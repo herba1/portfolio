@@ -91,25 +91,52 @@ export const BANDS = (() => {
   }
   return { n, y0: Uint16Array.from(y0), h: Uint8Array.from(h), c, of };
 })();
-// The sort domain: one row per band, one texel per grid column.
+// The sort domain: one texel per grid column, one row per band, and below
+// them one more row per source band (SRC, after the stack's constants).
 export const DW = GW;
-export const DH = BANDS.n;
 
 // ---- the stack
 // The wave is a staircase of straight strips, after herb's reference 2:
 // every strip is one band's sorted run, a hard-edged horizontal rectangle at
-// its own row, never bent. The rise comes only from stacking. Bands of the
-// verge (rows VERGE_TOP..VERGE_BOT) are sorted in place and are the root;
-// above them every band row is a layer of the stack, and each layer shows a
+// its own row, never bent. The rise comes only from stacking. The verge
+// (ZONE_TOP..ZONE_BOT) is the root, a graded zone the stack grows out of:
+// short runs sorted in place inside whole grass at its foot, longer and more
+// of them up it, with lifted strips starting out of each row's own grass;
+// above it every row is a layer of the stack, and each layer shows a
 // verge band's run lifted up to it, both its ends stepped right as the
 // square of its height, so the stack leans over as it climbs. Over the top the crest
 // runs on to the right and a lip of shorter strips hangs down from its end,
 // so the staircase reads as a blade of grass peeling up and curling over.
 // The crossing (the road and the rails, right of centre) stays clear.
-export const VERGE_TOP = 1236; // grid rows below this are the verge, sorted in place
+export const VERGE_TOP = 1236; // grid rows below this are the verge, the stack's root
 export const VERGE_BOT = 1470; // ...down to here (the rails start below)
+// The root is not a slab: the verge is a graded zone the stack grows out of.
+// At ZONE_BOT (the grass just above the rails) the photo stays whole, with
+// only short runs sorted in place along its grass; moving up, the runs grow
+// longer and more of each band is sorted, and lifted strips start out of the
+// grass where each row's own grass starts, until at ZONE_TOP the rows join
+// the stack. Below ZONE_BOT the rails and the foreground stay photo.
+export const ZONE_TOP = VERGE_TOP;
+export const ZONE_BOT = 1430;
+export const zoneZ = (y) => clamp((ZONE_BOT - y) / (ZONE_BOT - ZONE_TOP), 0, 1);
+// The stack's rows read their runs from the zone's grass bands; each source
+// band is sorted again, whole, on a row of its own below the bands, so the
+// in-place runs on the zone can stay short while the stack's runs are long.
+export const SRC = (() => {
+  const s = [];
+  for (let j = 0; j < BANDS.n; j++) if (BANDS.c[j] >= ZONE_TOP && BANDS.c[j] <= ZONE_BOT) s.push(j);
+  return Uint16Array.from(s);
+})();
+export const DH = BANDS.n + SRC.length;
+// The grid row each domain row is read off (a band's centre row).
+export const DOMAIN_C = (() => {
+  const c = new Uint16Array(DH);
+  c.set(BANDS.c, 0);
+  for (let i = 0; i < SRC.length; i++) c[BANDS.n + i] = BANDS.c[SRC[i]];
+  return c;
+})();
 export const CREST = 392; // the stack's top row
-export const ROOT_X1 = 1160; // the root zone runs from the print's left edge to here
+export const ROOT_X1 = 1160; // the root zone reaches across from the left to here
 // Both edges of the stack step right as the square of its height, so the
 // lower half rises nearly straight and the upper third leans well out past
 // the face below it: the back rounds over, and the face goes concave.
@@ -155,8 +182,8 @@ export const LIP_ON = 0.94;
 // px, 2-8 device px at DPR 2) broken by thick ones (12-29 grid px, up to 24
 // device px), each height from a hash, so the sheet mixes hairlines with
 // chunky blocks the way reference 2 does. Rows abut: no sky between them.
-// Below VERGE_TOP the rows are the verge's own combing, laid from the
-// print's left edge, so the grass turns into the stack without a seam.
+// Below VERGE_TOP the rows cross the zone, where their strips start out of
+// each row's own grass, so the grass turns into the stack without a seam.
 export const ROW_MIN = 3;
 export const ROW_MAX = 29;
 export const ROWS = (() => {
@@ -164,7 +191,7 @@ export const ROWS = (() => {
   const h = [];
   let y = CREST;
   let thickLast = false;
-  for (let j = 0; y < VERGE_BOT; j++) {
+  for (let j = 0; y < ZONE_BOT; j++) {
     const u = hash(j, 173);
     // The upper third, where the light reads into the tails, is where the
     // chunky blocks gather: tall rows (20-29 grid px, 16-24 device px) whose
@@ -174,7 +201,7 @@ export const ROWS = (() => {
     const t0 = up ? 20 : 12;
     let hh = thick ? t0 + Math.floor(u * (ROW_MAX - t0 + 1)) : ROW_MIN + Math.floor(u ** 1.6 * 8);
     // No sliver at the foot: the last row takes what is left.
-    if (VERGE_BOT - y - hh < ROW_MIN) hh = VERGE_BOT - y;
+    if (ZONE_BOT - y - hh < ROW_MIN) hh = ZONE_BOT - y;
     y0.push(y);
     h.push(hh);
     y += hh;
@@ -222,8 +249,9 @@ export function maskRow(mask8, y, out = new Float32Array(GW)) {
   return out;
 }
 
-// The resting wave's mask: the verge, from the print's left edge to just
-// short of the crossing, held at the amount. The stack climbs from it as far
+// The resting wave's mask: the zone, from the print's left edge to just
+// short of the crossing, held at the amount (above it the stack covers the
+// bands, so nothing there is sorted in place). The stack climbs from it as far
 // as that amount lets it (liftAt), and the brush can open it anywhere else.
 export function demoMask(amount) {
   const m = new Float32Array(MW * MH);
@@ -232,7 +260,7 @@ export function demoMask(amount) {
       const x = (cx + 0.5) * CELL;
       const y = (cy + 0.5) * CELL;
       const n = vnoise(x / 160, y / 160) - 0.5;
-      const v = smooth(VERGE_TOP - 90, VERGE_TOP - 20, y) * smooth(VERGE_BOT + 50, VERGE_BOT, y) * smooth(ROOT_X1 + 60, ROOT_X1 - 40, x + n * 160);
+      const v = smooth(ZONE_TOP - 36, ZONE_TOP + 4, y) * smooth(ZONE_BOT + 40, ZONE_BOT - 8, y) * smooth(ROOT_X1 + 60, ROOT_X1 - 40, x + n * 160);
       m[cy * MW + cx] = clamp(v * amount, 0, 1);
     }
   }
@@ -315,7 +343,7 @@ export function bake(photoPx, depthPx, holdPx) {
   const veg = new Uint8Array(N); // 1 on vegetation
   const k0 = 2 * S;
   const eRow = new Uint8Array(GW);
-  for (let j = 0; j < DH; j++) {
+  for (let j = 0; j < BANDS.n; j++) {
     const y = BANDS.c[j];
     // Silhouette, dilated a few px along the row and across it.
     const g = new Uint8Array(GW);
@@ -354,13 +382,79 @@ export function bake(photoPx, depthPx, holdPx) {
       veg[k] = isVeg(photoPx[s], photoPx[s + 1], photoPx[s + 2]) ? 1 : 0;
     }
   }
-  return { lum16, key: key16, depth, reachQ, veg };
+  // The source rows: each a copy of its band, sorted whole for the stack.
+  for (let i = 0; i < SRC.length; i++) {
+    const a = SRC[i] * DW;
+    const b = (BANDS.n + i) * DW;
+    for (const arr of [lum16, key16, depth, reachQ, veg]) arr.copyWithin(b, a, a + DW);
+  }
+  return { lum16, key: key16, depth, reachQ, veg, win: zoneWindows(veg) };
+}
+
+// A band's grass: its stretches of vegetation, gaps of a few px bridged, as
+// [x0, x1) pairs, dropping specks.
+export function vegSegs(veg, d, min = 10) {
+  const out = [];
+  const row = d * DW;
+  let s = -1;
+  let gap = 0;
+  for (let x = 0; x <= DW; x++) {
+    const v = x < DW && veg[row + x];
+    if (v) {
+      if (s < 0) s = x;
+      gap = 0;
+    } else if (s >= 0 && (++gap > 4 || x === DW)) {
+      const e = x - gap + 1;
+      if (e - s >= min) out.push([s, e]);
+      s = -1;
+      gap = 0;
+    }
+  }
+  return out;
+}
+
+// The windows a zone band may sort in place: win[k] is the id of the window
+// texel k lies in (0: none, it stays photo), and a span never crosses from
+// one window into another. Off the zone every texel is in window 1, no
+// constraint. On the zone a band is cut along its own grass into windows,
+// short at the zone's foot and longer up it, and only some of them open (more
+// of them up the zone), so at the foot a few short runs sort in place inside
+// whole grass and by the top nearly all of it is sorted in long runs.
+export const ZONE_RUN = [18, 210]; // a window's length at the zone's foot and top
+export const ZONE_OPEN = [0.4, 1]; // the share of windows that sort
+function zoneWindows(veg) {
+  const win = new Uint16Array(DW * DH).fill(1);
+  let id = 2;
+  for (let j = 0; j < BANDS.n; j++) {
+    const c = BANDS.c[j];
+    if (c < ZONE_TOP || c > ZONE_BOT + 48) continue;
+    const z = zoneZ(c);
+    const row = j * DW;
+    win.fill(0, row, row + DW);
+    const len = ZONE_RUN[0] + (ZONE_RUN[1] - ZONE_RUN[0]) * z ** 1.4;
+    const open = ZONE_OPEN[0] + (ZONE_OPEN[1] - ZONE_OPEN[0]) * z;
+    let n = 0;
+    for (const [s0, e0] of vegSegs(veg, j, 8)) {
+      let x = s0;
+      while (x < e0) {
+        n++;
+        const w = Math.max(6, Math.round(len * (0.5 + hash(j * 977 + n, 13))));
+        const x1 = Math.min(e0, x + w);
+        if (hash(j * 977 + n, 17) < open) {
+          win.fill(id, row + x, row + x1);
+          id = id >= 65000 ? 2 : id + 1;
+        }
+        x = x1;
+      }
+    }
+  }
+  return win;
 }
 
 // The mask read once per band texel (on the band's centre row), 0..255.
 export function bandMask(mask8, out = new Uint8Array(DW * DH)) {
   for (let j = 0; j < DH; j++) {
-    const y = BANDS.c[j] + 0.5;
+    const y = DOMAIN_C[j] + 0.5;
     for (let x = 0; x < DW; x++) out[j * DW + x] = Math.round(maskAt(mask8, x + 0.5, y) * 255);
   }
   return out;
@@ -371,7 +465,7 @@ export function bandMask(mask8, out = new Uint8Array(DW * DH)) {
 // only ever swaps across an open link; everywhere else it orders by home
 // index, so a pixel outside a span flows home.
 export function links(base, bm, out = new Uint8Array(DW * DH)) {
-  const { lum16, depth, reachQ } = base;
+  const { lum16, depth, reachQ, win } = base;
   const inSpan = (k) => {
     const rq = reachQ[k];
     if (depth[k] === 255 || bm[k] < 1) return false;
@@ -385,7 +479,8 @@ export function links(base, bm, out = new Uint8Array(DW * DH)) {
     let prev = inSpan(row);
     for (let x = 0; x < DW - 1; x++) {
       const next = inSpan(row + x + 1);
-      out[row + x] = prev && next && Math.abs(depth[row + x] - depth[row + x + 1]) < JUMP ? 1 : 0;
+      const k = row + x;
+      out[k] = prev && next && win[k] && win[k] === win[k + 1] && Math.abs(depth[k] - depth[k + 1]) < JUMP ? 1 : 0;
       prev = next;
     }
     out[row + DW - 1] = 0;
@@ -442,8 +537,8 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 // ends, so the outer edge is ragged row by row and is the sort's own. Over
 // the top the crest's rows run on out to the lip's reach, and below them the
 // lip hangs free, its own short rows curling back in over a hollow of open
-// sky; the face under it stops well short. The verge is combed over by rows
-// laid from the print's left edge, so the sheet is opaque from the root up.
+// sky; the face under it stops well short. Under the stack the zone grades
+// from whole photo with a few short runs sorted in place into the sheet.
 //
 // The stack is lit by its own sort order: every row reads a long stretch of
 // its run (readWindow), so each shows the whole ramp from dark green heads to
@@ -467,6 +562,14 @@ const TAIL = [0.9, 1];
 const BLOCK_H = 18;
 // A layer's run is chosen among its source band's runs left of here.
 const SRC_X1 = ROOT_X1 + 240;
+// Zone rows above this share of the zone run whole, as the stack's do.
+const ZONE_JOIN = 0.88;
+// The stack's foot, up to this height, starts where its rows' grass starts.
+const FOOT = 0.3;
+// How far in from the print's left edge a zone row's strips may start: low
+// in the zone the grass runs to the edge, but up it the tree and the fence
+// stand, so the strips start out of the grass right of the stack's back edge.
+const zoneLeft = (z) => (X_ROOT + 30) * smooth(0.35, 0.95, z);
 // Each grid row holds up to PARTS tiles, three RGBA16UI texels each, in a
 // texture GH wide and 3 x PARTS tall: (x0, x1, source band + 1, flags) for
 // the tile's span, (run x0, run x1, facing x 65535, vegetation share of the
@@ -474,13 +577,10 @@ const SRC_X1 = ROOT_X1 + 240;
 // as two bytes (lo << 8 | hi, readWindow), blow-out x 65535) for the whole
 // row the tile is part of. The first tile that holds a pixel draws it,
 // so glints and end blocks are written first.
-export const PARTS = 16;
+export const PARTS = 24;
 export const F_LIFT = 1; // a lifted strip: lit by its facing (the holdout matte covers every sorted pixel)
 export const F_GLINT = 2; // a glint tile: the run's brightest pixel, white-gold
 export const F_BLOWN = 4; // a row's end block: its run's tail, gone over to white-gold
-// A verge run in place slides right by up to this much of itself where it
-// has been lifted.
-const SLIDE = 0.3;
 // A run must be this much grass to be lifted.
 const VEG_MIN = 0.5;
 // A row's span is a verge band's longest run, at least this share of the
@@ -534,19 +634,19 @@ export function liftPlan(mask8) {
   }
   zone.sort((a, b) => a - b);
   const root = zone.length ? zone[Math.floor(zone.length * 0.75)] / 255 : 0;
-  const verge = [];
-  for (let d = 0; d < DH; d++) if (B.c[d] >= VERGE_TOP && B.c[d] <= VERGE_BOT) verge.push(d);
+  // The stack reads the source rows: the zone's grass bands sorted whole.
+  const verge = Array.from(SRC, (_, i) => B.n + i);
   const nv = verge.length;
   const layers = [];
   let i = 0;
   for (let r = ROWS.n - 1; r >= 0; r--) {
     const c = ROWS.y0[r] + ROWS.h[r] / 2;
     const t = stackT(c);
-    // Below the stack's foot a row is the verge's combing, from the print's
-    // left edge out towards the crossing; above it, a strip of the stack
-    // from its back edge to its face.
+    // Below the stack's foot a row is in the zone, where its strips start
+    // out of its own grass (geometry finds where), reaching out towards the
+    // crossing; above it, a strip of the stack from its back edge to its face.
     const vg = t < 0;
-    const xl = vg ? hash(r, 31) * 36 : stackLeft(t) + (hash(r, 31) - 0.5) * 20;
+    const xl = vg ? 0 : stackLeft(t) + (hash(r, 31) - 0.5) * 20;
     const xr = vg ? ROOT_X1 - 60 + (hash(r, 37) - 0.5) * 140 : stackRight(t);
     const m = Math.max(root, maskAt(mask8, xl + 0.35 * (xr - xl), c));
     // Bottom to top the rows walk the verge in a scrambled order, so no two
@@ -564,10 +664,10 @@ export function liftPlan(mask8) {
   return { root, layers, verge };
 }
 
-// The mask read once per band texel, as bandMask, raised on every verge band
-// once any row lifts: a row reads the longest run of some verge band, so the
-// sort runs on all of them whether or not the brush has touched the verge
-// itself. (Sorting a band shows nothing in place unless the mask is there.)
+// The mask read once per band texel, as bandMask, raised on every source
+// row once any row lifts: a row reads the longest run of some source row, so
+// the sort runs on all of them whether or not the brush has touched the
+// verge itself. (Source rows are never shown in place.)
 export function liftMask(mask8, plan, out = new Uint8Array(DW * DH)) {
   bandMask(mask8, out);
   let m = 0;
@@ -593,27 +693,32 @@ export function geometry(mask8, base, link, plan, out = {}) {
   const r = runs(link);
   const byBand = Array.from({ length: DH }, () => []);
   for (let n = 0; n < r.length; n += 3) byBand[r[n]].push([r[n + 1], r[n + 2]]);
-  const lifted = new Uint8Array(DH);
-  for (const L of plan.layers) {
-    if (L.on) lifted[plan.verge[L.src]] = 1;
-    if (L.lip) lifted[plan.verge[L.lip.src]] = 1;
-  }
 
-  // In place: every long run under the mask, slid right where it was lifted.
+  // In place: every long run under the mask, where it lies. On the zone the
+  // runs are the short windows the band was cut into along its grass, so
+  // every one of them shows.
   const mrow = new Float32Array(GW);
-  for (let d = 0; d < DH; d++) {
+  for (let d = 0; d < B.n; d++) {
     const row = d * DW;
-    maskRow(mask8, B.c[d] + 0.5, mrow);
+    const c = B.c[d];
+    const min = c >= ZONE_TOP && c <= ZONE_BOT + 48 ? 6 : SHOW_MIN;
+    maskRow(mask8, c + 0.5, mrow);
     for (const [x0, x1] of byBand[d]) {
-      if (x1 - x0 < SHOW_MIN) continue;
-      const slide = lifted[d] ? Math.round((x1 - x0) * SLIDE * hash(d * 131 + x0, 93) ** 1.3) : 0;
-      for (let k = x0 + slide; k < x1; k++) {
+      if (x1 - x0 < min) continue;
+      for (let k = x0; k < x1; k++) {
         if (mrow[k] < WAVE_ON) continue;
-        geo[(row + k) * 2] = k - slide + 1;
+        geo[(row + k) * 2] = k + 1;
         geo[(row + k) * 2 + 1] = d;
       }
     }
   }
+  // A band's grass, for rows that start out of it.
+  const segPool = new Map();
+  const segsAt = (y) => {
+    const d = B.of[clamp(Math.round(y), 0, GH - 1)];
+    if (!segPool.has(d)) segPool.set(d, vegSegs(base.veg, d, 10));
+    return segPool.get(d);
+  };
 
   const vegOf = (d, x0, x1) => {
     let n = 0;
@@ -704,6 +809,38 @@ export function geometry(mask8, base, link, plan, out = {}) {
     list.push([r, xa, end, F_LIFT, run, f, xa, end, readWindow(r, salt, f)]);
     return { tiles: [[xa, end, run]], xb: end };
   };
+  // A zone row below the join: lifted strips start out of the row's own
+  // grass, at the start of each stretch of it, short and few at the zone's
+  // foot, longer and more of them up it, and further up they run on past
+  // the stretch's end, over the gaps, until the row joins the stack. Between
+  // them the band's own short runs sorted in place, and the photo, show.
+  const zoneStrips = (L, z, f, xEnd) => {
+    const { r } = L;
+    const c = ROWS.y0[r] + ROWS.h[r] / 2;
+    const p = smooth(0.22, 0.85, z);
+    const len = 26 + 560 * z ** 1.9;
+    const x0 = zoneLeft(z);
+    let n = 0;
+    for (const [s0, e0] of segsAt(c)) {
+      if (s0 >= xEnd) break;
+      if (e0 - Math.max(s0, x0) < 16) continue;
+      let x = Math.max(s0, x0);
+      while (x < Math.min(e0, xEnd) && n < PARTS - 6) {
+        const u = hash(r * 61 + Math.round(x), 141);
+        const w = len * (0.45 + 1.1 * hash(r * 61 + Math.round(x), 143));
+        if (u < p) {
+          const xb = Math.min(xEnd, x + w, e0 + w * z * 0.7);
+          const run = xb - x >= 10 ? pick(r * 13 + n, 41, prevRun[41]) : null;
+          if (run) {
+            prevRun[41] = run;
+            n++;
+            face.push([r, x, xb, F_LIFT, run, f, x, xb, readWindow(r * 13 + n, 41, f)]);
+          }
+          x = xb + 4 + len * (0.15 + 0.6 * hash(r, Math.round(x))) * (1 - z);
+        } else x += w * 0.8;
+      }
+    }
+  };
   // A row's end block, from about x0 (a smooth line down the rows, so the
   // blocks stack into a column) to the row's end.
   const endBlock = (r, tt, x0, f, xa, blow) => {
@@ -732,7 +869,28 @@ export function geometry(mask8, base, link, plan, out = {}) {
     // The row's reach: how far the brush lets it run. The topmost rows the
     // mask has only just lifted reach less, so a stack short of its crest
     // tapers.
-    const xa = L.xl;
+    let xa = L.xl;
+    if (t < 0) {
+      // The zone: below the join, strips out of the row's grass; at the
+      // join the row is one strip, from where its grass starts.
+      const z = zoneZ(ROWS.y0[r] + ROWS.h[r] / 2);
+      f = clamp(0.3 + 0.25 * z + (hash(r, 47) - 0.5) * 0.1, 0, 1);
+      const xEnd = L.xr * (0.6 + 0.4 * L.m);
+      if (z < ZONE_JOIN) {
+        zoneStrips(L, z, f, xEnd);
+        continue;
+      }
+      const x0 = zoneLeft(z);
+      const s0 = segsAt(ROWS.y0[r] + ROWS.h[r] / 2).find(([a, b]) => b - Math.max(a, x0) >= 30 && a < xEnd - 160);
+      if (!s0) continue;
+      xa = Math.max(s0[0], x0);
+    } else if (t < FOOT) {
+      // The stack's foot starts where its row's own grass starts, close to
+      // its back edge, so the edge is ragged and follows the leaves, and the
+      // trunk between them stays photo.
+      const s0 = segsAt(ROWS.y0[r] + ROWS.h[r] / 2).find(([a, b]) => b - Math.max(a, xa) >= 24);
+      if (s0 && s0[0] - xa < 240 * (1 - t / FOOT)) xa = Math.max(xa, s0[0]);
+    }
     let reach = 0;
     if (L.on) {
       const grow = 0.25 + 0.75 * smooth(0, 0.12, L.m - liftAt(t));

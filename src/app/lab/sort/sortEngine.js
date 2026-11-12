@@ -1,6 +1,6 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
-import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_GLINT, F_BLOWN, RAMP_GREEN, demoMask, bake, liftPlan, liftMask, links, restSort, geometry } from "./sortCore";
+import { GW, GH, CELL, MW, MH, DW, DH, BANDS, DOMAIN_C, PARTS, F_GLINT, F_BLOWN, RAMP_GREEN, demoMask, bake, liftPlan, liftMask, links, restSort, geometry } from "./sortCore";
 
 // Sort: a real pixel sort, after Kim Asendorf's ASDF Pixel Sort (2010), run
 // on the GPU over a summer photograph of a Japanese level crossing.
@@ -33,8 +33,13 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_GLINT, F_BLOWN, RAMP_GREE
 // by the same network.
 //
 // The wave is geometry, not sort direction, and it is never bent: after
-// herb's reference 2 the curl is a staircase of straight strips. The verge's
-// bands are sorted in place and are the root; every band row above them is a
+// herb's reference 2 the curl is a staircase of straight strips. The verge
+// is the root, a graded zone the stack grows out of: at its foot the photo is
+// whole but for short runs sorted in place along its grass, and up it the
+// runs lengthen, more of each band sorts, and lifted strips start out of each
+// row's own grass until the rows join the stack. The zone's grass bands are
+// sorted again, whole, on source rows below the bands for the stack to read
+// (sortCore's SRC), so the in-place runs stay short. Every band row above is a
 // layer of the stack, cut into its own rows (mostly hairlines, now and then a
 // chunky block, sortCore's ROWS). Each row is an opaque, hard-edged strip
 // from the stack's inner edge, both ends stepped right as the square of its
@@ -130,7 +135,7 @@ precision highp usampler2D;
 uniform usampler2D uState;
 uniform usampler2D uGeo;    // in place, per (x, band): source x + 1 (0 = not sorted here), source band
 uniform usampler2D uStripe; // per grid row, per tile: (x0, x1, source band + 1, flags), (run x0, run x1, facing, vegetation share), (row x0, row x1, row offset into the sort order, blow-out)
-uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band
+uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each sort-domain row
 uniform sampler2D uHold;    // holdout alpha, print-sized, top row first: the photo in front of the stack
 uniform sampler2D uFilm;    // the developed print, print-sized, GL orientation
 uniform sampler2D uClean;   // the photo developed at grid size without grain, for the strips
@@ -340,7 +345,7 @@ export async function createSort(host, { embedded = false } = {}) {
   const state = qMask === "none" ? restSort(base, new Uint8Array(DW * DH)) : restSort(base, link);
   const bandRows = new Uint16Array(GH * 2);
   bandRows.set(BANDS.of, 0);
-  bandRows.set(BANDS.c, GH);
+  bandRows.set(DOMAIN_C, GH);
 
   // ---- GL resources
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
