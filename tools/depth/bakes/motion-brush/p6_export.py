@@ -11,6 +11,7 @@ save_rgb(PUB + 'plate.webp', rs(Bp), q=92)
 # premultiplied wire colour, lossless (mostly black)
 Pd = rs(P)
 cv2.imwrite(PUB + 'wire.png', (np.clip(Pd, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
+# b is left empty here; p7_cloud.py fills it with the cloud/sky layer
 lay = np.stack([rs(aW), rs(Ab), np.zeros((PH, PW), np.float32)], 2)
 cv2.imwrite(PUB + 'layers.png', (np.clip(lay, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
 # guide for the field solver: luma, blueness, building (max over the cell)

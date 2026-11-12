@@ -9,7 +9,7 @@
   ],
   "status": "draft",
   "createdAt": "2026-11-06T23:30:00.000Z",
-  "intent": "After Holynski, Curless, Seitz and Szeliski, Animating Pictures with Eulerian Motion Fields (CVPR 2021, https://eulerian.cs.washington.edu/), and the motion brush in video models. One static velocity field per photo, integrated backward and forward from the source frame and blended symmetrically (variance-preserving), so the loop starts and ends on the photograph. Strokes spread by geodesic distance through a colour-weighted grid with buildings as walls, then a guided filter. ?strokes=demo|none, ?t=seconds holds the clock, ?trace=0..1 holds the brush trace, ?wire=0..25 sets a wire swaying.",
+  "intent": "After Holynski, Curless, Seitz and Szeliski, Animating Pictures with Eulerian Motion Fields (CVPR 2021, https://eulerian.cs.washington.edu/), and the motion brush in video models. One static velocity field per photo, integrated backward and forward from the source frame and blended symmetrically (variance-preserving, and occlusion-aware: a branch that crosses from cloud into sky or stalls loses its weight, and open sky and the silhouette band are held still), so the loop starts and ends on the photograph. Strokes spread by geodesic distance through a colour-weighted grid with buildings as walls, then a guided filter. ?strokes=demo|none, ?t=seconds holds the clock, ?trace=0..1 holds the brush trace, ?wire=0..25 sets a wire swaying.",
   "tile": {
     "shape": "wide"
   },

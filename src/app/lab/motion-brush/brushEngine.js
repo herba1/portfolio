@@ -16,7 +16,13 @@ import { WIRE_Y, WIRE_VIS } from "./wires";
 // straight offset) a curved stroke carries the cloud round the curve instead
 // of smearing it. The two branches are blended with a variance-preserving
 // operator (Neyret 2003; Heitz & Neyret 2018) about a shared low-pass mean,
-// so the moving cloud keeps its grain instead of going soft mid-loop.
+// so the moving cloud keeps its grain instead of going soft mid-loop. The
+// blend is occlusion-aware: a branch whose source lies in the other layer
+// (cloud vs sky, baked into layers.png b), or that stalled, loses its weight,
+// and where the branches disagree the blend narrows to one of them, so a
+// diverging flow never leaves a double exposure. Open sky and the band along
+// the cloud's silhouette are held still, so the outline (and the dark pockets
+// of sky inside it) stays put while the cloud's texture drifts.
 //
 // The photograph is taken apart offline: the 26 wires are found as tracked
 // centrelines, matted (I = P + (1 - a) B, P their premultiplied colour, B the
@@ -41,7 +47,6 @@ const S0 = 520; // css px/s of pointer speed for 63% of VMAX
 const AMAX = 9; // plate px of wire sway for a fast stroke
 const K = WIRE_Y.length;
 const NS = WIRE_Y[0].length;
-const ZBETA = "7.0";
 const VIEW = [0.022, 0.022, 0.956, 0.956];
 
 // The pre-painted stroke: a slow drift right and a little up along the lean
@@ -74,7 +79,7 @@ uniform sampler2D uPlate;   // sky layer: wires painted out, roofs filled
 uniform sampler2D uLow;     // the same, Gaussian sigma 12 px
 uniform sampler2D uPhoto;   // the photograph
 uniform sampler2D uWire;    // premultiplied wire colour P
-uniform sampler2D uLayers;  // r wire alpha, g building alpha
+uniform sampler2D uLayers;  // r wire alpha, g building alpha, b cloud (vs sky)
 uniform sampler2D uField;   // vx, vy (plate px/s), cos, sin of paint phase
 uniform sampler2D uWGeo;    // ${NS} x ${K}: r wire centre y / PH
 uniform sampler2D uWAmp;    // ${NS} x ${K}: r sway amplitude px, g phase
@@ -104,6 +109,11 @@ void main() {
 
   // --- sky: two branches of the Eulerian flow, symmetric about the photo ---
   vec3 sky;
+  // the plate's mip level, taken here in uniform control flow: inside the
+  // branch below, neighbouring pixels can take the other path, and implicit
+  // derivatives there pick a blurred mip along the seam
+  vec2 dp = max(abs(dFdx(p)), abs(dFdy(p)));
+  float lod = max(0.0, log2(max(dp.x, dp.y)));
   vec4 f = texture(uField, pu);
   if (dot(f.rg, f.rg) * uEnv * uEnv < 1e-4) {
     sky = texture(uPlate, pu).rgb;
@@ -125,24 +135,53 @@ void main() {
     // sooner near its own end, where it has drifted furthest from the other
     float w = smoothstep(0.18, 0.86, tau / N);
     vec2 u1 = q1 / PLATE, u2 = q2 / PLATE;
-    vec3 a = texture(uPlate, u1).rgb, b = texture(uPlate, u2).rgb;
-    vec3 ma = texture(uLow, u1).rgb, mb = texture(uLow, u2).rgb;
-    // Softmax blend (the z-weighting of Holynski's symmetric splatting, with
-    // brightness standing in for the learned z): where one branch has cloud
-    // and the other open sky, the cloud wins, so mid-loop the cloud reads as
-    // one body that has grown a little rather than two half-transparent ones.
-    // (strongest mid-loop; near either end the outgoing branch just fades,
-    // so it never lingers as a ghost of where the cloud was headed)
-    float beta = ${ZBETA} * 4.0 * w * (1.0 - w);
-    float za = exp(beta * dot(ma, vec3(0.2126, 0.7152, 0.0722)));
-    float zb = exp(beta * dot(mb, vec3(0.2126, 0.7152, 0.0722)));
-    float wb = w * zb / ((1.0 - w) * za + w * zb);
+    vec3 a = textureLod(uPlate, u1, lod).rgb, b = textureLod(uPlate, u2, lod).rgb;
+    vec3 ma = textureLod(uLow, u1, 0.0).rgb, mb = textureLod(uLow, u2, 0.0).rgb;
+    vec3 sp = textureLod(uPlate, pu, lod).rgb;
+
+    // --- occlusion-aware blend ---
+    // A plain symmetric blend averages two warped copies, and where the flow
+    // diverges (a stroke's flank, the cloud/sky edge) those copies hold
+    // different things, so the result is a double exposure: a milky ghost of
+    // cloud over a dark pocket of sky. Instead each branch is weighted by how
+    // far it can be trusted at this pixel:
+    //  - layer: its source pixel must lie in the same layer (sky or cloud,
+    //    layers.b) as this pixel in the photograph, so a silhouette is never
+    //    carried across another layer;
+    //  - stall: it must have travelled about as far as the flow here says, or
+    //    it has run into the still band at a layer edge and is smearing.
+    // Where the two branches disagree (their luma, or the field's divergence),
+    // the blend narrows towards whichever branch is trusted, so the pixel is
+    // one sample, never two halves. Where neither is, the photograph holds.
+    // At either end of the loop the arriving branch sits on the pixel itself
+    // and has full trust, so the loop still starts and ends on the photograph.
+    float cp = textureLod(uLayers, pu, 2.0).b;
+    float ka = 1.0 - smoothstep(0.2, 0.6, abs(textureLod(uLayers, u1, 2.0).b - cp));
+    float kb = 1.0 - smoothstep(0.2, 0.6, abs(textureLod(uLayers, u2, 2.0).b - cp));
+    float sv = length(vel(p));
+    ka *= smoothstep(0.25, 0.6, (length(q1 - p) + 6.0) / (tau * sv + 6.0));
+    kb *= smoothstep(0.25, 0.6, (length(q2 - p) + 6.0) / ((N - tau) * sv + 6.0));
+    // divergence of the field (1/s) times the loop: the fraction by which a
+    // patch grows or shrinks over one loop
+    vec2 e = 1.0 / vec2(${GW}.0, ${GH}.0);
+    float div = (texture(uField, pu + vec2(e.x, 0.0)).r - texture(uField, pu - vec2(e.x, 0.0)).r) / (2.0 * PLATE.x * e.x)
+              + (texture(uField, pu + vec2(0.0, e.y)).g - texture(uField, pu - vec2(0.0, e.y)).g) / (2.0 * PLATE.y * e.y);
+    const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
+    float dis = max(abs(dot(ma - mb, LW)), 0.6 * abs(dot(a - b, LW)));
+    float conflict = max(smoothstep(0.02, 0.07, dis), smoothstep(0.3, 0.9, abs(div) * uEnv * N));
+    float wa0 = (1.0 - w) * ka, wb0 = w * kb;
+    float wb = wb0 / max(wa0 + wb0, 1e-4);
+    if (wa0 + wb0 < 1e-4) wb = w;
+    wb = mix(wb, smoothstep(0.3, 0.7, wb), conflict);
     // Variance-preserving blend about the low-pass mean: the detail of two
     // decorrelated samples, averaged, loses contrast by sqrt(w^2+(1-w)^2);
     // give it back, in proportion to how decorrelated they are.
     float dc = smoothstep(2.0, 30.0, length(q1 - q2));
     float g = mix(1.0, inversesqrt(wb * wb + (1.0 - wb) * (1.0 - wb)), dc);
     sky = mix(ma, mb, wb) + ((1.0 - wb) * (a - ma) + wb * (b - mb)) * g;
+    // neither branch trusted: the photograph stays put
+    float hold = (1.0 - ka) * (1.0 - kb);
+    sky = mix(sky, sp, hold);
   }
 
   // --- wires: each sways on its own, periodic in the loop ---
@@ -305,6 +344,53 @@ function wireVisible(k, x) {
   return WIRE_VIS[k][i] === "1";
 }
 
+// Where the field is held still, on its grid: open sky, and the band where a
+// cell straddles the cloud/sky silhouette (layers.b), with half that one cell
+// out. Only cloud moves, inside its own outline; a dark pocket of sky stays
+// put, so it is never carried across, or under, the cloud beside it.
+function edgeBand(layers) {
+  const S = 4; // samples per cell side
+  const c = document.createElement("canvas");
+  c.width = GW * S;
+  c.height = GH * S;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.imageSmoothingEnabled = true;
+  x.imageSmoothingQuality = "high";
+  x.drawImage(layers, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  const edge = new Float32Array(GW * GH);
+  for (let gy = 0; gy < GH; gy++)
+    for (let gx = 0; gx < GW; gx++) {
+      let lo = 255;
+      let hi = 0;
+      let sum = 0;
+      for (let j = 0; j < S; j++)
+        for (let i = 0; i < S; i++) {
+          const v = d[((gy * S + j) * c.width + gx * S + i) * 4 + 2];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+          sum += v;
+        }
+      const t = clamp((hi - lo) / 255 / 0.5 - 0.4, 0, 1);
+      const sky = 1 - easeInOut((sum / (S * S * 255) - 0.3) / 0.4);
+      edge[gy * GW + gx] = Math.max(t * t * (3 - 2 * t), sky);
+    }
+  const band = new Float32Array(GW * GH);
+  for (let gy = 0; gy < GH; gy++)
+    for (let gx = 0; gx < GW; gx++) {
+      let m = edge[gy * GW + gx];
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = gx + dx;
+          const ny = gy + dy;
+          if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+          m = Math.max(m, 0.5 * edge[ny * GW + nx]);
+        }
+      band[gy * GW + gx] = m;
+    }
+  return band;
+}
+
 export async function createMotionBrush(host, { embedded = false } = {}) {
   const q = new URLSearchParams(window.location.search);
   const num = (k) => {
@@ -344,7 +430,7 @@ export async function createMotionBrush(host, { embedded = false } = {}) {
   gc.height = GH;
   const g2 = gc.getContext("2d", { willReadFrequently: true });
   g2.drawImage(imgs[5], 0, 0);
-  const field = createField(g2.getImageData(0, 0, GW, GH).data, PW, PH, LOOP);
+  const field = createField(g2.getImageData(0, 0, GW, GH).data, PW, PH, LOOP, edgeBand(imgs[4]));
 
   tex.field = floatTexture(gl, GW, GH, new Float32Array(GW * GH * 4));
   const geo = new Float32Array(NS * K * 4);

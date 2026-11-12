@@ -13,7 +13,8 @@
 // Strokes combine as a normalised weighted mean, so two strokes in the same
 // direction do not double the speed, and crossing strokes turn the flow.
 // The result is a static (Eulerian) velocity field plus, per cell, the time
-// it was painted, which starts that region's loop from the photograph.
+// it was painted, which starts that region's loop from the photograph. It is
+// held at zero along the cloud/sky edge band, so silhouettes stay put.
 
 export const GW = 96;
 export const GH = 128;
@@ -92,7 +93,9 @@ function boxFilter(src, r, out, sat, W, H) {
   }
 }
 
-export function createField(guide, plateW, plateH, loop) {
+// band (optional, per cell 0..1): where the field is held still, the edge
+// between layers that must not be carried across one another.
+export function createField(guide, plateW, plateH, loop, band = null) {
   const N = GW * GH;
   const cw = plateW / GW;
   const ch = plateH / GH;
@@ -340,7 +343,7 @@ export function createField(guide, plateW, plateH, loop) {
           ss += f.ps[i] * wi;
         }
         if (sw <= 0) continue;
-        const norm = 1 / Math.max(1, sw);
+        const norm = (band ? 1 - band[i] : 1) / Math.max(1, sw);
         data[i * 4] = sx * norm;
         data[i * 4 + 1] = sy * norm;
         data[i * 4 + 2] = sc / sw;
