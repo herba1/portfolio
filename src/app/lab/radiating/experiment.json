@@ -1,6 +1,6 @@
 {
   "title": "Radiating",
-  "description": "A short word in heavy Geist on warm white, its outline echoed outward in evenly spaced black lines until the whole box is one field of type, after Lance Wyman's Mexico 68 logotype. The lines are level sets of the word's signed distance field, so the echoes of neighbouring letters meet in clean creases. The pointer is a second source: a dot that radiates rings of its own, smoothly merged into the word's wherever the two fields meet. A press sends a pulse out through every ring, each one carried a single line outward as it passes.",
+  "description": "A short word in heavy Geist on warm white, its outline echoed outward in evenly spaced black lines until the whole box is one field of type, after Lance Wyman's Mexico 68 logotype. The lines are level sets of the word's signed distance field, so the echoes of neighbouring letters meet in clean creases. Every press drops a source that stays: a dot whose rings run finer the more presses already crowd the spot, unioned with the word ring for ring, so the picture builds up out of the presses as nested patches of bunched line meeting the word's echoes in chevron creases that never reach the letters.",
   "tags": ["WebGL", "Type", "Op art"],
   "status": "draft",
   "createdAt": "2026-11-06T14:00:00.000Z",

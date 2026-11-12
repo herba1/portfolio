@@ -23,19 +23,42 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // stadium fitted to the word, so the creases between letters die out within
 // a few rings and the outer bands are clean concentric lines to the frame.
 //
-// The pointer is a second source: a dot whose own distance field is smoothly
-// unioned with the word's, so its rings and the letters' rings meet in one
-// continuous crease. A press sends a pulse outward: a front that carries every
-// line exactly one period on as it passes, so the field it leaves behind is
-// the one it found.
+// Every press drops a source that stays. A source is a dot whose rings run
+// at their own period, finer the more sources already crowd the spot, and it
+// blooms on the press by pushing a few rings of its own out into the field.
+// All sources and the word are unioned in ring space: each field is divided
+// by its own period first, so ring n of one meets ring n of the next on the
+// crease between them however fine either is. A fine source wins only a
+// bounded patch around itself (an Apollonius disc), so the picture builds up
+// out of the presses as patches of crowded line, nested where presses pile up
+// and bunching into chevrons where patches meet.
 //
-// ?x=&y= (0..1 of the box) hold the dot; ?t= (0..1) holds a pulse from it.
+// The union is a true min, rounded over a narrow band at the creases, and it
+// cannot reach the letters: inside the word's own first rings only the word
+// draws, and a source that comes closer is flattened onto contours parallel
+// to the letter instead of cutting into it. The pointer carries the next
+// source before it is dropped.
+//
+// ?x=&y= (0..1 of the box) hold the pointer's dot; ?n= replays that many
+// presses (a fixed sequence, the last one at x, y); ?t= (0..1) holds the last
+// press mid-bloom.
 
 const WORD = "echo";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const INK = [0x14 / 255, 0x13 / 255, 0x12 / 255];
-const MAX_PULSES = 4;
-const PULSE_MS = 2600;
+// Sources kept; the oldest lets go when a press would exceed it.
+const MAX_SOURCES = 20;
+// Shader slots: the kept sources, one letting go, and the pointer's.
+const SLOTS = MAX_SOURCES + 2;
+const BLOOM_MS = 1700;
+const RETIRE_MS = 1400;
+// A first source's period, against the word's; each source already near the
+// spot makes the next one finer by FINER, down to MIN_PERIOD.
+const FIRST_PERIOD = 0.5;
+const FINER = 0.66;
+const MIN_PERIOD = 0.2;
+// Rings a source pushes out when it blooms, before the crowd adds more.
+const BLOOM_RINGS = 4;
 // Inradius, in periods, a counter needs to keep its rings.
 const RING_ROOM = 1.5;
 // Radius, in periods, of the closing the rings outside a letter follow: wide
@@ -45,6 +68,18 @@ const BRIDGE = 3;
 // settle onto one stadium: rings inside the first hug the type exactly,
 // rings past the second are clean concentric bands.
 const ANNEAL = [3, 9];
+// Presses replayed by ?n=, as fractions of the box: two clusters, so the
+// replay shows patches nesting as well as meeting.
+const SCRIPT = [
+  [0.14, 0.26],
+  [0.2, 0.19],
+  [0.86, 0.22],
+  [0.8, 0.77],
+  [0.87, 0.67],
+  [0.24, 0.8],
+  [0.17, 0.31],
+  [0.5, 0.14],
+];
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -59,11 +94,11 @@ uniform float uGrid;       // field texels per css px
 uniform vec2 uRes;         // device px
 uniform float uDpr;
 uniform float uP;          // line period, css px (line = gap = P/2)
-uniform vec3 uDot;         // xy css px, radius
-uniform float uK;          // smooth-union width with the dot, css px
+uniform vec4 uSrc[${SLOTS}];  // xy css px, period css px, rings pushed out
+uniform int uSrcN;
+uniform float uK;          // crease rounding, in rings
 uniform float uKg;         // smooth-union width between letters, css px
-uniform vec4 uPulse[${MAX_PULSES}]; // xy origin, front radius, active
-uniform float uFront;      // pulse front width, css px
+uniform float uHug;        // how steeply a source is flattened near a letter
 uniform float uReveal;     // css px of field drawn so far (intro)
 uniform vec4 uBox;         // far-field stadium: centre, half size (css px)
 uniform vec2 uAnneal;      // css px: the word's field lets go over [x, y]
@@ -74,6 +109,7 @@ out vec4 o;
 // Polynomial smooth minimum (Quilez): a crease between two sources is
 // rounded over a band k wide instead of meeting at a sharp mitre.
 float smin(float a, float b, float k){
+  if (k < 1e-3) return min(a, b);
   float h = max(k - abs(a - b), 0.0) / k;
   return min(a, b) - h * h * k * 0.25;
 }
@@ -128,23 +164,45 @@ void main(){
   float d = mix(dw, stadium(p), smoothstep(uAnneal.x, uAnneal.y, dw));
   vec2 e = edgeField(p);
   float cz = e.x;
-  float dc = length(p - uDot.xy) - uDot.z;
-  // f carries the rings; fl draws the solid shapes, letters and dot.
-  float f = smin(d, dc, uK);
-  float fl = smin(e.y, dc, uK);
+  float fl = e.y;
 
-  // Pulses: behind each front the field is shifted by one whole period, so
-  // the rings it passes move one line outward and land where they began.
-  float g = f;
-  for (int i = 0; i < ${MAX_PULSES}; i++) {
-    vec4 q = uPulse[i];
-    if (q.w < 0.5) continue;
-    float s = smoothstep(0.0, 1.0, (q.z - length(p - q.xy)) / uFront);
-    g -= uP * s;
+  // Everything below is in rings: a field divided by its own period, so
+  // ring n of every source is the level set n of its phase.
+  float pw = d / uP;
+  // The word's first black ring ends at 1, its next paper ring is centred
+  // on 1.25; nothing but the word draws inside that, and the creases only
+  // round off a ring or two further out.
+  float k = uK * smoothstep(1.25, 3.0, pw);
+  float ps = 1e5;
+  float hard = 1e5;
+  float coreAt = 0.0;  // the core's edge, in rings, of the nearest source
+  float coreP = uP;
+  for (int i = 0; i < ${SLOTS}; i++) {
+    if (i >= uSrcN) break;
+    vec4 s = uSrc[i];
+    float r0 = s.z * 0.55;
+    float psi = (length(p - s.xy) - r0) / s.z - s.w;
+    ps = smin(ps, psi, k);
+    if (psi < hard) {
+      hard = psi;
+      coreAt = -s.w;
+      coreP = s.z;
+    }
   }
+  // Near a letter a source may not go below C: where it would, it is laid
+  // onto contours of the word's own field, falling away outward, so its
+  // rings bend round the letter's first ring instead of cutting into it.
+  float C = 1.25 - uHug * (pw - 1.25);
+  float f = smin(pw, max(ps, C), k);
+  float g = f * uP;
 
   float fw = max(fwidth(g), 1e-4);
   float fe = max(fwidth(fl), 1e-4);
+  // A source's core: its phase below the level its rings start from. Where
+  // the word holds the field the phase never gets there, so a dot pressed
+  // against a letter loses its core rather than melting into it.
+  float core = hard > f + 0.5 ? 1e5 : (f - coreAt) * coreP;
+  float fc = max(fwidth(f) * coreP, 1e-4);
   float ink;
   if (fl <= 0.0) {
     ink = 1.0;
@@ -162,9 +220,10 @@ void main(){
     // Box-filtered coverage; a line thinner than a pixel covers only its own
     // width, so an unborn ring is nothing rather than a grey hairline.
     ink = min(clamp((half_ - dist) / fw + 0.5, 0.0, 1.0), 2.0 * half_ / fw);
-    // A line the pulse brings in is born half a period off the letter, so the
-    // letters never swell as the front passes them.
-    if (n < 0.0) ink *= clamp((f - uP * 0.5) / fe + 0.5, 0.0, 1.0);
+    // Below the word's first ring only a source's rings may draw: a word
+    // ring there would sit in the cleared paper of a counter.
+    if (n < 0.0) ink *= clamp((d - uP * 0.5) / fe + 0.5, 0.0, 1.0);
+    ink = max(ink, clamp(0.5 - core / fc, 0.0, 1.0));
   }
   // Letter edge, anti-aliased on the unshifted field.
   ink = max(ink, clamp(0.5 - fl / fe, 0.0, 1.0));
@@ -645,6 +704,32 @@ async function loadFamily() {
 
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
 
+// How many kept sources already crowd a spot (css px), each counted by how
+// near it sits, out to a few periods.
+function crowdAt(sources, x, y, w, h, period) {
+  const r = period * 6;
+  let c = 0;
+  for (const s of sources) {
+    if (s.retire >= 0) continue;
+    const d = Math.hypot(s.fx * w - x, s.fy * h - y) / r;
+    c += Math.exp(-d * d);
+  }
+  return c;
+}
+
+// The source a press at (x, y) would drop: finer, and pushing out more rings,
+// the more sources it lands among. Positions are kept as fractions of the
+// box and periods as fractions of the word's, so a resize keeps the picture.
+function nextSource(sources, x, y, w, h, period) {
+  const c = crowdAt(sources, x, y, w, h, period);
+  return {
+    fx: x / w,
+    fy: y / h,
+    pr: Math.max(MIN_PERIOD, FIRST_PERIOD * Math.pow(FINER, c)),
+    rings: BLOOM_RINGS + Math.round(c * 3),
+  };
+}
+
 export async function createRadiating(host, { embedded = false } = {}) {
   const family = await loadFamily();
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false });
@@ -656,8 +741,9 @@ export async function createRadiating(host, { embedded = false } = {}) {
     x: params.has("x") ? clamp(+params.get("x"), 0, 1) : null,
     y: params.has("y") ? clamp(+params.get("y"), 0, 1) : null,
     t: params.has("t") ? clamp(+params.get("t"), 0, 1) : null,
+    n: params.has("n") ? clamp(Math.round(+params.get("n")) || 0, 0, MAX_SOURCES) : null,
   };
-  const held = hold.x != null || hold.t != null;
+  const held = hold.x != null || hold.t != null || hold.n != null;
 
   const compile = (type, src) => {
     const s = gl.createShader(type);
@@ -672,7 +758,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   const U = {};
-  for (const name of ["uSdf", "uEdge", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uKg", "uPulse", "uFront", "uReveal", "uBox", "uAnneal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
+  for (const name of ["uSdf", "uEdge", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uSrc", "uSrcN", "uK", "uKg", "uHug", "uReveal", "uBox", "uAnneal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -702,11 +788,28 @@ export async function createRadiating(host, { embedded = false } = {}) {
 
   // The dot: position follows the pointer on an ease-out; presence (0..1)
   // grows its field out of nothing and lets it sink back when the hand goes.
+  // It is the next source, carried before it is dropped.
   const dot = { x: 0, y: 0, tx: 0, ty: 0, a: 0, ta: 0, placed: false };
-  const pulses = [];
+  // Dropped sources: { fx, fy, pr, rings, t0, retire }.
+  const sources = [];
   let revealStart = -1;
   let dirty = true;
 
+  const drop = (x, y, t0) => {
+    const s = { ...nextSource(sources, x, y, w, h, period), t0, retire: -1 };
+    const kept = sources.filter((q) => q.retire < 0);
+    if (kept.length >= MAX_SOURCES) kept[0].retire = t0;
+    sources.push(s);
+    return s;
+  };
+
+  // The word is not the hand's to paint: over a letter, its first rings or a
+  // counter the dot sinks away and a press drops nothing.
+  const blocked = (x, y) => {
+    if (!sdf) return true;
+    const i = clamp(Math.floor(y * grid), 0, sdf.H - 1) * sdf.W + clamp(Math.floor(x * grid), 0, sdf.W - 1);
+    return sdf.edge[i * 2 + 1] < period * 2 || sdf.edge[i * 2] > 0;
+  };
   const rebuild = () => {
     w = stage.width;
     h = stage.height;
@@ -723,14 +826,25 @@ export async function createRadiating(host, { embedded = false } = {}) {
     if (held) {
       dot.x = dot.tx = (hold.x ?? 0.72) * w;
       dot.y = dot.ty = (hold.y ?? 0.7) * h;
-      dot.a = dot.ta = 1;
+      dot.a = dot.ta = blocked(dot.x, dot.y) ? 0 : 1;
       dot.placed = true;
+      // Replay: the scripted presses, the last at the held dot, all fully
+      // bloomed but the last, which ?t= holds.
+      sources.length = 0;
+      const n = hold.n ?? (hold.t != null ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const last = i === n - 1;
+        const [fx, fy] = last && hold.x != null ? [hold.x, hold.y ?? 0.7] : SCRIPT[i % SCRIPT.length];
+        if (blocked(fx * w, fy * h)) continue;
+        const s = drop(fx * w, fy * h, 0);
+        s.hold = last && hold.t != null ? hold.t : 1;
+      }
     }
     dirty = true;
   };
   stage.onResize(rebuild);
 
-  stage.on("move", (pt) => {
+  const follow = (pt) => {
     dot.tx = pt.x;
     dot.ty = pt.y;
     dot.ta = 1;
@@ -739,33 +853,27 @@ export async function createRadiating(host, { embedded = false } = {}) {
       dot.y = pt.y;
       dot.placed = true;
     }
-  });
+  };
+  stage.on("move", follow);
   stage.on("down", (pt) => {
-    dot.tx = pt.x;
-    dot.ty = pt.y;
-    dot.ta = 1;
-    if (!dot.placed || dot.a < 0.02) {
-      dot.x = pt.x;
-      dot.y = pt.y;
-      dot.placed = true;
-    }
-    if (pulses.length >= MAX_PULSES) pulses.shift();
-    pulses.push({ x: pt.x, y: pt.y, t0: performance.now() });
+    follow(pt);
+    if (held || blocked(pt.x, pt.y)) return;
+    drop(pt.x, pt.y, performance.now());
+    dirty = true;
   });
   stage.on("up", (pt, e) => {
     if (e.pointerType !== "mouse") dot.ta = 0;
   });
 
-  const pulseData = new Float32Array(MAX_PULSES * 4);
+  const srcData = new Float32Array(SLOTS * 4);
 
   stage.onFrame((dt) => {
     if (!sdf || stage.width !== w || stage.height !== h) return;
     const now = performance.now();
     const diag = Math.hypot(w, h);
-    const front = period * 2.5;
 
     if (!held) {
-      if (!stage.pointer.inside && !stage.pointer.down) dot.ta = 0;
+      if ((!stage.pointer.inside && !stage.pointer.down) || blocked(dot.tx, dot.ty)) dot.ta = 0;
       const px = dot.x;
       const py = dot.y;
       const pa = dot.a;
@@ -776,19 +884,31 @@ export async function createRadiating(host, { embedded = false } = {}) {
       if (Math.abs(px - dot.x) + Math.abs(py - dot.y) + Math.abs(pa - dot.a) > 1e-3) dirty = true;
     }
 
-    pulseData.fill(0);
-    if (held && hold.t != null) {
-      const R = (diag + front) * easeOut(hold.t);
-      pulseData.set([dot.x, dot.y, R, 1], 0);
-    } else {
-      for (let i = pulses.length - 1; i >= 0; i--) if (now - pulses[i].t0 > PULSE_MS) pulses.splice(i, 1);
-      pulses.forEach((q, i) => {
-        // The front leaves fast and slows as it spreads: ease-out, no return.
-        const reach = Math.max(Math.hypot(q.x, q.y), Math.hypot(w - q.x, q.y), Math.hypot(q.x, h - q.y), Math.hypot(w - q.x, h - q.y)) + front;
-        const e = 1 - Math.pow(1 - (now - q.t0) / PULSE_MS, 2.4);
-        pulseData.set([q.x, q.y, reach * e, 1], i * 4);
-      });
-      if (pulses.length) dirty = true;
+    // Sources: a press blooms out of the dot it was (rings 0) to its own
+    // count; one letting go sinks back past everything, then is forgotten.
+    srcData.fill(0);
+    let count = 0;
+    for (let i = sources.length - 1; i >= 0; i--) {
+      if (sources[i].retire >= 0 && now - sources[i].retire > RETIRE_MS) sources.splice(i, 1);
+    }
+    for (const s of sources) {
+      const p = s.pr * period;
+      let rings = s.rings * (s.hold ?? easeOut((now - s.t0) / BLOOM_MS));
+      if (s.hold == null && now - s.t0 < BLOOM_MS) dirty = true;
+      if (s.retire >= 0) {
+        rings -= ((diag + period * 4) / p) * easeOut((now - s.retire) / RETIRE_MS);
+        dirty = true;
+      }
+      srcData.set([s.fx * w, s.fy * h, p, rings], count * 4);
+      count++;
+    }
+    // The pointer's dot, last: far away its field is pushed past everything,
+    // so it grows outward from the dot as presence rises.
+    if (dot.a > 1e-3) {
+      const next = nextSource(sources, dot.x, dot.y, w, h, period);
+      const p = next.pr * period;
+      srcData.set([dot.x, dot.y, p, -((1 - dot.a) * (diag + period * 4)) / p], count * 4);
+      count++;
     }
 
     // Intro: the rings swell out of the word one after another.
@@ -804,11 +924,6 @@ export async function createRadiating(host, { embedded = false } = {}) {
     if (!dirty) return;
     dirty = false;
 
-    // Presence: far away, the dot's field is pushed past everything, so it
-    // grows outward from the dot as presence rises.
-    const dotR = period * 0.55;
-    const push = (1 - dot.a) * (diag + period * 4);
-
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.useProgram(prog);
     gl.activeTexture(gl.TEXTURE0);
@@ -822,11 +937,11 @@ export async function createRadiating(host, { embedded = false } = {}) {
     gl.uniform2f(U.uRes, stage.canvas.width, stage.canvas.height);
     gl.uniform1f(U.uDpr, stage.canvas.width / w);
     gl.uniform1f(U.uP, period);
-    gl.uniform3f(U.uDot, dot.x, dot.y, dotR - push);
-    gl.uniform1f(U.uK, period * 2.2);
+    gl.uniform4fv(U.uSrc, srcData);
+    gl.uniform1i(U.uSrcN, count);
+    gl.uniform1f(U.uK, 0.9);
     gl.uniform1f(U.uKg, period);
-    gl.uniform4fv(U.uPulse, pulseData);
-    gl.uniform1f(U.uFront, front);
+    gl.uniform1f(U.uHug, 4);
     gl.uniform1f(U.uReveal, reveal);
     gl.uniform4fv(U.uBox, sdf.box);
     gl.uniform2f(U.uAnneal, ANNEAL[0] * period, ANNEAL[1] * period);
