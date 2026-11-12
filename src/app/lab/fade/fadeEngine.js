@@ -80,7 +80,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    window frames and at drip points along an eave, and bleaches a thin
 //    runoff tail down the wall below, fading over a few hundred px; and the
 //    open wall weathers in thin drips along its vertical, not in patches;
-// then photo + S x (aged albedo - albedo), developed by the shared film kit.
+// then photo + S x (aged albedo - albedo), its chalk lift capped near L* 85
+// and the plate's own fine texture multiplied back over the lime (chalk is a
+// matte powder, not a highlight), developed by the shared film kit, twice
+// once a coat has chalked: the chalked walls take the development without
+// the diffusion and the halation, which stay on the cloud tops.
 //
 // The sky, last: the photo's own is a pale, hazy powder blue, which leaves
 // the bleached walls nothing to read against. A polariser, turned to the
@@ -167,6 +171,23 @@ const SKY_RIM = [203, 0.68, 0.71];
 // The photo's own clearest sky (95th percentile of saturation in the mask),
 // the reference for how much of a pixel is still clear sky.
 const SKY_CLEAR = [206, 0.49, 0.87];
+// Chalk is a matte powder, not a highlight. The lime blend flattens a coat's
+// lightness toward one value, so the plate's own fine texture (the render's
+// grain, its cracks, the drip lines, the cables' shadows) is put back on top
+// of it: the ratio of the plate to its own wall-only, edge-aware blur (sigma
+// DETAIL_SIGMA plate px, about 8 to 16 px across), multiplied back in with
+// an exponent that climbs with the chalk, past 1 on a fully chalked coat, as
+// a powdered surface shows every pit of the wall under it. The ratio is held
+// under DETAIL_CLIP (log units) so a void or a hard shadow never punches out.
+const DETAIL_SIGMA = 6;
+const DETAIL_RANGE = 0.3;
+const DETAIL_GAIN = 2.6;
+const DETAIL_CLIP = 0.45;
+// And it never reaches paper white: the bloom may lift a coat's value only to
+// about L* 85 (scene luminance, before the film), on a soft shoulder, so the
+// chalked top floors stay below the clouds' tops. A coat already lighter than
+// that in the photo (the white trim) keeps its own.
+const CHALK_CAP = 0.74;
 // The scan's lifted black (the film's toe x toe colour), removed over the sky.
 const FILM_TOE = 0.035;
 const FILM_TOE_COLOR = [0.75, 1, 1.2];
@@ -365,6 +386,62 @@ void main() {
   outColor = vec4(shelterAt(P), clamp(tail, 0.0, 1.0), 0.5 + 0.5 * st, 1.0);
 }`;
 
+// Bake 3, once at load, at plate resolution, four passes: the wall's own
+// local level, for the chalk's texture. Log luminance is stored packed in two
+// bytes (R + G / 255), which a bilinear read interpolates exactly. Only wall
+// samples count (the sky beside an eave never pulls the wall's level up).
+// Passes 1 and 2 (across, then down) are a plain Gaussian, G. Passes 3 and 4
+// repeat it twice over, with each sample weighted by how near it lies to a
+// reference: in RG to G, so a cable, a crack or a hook (an outlier against its
+// wall) is left out of the level and stands dark in the ratio; in BA to the
+// pixel itself (a bilateral), so the render beside a window's void or a
+// shutter, a whole other level, keeps its own and takes no bright halo. The
+// live shader takes the darker of the two ratios.
+const DETAIL_PACK = `float unpackLog(vec2 v) { return (v.x + v.y / 255.0) * 4.1 - 4.0; }
+vec2 packLog(float l) {
+  float v = clamp((l + 4.0) / 4.1, 0.0, 1.0) * 255.0;
+  float h = floor(v);
+  return vec2(h / 255.0, v - h);
+}`;
+const DETAIL = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uPlate;
+uniform sampler2D uMat;
+uniform sampler2D uSrc;
+uniform sampler2D uRef;
+uniform vec2 uPlateSize;
+uniform vec2 uVanish;
+uniform vec2 uDir;
+uniform float uFromPlate;
+uniform float uRange;
+uniform float uSigma;
+${NOISE}
+${DETAIL_PACK}
+void main() {
+  float refG = uRange > 0.0 ? unpackLog(texture(uRef, vUv).rg) : 0.0;
+  float refC = logY(vUv * uPlateSize, 0.0);
+  vec2 sum = vec2(0.0);
+  vec2 wsum = vec2(0.0);
+  for (int i = -15; i <= 15; i++) {
+    vec2 uv = vUv + uDir * float(i);
+    vec4 src = textureLod(uSrc, uv, 0.0);
+    float lp = logY(uv * uPlateSize, 0.0);
+    vec2 l = uFromPlate > 0.5 ? vec2(lp) : vec2(unpackLog(src.rg), unpackLog(src.ba));
+    float w = exp(-float(i * i) / (2.0 * uSigma * uSigma)) * (smoothstep(0.005, 0.03, textureLod(uMat, uv, 0.0).a) + 1e-3);
+    vec2 wr = vec2(w);
+    if (uRange > 0.0) {
+      vec2 dd = (vec2(l.x, lp) - vec2(refG, refC)) / uRange;
+      wr *= exp(-dd * dd) + 1e-3;
+    }
+    sum += wr * l;
+    wsum += wr;
+  }
+  vec2 b = sum / wsum;
+  outColor = vec4(packLog(b.x), packLog(b.y));
+}`;
+
 const AGE = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -399,7 +476,12 @@ uniform float uShelter;
 uniform float uStreak;
 uniform float uRunoff;
 uniform float uMottle;
+uniform sampler2D uDetail;
+uniform float uDetailGain;
+uniform float uDetailClip;
+uniform float uChalkCap;
 ${NOISE}
+${DETAIL_PACK}
 vec3 toSrgb(vec3 c) {
   c = max(c, 0.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
@@ -601,13 +683,32 @@ void main() {
   aged = oklabToLin(vec3(mix(oa.x, max(oa.x, ol.x), c), mix(abMix, abHeld, held)));
 
   vec3 outLin = max(lin + S * (aged - a), 0.0);
+  // The bloom lifts a coat only to the chalk's own value, rolled off on a
+  // soft shoulder under the clouds' paper white; what the photo already has
+  // brighter than that (the white trim) it keeps.
+  float chalked = smoothstep(0.0, 0.3, c);
+  float Y0 = dot(lin, LUMA);
+  float Y1 = dot(outLin, LUMA);
+  float knee = 0.7 * uChalkCap;
+  float Yc = Y1 < knee ? Y1 : knee + (uChalkCap - knee) * (1.0 - exp(-(Y1 - knee) / (uChalkCap - knee)));
+  outLin *= mix(1.0, min(max(Y0, Yc) / max(Y1, 1e-5), 1.0), chalked);
+  // and the plate's own grain, cracks and drip lines go back on top of the
+  // lime, harder the more it has chalked: a powdered coat is matte and shows
+  // every pit of the render under it
+  vec4 lv = texture(uDetail, uv);
+  float ly = logY(P, 0.0);
+  float dt = min(ly - unpackLog(lv.rg), ly - unpackLog(lv.ba));
+  dt = uDetailClip * tanh(dt / uDetailClip);
+  outLin *= exp(uDetailGain * c * dt);
   // the sky is inert to the clock (A = 0), so its grade is the same every year
   float sky = skyMask(m, lin) * uPolar;
   if (sky > 0.001) outLin = mix(outLin, polarise(lin, uv), sky);
   // triangular dither over the graded sky, so its gradient never bands in the
   // 8-bit scene target
   float n = hash12(gl_FragCoord.xy) + hash12(gl_FragCoord.yx + 7.3) - 1.0;
-  outColor = vec4(toSrgb(outLin) + n * sky / 255.0, 1.0);
+  // alpha: where the coat has chalked, which the film develops without its
+  // diffusion, so the powder stays matte and drawn instead of glowing
+  outColor = vec4(toSrgb(outLin) + n * sky / 255.0, chalked * (1.0 - sky));
 }`;
 
 // The plate premultiplied by the sky mask, mipmapped once at load, so the
@@ -632,6 +733,9 @@ precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uTex;
+uniform sampler2D uSharp;
+uniform sampler2D uScene;
+uniform float uSharpOn;
 uniform sampler2D uMat;
 uniform float uFade;
 uniform vec3 uPaper;
@@ -639,6 +743,8 @@ uniform vec3 uToe;
 uniform vec4 uCrop;
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
+  // the chalked walls, developed without the diffusion and the halation
+  if (uSharpOn > 0.5) c = mix(c, texture(uSharp, vUv).rgb, texture(uScene, vUv).a);
   // the scan's lifted black, taken back out over the sky alone
   vec4 m = texture(uMat, uCrop.xy + uCrop.zw * vec2(vUv.x, 1.0 - vUv.y));
   float sky = clamp(1.0 - (2.0 * m.r - m.b / 0.85), 0.0, 1.0);
@@ -763,6 +869,7 @@ export async function createFade(host, { embedded = false } = {}) {
     premul: program(gl, VERT, SKY_PREMUL),
     seed: program(gl, VERT, SEED),
     local: program(gl, VERT, LOCAL),
+    detail: program(gl, VERT, DETAIL),
   };
 
   // the sky-only plate, once: render, then mipmap
@@ -835,6 +942,31 @@ export async function createFade(host, { embedded = false } = {}) {
     ["uMat", mat],
     ["uSeed", seedTex],
   ]);
+  // The wall's own level for the chalk's texture: a plain wall-only blur
+  // (across, then down), then the same weighted by nearness to it.
+  const detailPass = (dst, dx, dy, fromPlate, src, ref) => {
+    const u = P.detail.u;
+    gl.useProgram(P.detail.p);
+    gl.uniform2f(u.uDir, dx / PW, dy / PH);
+    gl.uniform1f(u.uFromPlate, fromPlate ? 1 : 0);
+    gl.uniform1f(u.uRange, ref ? DETAIL_RANGE : 0);
+    gl.uniform1f(u.uSigma, DETAIL_SIGMA);
+    bake(P.detail, dst, [
+      ["uPlate", plate],
+      ["uMat", mat],
+      ["uSrc", src || plate],
+      ["uRef", ref || plate],
+    ]);
+  };
+  const detailA = plateTarget(false);
+  const detailRef = plateTarget(false);
+  const detailTex = plateTarget(false);
+  detailPass(detailA, 1, 0, true, null, null);
+  detailPass(detailRef, 0, 1, false, detailA, null);
+  detailPass(detailA, 1, 0, true, null, detailRef);
+  detailPass(detailTex, 0, 1, false, detailA, detailRef);
+  gl.deleteTexture(detailA);
+  gl.deleteTexture(detailRef);
   const film = createFilm(gl, { width: 2, height: 2 });
 
   // The view fills the box: looking up from the cobbles reads at full size,
@@ -843,7 +975,7 @@ export async function createFade(host, { embedded = false } = {}) {
   // past that (a tall phone) it runs edge to edge across and sits on the
   // paper above and below. Embedded, it fills the tile's height.
   const L = { x: 0, y: 0, w: 1, h: 1, pw: 2, ph: 2, u0: 0, v0: 0, us: 1, vs: 1, fitW: 1 };
-  const T = { scene: null, film: null };
+  const T = { scene: null, film: null, sharp: null };
   let dirty = true;
   const layout = (W, H, dpr) => {
     const ar = PW / PH;
@@ -874,6 +1006,7 @@ export async function createFade(host, { embedded = false } = {}) {
     Object.values(T).forEach((t) => freeTarget(gl, t));
     T.scene = target(gl, L.pw, L.ph);
     T.film = target(gl, L.pw, L.ph);
+    T.sharp = target(gl, L.pw, L.ph);
     film.resize(L.pw, L.ph);
     dirty = true;
   };
@@ -963,6 +1096,10 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uStreak, STREAK);
     gl.uniform1f(u.uRunoff, RUNOFF);
     gl.uniform1f(u.uMottle, MOTTLE);
+    bindTex(5, detailTex, u.uDetail);
+    gl.uniform1f(u.uDetailGain, DETAIL_GAIN);
+    gl.uniform1f(u.uDetailClip, DETAIL_CLIP);
+    gl.uniform1f(u.uChalkCap, CHALK_CAP);
     gl.uniform1f(u.uDebug, debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
@@ -973,29 +1110,32 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.viewport(0, 0, T.scene.w, T.scene.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
+    // nothing has chalked in the first years: the second development waits
+    const sharpOn = !raw && !debugDose && years > 1;
     if (!raw && !debugDose) {
-      film.render(
-        T.scene.tex,
-        {
-          ...FILM_PRESETS.summer,
-          exposure: 0.12 + expoStops,
-          headroom: 0.6,
-          halation: 0.22,
-          bloom: 0.2,
-          softness: 0.5,
-          contrast: 1.06,
-          toe: FILM_TOE,
-          saturation: 1.02,
-          blueDepth: 0.4,
-          shadowTint: [0.95, 1, 1.05],
-          highlightTint: [1.0, 1, 0.99],
-          vignette: 0.18,
-          whitePoint: 1.2,
-          grain: 0.32,
-          grainSeed: seed,
-        },
-        T.film.fbo,
-      );
+      const look = {
+        ...FILM_PRESETS.summer,
+        exposure: 0.12 + expoStops,
+        headroom: 0.6,
+        halation: 0.22,
+        bloom: 0.2,
+        softness: 0.5,
+        contrast: 1.06,
+        toe: FILM_TOE,
+        saturation: 1.02,
+        blueDepth: 0.4,
+        shadowTint: [0.95, 1, 1.05],
+        highlightTint: [1.0, 1, 0.99],
+        vignette: 0.18,
+        whitePoint: 1.2,
+        grain: 0.32,
+        grainSeed: seed,
+      };
+      film.render(T.scene.tex, look, T.film.fbo);
+      // and again without the diffusion, the halation and the optical
+      // softness (same grain), for the chalked walls: the Pro-Mist stays on
+      // the cloud tops and the paint that has not yet gone
+      if (sharpOn) film.render(T.scene.tex, { ...look, bloom: 0, halation: 0, softness: 0 }, T.sharp.fbo);
       gl.bindVertexArray(vao);
     }
 
@@ -1009,6 +1149,9 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.viewport(vx, vy, L.pw, L.ph);
     gl.useProgram(P.blit.p);
     bindTex(0, raw || debugDose ? T.scene.tex : T.film.tex, P.blit.u.uTex);
+    bindTex(2, T.sharp.tex, P.blit.u.uSharp);
+    bindTex(3, T.scene.tex, P.blit.u.uScene);
+    gl.uniform1f(P.blit.u.uSharpOn, sharpOn ? 1 : 0);
     gl.uniform1f(P.blit.u.uFade, fade);
     gl.uniform3fv(P.blit.u.uPaper, PAPER);
     bindTex(1, mat, P.blit.u.uMat);
@@ -1091,7 +1234,7 @@ export async function createFade(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [plate, mat, light, skyPlate, seedTex, localTex].forEach((t) => gl.deleteTexture(t));
+      [plate, mat, light, skyPlate, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
