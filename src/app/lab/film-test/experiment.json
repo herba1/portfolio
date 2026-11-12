@@ -1,10 +1,10 @@
 {
   "title": "Film test",
-  "description": "A test bench for the lab's shared film look. One photograph of a towering summer cumulus, looking straight up past three power lines, raw on the left of the split and developed on the right: halation, Pro-Mist diffusion, dye-cloud colour bleed, a film curve that lets the cloud glow instead of clip, a deeper summer blue, fine grain and an optical vignette. Drag sideways to move the split.",
+  "description": "A test bench for the lab's shared film look, shot through a circular polariser. One photograph of a towering summer cumulus, looking straight up past three power lines, developed with halation, Pro-Mist diffusion, dye-cloud colour bleed, a film curve that lets the cloud glow instead of clip, fine grain and an optical vignette. Drag sideways to turn the polariser: the skylight's polarised share follows cos², so the sky deepens to cobalt and the cloud's skylit shade gains weight, then pales back to haze, half a turn per cycle.",
   "tags": ["WebGL", "Photography", "Film"],
   "status": "draft",
   "createdAt": "2026-11-06T18:10:00.000Z",
-  "intent": "Tune src/app/lab/_kit/film.js against herb's references (scanned Portra 400 / Fuji Superia / CineStill summer skies), not a VHS or bloom filter. ?preset=summer|dusk|night, any film param as a query override, ?motion=1 for moving grain.",
+  "intent": "Tune the film kit against herb's references (scanned Portra 400 / Fuji Superia / CineStill summer skies), not a VHS or bloom filter. The polariser acts on the scene light before the film; the film's sky dye density follows the same cos² response. ?x=0..1 starting angle (0 = deepest sky), ?lift=0..1 holds the white-blue opening, ?preset=summer|dusk|night, any film param as a query override, ?motion=0 for still grain and no drift.",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.7, 0.5] },
   "photo": {
@@ -16,6 +16,8 @@
     "https://creativecommons.org/licenses/by/3.0/",
     "https://en.wikipedia.org/wiki/Halation",
     "https://www.cinestill.com/",
-    "https://gpuopen.com/wp-content/uploads/2016/03/GdcVdrLottes.pdf"
+    "https://gpuopen.com/wp-content/uploads/2016/03/GdcVdrLottes.pdf",
+    "https://en.wikipedia.org/wiki/Polarizing_filter_(photography)",
+    "https://en.wikipedia.org/wiki/Rayleigh_sky_model"
   ]
 }

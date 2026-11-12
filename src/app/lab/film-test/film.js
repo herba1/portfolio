@@ -47,6 +47,10 @@
 //                highlights veil. The dye-cloud colour bleed then reads its
 //                colour from a ~6 px spread of the input instead of the
 //                pyramid.                                                     0
+//   bloomKnee    0.05..0.5  half-width of that knee as a share of the
+//                threshold: 0.5 is the soft half-to-1.5x knee; lower keeps
+//                the light just under the threshold out of the veil, so the
+//                mid-grey of a cloud's shaded side holds its own drawing. 0.5
 //   softness     0..1  optical softness and dye-cloud colour bleed: luma
 //                spread over 1-2 px, the colour ratio (hue, saturation) over
 //                ~8 px, so colour creeps across edges while drawing holds. 0.55
@@ -57,6 +61,9 @@
 //   toeColor     [r,g,b] relative tint of that black            [.75, 1, 1.2]
 //   shadowTint   [r,g,b] multiplier on the shadows (split tone)  [.9, 1, 1.08]
 //   highlightTint [r,g,b] multiplier on the highlights           [.95, 1, 1.05]
+//   shoulderTint [r,g,b] display-space tint on the last stretch of the
+//                shoulder (from ~0.6 to paper white), the colour the
+//                brightest tones roll off into                      [1, 1, 1]
 //   saturation   1 = as shot; eased off towards the shoulder, so bright colour
 //                bleaches instead of clipping into a flat hue             1.1
 //   blueDepth    0..1  subtractive dye density on the sky, the way a
@@ -104,6 +111,7 @@ export const FILM_DEFAULTS = {
   halationLocal: 0,
   bloom: 0.28,
   bloomThreshold: 0,
+  bloomKnee: 0.5,
   softness: 0.55,
   contrast: 1.2,
   shoulder: 0.95,
@@ -112,6 +120,7 @@ export const FILM_DEFAULTS = {
   whitePoint: 1.3,
   shadowTint: [0.9, 1, 1.08],
   highlightTint: [0.95, 1, 1.05],
+  shoulderTint: [1, 1, 1],
   saturation: 1.1,
   blueDepth: 1,
   dyeWhite: 0.7,
@@ -188,12 +197,13 @@ const COMMON = `
 uniform float uInSRGB;
 uniform float uHeadroom;
 uniform float uMistThr;
+uniform float uMistKnee;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // The share of a pixel's light the diffusion takes: all of it, or above a
 // threshold only the highlights.
 float mistShare(vec3 s) {
   if (uMistThr <= 0.0) return 1.0;
-  return smoothstep(uMistThr * 0.5, uMistThr * 1.5, dot(s, LUMA));
+  return smoothstep(uMistThr * (1.0 - uMistKnee), uMistThr * (1.0 + uMistKnee), dot(s, LUMA));
 }
 vec3 srgbToLinear(vec3 c) {
   c = clamp(c, 0.0, 1.0);
@@ -321,6 +331,7 @@ uniform vec4 uCurve;       // a, d, b, c
 uniform vec3 uToe;
 uniform vec3 uShadowTint;
 uniform vec3 uHighTint;
+uniform vec3 uShoulderTint;
 uniform float uGrain;
 uniform float uGrainPx;
 uniform float uSeed;
@@ -431,6 +442,10 @@ void main() {
 
   // Lifted, tinted black of a scanned negative.
   outc = uToe + (1.0 - uToe) * outc;
+
+  // The shoulder's own colour: the brightest tones roll off into it, so a
+  // sunlit lobe lands warm-neutral instead of on a cool paper white.
+  outc *= mix(vec3(1.0), uShoulderTint, smoothstep(0.6, 0.94, dot(outc, LUMA)));
 
   // Grain: clumps about 1/1100 of the frame tall, strongest in the mids and
   // shadows, cleaner in the highlights; mostly monochrome with a little dye.
@@ -598,6 +613,7 @@ export function createFilm(gl, { width = 1, height = 1 } = {}) {
     gl.uniform1f(P.prep.u.uInSRGB, inSRGB);
     gl.uniform1f(P.prep.u.uHeadroom, headroom);
     gl.uniform1f(P.prep.u.uMistThr, Math.max(0, p.bloomThreshold));
+    gl.uniform1f(P.prep.u.uMistKnee, Math.min(0.5, Math.max(0.05, p.bloomKnee)));
     pass(down[0]);
 
     // 2. Down the pyramid.
@@ -645,6 +661,7 @@ export function createFilm(gl, { width = 1, height = 1 } = {}) {
     gl.uniform1f(c.uInSRGB, inSRGB);
     gl.uniform1f(c.uHeadroom, headroom);
     gl.uniform1f(c.uMistThr, Math.max(0, p.bloomThreshold));
+    gl.uniform1f(c.uMistKnee, Math.min(0.5, Math.max(0.05, p.bloomKnee)));
     gl.uniform2f(c.uRes, W, H);
     gl.uniform1f(c.uExposure, 2 ** p.exposure);
     gl.uniform1f(c.uBloom, Math.min(1, Math.max(0, p.bloom)) * 0.45);
@@ -661,6 +678,7 @@ export function createFilm(gl, { width = 1, height = 1 } = {}) {
     gl.uniform4fv(c.uCurve, curveConstants(p.contrast, p.shoulder, hdrMax, 0.18, 0.18));
     gl.uniform3fv(c.uShadowTint, p.shadowTint);
     gl.uniform3fv(c.uHighTint, p.highlightTint);
+    gl.uniform3fv(c.uShoulderTint, p.shoulderTint);
     gl.uniform3f(c.uToe, p.toe * p.toeColor[0], p.toe * p.toeColor[1], p.toe * p.toeColor[2]);
     gl.uniform1f(c.uGrain, Math.max(0, p.grain));
     gl.uniform1f(c.uGrainPx, Math.max(0.75, (H / 1100) * p.grainSize));
