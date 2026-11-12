@@ -27,7 +27,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // disparity (sky barely, the time a little, the crowns most), and the cloud
 // drifts slowly on its own, so the cumulus passes behind the figures while the
 // crowns cross in front. The figures are lit by the sky around them, pale and
-// never white, and bleed a broad, faint veil of their own light into the air.
+// never white, and bleed a broad, faint veil of their own light into the air;
+// the air in that veil's footprint is first taken down a step (?shade=, a
+// multiply), so where the cloud's sunlit crown stands behind the 0 and the 4
+// the figures still separate from it without being brightened.
 // The frame is then developed by the shared film kit (summer preset) with
 // its diffusion off: the cumulus at infinity is drawn as crisply as the
 // needles in front of it, and only the figures veil into the air.
@@ -46,10 +49,12 @@ const ENC = 2;
 // numerals, so the trunks rise toward the time from every edge.
 const ANCHOR = [0.5, 0.46];
 // The numerals: centre of the figures and their em size, in image pixels.
-// They sit across the upper well, wider than it: the sunlit crown on the left
-// and the dark crown on the right come in over their ends, and the crown
-// overhead dips its lowest needles into their tops.
-const NUM = { cx: 2010, cy: 780, size: 560 };
+// They sit whole in the open well, low enough that the lower half of the 0
+// and the 4 stands on the cumulus's sunlit crown. Only the tips of the
+// crowns' outermost needles reach the 1s: measured against the matte and the
+// parallax, no figure loses more than about 4% of its ink at any full tilt,
+// and nothing crosses a stem. (Tune with ?nx=&ny=&ns=.)
+const NUM = { cx: 2120, cy: 900, size: 470 };
 
 const SKY_D = 0.04; // the sky's disparity in the depth map
 const NUM_D = 0.2; // the numerals' plane: in front of the sky, behind every tree
@@ -96,6 +101,8 @@ uniform vec3 uPlane;      // amp, focus, numerals' disparity
 uniform float uNumL;      // numerals' radiance
 uniform float uBleed;     // share of the figures' light that diffuses
 uniform float uBleedLod;  // mip offset that scales the bleed with the figures
+uniform float uShade;     // the air under the figures, multiplied by this at full bleed
+uniform float uShadeK;    // the bleed at which the step is whole
 uniform float uEnc;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${(IMG_W / IMG_H).toFixed(6)};
@@ -154,9 +161,17 @@ void main() {
     // Never past uNumL: pale, never paper white, even over cloud.
     float lift = clamp(pow(dot(skyl, LUMA) / 0.14, 0.25), 0.88, 1.0);
     vec3 n = uNumL * lift * mix(cool, sun, smoothstep(0.1, 0.8, near));
+    // A value step under the figures: the air in their bleed footprint is
+    // taken down softly (a multiply, so the cloud keeps its form) before
+    // anything is added. The figures stay as they were, pale and never white;
+    // it is the cloud crown behind them that steps down, so the 0 and the 4
+    // separate from the brightest part of the cumulus.
+    // The veil is measured against the air as it was, so it never fills the
+    // step back in.
     // Bleed adds light, and less of it where the air is already as bright
     // (over cloud it all but vanishes, so the cloud never clips).
     vec3 glow = max(n - col, 0.0) * bleed * uBleed;
+    col *= mix(1.0, uShade, smoothstep(0.0, uShadeK, bleed));
     col = mix(col + glow, n, ta);
   }
 
@@ -228,6 +243,12 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const numQ = { cx: num(q.get("nx"), NUM.cx), cy: num(q.get("ny"), NUM.cy), size: num(q.get("ns"), NUM.size) };
   const numL = num(q.get("nl"), 0.85);
   const bleedK = num(q.get("bleed"), 0.4);
+  // The step under the figures: 0.8 of the air's light where the bleed
+  // reaches shadew. The film's shoulder compresses it on the cloud's crown to
+  // about a tenth on the print, which is what the 0 and the 4 need to stand
+  // off it; 0.85 left the brightest cloud level with the figures.
+  const shadeK = clamp(num(q.get("shade"), 0.8), 0, 1);
+  const shadeW = num(q.get("shadew"), 0.15);
   const driftQ = q.get("drift") != null ? clamp(num(q.get("drift"), 0), -1, 1) : null;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -554,6 +575,8 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     gl.uniform3f(u.uPlane, AMP, FOCUS, NUM_D);
     gl.uniform1f(u.uNumL, numL);
     gl.uniform1f(u.uBleed, bleedK);
+    gl.uniform1f(u.uShade, shadeK);
+    gl.uniform1f(u.uShadeK, shadeW);
     gl.uniform1f(u.uBleedLod, lay.bleedLod);
     gl.uniform2f(u.uWind, wind.x, wind.y);
     gl.uniform1f(u.uEnc, ENC * enc);
