@@ -106,8 +106,11 @@ const FILM = {
 //    steepened every edge into a hard rim). An S-curve over the cloud's own
 //    range, driven by the blurred plate: the lit masses take CLOUD_LIFT of
 //    the headroom left and draw toward warm-neutral paper (CLOUD_TOP,
-//    #f3eee4), bending toward white and never reaching it; the shade masses
-//    sink toward the blue-grey of skylight (CLOUD_SHADE).
+//    #f2eee6), bending toward white and never reaching it; the shade masses
+//    sink toward the blue of skylight (CLOUD_SHADE, #9db6cf). Each mass is
+//    also read for which side faces the sun (SUN): its sun-facing flank is
+//    lit and warmed with the cores, its far side and base sink to skylight,
+//    so a cumulus has a sunlit top and a blue underside, not one grey value.
 //  - Diffusion: the cloud light, blurred wide, screened in at DIFFUSE, veils
 //    the cobalt near the cloud. Halation is not in the plate: it is a pass of
 //    its own over the finished scene (see HALO), so the steel, the live wires
@@ -118,20 +121,23 @@ const STRUCT = 0.88;
 const STRUCT_GAIN = 0.45;
 const STRUCT_FLOOR = 0.006;
 const STRUCT_TINT = [1.06, 1, 0.9]; // linear, luminance-normalised
-const CLOUD_TOP = [0xf3, 0xee, 0xe4];
+const CLOUD_TOP = [0xf2, 0xee, 0xe6];
 // The print bleaches colour on its shoulder (saturation eases off toward
 // white), so the plate aims this much warmer (linear) to land on CLOUD_TOP.
-const CLOUD_AIM = [1.03, 1, 0.9];
-const CLOUD_LIFT = 0.48;
+const CLOUD_AIM = [1.04, 1, 0.9];
+const CLOUD_LIFT = 0.56;
 // The cloud's modelling (see PLATE): where its range starts (blurred luma,
 // gamma), how far the S-curve goes (0 straight, 1 the doubled smoothstep),
 // and how far the shade masses draw toward CLOUD_SHADE, the blue-grey of a
 // cumulus underside lit only by the sky.
 const CLOUD_FROM = 0.6;
-const SCULPT = 0.8;
-const SHADE_TINT = 0.35;
-const CLOUD_SHADE = [0xa6, 0xb6, 0xc8];
-const DIFFUSE = 0.18;
+const SCULPT = 1;
+const SHADE_TINT = 0.6;
+const CLOUD_SHADE = [0x9d, 0xb6, 0xcf];
+// Toward the sun, degrees in the photograph (0 right, 90 up): upper left,
+// where the cumulus tops are brightest as shot.
+const SUN = 125;
+const DIFFUSE = 0.22;
 // Halation, the film's own optics rather than its grade: light that went
 // through the emulsion, bounced off the base (no remjet) and came back
 // through the red layer a little way off. Over the finished linear scene,
@@ -144,7 +150,7 @@ const DIFFUSE = 0.18;
 // steel against plain sky (the sky never reaches the threshold), and almost
 // nothing on the cloud itself. The wide radius stays low so it never reads
 // as a glow or a chroma smear.
-const HAL = 1;
+const HAL = 3.4;
 // Measured on the scene: the open sky never passes 0.3, even beside cloud;
 // the cumulus behind the truss sits at 0.38-0.55 and only its cores reach
 // the film's own halationThreshold (0.6), the sunlit masses upper right and
@@ -152,13 +158,13 @@ const HAL = 1;
 // low enough that the truss's cloud throws a fringe, with the sky still a
 // full 0.07 below the knee.
 const HAL_THRESHOLD = 0.42;
-const HAL_TINT = [1, 0.7, 0.45]; // linear
+const HAL_TINT = [1, 0.5, 0.26]; // linear
 const HAL_CAP = 0.62;
 // The narrow radius carries the fringe; the wide one only a breath of warmth
 // into the steel, so a 16 px feeder over the brightest cloud is lifted a few
 // levels, not turned into a lit tube.
-const HAL_NARROW = [3, 1]; // sigma (device px at DPR 2), weight
-const HAL_WIDE = [12, 0.08];
+const HAL_NARROW = [1.8, 1]; // sigma (device px at DPR 2), weight
+const HAL_WIDE = [12, 0.03];
 // The open sky deepens toward the zenith (the top edge): on top of the
 // polariser, it loses up to ZENITH of its value there.
 const ZENITH = 0.1;
@@ -210,6 +216,7 @@ uniform vec3 uCloudTop; // linear
 uniform vec2 uGlow;     // cloud lift, diffusion
 uniform vec3 uSculpt;   // cloud range floor (gamma), S-curve amount, shade tint
 uniform vec3 uCloudShade; // linear
+uniform vec2 uSun;     // toward the sun, image px direction (unit)
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 vec3 rgb2hsv(vec3 c) {
@@ -292,17 +299,32 @@ void main() {
   float s = clamp((ylg - uSculpt.x) / (0.94 - uSculpt.x), 0.0, 1.0);
   float s1 = s * s * (3.0 - 2.0 * s);
   float s2 = s1 * s1 * (3.0 - 2.0 * s1);
-  float lit = mass * s2;
-  // Shade: in from the fringe (it starts at s ~0.12), deepest mid-range.
-  float shade = mass * smoothstep(0.0, 0.25, s) * (1.0 - s2);
+  // Which side of the mass faces the sun: the same blurred light, read a
+  // cloud's width toward the sun and away from it. On the sun-facing side
+  // the cloud lies behind the pixel (away) and open sky ahead (toward), so
+  // the difference is positive there and negative on the shadowed base.
+  // Low frequency like the rest: it shapes masses, never draws a rim.
+  vec2 sd = uSun * ts * 2.5;
+  float yAhead = pow(dot(textureLod(uPlate, uv + sd, 5.0).rgb, LUMA), 1.0 / 2.2);
+  float yBehind = pow(dot(textureLod(uPlate, uv - sd, 5.0).rgb, LUMA), 1.0 / 2.2);
+  float side = clamp((yBehind - yAhead) * 5.0, -1.0, 1.0);
+  float body = mass * smoothstep(0.0, 0.3, s);
+  float facing = body * smoothstep(0.0, 0.6, side);
+  float away = body * smoothstep(0.0, 0.6, -side);
+  // Sunlit: the bright cores, and the sun-facing flank of every mass.
+  float lit = clamp(mass * s2 + facing * (0.2 + 0.8 * s1), 0.0, 1.0);
+  // Shade: in from the fringe (it starts at s ~0.12), deepest mid-range,
+  // and deepest of all on the side turned from the sun.
+  float shade = clamp(mass * smoothstep(0.0, 0.25, s) * (1.0 - s2) * (0.6 + 0.8 * away) * (1.0 - 0.7 * facing), 0.0, 1.0);
   float yc = uSculpt.x + (0.94 - uSculpt.x) * mix(s, s2, uSculpt.y);
-  yc += (1.0 - yc) * uGlow.x * s2;
+  yc += (1.0 - yc) * uGlow.x * lit;
+  yc -= (yc - uSculpt.x) * 0.16 * uSculpt.y * away * (1.0 - s2);
   yc = mix(ylg, yc, mass * step(uSculpt.x, ylg));
   float ratio = pow(yc / max(ylg, 1e-4), 2.2);
   float y = dot(c, LUMA);
   float yt = y * ratio;
   c *= ratio;
-  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), 0.8 * lit);
+  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), lit);
   c = mix(c, uCloudShade * (yt / dot(uCloudShade, LUMA)), uSculpt.z * shade);
 
   // Wide diffusion: screened, so it lifts the cobalt and never clips. Masked
@@ -569,6 +591,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const halThr = clamp(num("halThr", HAL_THRESHOLD), 0.05, 4);
   const sculpt = [clamp(num("cloudFrom", CLOUD_FROM), 0.3, 0.9), clamp(num("sculpt", SCULPT), 0, 1), clamp(num("shadeTint", SHADE_TINT), 0, 1)];
   const cloudShade = CLOUD_SHADE.map((v) => toLin(v / 255));
+  const sunA = (num("sun", SUN) * Math.PI) / 180;
+  const sun = [Math.cos(sunA), -Math.sin(sunA)];
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
@@ -893,6 +917,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     setGrade(plateP);
     gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
     gl.uniform4fv(plateP.u.uVib, vib);
+    gl.uniform2fv(plateP.u.uSun, sun);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND);
