@@ -72,20 +72,16 @@ void main(){
       ink = textureGrad(uTex, uv, gx, gy).r;
     }
     // Matte print on a matte drum under a broad, soft light a little above
-    // the eye: Lambertian, so the face is all but even, a few percent
-    // brighter where it tips up toward the light and a few darker as it
-    // tips away. Then the narrow part that matters: in the last few degrees
-    // before the window lip the surface turns edge-on and drops quickly into
-    // a thin terminator, and the lip itself throws a hairline of contact
-    // shadow. Ink is printed on that same surface, so it takes the same
-    // light; there is no separate darkening of the type.
+    // the eye: Lambertian, part direct and part fill. The window shows ±72°
+    // of the drum, so that one term is the cylinder: the front is all but
+    // even, and the surface darkens smoothly, faster and faster, as it turns
+    // edge-on toward each lip, a little deeper below than above. No contact
+    // shadow and no bar at the lip; the form does it. Ink is printed on that
+    // same surface, so it takes the same light; there is no separate
+    // darkening of the type.
     const float LIGHT = -0.12; // radians above the axis
     float lam = cos(th - LIGHT) / cos(LIGHT);
-    float face = 1.0 + 0.1 * (lam - 1.0);
-    float rim = smoothstep(0.9, 1.0, abs(th) / uTheta);
-    float shade = face * (1.0 - 0.16 * rim * rim);
-    float lip = min(ly, uFrame.w - ly);
-    shade *= 1.0 - 0.10 * (1.0 - smoothstep(0.0, 3.0, lip));
+    float shade = 1.0 + 0.26 * (lam - 1.0);
     vec3 paper = uPaper * shade;
     // Where one wheel meets the next: a hairline gap, not a groove.
     float px = min(lx, 1.0 - lx) * uFrame.z;
@@ -148,15 +144,24 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   const tex = gl.createTexture();
+  const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
 
   const letters = [...new Set(TITLES.join(""))];
   const glyphOf = new Int32Array(K * N);
   TITLES.forEach((t, i) => [...t].forEach((ch, w) => (glyphOf[i * K + w] = letters.indexOf(ch))));
 
   // Geometry, rebuilt on resize.
-  const THETA = 0.96; // the window shows ±55° of each drum
-  const ALPHA = 0.88; // a letter covers ±50°
-  const SLOT = THETA + ALPHA + 0.05;
+  // The window opens wide, ±72° of each drum, so a letter visibly curves
+  // away over the top: by the lip the surface is two-thirds edge-on and a
+  // rolling letter squashes to a sliver. A letter covers ±66° of its wheel,
+  // which at rest fills all but the last few degrees of the window, and
+  // the titles are printed tight round the drum, a hair apart, so the next
+  // word follows right behind the last instead of after a stretch of bare
+  // paper. At rest only the very edge of each neighbour peeks under the
+  // lips, edge-on.
+  const THETA = 1.25;
+  const ALPHA = 1.15;
+  const SLOT = 2 * ALPHA + 0.04;
   let geo = null;
 
   const mc = document.createElement("canvas").getContext("2d");
@@ -182,17 +187,19 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
       const cellW = (W - 2 * pad) / c;
       const bandH = (H - 2 * pad - (r - 1) * gapY) / r;
       const R = bandH / 2 / Math.sin(THETA);
-      const cap = 2 * R * Math.sin(ALPHA) * 0.97;
+      const cap = 2 * ALPHA * R * 0.98;
       const s = (cellW * 0.92) / (cap * maxW);
       const score = Math.abs(Math.log(Math.min(s, 1.15) / 0.62)) + (s > 1 ? 1 : 0);
       if (!best || score < best.score) best = { r, c, cellW, bandH, R, s: Math.min(s, 1), score };
     }
     const { r, c, cellW, bandH, R } = best;
     const s = best.s;
-    // Glyph texture: arc length of a letter, so 1:1 at the drum's front.
+    // Glyph texture: arc length of a letter, so 1:1 at the drum's front, and
+    // the cap fills that arc (less a hair for the rounds' overshoot): the
+    // letter is printed on the curve, not sized to the chord it projects to.
     const gw = Math.round(cellW * dpr);
     const gh = Math.round(2 * ALPHA * R * dpr);
-    const capPx = 2 * R * Math.sin(ALPHA) * dpr * 0.97;
+    const capPx = gh * 0.98;
     const fontPx = capPx / capRatio;
     const dil = 0;
     const inset = 6;
@@ -232,6 +239,9 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Toward the lip a letter is squashed hard in y only; anisotropic
+    // filtering keeps its stems sharp there instead of blurring them sideways.
+    if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
     const x0 = (W - c * cellW) / 2;
     const y0 = (H - r * bandH - (r - 1) * gapY) / 2;
     geo = { r, c, cellW, bandH, R, gapY, x0, y0, ac, ar, insetU: inset / cw, insetV: inset / ch, dpr };
