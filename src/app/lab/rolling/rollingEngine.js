@@ -39,7 +39,7 @@ import { createStage, clamp } from "../_kit/stage";
 // its own exposure window too. Four lamp cycles fit the 1/30 s readout, so the
 // frame carries four bands: broad cool crests and short warm, dimmer gaps,
 // the readout itself drawn in the picture's own light. They lie along the
-// sensor's rows (they turn when the phone turns) and they light everything
+// sensor's rows (they turn with ?scan, and stay put on the sensor when the phone moves) and they light everything
 // through the same linear composite: a crest brightens a row of the guard's
 // chrome and the blade islands under it, the gap beside it dims them warm. At 29.97 fps the 120 Hz lamp gains
 // 0.004 of a cycle a frame, so they creep up the frame while the torn
@@ -55,12 +55,27 @@ import { createStage, clamp } from "../_kit/stage";
 // second, so the torn pattern crawls slowly backwards against the frame
 // rate. Drag up (or scroll up) to overdrive it; drag down to drop the set
 // speed and let it coast down through the hooks and the wagon-wheel speeds;
-// let go and it returns to the notch. Drag sideways to turn the phone: the
-// sensor's readout direction rotates with it.
+// let go and it returns to the notch.
+//
+// The phone is held in a hand, and the readout acts on the whole picture,
+// not only on the blades. The phone's pose (a pan across the picture and a
+// small roll) is a mass on the hand's damped spring, simulated at the
+// rotor's own steps, plus a faint sway and tremor that never stop. Every
+// row looks into the room through the pose at its own instant, so the guard,
+// the hub, the badge, the stand and the room are read by the same process as
+// the blades: at rest the tremor gives the guard a slight wobble that differs
+// every frame, and drag sideways (grab the picture, flick it, let go) and
+// the phone swings, overshoots and rings out, leaning the rim into a
+// parallelogram, bending the wires while it slows, slanting the legs, and
+// tearing the blades further or knitting them back as the pan adds to or
+// takes from the rotor's sweep down the frame.
 //
 // Stills: ?rpm=4800&t=0.25 holds the frame that starts at t (seconds) with
 // the rotor at a steady rpm; the hero is ?rpm=2395&t=13.78043, the frame the
-// live view opens on. ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
+// live view opens on, the hand at rest (tremor only). ?flick=vx,vy releases
+// the phone from rest at that velocity (photo px/s) as the frame starts, so
+// ?rpm=2395&t=13.78043&flick=4200,-1200 is the same frame mid-swing.
+// ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
 // is 1/16000, so a blade tip travels a few px while its row is open and every
 // hook keeps a hard edge: long exposures blur the blades and wash the bands out, and at
 // 1/120 s the bands vanish).
@@ -152,6 +167,43 @@ const SLIP = 6; // motor torque per rad/s of slip below the set speed
 const TORQUE = 260; // motor torque cap
 const PX_PER_RPM = 0.15; // drag distance (CSS px) per rpm of set speed
 
+// The phone, held in a hand. Its pose is where it points, as the shift of
+// the picture on the sensor (photo px, x right, y down) and a roll about the
+// sensor's centre (rad). A phone in a hand is a mass on a soft, lightly
+// damped spring (the wrist and arm): pull it and let go and it swings back
+// through rest and rings out over most of a second. Sideways drag holds the
+// picture and pulls it; the wrist rolls a little as the hand goes sideways.
+const CAM_W = 2 * Math.PI * 2.6; // natural frequency of the hand, rad/s
+const CAM_ZETA = 0.26; // damping ratio: overshoots, then settles
+const ROLL_W = 2 * Math.PI * 3.1;
+const ROLL_ZETA = 0.3;
+const CAM_GAIN = 0.7; // photo px of pull per photo px of drag
+const CAM_REACH = 240; // photo px: the arm's soft limit
+const ROLL_PER_PX = -0.00022; // rad of wrist roll per photo px of sideways pull
+// The hand is never still: a slow sway and the physiological tremor at 8 to
+// 18 Hz, a few photo px (about a tenth of a degree of a phone's field of
+// view). Each is [amplitude, Hz, phase]; a sum of incommensurate sines, so it
+// never repeats and any still is reproducible from its time alone.
+const TREMOR_X = [
+  [5, 0.29, 1.1],
+  [3, 0.93, 4.3],
+  [6.2, 8.3, 0.1],
+  [4.5, 11.7, 0.8],
+  [2, 16.9, 2.6],
+];
+const TREMOR_Y = [
+  [4, 0.21, 5.2],
+  [1.8, 1.31, 5.9],
+  [3.4, 9.1, 2.2],
+  [2.2, 12.6, 0.3],
+  [1, 17.8, 1.6],
+];
+const TREMOR_R = [
+  [0.0012, 0.37, 2.6],
+  [0.0006, 9.7, 0.9],
+];
+const sway = (terms, t) => terms.reduce((a, [amp, hz, ph]) => a + amp * Math.sin(2 * Math.PI * hz * t + ph), 0);
+
 const AA = 0.6; // the blade outline's anti-aliasing width, device px: a moulded edge, caught hard
 // The blade's moulded edge: a bright line EDGE_AT device px inside the
 // outline, EDGE_W wide (sigma), as bright as EDGE where the edge faces the
@@ -181,6 +233,7 @@ uniform vec2 uHub;
 uniform mat2 uToDisc;
 uniform mat2 uFromDisc;
 uniform float uAng[${NANG}];
+uniform vec3 uPose[${NANG}]; // the phone's pose at 1/960 s steps through the frame: pan x, y (photo px) and roll (rad)
 uniform float uBase;
 uniform float uDir;
 uniform float uStep;
@@ -243,6 +296,23 @@ vec3 lampOver(float tau){
   return max(l, 0.0);
 }
 
+// The phone's pose at tau seconds into the frame.
+vec3 poseAt(float tau){
+  float f = tau / uStep;
+  int i = clamp(int(floor(f)), 0, ${NANG - 2});
+  return mix(uPose[i], uPose[i + 1], clamp(f - float(i), 0.0, 1.0));
+}
+
+// The room beyond the photo's edge, for when the phone swings past it: the
+// photo's own edge, blurred out further the further past it, and dimmed, so
+// the dim ground runs on instead of stopping at a seam.
+vec3 plateAt(vec2 q){
+  vec2 out2 = max(max(-q, q - 1.0), 0.0) * uImg;
+  float far = max(out2.x, out2.y);
+  if (far <= 0.0) return texture(uPlate, q).rgb;
+  return textureLod(uPlate, clamp(q, 0.0, 1.0), clamp(log2(1.0 + far), 0.0, 6.0) + uLod).rgb * mix(1.0, 0.7, clamp(far / 120.0, 0.0, 1.0));
+}
+
 // The blade frame at radius rho: row 0 holds blades 0 and 1 (lo, hi), row 1
 // blade 2, every angle against the blade's mid, linear between FRAME radii.
 vec4 frameAt(int row, float rho){
@@ -275,6 +345,7 @@ vec4 bladeAt(float rho, float phi, vec3 lo, vec3 hi){
 // shading and highlights (tools/depth/bakes/rolling/photo_front.py), and the
 // badge's chrome. Straight alpha over everything behind.
 vec4 frontAt(vec2 q){
+  if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) return vec4(0.0);
   return texture(uFront, q);
 }
 
@@ -282,15 +353,27 @@ void main(){
   vec2 frag = vec2(gl_FragCoord.x, uView.y - gl_FragCoord.y);
   vec2 q = (frag - uRect.xy) / uRect.zw;
   if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) { o = vec4(enc(uPaper), 1.0); return; }
-  vec2 p = q * uImg;
+  vec2 ps = q * uImg; // the sensor's own pixel, in photo px
   // The sensor row this pixel belongs to, as a fraction of the readout.
-  float s = (dot(p, uScan) - uScanRange.x) / (uScanRange.y - uScanRange.x);
+  float s = (dot(ps, uScan) - uScanRange.x) / (uScanRange.y - uScanRange.x);
   s = (floor(s * uRows) + 0.5) / uRows;
-  vec3 plate = texture(uPlate, q).rgb;
+  // The phone is held in a hand, so it is somewhere slightly different for
+  // every row: where it pointed at this row's instant (the middle of its
+  // exposure) is where this row looks into the room. The whole picture, the
+  // room, the guard, the hub and the blades alike, is read through it, so a
+  // pan leans the frame into a parallelogram and a pan that slows or turns
+  // during the readout bends every vertical into a curve.
+  vec3 pose = poseAt(s * uReadout + 0.5 * uExpo);
+  float cr = cos(pose.z), sr = sin(pose.z);
+  vec2 cen = 0.5 * uImg;
+  vec2 w0 = ps - cen - pose.xy;
+  vec2 p = cen + vec2(cr * w0.x + sr * w0.y, -sr * w0.x + cr * w0.y);
+  vec2 qs = p / uImg;
+  vec3 plate = plateAt(qs);
   // The fan head is turned: the blades turn in the disc's own plane, which
   // the picture sees as the guard rim's ellipse.
   vec2 d = uToDisc * (p - uHub);
-  vec4 f = frontAt(q);
+  vec4 f = frontAt(qs);
   // Everything in the room is lit by the lamp, so every row sees it at the
   // brightness of its own exposure window: the readout drawn as bands.
   vec3 lit = lampOver(s * uReadout);
@@ -391,7 +474,7 @@ export async function createRolling(host, { embedded = false } = {}) {
   const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
-  stage.canvas.style.cursor = "ns-resize";
+  stage.canvas.style.cursor = "grab";
 
   const [meta, plateBm, rotorBm, shapeBm, frontBm] = await Promise.all([
     fetch(`${BASE}meta.json`).then((r) => r.json()),
@@ -484,6 +567,30 @@ export async function createRolling(host, { embedded = false } = {}) {
   theta = stillT != null ? omega * stillT : omega * step * H;
   ring[step & 4095] = theta;
 
+  // The phone: spring state (pan x, y in photo px, roll in rad) and its
+  // history at the same steps as the rotor's, so every row of a frame reads
+  // the pose at its own instant.
+  const cam = { x: 0, y: 0, r: 0, vx: 0, vy: 0, vr: 0, tx: 0, ty: 0 };
+  const camRing = new Float64Array(4096 * 3);
+  const camStep = () => {
+    const kx = CAM_W * CAM_W;
+    const cx = 2 * CAM_ZETA * CAM_W;
+    cam.vx += (kx * (cam.tx - cam.x) - cx * cam.vx) * H;
+    cam.vy += (kx * (cam.ty - cam.y) - cx * cam.vy) * H;
+    cam.x += cam.vx * H;
+    cam.y += cam.vy * H;
+    // The wrist rolls with the sideways pull, on its own slightly stiffer spring.
+    const tr = ROLL_PER_PX * cam.tx;
+    cam.vr += (ROLL_W * ROLL_W * (tr - cam.r) - 2 * ROLL_ZETA * ROLL_W * cam.vr) * H;
+    cam.r += cam.vr * H;
+  };
+  const camStore = (i) => {
+    const j = (i & 4095) * 3;
+    camRing[j] = cam.x;
+    camRing[j + 1] = cam.y;
+    camRing[j + 2] = cam.r;
+  };
+
   const physics = () => {
     const target = setRpm * RPM;
     const drag = DRAG * omega * omega + VISC * omega;
@@ -497,14 +604,20 @@ export async function createRolling(host, { embedded = false } = {}) {
     theta += omega * H;
     step += 1;
     ring[step & 4095] = theta;
+    camStep();
+    camStore(step);
   };
 
   // ---- the sensor
-  let scan = ((scanQ ?? 0) * Math.PI) / 180;
-  let scanTarget = scan;
+  const scan = ((scanQ ?? 0) * Math.PI) / 180;
   let frameIndex = Math.floor((simT + 1e-9) * FPS);
   let lastFrame = null; // { base, ang }
   const angs = new Float32Array(NANG);
+  const poses = new Float32Array(NANG * 3);
+  // ?flick=vx,vy: a still taken while the phone swings, the spring released
+  // from rest at the frame's start at that velocity (photo px/s).
+  const flickQ = (q.get("flick") || "").split(",").map(Number);
+  const flick = [Number.isFinite(flickQ[0]) ? flickQ[0] : 0, Number.isFinite(flickQ[1]) ? flickQ[1] : 0];
   // A frame starts at t0 = frameIndex / 29.97 s, between two physics steps:
   // the rotor's history is read at t0 + j H exactly (interpolated), so the
   // rotor and the lamp keep one clock and the bands creep without jitter.
@@ -515,6 +628,16 @@ export async function createRolling(host, { embedded = false } = {}) {
       const th0 = w * t0;
       base = th0 % (2 * Math.PI);
       for (let j = 0; j < NANG; j++) angs[j] = w * j * H;
+      // The hand's spring from rest at the flick's velocity, through the frame.
+      Object.assign(cam, { x: 0, y: 0, r: 0, vx: flick[0], vy: flick[1], vr: 0, tx: 0, ty: 0 });
+      for (let j = 0; j < NANG; j++) {
+        const t = t0 + j * H;
+        poses[j * 3] = cam.x + sway(TREMOR_X, t);
+        poses[j * 3 + 1] = cam.y + sway(TREMOR_Y, t);
+        poses[j * 3 + 2] = cam.r + sway(TREMOR_R, t);
+        camStep();
+      }
+      Object.assign(cam, { x: 0, y: 0, r: 0, vx: 0, vy: 0, vr: 0 });
     } else {
       const x = t0 / H;
       const i = Math.floor(x);
@@ -523,9 +646,17 @@ export async function createRolling(host, { embedded = false } = {}) {
       const th0 = at(0);
       base = th0 % (2 * Math.PI);
       for (let j = 0; j < NANG; j++) angs[j] = at(j) - th0;
+      for (let j = 0; j < NANG; j++) {
+        const t = t0 + j * H;
+        for (let c = 0; c < 3; c++) {
+          const a = camRing[((i + j) & 4095) * 3 + c];
+          const b = camRing[((i + j + 1) & 4095) * 3 + c];
+          poses[j * 3 + c] = a + fr * (b - a) + sway(c === 0 ? TREMOR_X : c === 1 ? TREMOR_Y : TREMOR_R, t);
+        }
+      }
     }
     // The lamp's phase (cycles) at the first row.
-    lastFrame = { base, ang: Float32Array.from(angs), scan, lamp: (t0 * LAMP) % 1 };
+    lastFrame = { base, ang: Float32Array.from(angs), pose: Float32Array.from(poses), scan, lamp: (t0 * LAMP) % 1 };
     draw();
   };
 
@@ -568,6 +699,7 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniformMatrix2fv(u.uToDisc, false, toDisc);
     gl.uniformMatrix2fv(u.uFromDisc, false, fromDisc);
     gl.uniform1fv(u.uAng, lastFrame.ang);
+    gl.uniform3fv(u.uPose, lastFrame.pose);
     gl.uniform1f(u.uBase, lastFrame.base);
     gl.uniform1f(u.uDir, meta.dir);
     gl.uniform1f(u.uStep, H);
@@ -611,11 +743,16 @@ export async function createRolling(host, { embedded = false } = {}) {
       step = Math.round(simT / H);
       theta = omega * simT;
       for (let j = 0; j < 4096; j++) ring[(step - j) & 4095] = theta - omega * j * H;
+      Object.assign(cam, { x: 0, y: 0, r: 0, vx: 0, vy: 0, vr: 0, tx: 0, ty: 0 });
+      camRing.fill(0);
     }
   };
+  // Photo px per CSS px of drag: the picture follows the finger.
+  const photoPerCss = () => (IW * stage.dpr) / Math.max(1, rect[2]);
+  const reach = (v) => CAM_REACH * Math.tanh(v / CAM_REACH);
   stage.on("down", (p) => {
     wake();
-    gesture = { x: p.x, y: p.y, rpm: Math.max(setRpm, omega / RPM), scan: scanTarget, axis: null };
+    gesture = { x: p.x, y: p.y, rpm: Math.max(setRpm, omega / RPM), axis: null };
   });
   stage.on("move", (p) => {
     if (!gesture || !p.down) return;
@@ -623,13 +760,21 @@ export async function createRolling(host, { embedded = false } = {}) {
     const dy = p.y - gesture.y;
     if (!gesture.axis && Math.hypot(dx, dy) > 8) gesture.axis = Math.abs(dy) >= Math.abs(dx) ? "y" : "x";
     if (gesture.axis === "y") setRpm = clamp(gesture.rpm - dy / PX_PER_RPM, 0, MAX);
-    if (gesture.axis === "x") scanTarget = gesture.scan + (dx / Math.max(200, stage.width)) * Math.PI;
-    stage.canvas.style.cursor = gesture.axis === "x" ? "ew-resize" : "ns-resize";
+    if (gesture.axis === "x") {
+      // The hand pulls the phone; the phone follows on its spring, late.
+      const k = CAM_GAIN * photoPerCss();
+      cam.tx = reach(dx * k);
+      cam.ty = reach(dy * k);
+    }
+    if (gesture.axis) stage.canvas.style.cursor = gesture.axis === "x" ? "grabbing" : "ns-resize";
   });
   stage.on("up", () => {
     gesture = null;
     release();
-    stage.canvas.style.cursor = "ns-resize";
+    // Let go: the phone swings back through rest and rings out.
+    cam.tx = 0;
+    cam.ty = 0;
+    stage.canvas.style.cursor = "grab";
   });
   let wheelTimer = 0;
   let wheelRpm = null;
@@ -659,8 +804,6 @@ export async function createRolling(host, { embedded = false } = {}) {
   }
   const SPAN = Math.ceil((READOUT + expo) / H) + 2;
   stage.onFrame((dt) => {
-    // The phone turns with a little weight.
-    scan += (scanTarget - scan) * (1 - Math.exp(-dt * 14));
     if (holding) return;
     const end = simT + dt;
     while (simT + H <= end) {
