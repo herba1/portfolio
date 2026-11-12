@@ -102,7 +102,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Query: ?years=0..30 holds the clock; ?still=1 skips the reveal; ?film=0
 // shows the aged frame before the film; ?debug=dose shows the dose map;
 // ?debug=local shows the dose with its ledge shelter, tails and drips;
-// ?debug=runoff shows the bake (R shelter, G runoff tails, B drips); ?sky=0
+// ?debug=runoff shows the bake (R shelter, G runoff tails, B drips);
+// ?debug=cloud shows the sky's split (R cloud, G its lit term); ?sky=0
 // shows the sky as shot.
 
 const BASE = "/lab/fade/";
@@ -171,6 +172,17 @@ const SKY_RIM = [203, 0.68, 0.71];
 // The photo's own clearest sky (95th percentile of saturation in the mask),
 // the reference for how much of a pixel is still clear sky.
 const SKY_CLEAR = [206, 0.49, 0.87];
+// The clouds' own light. The sun stands off the frame's upper left (the
+// shutters' and the lantern's shadows run down and to the right), so the
+// cloud tops facing that edge are sunlit. They roll softly under a warm
+// paper white (sRGB, about L* 94 after the film), and the shade side and the
+// thin veils take skylight blue: the polarised sky's colour at 0.8, lifted
+// by SKY_LIFT (linear), the light the sky itself throws on them. A full cloud stands about
+// CLOUD_SPAN (log luminance) above the clear sky around it on the plate.
+const SUN_DIR = [-0.8, -0.6];
+const PAPER_WHITE = [250, 242, 226];
+const SKY_LIFT = [0.18, 0.25, 0.42];
+const CLOUD_SPAN = 0.7;
 // Chalk is a matte powder, not a highlight. The lime blend flattens a coat's
 // lightness toward one value, so the plate's own fine texture (the render's
 // grain, its cracks, the drip lines, the cables' shadows) is put back on top
@@ -469,6 +481,10 @@ uniform float uPolar;
 uniform vec3 uZenith;
 uniform vec3 uRim;
 uniform vec3 uClear;
+uniform vec2 uSunDir;
+uniform float uCloudSpan;
+uniform vec3 uPaperWhite;
+uniform vec3 uSkyLift;
 uniform vec4 uCrop;
 uniform vec2 uPlateSize;
 uniform vec2 uVanish;
@@ -521,37 +537,73 @@ float mottleAt(vec2 P) {
 }
 // The sky through a polariser. Clouds are near neutral, so the share of the
 // clear sky's blue chroma (b - r) a pixel still holds is how much of it is
-// clear sky; the rest is cloud, whose own light is what is left over. The
-// plate's chroma is stored at half resolution in 8x8 blocks, so it is read
-// soft, and the detail (a filament finer than that) comes from luminance,
-// which the plate keeps sharp: brighter than its surround is more cloud.
-// The soft read is of the sky alone (uSkyPlate is the plate premultiplied by
-// the sky mask), so a wall beside it never bleeds in as a pale rim.
+// clear sky. The plate's chroma is stored at half resolution in 8x8 blocks,
+// so that share is only a coarse guess (read soft); the cloud/clear split
+// itself is drawn from luminance, which the plate keeps sharp to the pixel:
+// how much brighter a pixel is than the soft clear-or-cloud guess around it.
+// The soft reads are of the sky alone (uSkyPlate is the plate premultiplied
+// by the sky mask), so a wall beside it never bleeds in as a pale rim.
+// The cloud then gets its own light instead of the photo's dull grey: a lit
+// term from the plate's cloud luminance against its wide blurred surround
+// (the heaped, brighter parts face the sun) plus a gradient toward the frame
+// edge facing the sun lifts the tops toward a warm paper white, rolled
+// softly under it; the thin and shadowed parts take skylight blue.
+// the share of cloud and its lit term, kept for ?debug=cloud
+vec2 gCloud = vec2(0.0);
 vec3 polarise(vec3 lin, vec2 uv) {
   vec4 sp = textureLod(uSkyPlate, uv, 2.5);
   vec3 soft = sp.a > 0.02 ? toLin(sp.rgb / sp.a) : lin;
+  vec4 sw = textureLod(uSkyPlate, uv, 4.5);
+  vec3 wide = sw.a > 0.02 ? toLin(sw.rgb / sw.a) : soft;
+  vec4 sv = textureLod(uSkyPlate, uv, 6.5);
+  vec3 vast = sv.a > 0.02 ? toLin(sv.rgb / sv.a) : wide;
   float cc = max(uClear.b - uClear.r, 1e-3);
   float yc = dot(uClear, LUMA);
-  float cloud = 1.0 - clamp((soft.b - soft.r) / cc, 0.0, 1.0);
-  cloud = clamp(cloud + (dot(lin, LUMA) - dot(soft, LUMA)) / max(0.9 - yc, 0.1), 0.0, 1.0);
-  float clear = 1.0 - cloud;
-  // the cloud's own light: the pixel minus the clear sky it sits in
-  vec3 cl = max(lin - clear * uClear, 0.0) / max(cloud, 0.04);
-  float cy = dot(cl, LUMA);
-  // tops roll softly under paper white instead of lifting into it
-  float cy2 = cy * 1.08 / (1.0 + 0.08 * cy);
-  vec3 cw = cl * (cy2 / max(cy, 1e-4));
+  float Y = dot(lin, LUMA);
+  float ys = dot(soft, LUMA);
+  // the coarse share of cloud, from the soft chroma
+  float c0 = 1.0 - clamp((soft.b - soft.r) / cc, 0.0, 1.0);
+  // and the fine split, from full-resolution luminance: a full cloud stands
+  // about uCloudSpan (log luminance) above the clear sky, so a filament that
+  // much brighter than the soft guess around it is that much more cloud
+  float dl = log(Y + 0.01) - log(ys + 0.01);
+  float cloud = clamp(c0 + dl / uCloudSpan, 0.0, 1.0);
+  // the plate's own clear sky luminance at this pixel's soft read: what a
+  // cloud has to stand above to be seen at all
+  float yClear = mix(ys, yc, c0);
+  float lift = log(Y + 0.01) - log(min(yClear, yc) + 0.01);
+  cloud = max(cloud, clamp(lift / uCloudSpan, 0.0, 1.0) * c0);
+  // the photo's haze reads as a tenth of a cloud everywhere: the polariser
+  // cuts it, and a gentle S on the rest gives the wisps a drawn edge
+  cloud = clamp((cloud - 0.1) / 0.72, 0.0, 1.0);
+  cloud = mix(cloud, smoothstep(0.0, 1.0, cloud), 0.5);
   // radial depth: the zenith sits at the frame's centre
-  vec2 d = (uv - 0.5) * vec2(uPlateSize.x / uPlateSize.y, 1.0);
-  float r = length(d) / (0.5 * length(vec2(uPlateSize.x / uPlateSize.y, 1.0)));
+  float aspect = uPlateSize.x / uPlateSize.y;
+  vec2 d = (uv - 0.5) * vec2(aspect, 1.0);
+  float r = length(d) / (0.5 * length(vec2(aspect, 1.0)));
   float t = smoothstep(0.05, 1.0, r);
   vec3 skyCol = mix(uZenith, uRim, t);
-  // thin cloud and cloud shadow are lit by the sky around them: skylight blue
-  float thin = 1.0 - smoothstep(0.25, 0.75, cy);
-  cw = mix(cw, cw * normalize(skyCol + 0.25) * 1.73, 0.35 * thin);
-  // the clear part, its haze cut; the cloud mixes in over it
-  float a = smoothstep(0.0, 1.0, cloud);
-  return mix(skyCol, cw, a);
+  // the lit term: the cloud's heaped, brighter parts against its blurred
+  // surround (a few tens of px, for the knots, and a few hundred, for a whole
+  // bank), plus the gradient toward the frame edge that faces the sun
+  float ly = log(Y + 0.01);
+  float relief = 0.6 * (ly - log(dot(wide, LUMA) + 0.01)) + 0.4 * (ly - log(dot(vast, LUMA) + 0.01));
+  float sunward = dot(d / (0.5 * length(vec2(aspect, 1.0))), uSunDir);
+  float lit = clamp(0.5 + 2.4 * relief + 0.32 * sunward, 0.0, 1.0);
+  // only body takes the sun: a thin veil is lit through, by the sky
+  lit *= smoothstep(0.25, 0.85, cloud);
+  lit = lit * lit * (3.0 - 2.0 * lit);
+  // the plate's own fine modelling of the cloud, kept on top of the grade
+  float grain = exp(clamp(dl, -0.35, 0.35) * 0.9);
+  // shadowed and thin cloud: skylight blue, the sky's own light at 0.8
+  vec3 shade = skyCol * 0.8 + uSkyLift;
+  // sunlit tops: warm paper white, rolled softly under it (never 255)
+  vec3 cw = mix(shade, uPaperWhite * 1.6, lit) * grain;
+  float yMax = dot(uPaperWhite, LUMA);
+  float x = dot(cw, LUMA) / yMax;
+  cw *= 1.0 / pow(1.0 + x * x * x * x, 0.25);
+  gCloud = vec2(cloud, lit);
+  return mix(skyCol, cw, cloud);
 }
 void main() {
   // the part of the plate the screen shows (uCrop: offset, size)
@@ -664,7 +716,7 @@ void main() {
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
   float ya = dot(a, LUMA);
   float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.92) * smoothstep(0.02, 0.2, ya);
-  if (uDebug > 3.5) {
+  if (uDebug > 3.5 && uDebug < 4.5) {
     // R: how worn the coat is, G: the chalk, B: the ink's clock
     outColor = vec4(0.5 + 0.5 * wear, c, 1.0 - exp(-0.1 * e), 1.0);
     return;
@@ -703,6 +755,11 @@ void main() {
   // the sky is inert to the clock (A = 0), so its grade is the same every year
   float sky = skyMask(m, lin) * uPolar;
   if (sky > 0.001) outLin = mix(outLin, polarise(lin, uv), sky);
+  if (uDebug > 4.5) {
+    // R: the share of cloud, G: its lit term, B: the sky mask
+    outColor = vec4(gCloud * sky, sky, 1.0);
+    return;
+  }
   // triangular dither over the graded sky, so its gradient never bands in the
   // 8-bit scene target
   float n = hash12(gl_FragCoord.xy) + hash12(gl_FragCoord.yx + 7.3) - 1.0;
@@ -838,11 +895,12 @@ export async function createFade(host, { embedded = false } = {}) {
   const still = held || q.get("still") === "1";
   const raw = q.get("film") === "0";
   const debugQ = q.get("debug");
-  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear";
+  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear" || debugQ === "cloud";
   const polar = q.get("sky") === "0" ? 0 : 1;
   const zenith = hsvLin(SKY_ZENITH);
   const rim = hsvLin(SKY_RIM);
   const clearSky = hsvLin(SKY_CLEAR);
+  const paperWhite = PAPER_WHITE.map((c) => srgbToLin(c / 255));
   const lime = LIME.map((c) => srgbToLin(c / 255));
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -1100,11 +1158,15 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uDetailGain, DETAIL_GAIN);
     gl.uniform1f(u.uDetailClip, DETAIL_CLIP);
     gl.uniform1f(u.uChalkCap, CHALK_CAP);
-    gl.uniform1f(u.uDebug, debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
+    gl.uniform1f(u.uDebug, debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
     gl.uniform3fv(u.uRim, rim);
     gl.uniform3fv(u.uClear, clearSky);
+    gl.uniform2fv(u.uSunDir, SUN_DIR);
+    gl.uniform1f(u.uCloudSpan, CLOUD_SPAN);
+    gl.uniform3fv(u.uPaperWhite, paperWhite);
+    gl.uniform3fv(u.uSkyLift, SKY_LIFT);
     gl.uniform4f(u.uCrop, L.u0, L.v0, L.us, L.vs);
     gl.bindFramebuffer(gl.FRAMEBUFFER, T.scene.fbo);
     gl.viewport(0, 0, T.scene.w, T.scene.h);
