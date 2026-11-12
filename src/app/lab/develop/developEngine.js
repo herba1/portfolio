@@ -23,15 +23,20 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //
 // A front sweeps that key, far to near (press on the sky) or near to far
 // (press on the mast). Behind it, the photograph. Ahead of it, per layer:
-//  - defocus, a real disc gather (scatter-as-gather, highlight-weighted,
-//    cat's-eye towards the corners) whose circle of confusion grows with the
-//    depth still to cover;
-//  - the latent image: the scene itself, faint, low in contrast, washed into
-//    a cool white-blue, its sunlit curds lifted so their discs read; never
-//    brighter than the finished print (the lift is held under the developed
-//    cloud's luminance round each pixel), and none of the sky's latent terms
-//    (lift, highlight boost, halation) inside the structure's matte, dilated
-//    a few pixels, so wires, hangers and insulators never pick them up;
+//  - defocus, a real disc gather (scatter-as-gather, cat's-eye towards the
+//    corners) whose circle of confusion grows with the depth still to cover.
+//    On the structure bright taps weigh more, so its specular hardware
+//    (insulator rims, hangers) opens into discs; the sky is a plain energy-
+//    conserving average, because cloud is a diffuse source, not a highlight,
+//    and out of focus it only softens, it never sparkles;
+//  - the latent image: the scene itself, faint and low in contrast. On the
+//    sky it holds the developed sky's own chroma: the blue is lifted, not
+//    greyed, the cloud left as it is, so it comes up from a soft, light field
+//    of the same blue into the deep one. Never brighter than the finished
+//    print (the lift is held under the developed cloud's luminance round each
+//    pixel), and none of the sky's latent terms (lift, halation) inside the
+//    structure's matte, dilated a few pixels, so wires, hangers and
+//    insulators never pick them up;
 //  - the strata lifted towards you in z (a scale about the principal point
 //    in proportion to nearness), held clean by the fill behind them.
 // On the structure the front is a thin band of light, which the film's
@@ -172,16 +177,8 @@ void main() {
   vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
   vec3 c = texture(uFill, iuv).rgb;
   float d = ahead(skyKey(iuv));
-  // A real sky's highlights run past paper white: the sunlit curds, brighter
-  // than the cloud round them, get that headroom ahead of the front, so the
-  // lens spreads each into a disc you can see.
-  float l = dot(c, LUMA);
-  float lm = dot(textureLod(uFill, iuv, 3.5).rgb, LUMA);
-  float hi = smoothstep(0.015, 0.09, l - lm) * smoothstep(0.3, 0.6, l);
-  // Never on or beside the structure: a fleck of hardware left in the fill
-  // would otherwise bloom into a white flare.
-  hi *= 1.0 - cover(iuv);
-  c *= 1.0 + 7.0 * smoothstep(0.0, AHEAD * 0.4, d) * hi;
+  // The sky's light as it is: cloud is a diffuse source with no highlights
+  // past paper white, so the lens only spreads it, it makes no discs.
   o0 = vec4(c, 1.0);
   o1 = vec4(min(31.0, SKY_COC * cocOf(d)) / 32.0, 0.0, 0.0, 1.0);
 }`;
@@ -203,9 +200,14 @@ void main() {
 }`;
 
 // Disc defocus as a gather: each tap counts if its own circle reaches this
-// pixel; bright taps weigh more (a lens spreads energy, and a highlight's
-// disc is what you see); towards the corners the aperture is cut by the
-// barrel into a cat's eye.
+// pixel; towards the corners the aperture is cut by the barrel into a cat's
+// eye. On the structure bright taps weigh more (a highlight's disc is what
+// you see), and its bright points are real specular hardware: insulator
+// rims, hangers. The sky (uSky) has no highlights. Cloud is a broad diffuse
+// source, so it is a plain normalised average (its light conserved), and
+// through a soft-edged aperture (weight (1 - u^2)^2, spread to keep the same
+// width): a hard disc stamps every small curd as a flat round blotch, a
+// polka-dot over the blue, where out-of-focus cloud only melts.
 const GATHER = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -214,12 +216,15 @@ uniform sampler2D uCol;
 uniform sampler2D uCocT;
 uniform vec2 uTexel;
 uniform float uAspect;
+uniform float uSky;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const int N = __N__;
 void main() {
   vec4 c0 = texture(uCol, vUv);
   float r0 = texture(uCocT, vUv).r * 32.0;
   if (r0 < 0.6) { o = c0; return; }
+  float spread = 1.0 + 0.35 * uSky;
+  r0 *= spread;
   float lod = max(0.0, log2(r0 * 1.7725 / sqrt(float(N))) - 0.6);
   vec2 fpos = (vUv - 0.5) * vec2(uAspect, 1.0) * 0.55;
   vec4 acc = vec4(0.0);
@@ -232,10 +237,11 @@ void main() {
     if (length(off / r0 + fpos) > 1.0) continue;
     vec2 uv = vUv + off * uTexel;
     vec4 s = textureLod(uCol, uv, lod);
-    float cs = textureLod(uCocT, uv, lod).r * 32.0;
+    float cs = textureLod(uCocT, uv, lod).r * 32.0 * spread;
     float w = smoothstep(r - 1.0, r + 0.5, cs + 0.5);
     float l = dot(s.rgb, LUMA) / max(s.a, 0.08);
-    w *= 1.0 + 3.0 * l * l;
+    float u = 1.0 - t;
+    w *= mix(1.0 + 3.0 * l * l, u * u, uSky);
     acc += s * w;
     ws += w;
   }
@@ -258,6 +264,8 @@ const float BAND = ${f(BAND)};
 const float HALO = ${f(HALO)};
 // The cool white-blue an overexposed sky washes out to (linear).
 const vec3 WASH = vec3(0.66, 0.77, 0.92);
+// The level the latent sky's blue is lifted towards (linear luminance).
+const float SKY_LAT = 0.46;
 const vec3 LEAK = vec3(1.0, 0.8, 0.58);
 // Halation: the red layer's glow, amber-orange (linear).
 const vec3 AMBER = vec3(1.0, 0.5, 0.12);
@@ -294,6 +302,23 @@ vec3 latent(vec3 c, float d, float dev) {
   return exp(mix(log(max(lat, 1e-4)), log(max(c, 1e-4)), dev));
 }
 
+// The sky's latent image holds the developed sky's chroma: its luminance
+// is drawn up towards a light level (low contrast, fainter the further from
+// the developer) and the colour scaled with it, so the blue stays blue at
+// the same saturation instead of washing to grey-white; the cloud, already
+// above that level, is left as it is. Density builds in log light, so at
+// every stage it is c times one factor: the chroma never moves. The level
+// sits well under the cloud's white, so the latent sky never outshines the
+// finished print, and it needs no local cap: a cap drawn from the cloud
+// round each pixel lifted the blue only near cloud, in round patches the
+// shape of its samples, a polka-dot over the clear sky.
+vec3 latentSky(vec3 c, float d, float dev) {
+  float an = clamp(d / AHEAD, 0.0, 1.0);
+  float lc = max(dot(c, LUMA), 1e-4);
+  float lt = max(lc, mix(SKY_LAT, lc, mix(0.55, 0.3, an)));
+  return c * pow(lt / lc, 1.0 - dev);
+}
+
 // The developed cloud round a pixel: the brightest of the print within a
 // mass's reach of it (32 px cells, on two rings, smoothly filtered so the
 // level never steps), the level its whites come up to.
@@ -324,14 +349,13 @@ vec3 liftUnder(vec3 c, vec3 lat, float cap) {
 // sky's key wide, widened by the key's gradient on screen so it stays soft
 // where the key is steep; no light of its own, only a faint amber halation
 // in its middle, warming what is under it. c is the sky as the lens sees it
-// (developed light, defocused); every undeveloped term (the white-blue lift,
-// the halation) is gated by 1 - cov, the dilated structure, and the lift is
-// capped at the developed print's luminance there.
-vec3 developSky(vec3 c, float d, vec2 iuv, float cov, float cap) {
+// (developed light, defocused); every undeveloped term (the latent lift,
+// the halation) is gated by 1 - cov, the dilated structure.
+vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   float w = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(d));
   float dev = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
   float open = 1.0 - cov;
-  vec3 r = liftUnder(c, mix(c, latent(c, d, dev), open), cap);
+  vec3 r = mix(c, latentSky(c, d, dev), open);
   float h = 4.0 * dev * (1.0 - dev);
   float leak = 0.7 + 0.3 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
   // Halation is the red layer's own glow: on a cool sky it has to take a
@@ -369,16 +393,15 @@ void main() {
   // where the structure is on screen and where it was baked, dilated
   float cov = max(cover(q), cover(iuv));
 
-  // Sky, as the lens sees it. The cap: the developed cloud's luminance here,
-  // the brightest the finished print reaches round this pixel, so the
-  // latent wash and its discs can come up to the cloud they belong to but
-  // never outshine it.
+  // Sky, as the lens sees it. The cap, for the latent steel: the developed
+  // cloud's luminance here, the brightest the finished print reaches round
+  // this pixel, so the steel's wash never outshines the sky behind it.
   float dB = ahead(skyKey(iuv));
   float rB = SKY_COC * cocOf(dB);
   vec3 skyDev = texture(uFill, iuv).rgb;
   float cap = max(dot(skyDev, LUMA), cloudWhite(iuv));
   vec3 sky = mix(skyDev, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, rB));
-  sky = developSky(sky, dB, iuv, cov, cap);
+  sky = developSky(sky, dB, iuv, cov);
 
   vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap) * fg.a;
   o = vec4(fgP + sky * (1.0 - fg.a), 1.0);
@@ -731,6 +754,7 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.uniform1i(P.gather.u.uCocT, 5);
     gl.uniform2f(P.gather.u.uTexel, 1 / hw, 1 / hh);
     gl.uniform1f(P.gather.u.uAspect, ASPECT);
+    gl.uniform1f(P.gather.u.uSky, layer === 0 ? 1 : 0);
     const [col, coc, fb] = layer === 0 ? [T.bgCol, T.bgCoc, T.bgBlurFb] : [T.fgCol, T.fgCoc, T.fgBlurFb];
     bindTex(4, col.t);
     bindTex(5, coc.t);
