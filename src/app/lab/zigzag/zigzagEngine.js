@@ -1,7 +1,12 @@
 import { createStage, clamp, mix } from "../_kit/stage";
 
 // After Experimental Jetset's responsive W for the Whitney (2013): one rule,
-// a zigzag that always touches all four sides of its frame.
+// a zigzag that always touches all four sides of its frame. The identity
+// worked because the W carried a whole poster: it filled whatever box the
+// layout handed it. So here the format is a Swiss grid of frames with shared
+// gutters, each frame holding its own solved W at one shared stroke weight.
+// Drag a gutter and the frames on both sides re-proportion at once: one W
+// goes flat and wide while its neighbour goes tall and narrow.
 //
 // The mark is solved, not scaled. Four parallel-sided bands share one
 // slope s (dx per dy) and one perpendicular weight w. Each band is H = w·√(1+s²)
@@ -12,10 +17,11 @@ import { createStage, clamp, mix } from "../_kit/stage";
 // intersection: the two top ends are cut flush with the top edge, and the
 // three mitre tips land exactly on the bottom, top and bottom edges.
 
-const REST_RATIO = 1.5; // width / height at rest
 const STIFF = 210;
 const ZETA = 0.82;
-const HIT = 18; // px reach for an edge or corner
+const HIT = 10; // px reach beyond a gutter's own width
+const INK = "#000";
+const RULE = "#e2e2de";
 
 // Solve the slope for a frame W wide and D tall with stroke weight w.
 function solveSlope(W, D, w) {
@@ -67,14 +73,37 @@ function outline(l, t, r, b, w) {
   ];
 }
 
-// Past a limit the edge keeps following, but with resistance.
+// Past a limit the gutter keeps following, but with resistance.
 const rubber = (v, lo, hi, c = 48) => {
   if (v < lo) return lo - c * (1 - 1 / ((lo - v) / c + 1));
   if (v > hi) return hi + c * (1 - 1 / ((v - hi) / c + 1));
   return v;
 };
 
-const CURSORS = { "-1,-1": "nwse-resize", "1,1": "nwse-resize", "1,-1": "nesw-resize", "-1,1": "nesw-resize", "1,0": "ew-resize", "-1,0": "ew-resize", "0,1": "ns-resize", "0,-1": "ns-resize" };
+// The poster as a guillotine grid: every split is one gutter. `x` splits
+// side by side (a vertical gutter), `y` stacks (a horizontal gutter); k is
+// the share of the space the first child takes. In portrait the grid is
+// transposed so the same composition stands up.
+//
+//   ┌─────┬───────────────────┐
+//   │     │         B         │   A  tall
+//   │  A  ├─────────┬─────────┤   B  panoramic
+//   │     │    C    │    D    │   C  square
+//   │     │         ├─────────┤   D,E  wide
+//   │     │         │    E    │
+//   └─────┴─────────┴─────────┘
+const LAYOUT = {
+  dir: "x",
+  k: 0.3,
+  pull: 0.15, // where the hero still drags this gutter to
+  a: null,
+  b: {
+    dir: "y",
+    k: 0.33,
+    a: null,
+    b: { dir: "x", k: 0.49, a: null, b: { dir: "y", k: 0.5, a: null, b: null } },
+  },
+};
 
 export function createZigzag(host) {
   const stage = createStage(host, { dpr: 2 });
@@ -82,134 +111,224 @@ export function createZigzag(host) {
   const params = new URLSearchParams(location.search);
   const still = params.has("t") ? clamp(+params.get("t") || 0, 0, 1) : null;
 
+  // Build live nodes from the layout. Each split keeps its rest share, its
+  // current share, a target it settles on, a velocity, and its rule's ink.
+  const gutters = [];
+  const build = (n) => {
+    if (!n) return null;
+    const node = { dir: n.dir, rest: n.k, pull: n.pull, k: n.k, target: n.k, v: 0, ink: 0, a: build(n.a), b: build(n.b), box: null };
+    gutters.push(node);
+    return node;
+  };
+  const root = build(LAYOUT);
+  const hero = root;
+
   let BW = 1;
   let BH = 1;
-  let rest = { l: 0, t: 0, r: 1, b: 1 };
+  let portrait = false;
+  let G = 16; // gutter
+  let M = 32; // margin
   let weight = 10;
-  // Live frame and its edge velocities, keyed l t r b.
-  const f = { l: 0, t: 0, r: 1, b: 1 };
-  const v = { l: 0, t: 0, r: 0, b: 0 };
-  let started = false;
-  let drag = null; // { sx, sy, ox, oy }
-  let hover = null; // { sx, sy }
-  let handleA = 0; // handle visibility, eased
-  let lastTouch = -1e9;
+  let drag = null; // { node, off }
+  let hover = null; // node
   let demo = null;
+  let hinted = false;
+  const t0 = performance.now();
 
   stage.onResize((w, h) => {
     BW = w;
     BH = h;
-    const W = Math.min(w * 0.44, h * 0.5 * REST_RATIO, 720);
-    const H = W / REST_RATIO;
-    const cx = w / 2;
-    const cy = h / 2;
-    const next = { l: Math.round(cx - W / 2), t: Math.round(cy - H / 2), r: Math.round(cx + W / 2), b: Math.round(cy + H / 2) };
-    const dx = next.l - rest.l;
-    const dy = next.t - rest.t;
-    rest = next;
-    weight = Math.max(6, Math.round(H * 0.092));
-    if (!started) {
-      Object.assign(f, rest);
-      started = true;
-    } else if (!drag) {
-      f.l += dx; f.r += dx; f.t += dy; f.b += dy;
-    }
+    portrait = h > w * 1.1;
+    const short = Math.min(w, h);
+    G = clamp(Math.round((short * 0.02) / 4) * 4, 8, 20);
+    M = clamp(Math.round((short * 0.04) / 4) * 4, 12, 40);
+    weight = Math.max(5, Math.round(short * 0.038));
   });
 
-  const pick = (x, y) => {
-    const near = (a, b) => Math.abs(a - b) < HIT;
-    const inX = x > f.l - HIT && x < f.r + HIT;
-    const inY = y > f.t - HIT && y < f.b + HIT;
-    let sx = 0;
-    let sy = 0;
-    if (inY) sx = near(x, f.l) ? -1 : near(x, f.r) ? 1 : 0;
-    if (inX) sy = near(y, f.t) ? -1 : near(y, f.b) ? 1 : 0;
-    if (sx || sy) return { sx, sy };
-    // Anywhere else: grab the side or corner the pointer is facing.
-    const cx = (f.l + f.r) / 2;
-    const cy = (f.t + f.b) / 2;
-    const u = (x - cx) / ((f.r - f.l) / 2);
-    const q = (y - cy) / ((f.b - f.t) / 2);
-    sx = Math.abs(u) > 0.45 ? Math.sign(u) : 0;
-    sy = Math.abs(q) > 0.45 ? Math.sign(q) : 0;
-    if (!sx && !sy) {
-      if (Math.abs(u) > Math.abs(q)) sx = Math.sign(u) || 1;
-      else sy = Math.sign(q) || 1;
-    }
-    return { sx, sy };
-  };
+  // The axis a split works along, after transposing for portrait.
+  const axis = (node) => (portrait ? (node.dir === "x" ? "y" : "x") : node.dir);
 
-  // Place the dragged edges at (x, y), within soft limits.
-  const place = (x, y, sx, sy) => {
-    const pad = 16;
-    if (sy) {
-      const minH = weight * 2.6;
-      if (sy < 0) f.t = rubber(y, pad, f.b - minH);
-      else f.b = rubber(y, f.t + minH, BH - pad);
+  // Lay out the tree into boxes. With `over` a single split can be given a
+  // trial share without touching the live state.
+  const lay = (node, box, leaves, over) => {
+    if (!node) {
+      leaves.push(box);
+      return;
     }
-    if (sx) {
-      const minW = minWidth(Math.max(f.b - f.t, weight * 1.2), weight) * 1.08;
-      if (sx < 0) f.l = rubber(x, pad, f.r - minW);
-      else f.r = rubber(x, f.l + minW, BW - pad);
+    node.box = box;
+    const k = over && over.node === node ? over.k : node.k;
+    const [x, y, w, h] = box;
+    if (axis(node) === "x") {
+      const a = k * (w - G);
+      lay(node.a, [x, y, a, h], leaves, over);
+      lay(node.b, [x + a + G, y, w - G - a, h], leaves, over);
+    } else {
+      const a = k * (h - G);
+      lay(node.a, [x, y, w, a], leaves, over);
+      lay(node.b, [x, y + a + G, w, h - G - a], leaves, over);
     }
   };
+  const content = () => [M, M, BW - 2 * M, BH - 2 * M];
+  const layout = (over) => {
+    const leaves = [];
+    lay(root, content(), leaves, over);
+    return leaves;
+  };
 
-  const grab = (p) => {
-    const g = drag || pick(p.x, p.y);
-    const ex = g.sx < 0 ? f.l : f.r;
-    const ey = g.sy < 0 ? f.t : f.b;
-    drag = { sx: g.sx, sy: g.sy, ox: ex - p.x, oy: ey - p.y };
-    for (const k in v) v[k] = 0;
+  // A frame is fillable when the W can still touch all four sides at the
+  // shared weight: tall enough for the mitres, wide enough for the crotches.
+  const fits = ([, , w, h]) => h >= weight * 2.6 && w >= minWidth(h, weight) * 1.08;
+  const leavesOf = (node, side) => {
+    const out = [];
+    const [x, y, w, h] = node.box;
+    const k = node.k;
+    const sub = side === "a" ? node.a : node.b;
+    let box;
+    if (axis(node) === "x") {
+      const a = k * (w - G);
+      box = side === "a" ? [x, y, a, h] : [x + a + G, y, w - G - a, h];
+    } else {
+      const a = k * (h - G);
+      box = side === "a" ? [x, y, w, a] : [x, y + a + G, w, h - G - a];
+    }
+    lay(sub, box, out);
+    return out;
+  };
+  // The range of shares a split can take before a frame on either side
+  // can no longer hold its W. Each side is monotone in k, so bisect.
+  const limits = (node) => {
+    const save = node.k;
+    const ok = (k, side) => {
+      node.k = k;
+      return leavesOf(node, side).every(fits);
+    };
+    let lo = 0;
+    let hi = save;
+    if (!ok(hi, "a")) hi = 1;
+    for (let i = 0; i < 22; i++) {
+      const m = (lo + hi) / 2;
+      if (ok(m, "a")) hi = m;
+      else lo = m;
+    }
+    const kLo = hi;
+    lo = save;
+    hi = 1;
+    if (!ok(lo, "b")) lo = 0;
+    for (let i = 0; i < 22; i++) {
+      const m = (lo + hi) / 2;
+      if (ok(m, "b")) lo = m;
+      else hi = m;
+    }
+    const kHi = lo;
+    node.k = save;
+    return [kLo, Math.max(kLo, kHi)];
+  };
+
+  // Gutter geometry: span is the length the share is measured over, base its
+  // start; the gutter's centre sits at base + k·span + G/2.
+  const frameOf = (node) => {
+    const [x, y, w, h] = node.box;
+    return axis(node) === "x" ? { base: x, span: w - G } : { base: y, span: h - G };
+  };
+  const centre = (node) => {
+    const { base, span } = frameOf(node);
+    return base + node.k * span + G / 2;
+  };
+
+  const pick = (px, py) => {
+    const leaves = layout();
+    // On a gutter: the one under the pointer, within reach.
+    let best = null;
+    let bestD = G / 2 + HIT;
+    for (const node of gutters) {
+      const [x, y, w, h] = node.box;
+      const c = centre(node);
+      const along = axis(node) === "x" ? py >= y && py <= y + h : px >= x && px <= x + w;
+      if (!along) continue;
+      const d = Math.abs((axis(node) === "x" ? px : py) - c);
+      if (d < bestD) {
+        bestD = d;
+        best = node;
+      }
+    }
+    if (best) return best;
+    // Inside a frame: the nearest of its own sides that is a gutter.
+    const leaf = leaves.find(([x, y, w, h]) => px >= x && px <= x + w && py >= y && py <= y + h);
+    if (!leaf) return null;
+    const [lx, ly, lw, lh] = leaf;
+    bestD = Infinity;
+    for (const node of gutters) {
+      const [x, y, w, h] = node.box;
+      const c = centre(node);
+      const near = (e, f) => Math.abs(e - f) < 0.5;
+      const borders =
+        axis(node) === "x"
+          ? (near(lx + lw, c - G / 2) || near(lx, c + G / 2)) && ly >= y - 0.5 && ly + lh <= y + h + 0.5
+          : (near(ly + lh, c - G / 2) || near(ly, c + G / 2)) && lx >= x - 0.5 && lx + lw <= x + w + 0.5;
+      if (!borders) continue;
+      const d = Math.abs((axis(node) === "x" ? px : py) - c);
+      if (d < bestD) {
+        bestD = d;
+        best = node;
+      }
+    }
+    return best;
+  };
+
+  const cursorFor = (node) => (node ? (axis(node) === "x" ? "col-resize" : "row-resize") : "default");
+
+  // Put a gutter's centre at pixel position p, rubbery past its limits.
+  const place = (node, p) => {
+    const { base, span } = frameOf(node);
+    const [lo, hi] = limits(node);
+    const q = rubber(p - G / 2, base + lo * span, base + hi * span);
+    node.k = clamp((q - base) / span, 0.001, 0.999);
   };
 
   stage.on("down", (p) => {
     if (still != null) return;
     demo = null;
-    lastTouch = performance.now();
-    drag = null;
-    grab(p);
-    canvas.style.cursor = CURSORS[`${drag.sx},${drag.sy}`];
+    hinted = true;
+    const node = pick(p.x, p.y);
+    if (!node) return;
+    const pos = axis(node) === "x" ? p.x : p.y;
+    drag = { node, off: centre(node) - pos };
+    node.v = 0;
+    canvas.style.cursor = cursorFor(node);
   });
   stage.on("move", (p) => {
     if (drag) {
-      lastTouch = performance.now();
-      place(p.x + drag.ox, p.y + drag.oy, drag.sx, drag.sy);
+      layout();
+      const pos = axis(drag.node) === "x" ? p.x : p.y;
+      place(drag.node, pos + drag.off);
       return;
     }
     hover = pick(p.x, p.y);
-    canvas.style.cursor = CURSORS[`${hover.sx},${hover.sy}`] || "default";
+    canvas.style.cursor = cursorFor(hover);
   });
   stage.on("up", (p) => {
     if (!drag) return;
-    // Hand the throw to the spring.
-    const vx = clamp(p.vx, -4000, 4000);
-    const vy = clamp(p.vy, -4000, 4000);
-    if (drag.sx < 0) v.l = vx;
-    if (drag.sx > 0) v.r = vx;
-    if (drag.sy < 0) v.t = vy;
-    if (drag.sy > 0) v.b = vy;
+    // The gutter stays where it was let go (pulled back inside its limits),
+    // and the throw is handed to the spring.
+    const node = drag.node;
+    layout();
+    const [lo, hi] = limits(node);
+    node.target = clamp(node.k, lo, hi);
+    const { span } = frameOf(node);
+    node.v = clamp(axis(node) === "x" ? p.vx : p.vy, -3000, 3000) / Math.max(1, span);
     drag = null;
-    lastTouch = performance.now();
   });
-
-  // A frame dragged by its bottom-right corner, for stills and the idle hint.
-  const pose = (k) => {
-    const W = rest.r - rest.l;
-    const H = rest.b - rest.t;
-    const x = rest.r - W * 0.46 * k;
-    const y = rest.b + H * 0.36 * k;
-    return [x, y];
-  };
 
   const spring = (dt) => {
     const c = 2 * ZETA * Math.sqrt(STIFF);
     const steps = Math.ceil(dt / (1 / 240));
     const h = dt / steps;
-    for (let i = 0; i < steps; i++) {
-      for (const k in v) {
-        const a = -STIFF * (f[k] - rest[k]) - c * v[k];
-        v[k] += a * h;
-        f[k] += v[k] * h;
+    for (const node of gutters) {
+      if (drag && drag.node === node) continue;
+      for (let i = 0; i < steps; i++) {
+        const a = -STIFF * (node.k - node.target) - c * node.v;
+        node.v += a * h;
+        node.k += node.v * h;
       }
     }
   };
@@ -219,98 +338,70 @@ export function createZigzag(host) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, BW, BH);
+    const leaves = layout();
 
-    const l = f.l;
-    const t = f.t;
-    const r = f.r;
-    const b = f.b;
-
-    // The frame: a hairline just outside the mark, so the tips land on it.
-    const px = 1 / dpr;
-    ctx.strokeStyle = "#c8c8c4";
-    ctx.lineWidth = px;
-    ctx.strokeRect(l - px / 2, t - px / 2, r - l + px, b - t + px);
-
-    // The W.
-    const pts = outline(l, t, r, b, weight);
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    ctx.fillStyle = "#000";
-    ctx.fill();
-
-    // Handles: four small squares on the corners, the active edge inked.
-    if (handleA > 0.01) {
-      const act = drag || hover;
-      ctx.globalAlpha = handleA;
-      if (act && (!act.sx || !act.sy)) {
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        if (act.sx) {
-          const x = act.sx < 0 ? l - 0.5 : r + 0.5;
-          ctx.moveTo(x, t); ctx.lineTo(x, b);
-        } else {
-          const y = act.sy < 0 ? t - 0.5 : b + 0.5;
-          ctx.moveTo(l, y); ctx.lineTo(r, y);
-        }
-        ctx.stroke();
-      }
-      const S = 7;
-      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        const x = sx < 0 ? l : r;
-        const y = sy < 0 ? t : b;
-        const on = act && act.sx === sx && act.sy === sy;
-        ctx.fillStyle = on ? "#000" : "#fff";
-        ctx.fillRect(x - S / 2, y - S / 2, S, S);
-        ctx.strokeStyle = on ? "#000" : "#8a8a86";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x - S / 2 + 0.5, y - S / 2 + 0.5, S - 1, S - 1);
-      }
+    // Gutter rules: a pale hairline at rest, full ink when in hand.
+    for (const node of gutters) {
+      const [x, y, w, h] = node.box;
+      const c = centre(node);
+      const rule = (lw) => (axis(node) === "x" ? ctx.fillRect(c - lw / 2, y, lw, h) : ctx.fillRect(x, c - lw / 2, w, lw));
       ctx.globalAlpha = 1;
+      ctx.fillStyle = RULE;
+      rule(1 / dpr);
+      if (node.ink > 0.01) {
+        ctx.globalAlpha = node.ink;
+        ctx.fillStyle = INK;
+        rule(2);
+      }
     }
+    ctx.globalAlpha = 1;
+
+    // The W's, one per frame, at one weight.
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    for (const [x, y, w, h] of leaves) {
+      const pts = outline(x, y, x + w, y + h, weight);
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+    }
+    ctx.fill();
   };
 
-  const ease = (x) => 1 - Math.pow(1 - x, 3);
-
-  stage.onFrame((dt, now) => {
+  stage.onFrame((dt) => {
     if (still != null) {
-      Object.assign(f, rest);
-      const [x, y] = pose(ease(still));
-      place(x, y, 1, 1);
-      drag = still > 0 ? { sx: 1, sy: 1 } : null;
-      handleA = still > 0 ? 1 : 0;
+      // The hero: the main gutter pulled toward the margin, so the tall,
+      // the panoramic and the square W stand side by side.
+      for (const node of gutters) node.k = node.rest;
+      hero.k = mix(hero.rest, hero.pull, still);
+      for (const node of gutters) node.ink = still > 0 && node === hero ? 1 : 0;
       draw();
       return;
     }
     const ms = performance.now();
-    // Idle hint: once soon after load, then now and then, the frame is
-    // pulled by its corner and let go, the way a hand would.
-    if (!drag && !demo && ms - lastTouch > (lastTouch < 0 ? 1400 : 9000) && Math.abs(v.r) < 1) {
+    // One hint, soon after load: the main gutter is pulled and let go, the
+    // way a hand would, then it is left alone.
+    if (!hinted && !drag && ms - t0 > 1400) {
+      hinted = true;
       demo = { t0: ms, dur: 1300 };
     }
     if (demo && !drag) {
       const k = (ms - demo.t0) / demo.dur;
-      if (k >= 1) {
+      if (k >= 0.75) {
         demo = null;
-        lastTouch = ms;
       } else {
-        // Rise to the pose with ease-in-out, hold a beat, then release.
-        const e = k < 0.75 ? 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, k / 0.6)) : 1;
-        Object.assign(f, rest);
-        const [x, y] = pose(e * 0.8);
-        place(x, y, 1, 1);
-        for (const key in v) v[key] = 0;
-        if (k >= 0.75) {
-          demo = null;
-          lastTouch = ms;
-        }
+        const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, k / 0.6));
+        hero.k = mix(hero.rest, mix(hero.rest, hero.pull, 0.7), e);
+        hero.v = 0;
+        hero.target = hero.rest;
       }
     }
-    if (!drag && !demo) spring(dt);
-    const showHandles = drag || (hover && stage.pointer.inside) || demo;
-    handleA = mix(handleA, showHandles ? 1 : 0, 1 - Math.exp(-dt * (showHandles ? 18 : 6)));
+    if (!demo) spring(dt);
+    const act = drag ? drag.node : demo ? hero : stage.pointer.inside ? hover : null;
+    for (const node of gutters) {
+      const on = node === act;
+      node.ink = mix(node.ink, on ? 1 : 0, 1 - Math.exp(-dt * (on ? 18 : 6)));
+    }
     draw();
   });
 
