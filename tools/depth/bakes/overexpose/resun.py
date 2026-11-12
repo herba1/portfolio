@@ -3,19 +3,23 @@
 # No camera aim can do that: the trees and the sun are on the same sphere, and
 # in this HDRI the sun stands in open sky about 20 deg from the nearest crown,
 # so turning the camera only carries the crown along with it. Instead the sky's
-# light is re-centred: the measured, azimuthally averaged circumsolar profile
-# (per channel, ray-free) is divided out around the old sun and multiplied in
-# around a new sun direction about 2 deg inside that crown's lower edge.
+# light is re-centred around a new sun direction about 2 deg inside that crown's
+# lower edge, in the camera's own (2x supersampled) frame:
 #
-#   new = pixel * (1 + t * (gain - 1)),  gain = exp(P_sun(g_new) - P_desun(g_old))
-#
-# t is each pixel's share of sky, from its luminance against the local sky
-# estimate, so needles keep their own (dark) value and only the sky between and
-# behind them takes the new light. The disc itself only comes through where a
-# real gap opens (t well above 0), never through noise in the needles.
+#  1. sky share t per pixel, against the sky actually behind it;
+#  2. the frame's open sky is fitted as elevation + a radial term around the old
+#     sun; only the radial term moves to the new sun, plus the measured
+#     circumsolar excess (disc and aureole). One gradient, no streak;
+#  3. within ~20 deg of the new sun the crown is rebuilt as a hard silhouette:
+#     the sky share steepened to a 1-2 px edge, the needle part kept at its own
+#     dark density, so no relit sky is smeared through the needles;
+#     elsewhere only the sky share of a pixel takes the new light;
+#  4. a thin warm-white rim (about 2 output px) on needles at the crown's open-sky
+#     edge in the sun's forward lobe, scaled to the sky beyond so it out-shines it.
 #
 # Run after desun.py (which removes the old sun's disc, star and aureole):
 #   python3 desun.py 6 26 && python3 resun.py 0.3906 0.1706 && python3 bake_wormseye.py <OE_WORK>/crop1536r.npy
+# OE_WORK holds the 8k caches and hdr/tree_lined_driveway_8k.hdr (Poly Haven).
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wormseye_lib as wlib, numpy as np
 from PIL import Image
@@ -93,48 +97,110 @@ for g in (0.1, 0.3, 0.6, 1, 2, 4, 8, 16, 30, 50, 70):
 def at(P, g):
     return np.stack([np.interp(g, G, P[:, c]) for c in range(3)], -1)   # held flat beyond 70 deg
 
-d_cam = wlib.rays(SIZE, FOV, 'stereo', ss=SS)
-im = np.zeros((SIZE, SIZE, 3), np.float32)
-tmap = np.zeros((SIZE, SIZE), np.float32)
-G1 = 12.0   # gain the sky share can carry on its own; beyond it, only real gaps pass light
-eqb = np.asarray(base)
-for r0 in range(0, SIZE * SS, 256):
-    dc = d_cam[r0:r0 + 256]
-    pix = wlib.sample(eqb, dc, R, 1).astype(np.float64)
-    dw = dc @ R.T
-    g_old = np.degrees(np.arccos(np.clip(dw @ s_old, -1, 1)))
-    g_new = np.degrees(np.arccos(np.clip(dw @ s_new, -1, 1)))
-    sky_old = np.exp(at(P_dsn, g_old))
-    Ls = sky_old @ LUMA
-    L = pix @ LUMA
-    t = np.clip((L - 0.05) / (0.8 * Ls - 0.05), 0, 1)[..., None]
-    gain = np.exp(at(P_sun, g_new) - at(P_dsn, g_old))
-    gs = np.minimum(gain, G1)
-    gap = np.clip((t - 0.35) / 0.4, 0, 1); gap = gap * gap * (3 - 2 * gap)
-    out = pix * (1 + t * (gs - 1) + gap * (gain - gs))
-    h = dc.shape[0] // SS
-    im[r0 // SS:r0 // SS + h] = out.reshape(h, SS, SIZE, SS, 3).mean((1, 3))
-    tmap[r0 // SS:r0 // SS + h] = t[..., 0].reshape(h, SS, SIZE, SS).mean((1, 3))
+# ---- relight, at the supersampled size ----
+from scipy import ndimage as ndi
+N = SIZE * SS
+cache = os.path.join(wlib.SC, 'base%d.npy' % N)          # the painted-out sky as the camera sees it
+if os.path.exists(cache):
+    pix = np.load(cache)
+else:
+    d_cam = wlib.rays(SIZE, FOV, 'stereo', ss=SS); eqb = np.asarray(base)
+    pix = np.zeros((N, N, 3), np.float32)
+    for r0 in range(0, N, 256): pix[r0:r0 + 256] = wlib.sample(eqb, d_cam[r0:r0 + 256], R, 1)
+    np.save(cache, pix); del d_cam
+pix = pix.astype(np.float64)
+dw = wlib.rays(SIZE, FOV, 'stereo', ss=SS) @ R.T
+g_old = np.degrees(np.arccos(np.clip(dw @ s_old, -1, 1)))
+g_new = np.degrees(np.arccos(np.clip(dw @ s_new, -1, 1)))
+elev = np.degrees(np.arcsin(np.clip(dw[..., 1], -1, 1)))
+del dw
+L = pix @ LUMA
+sk = lambda x, a, b: (lambda u: u * u * (3 - 2 * u))(np.clip((x - a) / (b - a), 0, 1))
+def mblur(a, m, s):
+    return ndi.gaussian_filter(a * m, s) / np.maximum(ndi.gaussian_filter(m, s), 1e-6)
 
-# Backlit needles. Thin needles at the crown's edge, in the sun's forward lobe,
-# transmit and glint: they glow brighter than the sky behind them, which is
-# what makes a backlit crown read as a sharp dark mass with a lit fringe. Only
-# needles next to sky get it (the blurred sky share), never the dense middle.
-def gblur(a, sigma):
-    r = int(np.ceil(sigma * 3)); k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2); k /= k.sum()
-    p = np.pad(a, r, mode='reflect')
-    t = sum(k[i] * p[i:i + a.shape[0]] for i in range(2 * r + 1))
-    return sum(k[i] * t[:, i:i + a.shape[1]] for i in range(2 * r + 1))
+# 1. Sky share. Confident sky is blue sky or bright neutral cloud, confident needle
+#    is dark; in between, t is the pixel's linear share of the sky actually behind
+#    it (a masked blur of the confident sky around it).
+blue = (pix[..., 2] > pix[..., 0] * 1.3) & (L > 0.12)
+cloud = (L > 0.3) & (pix[..., 2] < pix[..., 0] * 1.3)
+conf = (blue | cloud).astype(np.float64)
+S_loc = np.stack([mblur(pix[..., c], conf, 12.0 * SS) for c in range(3)], -1)
+S_loc = np.where(ndi.gaussian_filter(conf, 12.0 * SS)[..., None] > 0.02, S_loc, np.exp(at(P_dsn, g_old)))
+LN = 0.035                                                 # the needles' own luminance
+t = np.clip((L - LN) / np.maximum(S_loc @ LUMA - LN, 1e-3), 0, 1)
 
-RIM_K, RIM_W = float(os.environ.get('RIM_K', 7.0)), float(os.environ.get('RIM_W', 3.0))   # strength, lobe width in deg
-RIM_COL = np.array([1.35, 1.0, 0.5]); RIM_COL /= RIM_COL @ LUMA          # sunlight through green needles: warm
-dw1 = wlib.rays(SIZE, FOV, 'stereo', ss=1) @ R.T
-g1 = np.degrees(np.arccos(np.clip(dw1 @ s_new, -1, 1)))
-fringe = np.clip(gblur(tmap, 1.5) * 2.0, 0, 1) * (1 - tmap)                 # needle, with sky within a few px
-lobe = np.exp(-g1 / RIM_W) + 0.15 * np.exp(-g1 / (RIM_W * 3))
-rim = (RIM_K * fringe * lobe)[..., None] * RIM_COL
-im = (im + rim).astype(np.float32)
-print('rim: max add %.2f, px > 0.5: %d' % (float((rim @ LUMA).max()), int(((rim @ LUMA) > 0.5).sum())))
+# 2. The sky's own field. On open blue sky (cloud fringes eroded away) log radiance
+#    is fitted per channel as a smooth function of elevation plus a radial
+#    function of distance from the old sun. Only the radial part belongs to the
+#    sun, so only it moves: divided out around the old sun, multiplied in around
+#    the new one, plus the measured circumsolar excess (P_sun - P_desun, the
+#    disc and aureole desun.py took out). The sphere-wide ring median used before
+#    underestimated the painted dome in this view and left a pale streak from the
+#    crown towards the old sun; the in-frame fit leaves one gradient.
+fitm = ndi.binary_erosion(blue & ~cloud, iterations=10 * SS)
+sub = (slice(None, None, 4), slice(None, None, 4))
+B_el = lambda e: np.stack([np.ones_like(e), e / 90, (e / 90) ** 2, (e / 90) ** 3], -1)
+B_r = lambda g: np.stack([np.exp(-g / 6), np.exp(-g / 15), np.exp(-g / 35)], -1)
+m4 = fitm[sub]
+A = np.concatenate([B_el(elev[sub][m4]), B_r(g_old[sub][m4])], -1)
+radial = np.zeros(pix.shape)
+for c in range(3):
+    coef = np.linalg.lstsq(A, np.log(np.maximum(pix[..., c][sub][m4], 1e-6)), rcond=None)[0]
+    radial[..., c] = B_r(g_new) @ coef[4:] - B_r(g_old) @ coef[4:]
+    print('ch %d sun term at 2,10,20,35,60 deg:' % c, np.round(B_r(np.array([2., 10, 20, 35, 60])) @ coef[4:], 3))
+excess = np.maximum(at(P_sun, g_new) - at(P_dsn, g_new), 0)
+gain = np.exp(radial + excess)
+del radial, excess
+
+# 3. The crown around the sun is made the hard silhouette. Within the sun's
+#    surround (c) the sky share is steepened to a 1-2 px edge, and the pixel is
+#    rebuilt as that share of the relit sky plus the rest as the needles' own
+#    colour: no sky is left smeared through the needles, and the interior keeps
+#    its dark density. Further out the photograph's own soft edges stay.
+c_w = sk(-g_new, -26.0, -12.0)[..., None]
+th = sk(t, 0.38, 0.62)
+Nn = np.stack([mblur(pix[..., k], (t < 0.12).astype(np.float64), 6.0 * SS) for k in range(3)], -1)
+Np = pix + sk(t, 0.05, 0.4)[..., None] * (Nn - pix)       # needle part: its own texture, or the local needle colour
+bsky = sk(t, 0.8, 0.98)[..., None]
+Sp = bsky * pix + (1 - bsky) * S_loc                      # sky part, per unit share
+# holes inside the crown (not the open sky) are capped: lit, never blown
+lab, n = ndi.label(th > 0.5)
+sizes = ndi.sum(np.ones_like(th), lab, np.arange(1, n + 1))
+open_sky = np.isin(lab, 1 + np.flatnonzero(sizes > 40000 * SS * SS / 4))
+G1 = float(os.environ.get('G1', 4.0))
+gcap = np.where(open_sky[..., None], gain, np.minimum(gain, G1))
+hard = th[..., None] * Sp * gcap + (1 - th[..., None]) * Np
+# elsewhere: only the sky share takes the gain, never the needle part of a mixed pixel
+w = sk(t, 0.3, 0.75)[..., None]
+soft = pix + w * t[..., None] * Sp * (np.minimum(gcap, G1 + bsky * (gcap - G1)) - 1)
+out = c_w * hard + (1 - c_w) * soft
+del hard, soft, Nn, Np, Sp
+
+# 4. Backlit rim. Needles on the crown's open-sky edge, in the sun's forward lobe,
+#    transmit and glint brighter than the sky behind them: a thin warm-white line,
+#    RIM_PX output px deep, on the dark mass. It is scaled to the relit sky just
+#    beyond it, so it always out-shines that sky (a rim dimmer than the sky prints
+#    as a tan smear), and to how thin the needles are there. Interior holes get none.
+RIM_K, RIM_W, RIM_PX = (float(os.environ.get(k, v)) for k, v in (('RIM_K', 6.0), ('RIM_W', 5.0), ('RIM_PX', 2.0)))
+RIM_COL = np.array([1.15, 1.0, 0.82]); RIM_COL /= RIM_COL @ LUMA       # sunlight through needles: warm white
+rr = int(np.ceil(RIM_PX * SS)); yy, xx = np.mgrid[-rr:rr + 1, -rr:rr + 1]
+near = ndi.maximum_filter(np.where(open_sky, th, 0), footprint=(xx * xx + yy * yy) <= (RIM_PX * SS) ** 2 + 0.5)
+needle = 1 - th
+thin = np.clip(0.4 + 1.2 * ndi.gaussian_filter(th, 2.0 * SS), 0, 1.2)     # more sky around: thinner needles, more light through
+sky_lit = mblur((pix * gain) @ LUMA, open_sky.astype(np.float64), 3.0 * SS)
+lobe = np.exp(-g_new / RIM_W) + 0.1 * np.exp(-g_new / (RIM_W * 3))
+rim = (RIM_K * near * needle * thin * lobe * sky_lit)[..., None] * RIM_COL
+out = out + rim
+rs = (rim @ LUMA) / np.maximum(sky_lit, 1e-3); sel = (rim @ LUMA) > 0.05
+print('rim/sky over rim px: pct 50/90/99', [round(float(np.percentile(rs[sel], q)), 2) for q in (50, 90, 99)],
+      'sky at rim px pct 50/99', [round(float(np.percentile(sky_lit[sel], q)), 2) for q in (50, 99)],
+      'near*needle pct 99', round(float(np.percentile((near * needle)[sel], 99)), 2))
+
+im = out.reshape(SIZE, SS, SIZE, SS, 3).mean((1, 3)).astype(np.float32)
+tmap = (c_w[..., 0] * th + (1 - c_w[..., 0]) * t).reshape(SIZE, SS, SIZE, SS).mean((1, 3)).astype(np.float32)
+print('rim: max add %.2f, output px with rim > 0.3: %d' % (float((rim @ LUMA).max()),
+      int(((rim @ LUMA).reshape(SIZE, SS, SIZE, SS).mean((1, 3)) > 0.3).sum())))
 
 np.save(os.path.join(wlib.SC, 'crop1536r.npy'), im)
 lum = im @ LUMA.astype(np.float32)

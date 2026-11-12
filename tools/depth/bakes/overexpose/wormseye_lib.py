@@ -6,7 +6,7 @@ import hdrlib
 SC = os.environ.get('OE_WORK', '/tmp/claude-0/dl-overexpose')  # big caches live here, never in the repo
 
 def load(res='4k'):
-    src = '/tmp/claude-0/dl-overexpose/hdr/tree_lined_driveway_%s.hdr' % res
+    src = os.path.join(SC, 'hdr', 'tree_lined_driveway_%s.hdr' % res)   # the Poly Haven download
     cache = os.path.join(SC, 'tld_%s.npy' % res)
     if os.path.exists(cache): return np.load(cache, mmap_mode='r')
     # hdrlib caches next to the source; move it here
