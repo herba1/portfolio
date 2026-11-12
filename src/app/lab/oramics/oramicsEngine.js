@@ -27,15 +27,17 @@ import { createOramicsSound } from "./oramicsSound";
 // the clear base; what the cells hear is the same light through a narrow
 // slit at the reader.
 //
-// The reader also prints what the machine plays. On the bottom strip,
-// between the picture and the lower perforations, the film carries a
-// bilateral variable-area track of the shaped output: every voice through
-// the waveform, the VCA and the vibrato, computed with the same model the
-// oscillators play. The film crawls, so the print is slowed: one cycle at
-// the bottom note spans a fixed run of film, a higher note packs its
-// cycles tighter, and a waveform's shape, a chord's interference and an
-// envelope's swell all print legibly. The loop keeps its print, so the
-// track upstream of the reader is last lap's until the reader writes over it.
+// The reader also prints what the machine plays, onto a fifth loop below
+// the four, a wide print stock run in step with them and given over almost
+// edge to edge to one bilateral variable-area track of the shaped output:
+// every voice through the waveform, the VCA and the vibrato, computed with
+// the same model the oscillators play. The film crawls, so the print is
+// slowed: one cycle at the bottom note spans a couple of hundred device
+// pixels of film, a higher note packs its cycles tighter, and each cycle
+// prints as the shape the timbre strip draws, swelled by the amplitude
+// strip, so a change of drawing is a change of print. The loop keeps its
+// print, so the track upstream of the reader is last lap's until the reader
+// writes over it; it arrives already printed by the lap before.
 
 const GROUND = "#f2f0eb";
 const BASE = "#e5e6e0";
@@ -61,13 +63,13 @@ const W_MAX = 0.058;
 // Each strip has its own pen: the control strips take a broader nib, so a
 // hand can lay an envelope or a ramp, as Oram did with a mask.
 const NIB = [1, 3.2, 1.5, 2.4];
-const TRACK_MM = 7; // soundtrack width (wide, so a cycle's shape reads)
+const PRINT_FRAC = 0.27; // the print loop's share of the frame's height
 const SYNTH_NORM = 0.34; // one full voice at full level fills the track
 const VCA_FLOOR = 0.1; // clear film on the amplitude strip still leaks a little
 const HARM = 32; // harmonics read off the waveform strip
 const WAVE_N = 128; // samples down the strip for one cycle
 const TABLE_N = 256;
-const PRINT_CYCLE = 72; // device px of film per cycle of the bottom note, in the print
+const PRINT_CYCLE = 224; // device px of film per cycle of the bottom note, in the print
 
 const frac = (x) => x - Math.floor(x);
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -151,6 +153,8 @@ export function createOramics(host) {
   let dpr = 1;
   let h = 1; // strip height (35mm)
   let mm = 1;
+  let printY0 = 0; // the print loop's top edge, and its height
+  let printH = 1;
   let trackTop = 0;
   let trackH = 1;
   let pad = 0;
@@ -184,20 +188,21 @@ export function createOramics(host) {
     dpr = d;
     pad = Math.round(clamp(H * 0.03, 8, 32));
     const gap = Math.round(clamp(H * 0.016, 6, 16));
-    h = Math.max(64, Math.floor((H - pad * 2 - gap * (STRIPS - 1)) / STRIPS));
+    // The print loop takes its share first; the four control strips split
+    // the rest. All five share one gauge of perforation.
+    printH = Math.round(H * PRINT_FRAC);
+    h = Math.max(40, Math.floor((H - pad * 2 - printH - gap * STRIPS) / STRIPS));
     mm = h / 35;
-    const top0 = Math.round((H - (h * STRIPS + gap * (STRIPS - 1))) / 2);
+    const top0 = Math.round((H - (h * STRIPS + gap * STRIPS + printH)) / 2);
     const perfIn = 2.01 * mm + 2.79 * mm;
-    trackH = TRACK_MM * mm;
     for (const st of strips) {
       st.y0 = top0 + st.k * (h + gap);
       st.top = st.y0 + perfIn + 1.5 * mm;
-      // The bottom strip gives up a lane between the picture and the lower
-      // perforations to the soundtrack.
-      const bottom = st.k === STRIPS - 1 ? st.y0 + h - perfIn - 0.45 * mm - trackH - 0.45 * mm : st.y0 + h - perfIn - 1.5 * mm;
-      st.bh = bottom - st.top;
+      st.bh = h - 2 * (perfIn + 1.5 * mm);
     }
-    trackTop = strips[STRIPS - 1].y0 + h - perfIn - 0.45 * mm - trackH;
+    printY0 = top0 + STRIPS * (h + gap);
+    trackTop = Math.round((printY0 + perfIn + 0.9 * mm) * d) / d;
+    trackH = Math.round((printH - 2 * (perfIn + 0.9 * mm)) * d) / d;
     L = W;
     perfs = Math.max(8, Math.round(L / (4.75 * mm)));
     rx = (Math.round(W * 0.36 * dpr) + 0.5) / dpr;
@@ -380,12 +385,13 @@ export function createOramics(host) {
 
   const resizeInk = () => {
     rowTop = Math.floor((strips[0].top - 1.2 * mm) * dpr) / dpr;
-    R = Math.max(8, Math.ceil((trackTop - 0.25 * mm - rowTop) * dpr));
+    const last = strips[STRIPS - 1];
+    R = Math.max(8, Math.ceil((last.top + last.bh + 1.2 * mm - rowTop) * dpr));
     // Each strip's rows in the buffer: its band, and the margin a brush
     // laid at the band's edge spills into.
     for (const st of strips) {
       st.rA = clamp(Math.floor((st.top - 1.2 * mm - rowTop) * dpr), 0, R);
-      st.rB = clamp(Math.ceil(((st.k === STRIPS - 1 ? trackTop - 0.25 * mm : st.top + st.bh + 1.2 * mm) - rowTop) * dpr), st.rA, R);
+      st.rB = clamp(Math.ceil((st.top + st.bh + 1.2 * mm - rowTop) * dpr), st.rA, R);
       st.bA = clamp(Math.round((st.top - rowTop) * dpr), 0, R);
       st.bB = clamp(Math.round((st.top + st.bh - rowTop) * dpr), st.bA + 1, R);
     }
@@ -611,14 +617,14 @@ export function createOramics(host) {
   // The score on the loop when it arrives, one phrase across all four
   // strips, laid down the way a brush would. In three sections:
   //   a chord held over a low D whose inner voices cross, under a swell
-  //   that blooms and fades, through a smooth hump of a waveform, with the
-  //   vibrato ramping up and the room opening as it rises;
-  //   a bass and a held third under staccato notes, each one let through by
-  //   a gate on the amplitude strip, the waveform splitting into strands,
-  //   held straight and dry;
+  //   that blooms and fades, the vibrato ramping up and the room opening;
+  //   the bottom note alone, held long enough to print cycle after cycle,
+  //   under two swells, while the waveform strip changes its drawing under
+  //   it: one broad band (a square, printed as clear blocks) gives way to a
+  //   comb of five lines, light to heavy (five teeth a cycle, growing);
   //   a drone with an arpeggio stacking into a chord over it and folding
-  //   into unison, under a long tremolo crescendo, the waveform frayed into
-  //   jagged teeth, the vibrato ramp steepening into a pooled end.
+  //   into unison, under a long tremolo crescendo, the vibrato ramp
+  //   steepening into a pooled end.
   function seed() {
     const U0 = seamU + 0.016;
     const at = (f) => U0 + f * 0.966;
@@ -638,75 +644,57 @@ export function createOramics(host) {
       s.done = true;
       strokes.push(s);
     };
-    // A bar laid down across a strip, top to bottom, at one place on the loop.
-    const bar = (k, f, v0, v1, w, ld) => {
-      const s = newStroke(k);
-      const n = 12;
-      for (let i = 0; i <= n; i += 1) {
-        const t = i / n;
-        addPoint(s, at(f) + (vn1(t * 3, s.id * 31) - 0.5) * 0.0012, v0 + (v1 - v0) * t, w, ld, 0);
-      }
-      s.done = true;
-      strokes.push(s);
-    };
+    // The swell of a held phrase on the amplitude strip: a quick bloom, a
+    // long body, a fade.
+    const swell = (f0, f1, peak) =>
+      trace(AMP, f0, f1, (t) => [0.5, 0.03 + peak * smoothstep(0, 0.3, t) * (1 - 0.8 * smoothstep(0.72, 1, t)), 0.96]);
 
-    // 1  pitch
-    trace(PITCH, 0.0, 0.335, (t) => [1.6 + 0.15 * Math.sin(t * 9), 0.046 * (0.75 + 0.25 * smoothstep(0, 0.2, t)), 0.97]);
-    trace(PITCH, 0.02, 0.325, (t) => [9 + 10 * smooth(smoothstep(0.12, 0.88, t)), 0.032, 0.93], 0.01);
-    trace(PITCH, 0.03, 0.33, (t) => [19 - 10 * smooth(smoothstep(0.1, 0.86, t)), 0.027, 0.88], 0.01);
-    trace(PITCH, 0.07, 0.25, (t) => [24 + 0.25 * Math.sin(t * 23), 0.02, 0.3], 0.008);
-    trace(PITCH, 0.355, 0.63, () => [7, 0.05, 1]);
-    trace(PITCH, 0.37, 0.62, () => [16, 0.022, 0.78], 0.01);
-    [21, 24, 21, 19, 21, 24].forEach((n, i) => {
-      const f0 = 0.384 + i * 0.04;
-      trace(PITCH, f0, f0 + 0.024, (t) => [n + 0.2 * (t - 0.5), 0.05, 1, 0.3]);
-    });
-    trace(PITCH, 0.65, 0.985, () => [0.5, 0.055, 1]);
+    // 1  a chord over a low D
+    trace(PITCH, 0.0, 0.235, (t) => [1.6 + 0.15 * Math.sin(t * 9), 0.046 * (0.75 + 0.25 * smoothstep(0, 0.2, t)), 0.97]);
+    trace(PITCH, 0.014, 0.228, (t) => [9 + 10 * smooth(smoothstep(0.12, 0.88, t)), 0.032, 0.93], 0.01);
+    trace(PITCH, 0.021, 0.231, (t) => [19 - 10 * smooth(smoothstep(0.1, 0.86, t)), 0.027, 0.88], 0.01);
+    trace(PITCH, 0.05, 0.175, (t) => [24 + 0.25 * Math.sin(t * 23), 0.02, 0.3], 0.008);
+    trace(AMP, 0.0, 0.235, (t) => [0.5, 0.03 + 0.5 * smoothstep(0, 0.4, t) - 0.34 * smoothstep(0.62, 1, t), 0.96]);
+    trace(VIB, 0.01, 0.235, (t) => [0.86 - 0.56 * smooth(t), 0.012 + 0.2 * Math.pow(t, 1.3), 0.95]);
+
+    // 2  the bottom note alone, under two swells
+    trace(PITCH, 0.255, 0.64, (t) => [0.3, 0.054 * (0.8 + 0.2 * smoothstep(0, 0.1, t)), 1]);
+    swell(0.262, 0.452, 0.46);
+    swell(0.462, 0.636, 0.52);
+    trace(VIB, 0.27, 0.63, () => [0.88, 0.016, 0.38], 0.01);
+    trace(VIB, 0.47, 0.63, (t) => [0.74 - 0.3 * t, 0.012 + 0.09 * t * t, 0.95]);
+
+    // 3  timbre: one broad band, then a comb. The band covers half the
+    // band of the strip, so its cycle is a square; the comb's lines sit in
+    // the top half and thicken down it, so its cycle is five teeth, light
+    // to heavy, and then a rest of clear film before the next.
+    trace(WAVE, 0.0, 0.452, (t) => [0.5, 0.32 * (0.5 + 0.5 * smoothstep(0, 0.06, t)), 0.94], 0.004);
+    for (let j = 0; j < 5; j += 1) {
+      trace(WAVE, 0.458 + j * 0.003, 0.985, () => [0.07 + j * 0.115, 0.012 + 0.011 * j, 0.55 + 0.11 * j], 0.003);
+    }
+
+    // 4  a drone, an arpeggio stacking into a chord over it
+    trace(PITCH, 0.655, 0.985, () => [0.5, 0.055, 1]);
     [7, 9, 12, 16, 19].forEach((n, j) => {
-      const f0 = 0.668 + j * 0.05;
+      const f0 = 0.75 + j * 0.04;
       trace(
         PITCH,
         f0,
         0.975,
         (t) => {
           const f = f0 + (0.975 - f0) * t;
-          const fold = smoothstep(0.885, 0.97, f);
+          const fold = smoothstep(0.9, 0.97, f);
           return [n + (12 - n) * fold, (j % 2 ? 0.022 : 0.032) * (1 - 0.5 * fold), j % 2 ? 0.5 : 0.93];
         },
         0.01,
       );
     });
-
-    // 2  amplitude
-    trace(AMP, 0.0, 0.335, (t) => [0.5, 0.03 + 0.5 * smoothstep(0, 0.4, t) - 0.34 * smoothstep(0.62, 1, t), 0.96]);
-    for (let i = 0; i < 6; i += 1) bar(AMP, 0.396 + i * 0.04, i % 2 ? 0.26 : 0.12, i % 2 ? 0.74 : 0.88, 0.13, 1);
-    trace(AMP, 0.65, 0.978, (t) => {
-      const w = 0.04 + 0.5 * Math.pow(smoothstep(0, 0.92, t), 1.4);
+    trace(AMP, 0.655, 0.978, (t) => {
+      const w = 0.04 + 0.12 * smoothstep(0, 0.08, t) + 0.38 * Math.pow(smoothstep(0, 0.92, t), 1.4);
       const trem = 1 - 0.34 * smoothstep(0.42, 0.72, t) * (0.5 + 0.5 * Math.cos(Math.PI * 2 * t * 13));
       return [0.5, w * trem, 0.97];
     });
-
-    // 3  timbre
-    for (const [w, ld] of [[0.5, 0.9], [0.32, 0.93], [0.15, 0.96]]) {
-      trace(WAVE, 0.0, 0.32, (t) => [0.5, w * (0.35 + 0.65 * smoothstep(0, 0.14, t)) * (1 - 0.75 * smoothstep(0.7, 1, t)), ld]);
-    }
-    for (const d of [-1, 0, 1]) {
-      trace(WAVE, 0.27, 0.64, (t) => [0.5 + d * 0.24 * smoothstep(0.05, 0.35, t), d ? 0.05 : 0.034, 0.92], 0.008);
-    }
-    for (let j = 0; j < 6; j += 1) {
-      const from = [0.26, 0.26, 0.5, 0.5, 0.74, 0.74][j];
-      const to = 0.07 + j * 0.172;
-      trace(WAVE, 0.6, 0.985, (t) => [from + (to - from) * smoothstep(0, 0.22, t), 0.012 + 0.009 * j, j % 2 ? 0.42 : 0.95], 0.01);
-    }
-
-    // 4  vibrato and room
-    trace(VIB, 0.01, 0.335, (t) => [0.86 - 0.56 * smooth(t), 0.012 + 0.2 * Math.pow(t, 1.3), 0.95]);
-    trace(VIB, 0.37, 0.625, () => [0.88, 0.016, 0.38], 0.01);
-    for (let i = 0; i < 6; i += 1) {
-      const f0 = 0.386 + i * 0.04;
-      trace(VIB, f0, f0 + 0.026, (t) => [0.78 - 0.34 * t, 0.012 + 0.11 * t * t, 0.95]);
-    }
-    trace(VIB, 0.655, 0.982, (t) => [0.9 - 0.72 * Math.pow(t, 0.8), 0.012 + 0.27 * Math.pow(t, 1.2), 0.98]);
+    trace(VIB, 0.66, 0.982, (t) => [0.9 - 0.72 * Math.pow(t, 0.8), 0.012 + 0.27 * Math.pow(t, 1.2), 0.98]);
   }
 
   // --- input -------------------------------------------------------------
@@ -895,7 +883,10 @@ export function createOramics(host) {
   // ear never hears; a DFT turns the rest into harmonics, and those build
   // both the oscillators' wave and the print's wavetable. Rebuilt only when
   // the profile has changed, and at most every 100ms of film.
-  const wave = { re: new Float32Array(HARM + 1), im: new Float32Array(HARM + 1), table: new Float32Array(TABLE_N + 1), version: 0, at: -1e9 };
+  // lo, hi: the table's own trough and crest, so the print can open a
+  // single voice from closed to full whatever the waveform's symmetry.
+  const wave = { re: new Float32Array(HARM + 1), im: new Float32Array(HARM + 1), table: new Float32Array(TABLE_N + 1), lo: -1, hi: 1, version: 0, at: -1e9 };
+  for (let i = 0; i <= TABLE_N; i += 1) wave.table[i] = Math.sin((Math.PI * 2 * i) / TABLE_N);
   const prof = new Float32Array(WAVE_N);
   const blur = new Float32Array(WAVE_N);
   const heard = new Float32Array(WAVE_N).fill(-1);
@@ -967,8 +958,16 @@ export function createOramics(host) {
       wave.table[i] = x;
       peak = Math.max(peak, Math.abs(x));
     }
-    for (let i = 0; i < TABLE_N; i += 1) wave.table[i] /= peak;
+    let tLo = 0;
+    let tHi = 0;
+    for (let i = 0; i < TABLE_N; i += 1) {
+      wave.table[i] /= peak;
+      tLo = Math.min(tLo, wave.table[i]);
+      tHi = Math.max(tHi, wave.table[i]);
+    }
     wave.table[TABLE_N] = wave.table[0];
+    wave.lo = tLo;
+    wave.hi = Math.max(tHi, tLo + 1e-3);
     wave.version += 1;
   };
 
@@ -1118,14 +1117,14 @@ export function createOramics(host) {
     y *= shaped.env;
     env *= shaped.env;
     // Noise reduction, as on a real track: the opening rides the envelope,
-    // so silence prints as a hairline of clear and a loud note fills the
-    // track edge to edge. Past full modulation it clips open.
-    // The bias rides a little under the true peak (independent partials
-    // rarely all crest together), so the troughs bite to the centre line.
-    const want = Math.min(1, (0.8 * env) / SYNTH_NORM);
-    bias += (want - bias) * (1 - Math.exp(-dt / (want > bias ? 0.01 : 0.08)));
-    const yn = clamp(y / (SYNTH_NORM * 0.7), -1, 1);
-    return 0.035 + 0.965 * clamp((bias + yn) / 2, 0, 1);
+    // so silence prints as a hairline of clear and a loud note swings the
+    // track from closed to near full. The bias sits at the waveform's own
+    // trough scaled by the envelope, so one voice's cycle is printed whole,
+    // trough on the centre line and crest at the envelope's height; a
+    // chord's crests can pile past full modulation, where it clips open.
+    bias += (env - bias) * (1 - Math.exp(-dt / (env > bias ? 0.01 : 0.08)));
+    const open = (y - bias * wave.lo) / ((wave.hi - wave.lo) * SYNTH_NORM);
+    return 0.035 + 0.965 * clamp(open, 0, 1);
   };
 
   // Move the reader along the film to `to`, listening once per device pixel
@@ -1151,9 +1150,11 @@ export function createOramics(host) {
     }
   };
 
-  // A still (?t=…) is the loop as it would be after t seconds of running:
-  // replay the whole run from a blank print.
-  const replayTo = (t) => {
+  // Run the reader from one film position to another at transport speed,
+  // listening and printing every column, from a quiet machine and a blank
+  // print. The loop arrives printed by the lap before it, so a run starts
+  // one lap upstream of the reader.
+  const runFrom = (end) => {
     for (const s of strokes) if (s.dirty) densify(s);
     flushInk();
     for (const v of voices) Object.assign(v, { on: false, lv: 0, amp: 0, level: 0, fresh: false, snap: false });
@@ -1165,19 +1166,28 @@ export function createOramics(host) {
     printed.fill(0);
     clock = 0;
     bias = 0;
-    readAt = rx / L;
     const step = 1 / (N * speed);
-    let at = rx / L;
-    const end = t * speed + rx / L;
+    let at = rx / L - 1;
+    readAt = at;
     while (at + 1 / N <= end) {
       at += 1 / N;
       advance(at, step);
     }
-    phase = t * speed;
     advance(end, 0);
+  };
+  let warmed = false;
+
+  // A still (?t=…) is the loop as it would be after t seconds of running.
+  const replayTo = (t) => {
+    phase = t * speed;
+    runFrom(t * speed + rx / L);
   };
 
   // --- drawing -----------------------------------------------------------
+
+  // Every loop on the transport, as [top edge, height]: the four control
+  // strips and the print below them.
+  const films = () => [...strips.map((st) => [st.y0, h]), [printY0, printH]];
 
   const drawFilm = () => {
     const P = L / perfs;
@@ -1189,28 +1199,27 @@ export function createOramics(host) {
     const first = Math.floor(off / P) - 1;
     const line = 1 / dpr;
     g.lineWidth = line;
-    for (const st of strips) {
-      const y0 = st.y0;
+    for (const [y0, fh] of films()) {
       g.fillStyle = BASE;
-      g.fillRect(0, y0, W, h);
+      g.fillRect(0, y0, W, fh);
       // The splice that makes it a loop: a butt cut under clear tape. All
       // four loops were cut to one length and spliced in register.
       for (const seam of [-offS, L - offS]) {
         if (seam < -P * 2 || seam > W + P * 2) continue;
         const tw = P * 2;
         g.fillStyle = "rgba(206, 196, 164, 0.08)";
-        g.fillRect(seam - tw / 2, y0, tw, h);
+        g.fillRect(seam - tw / 2, y0, tw, fh);
         g.fillStyle = "rgba(150, 144, 128, 0.28)";
-        g.fillRect(Math.round((seam - tw / 2) * dpr) / dpr, y0, line, h);
-        g.fillRect(Math.round((seam + tw / 2) * dpr) / dpr, y0, line, h);
+        g.fillRect(Math.round((seam - tw / 2) * dpr) / dpr, y0, line, fh);
+        g.fillRect(Math.round((seam + tw / 2) * dpr) / dpr, y0, line, fh);
         g.fillStyle = EDGE;
-        g.fillRect(Math.round(seam * dpr) / dpr, y0, line, h);
+        g.fillRect(Math.round(seam * dpr) / dpr, y0, line, fh);
       }
       // Perforations: clear holes, so the ground shows through them.
       for (let i = first; i <= first + perfs + 2; i += 1) {
         const x = i * P - off + (P - pw) / 2;
         if (x > W || x + pw < 0) continue;
-        for (const top of [y0 + 2.01 * mm, y0 + h - 2.01 * mm - ph]) {
+        for (const top of [y0 + 2.01 * mm, y0 + fh - 2.01 * mm - ph]) {
           g.beginPath();
           g.roundRect(x, top, pw, ph, r);
           g.fillStyle = GROUND;
@@ -1298,7 +1307,7 @@ export function createOramics(host) {
     const ext = Math.max(4, Math.round(pad * 0.7));
     const line = 1 / dpr;
     const yTop = strips[0].y0 - ext;
-    const yBot = strips[STRIPS - 1].y0 + h + ext;
+    const yBot = printY0 + printH + ext;
     g.fillStyle = READER;
     g.fillRect(rx - line / 2, yTop, line, yBot - yTop);
     const tick = 2.4 * mm;
@@ -1307,7 +1316,7 @@ export function createOramics(host) {
 
     // The lamp's line across every strip: a faint wash on the clear base
     // either side of the slit, so it reads as light and not a rule.
-    for (const st of strips) bloom(st.y0 + 0.2 * mm, h - 0.4 * mm, 0.16, 0.9 * mm);
+    for (const [y0, fh] of films()) bloom(y0 + 0.2 * mm, fh - 0.4 * mm, 0.16, 0.9 * mm);
 
     // The line of light on the film, row by row, as the cells see it:
     // bright through clear base, cut by the ink, leaking through its gaps.
@@ -1349,11 +1358,12 @@ export function createOramics(host) {
       const open = Math.max(1, head * (trackH / 2) * 0.94);
       const mid = trackTop + trackH / 2;
       // The lamp's spill on the film around the head, so it reads on clear base too.
-      const spill = g.createRadialGradient(rx, mid, 0, rx, mid, trackH * 0.9);
+      const sr = trackH * 0.36;
+      const spill = g.createRadialGradient(rx, mid, 0, rx, mid, sr);
       spill.addColorStop(0, "rgba(232, 150, 70, 0.34)");
       spill.addColorStop(1, "rgba(232, 150, 70, 0)");
       g.fillStyle = spill;
-      g.fillRect(rx - trackH, mid - trackH, trackH * 2, trackH * 2);
+      g.fillRect(rx - sr, mid - sr, sr * 2, sr * 2);
       bloom(mid - open, open * 2, 1, 1.1 * mm);
       g.fillStyle = "rgba(255, 245, 222, 1)";
       g.fillRect(rx - 1, mid - open, 2, open * 2);
@@ -1369,9 +1379,9 @@ export function createOramics(host) {
     drawTrack();
     g.fillStyle = EDGE;
     const line = 1 / dpr;
-    for (const st of strips) {
-      g.fillRect(0, st.y0, W, line);
-      g.fillRect(0, st.y0 + h - line, W, line);
+    for (const [y0, fh] of films()) {
+      g.fillRect(0, y0, W, line);
+      g.fillRect(0, y0 + fh - line, W, line);
     }
     drawReader();
   };
@@ -1390,6 +1400,10 @@ export function createOramics(host) {
       }
       phase = held * speed;
     } else {
+      if (!warmed) {
+        warmed = true;
+        runFrom(phase + rx / L);
+      }
       // The transport comes up to speed the way a motor does.
       const spin = 1 - Math.pow(1 - clamp((t - started) / 1.6, 0, 1), 3);
       phase += speed * spin * dt;
