@@ -9,9 +9,9 @@ import { createStage, clamp } from "../_kit/stage";
 // the motor housing, so no shadow of the photographed blades stays), the rotor (the three blades as
 // the photo's own acrylic: its pixels, grain, dust, the light through the
 // sheet and the real specular, unwrapped into each blade's (radius, chord)
-// frame and read back at every sub-sample's turned point, so the readout
-// shears the photo's own texture into striations along the rows and tears
-// it into photographic fragments; a signed distance to one smooth outline
+// frame and read back along each sensor row at the row's own instant, at
+// full detail, so the readout cuts the photo's own texture into hard strips
+// along the rows and tears it into photographic fragments; a signed distance to one smooth outline
 // per blade only cuts and anti-aliases the edge, since the readout drags any
 // burr on it out into a frayed stroke end; the plate shows through the
 // sheet, tinted; and a bright edge drawn here, lit by the lamp as far as the
@@ -37,7 +37,7 @@ import { createStage, clamp } from "../_kit/stage";
 // The room is lit by a ring fluorescent on the same 60 Hz mains that drives
 // the motor, so its light pulses at 120 Hz, and every row integrates it over
 // its own exposure window too. Four lamp cycles fit the 1/30 s readout, so the
-// frame carries four bands: broad cool crests and short warm, dimmer gaps,
+// frame carries four bands: cool, bright crests and broad warm, dark gaps,
 // the readout itself drawn in the picture's own light. They lie along the
 // sensor's rows (they turn with ?scan, and stay put on the sensor when the phone moves) and they light everything
 // through the same linear composite: a crest brightens a row of the guard's
@@ -47,11 +47,10 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // The fan: an induction motor that pushes toward its set speed (it cannot
 // brake), quadratic air drag, viscous and dry bearing friction. Left alone
-// it runs on its 'high' notch, a shaded-pole motor slipping well below its
-// 3600 rpm synchronous speed, at 2395 rpm: a turn and a third per readout,
-// so one blade is read twice down the frame, torn clean off the hub into
-// floating pieces, while the others stay hooked to it and trail long
-// tapering tails, and the three blades pass just under 4 x 29.97 times a
+// it runs flat out at 3590 rpm, a hair under its two-pole motor's 3600 rpm
+// synchronous speed: nearly two turns per readout, so every blade is read
+// again and again down the frame and torn into islands floating in stacks
+// free of the hub, and the three blades pass just under 6 x 29.97 times a
 // second, so the torn pattern crawls slowly backwards against the frame
 // rate. Drag up (or scroll up) to overdrive it; drag down to drop the set
 // speed and let it coast down through the hooks and the wagon-wheel speeds;
@@ -71,10 +70,11 @@ import { createStage, clamp } from "../_kit/stage";
 // takes from the rotor's sweep down the frame.
 //
 // Stills: ?rpm=4800&t=0.25 holds the frame that starts at t (seconds) with
-// the rotor at a steady rpm; the hero is ?rpm=2395&t=13.78043, the frame the
+// the rotor at a steady rpm; the hero is ?rpm=3590&t=0.4, the frame the
 // live view opens on, the hand at rest (tremor only). ?flick=vx,vy releases
 // the phone from rest at that velocity (photo px/s) as the frame starts, so
-// ?rpm=2395&t=13.78043&flick=4200,-1200 is the same frame mid-swing.
+// ?rpm=3590&t=0.4&flick=4200,-1200 is the same frame mid-swing.
+// ?rows=N sets the sensor's row count (720 by default).
 // ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
 // is 1/16000, so a blade tip travels a few px while its row is open and every
 // hook keeps a hard edge: long exposures blur the blades and wash the bands out, and at
@@ -85,31 +85,31 @@ const FPS = 30000 / 1001; // sensor frame rate: NTSC 29.97, a hair under 30
 const READOUT = 1 / 30; // top row to bottom row (fits inside the 1 / 29.97 s frame)
 const EXPOSURE = 1 / 16000; // each row's open time (?exp=N for 1 / N s)
 const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrated as ramps, not stacks of copies
+const ROWTAP = 4; // atlas taps along a row (one device px of it), never across rows
 // The room's lamp: a ring fluorescent on the same 60 Hz mains as the motor,
-// on a tired choke ballast. The arc goes out every time the mains voltage
+// on an old, tired choke ballast and the room's only real light. The arc goes out every time the mains voltage
 // falls below its re-strike level (STRIKE of the peak, high on an old tube)
 // and the tube is dark until it re-strikes, nearly half of every cycle; while it burns its light follows the voltage softly
 // (a discharge's light saturates with current, so ARC < 1 flattens the
-// crest). That is a 120 Hz train of broad bright crests and short dark
-// gaps. Each phosphor holds the light for its own decay time, a first-order
+// crest). That is a 120 Hz train of bright crests and broad dark gaps. Each phosphor holds the light for its own decay time, a first-order
 // lag (each harmonic k scaled by 1 / (1 + i k w tau)), so each channel keeps
 // its own share of the gap and lags by its own angle; blue decays fastest
 // and drops furthest in the gap, red holds on, so the crests run
 // cool and the gaps warm, as real flicker bands do. STEADY is each channel's
-// light that does not flicker: the phosphors' long afterglow and the
-// daylight through the shoji, over half the room's light. The result is
+// light that does not flicker: the phosphors' long afterglow and what dusk
+// comes through the shoji, a fifth of the room's light. The result is
 // carried as LAMP_K harmonics, so a row's exposure integrates it exactly.
 // Behind a phone's sensor that is four bands down a 1/30 s readout, each
-// gap a broad plateau at about 0.56 of the mean light (on the screen, about
-// a quarter darker than the mean) and each crest about 1.6 times it: plain
-// bands across the torn blades and the guard, never deep enough to drown
-// the guard's chrome or the hub.
+// gap a broad warm plateau at a fifth to a third of the mean light (blue
+// falls to 0.2 while red holds 0.3 to 0.5) and each crest a cool 2 to 2.5
+// times it: the readout drawn in hard bands across the room, the guard's
+// chrome (which the crests burn out) and every torn piece of the blades.
 const MAINS = 60;
 const LAMP = 2 * MAINS; // Hz
 const STRIKE = 0.8;
 const ARC = 0.35;
 const DECAY = [0.0016, 0.0011, 0.0004]; // phosphor decay, s (r, g, b)
-const STEADY = [0.55, 0.54, 0.57];
+const STEADY = [0.2, 0.19, 0.21];
 const LAMP_K = 10;
 
 // The lamp's light as a function of phase (cycles), mean 1 per channel:
@@ -149,16 +149,22 @@ const NANG = 48; // angle samples per frame (covers READOUT + EXPOSURE)
 const RPM = (2 * Math.PI) / 60;
 
 // Fan dynamics, in rad/s and rad/s^2 (per unit rotor inertia).
-// The fan on its 'high' notch: a two-pole shaded-pole motor slips a third
-// below its 3600 rpm synchronous speed under the blades' load. 2395 rpm is
-// 1.33 turns per readout, enough to tear one blade off the hub and leave
-// the others hooked to it, and just under 2397.6 rpm (3 blades x 4 x 29.97
-// Hz), so the torn pattern crawls backwards, a blade pitch every 8 s.
-const REST = 2395;
-// The live view starts at this frame (k / FPS), the hero still: two blades
-// hooked to the hub with long tapering tails, one torn clean off at the top
-// and one at the bottom, the lamp's gaps lying across the hooks.
-const HERO_FRAME = 413;
+// The fan run flat out, a hair under its two-pole motor's 3600 rpm
+// synchronous speed (chosen for the readout, not the motor: at a turn and a
+// third per readout the torn blades read as hooks, a design, while near two
+// turns the frame is stacked with islands floating free of the hub, which
+// can only be the readout). 3590 rpm is 1.99 turns per readout, just under
+// 3596.4 rpm (3 blades x 6 x 29.97 Hz), so the torn pattern crawls
+// backwards, a blade pitch every 3 s.
+const REST = 3590;
+// The live view starts at this frame (k / FPS), the hero still: the blades
+// read into stacked islands down the disc, the lamp's four bands across
+// them (frame 12 starts at the lamp's trough).
+const HERO_FRAME = 12;
+// The sensor's rows: the phone records 720p, reading 720 rows down the frame
+// in the readout, each row one instant, so at DPR 2 a row is two device px
+// and every torn piece is cut into strips that step from row to row.
+const ROWS = 720;
 const MAX = 5400; // rpm, overdriven
 const DRAG = 0.0005; // quadratic air drag
 const VISC = 0.06; // viscous bearing loss
@@ -326,19 +332,29 @@ float wrapA(float a){ return a - 6.2831853 * floor((a + 3.14159265) / 6.2831853)
 // The photo's own blade at a point of the rotor's frame, given as its radius
 // rho (which the turn leaves alone), its angle phi, and the three blades'
 // extents lo, hi at that radius: which blade it falls on (the one whose
-// chord is nearest its middle) and where on it, (rho, chord), read from that
-// blade's panel of the unwrapped atlas.
-vec4 bladeAt(float rho, float phi, vec3 lo, vec3 hi){
+// chord is nearest its middle), as z, and where on it, (rho, chord), as the
+// texel of that blade's panel of the unwrapped atlas.
+vec2 atlasUV(float k, float rho, float ch){
+  float u = clamp((ch - uAtlas.z) / (uAtlas.w - uAtlas.z), 0.0, 1.0);
+  float v = clamp((rho - uAtlas.x) / (uAtlas.y - uAtlas.x) * uPanel.x, 0.5, uPanel.x - 0.5);
+  return vec2(u, (k * (uPanel.x + uPanel.y) + v) / uPanel.z);
+}
+vec3 bladeUV(float rho, float phi, vec3 lo, vec3 hi){
   vec3 c = (vec3(wrapA(phi - uMid.x), wrapA(phi - uMid.y), wrapA(phi - uMid.z)) - lo) / max(hi - lo, vec3(1e-3));
   vec3 m = abs(c - 0.5);
   float k = 0.0;
   float ch = c.x;
   if (m.y < m.x) { k = 1.0; ch = c.y; }
   if (m.z < min(m.x, m.y)) { k = 2.0; ch = c.z; }
-  float u = clamp((ch - uAtlas.z) / (uAtlas.w - uAtlas.z), 0.0, 1.0);
-  float v = clamp((rho - uAtlas.x) / (uAtlas.y - uAtlas.x) * uPanel.x, 0.5, uPanel.x - 0.5);
-  v = (k * (uPanel.x + uPanel.y) + v) / uPanel.z;
-  return textureLod(uRotor, vec2(u, v), uLod);
+  return vec3(atlasUV(k, rho, ch), k);
+}
+// The chord of blade k at (rho, phi).
+float chordOf(float k, float rho, float phi){
+  vec4 f01 = frameAt(0, rho);
+  vec2 f2 = frameAt(1, rho).xy;
+  float mid = k < 0.5 ? uMid.x : k < 1.5 ? uMid.y : uMid.z;
+  vec2 e = k < 0.5 ? f01.xy : k < 1.5 ? f01.zw : f2;
+  return (wrapA(phi - mid) - e.x) / max(e.y - e.x, 1e-3);
 }
 
 // The front: the photo's own guard wires, cut from its luminance with their
@@ -395,6 +411,26 @@ void main(){
   vec2 f2 = frameAt(1, rho).xy;
   vec3 lo = vec3(f01.x, f01.z, f2.x);
   vec3 hi = vec3(f01.y, f01.w, f2.y);
+  // The acrylic's own texture is read once for the row, at the rotor's angle
+  // at the row's own instant, and only along the row: a device px's run of
+  // the atlas along the row, never across it and never smeared over the
+  // exposure, so the photo's grain keeps its full detail and each row shows
+  // the blade turned by its own time offset. Neighbouring rows are read at
+  // angles a sixtieth of a degree and more apart, which at the tips is
+  // several px of the photo's grain, so a torn piece is striated into hard
+  // strips along the rows, the readout's own scan lines.
+  float aRow = uDir * angAt(s * uReadout + 0.5 * uExpo);
+  vec3 bk = bladeUV(rho, phi0 - aRow, lo, hi);
+  vec2 rowDir = vec2(uScan.y, -uScan.x) / uPx; // one device px along the row, photo px
+  vec2 p2 = p + vec2(cr * rowDir.x + sr * rowDir.y, -sr * rowDir.x + cr * rowDir.y);
+  vec2 d2 = uToDisc * (p2 - uHub);
+  float rho2 = length(d2);
+  vec2 du = atlasUV(bk.z, rho2, chordOf(bk.z, rho2, atan(d2.y, d2.x) - aRow)) - bk.xy;
+  du *= min(1.0, 0.03 / max(length(du), 1e-6)); // never across a blade's seam
+  vec4 t = vec4(0.0);
+  for (int j = 0; j < ${ROWTAP}; j++) t += textureLod(uRotor, bk.xy + du * ((float(j) + 0.5) / float(${ROWTAP}) - 0.5), 0.0);
+  t /= float(${ROWTAP});
+  vec3 tint = t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4);
   for (int k = 0; k < ${SUB}; k++) {
     float tau = s * uReadout + uExpo * (float(k) + 0.5) / float(${SUB});
     float a = uDir * angAt(tau);
@@ -404,9 +440,7 @@ void main(){
     float sd = (texture(uShape, r).r * 255.0 - 128.0) / uSdf * uPx; // device px, + inside
     float cov = clamp(sd / ${AA.toFixed(2)} + 0.5, 0.0, 1.0);
     if (sd < -2.5) { accT += lampAt(tau); continue; }
-    vec4 t = bladeAt(rho, phi0 - a, lo, hi);
     vec3 L = lampAt(tau);
-    vec3 tint = t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4);
     // The moulded edge: a line ${EDGE_AT} device px inside the outline, lit
     // by the lamp as far as the edge faces it. The outline's normal is the
     // signed distance's gradient, carried from the rotor's own frame to the
@@ -466,6 +500,7 @@ export async function createRolling(host, { embedded = false } = {}) {
   const stillT = num("t");
   const scanQ = num("scan");
   const expQ = num("exp");
+  const rowsQ = num("rows");
   // Never longer than the angle history covers past the last row.
   const expo = expQ && expQ > 0 ? clamp(1 / expQ, 1e-5, 1 / 100) : EXPOSURE;
   const lamp = lampWave();
@@ -717,8 +752,8 @@ export async function createRolling(host, { embedded = false } = {}) {
     const proj = [0, IW * nx, IH * ny, IW * nx + IH * ny];
     gl.uniform2f(u.uScan, nx, ny);
     gl.uniform2f(u.uScanRange, Math.min(...proj), Math.max(...proj));
-    // A row is one device pixel of the print at scan 0.
-    gl.uniform1f(u.uRows, Math.max(rect[3], 2));
+    // The sensor's own rows, whatever the screen.
+    gl.uniform1f(u.uRows, Math.max(2, rowsQ ?? ROWS));
     gl.uniform3f(u.uPaper, PAPER[0] ** 2.2, PAPER[1] ** 2.2, PAPER[2] ** 2.2);
     gl.bindVertexArray(vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
