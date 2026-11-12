@@ -32,8 +32,10 @@ import { orientation, skyField, createSpace, strokes as layStrokes, P, META } fr
 // separation grid, so where the crown's lines meet the sky's they stop
 // against each other. The sky's lines hold still; every point of a crown
 // line is carried by the modal field,
-// so a pull bends the lines and draws them out along the way the tree moves,
-// and each is tinted by where that point is in its swing relative to the
+// so a pull bends the lines where the crown shears and draws their trailing
+// ends out a little (never more than a line and a half), while each keeps the
+// width of the light at its rest position, so the print stays an engraving
+// under a hard pull; and each is tinted by where that point is in its swing relative to the
 // pull (with it, leading, against, lagging), on a continuous hue wheel whose
 // saturation rises with the amplitude. So even a frozen frame shows the
 // measured vibration structure of the real tree. The frame is
@@ -57,7 +59,10 @@ const BREEZE = 0.45; // idle forcing, in units of each mode's static response
 const LINE = 6.5; // target px at DPR 2: separation of the engraving's lines
 const WIDTH = 0.42; // widest stroke half-width, as a share of the separation
 const TRAIL = 0.6; // share of the displacement a stroke's trailing end lags by
-const TRAIL_CAP = 5; // longest lag, in line separations
+const TRAIL_CAP = 1.5; // longest lag, in line separations: an end draws out, the line is never smeared
+const TRAIL_RAMP = 4; // how far along a stroke its trailing end's lag eases out, in separations
+const CROWN_RUN = [14, 36]; // the crown's lines are cut into strokes this long, in separations
+const CROWN_SHORTEST = 8; // a crown streamline shorter than this (separations) is not laid
 const LUM = [0.04, 0.5]; // leaf light (sRGB luma) that starts and fills a stroke
 const SHADE = 0.16; // the crown's hairline in deep shadow, as a share of its widest
 const SPECK = 0.25; // a crown line on less matte than this (softened) is a speck in the sky: not laid
@@ -88,10 +93,10 @@ void main() {
 // at its ends, so at rest the print reads as a line engraving. The sky's
 // strokes hold still and keep one cool ink; for the crown's: Every spine
 // point is carried by the modal field at its own rest position, so a pull
-// bends the strokes where the crown shears, and each stroke is drawn out
-// along its displacement: its leading end goes the whole way, its trailing
-// end lags by a share of it (eased into a cap), so a stroke lengthens and
-// turns into the direction the tree is moving. Its tint is the phase of the
+// bends the strokes where the crown shears; only an end that trails its
+// motion lags behind, by a share of its displacement capped at a line and a
+// half, so a stroke draws out a little without ever smearing into a brush
+// mark, and its width stays the leaves' light at its rest position. Its tint is the phase of the
 // analytic signal sum_i phi_i (q_i - i v_i / omega_i) read in the frame of
 // the pull, on a continuous hue wheel: gold swings with the hand, violet
 // against it, teal leads it and rose lags it (or each swings off to one side of
@@ -122,6 +127,7 @@ uniform float uHalf;    // widest half-width, target px
 uniform float uLod;
 uniform float uTrail;   // share of the displacement the trailing end lags by
 uniform float uCap;     // longest lag, plate px
+uniform float uRamp;    // how far along the stroke the lag eases out, plate px
 uniform vec2 uLum;      // luminance that starts and fills a stroke
 uniform float uFloor;   // the crown's finest line in shadow, as a share of its widest
 uniform float uSkyHalf; // the sky's widest half-width, target px
@@ -174,15 +180,33 @@ vec3 oklch(float L, float C, float h) {
   return pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / 2.2));
 }
 
-float lam;    // the trailing end's lag, as a share of the displacement
-float along;  // -1..1: which end leads, eased through the perpendicular
 bool sky;
+float lagA;   // how far the stroke's start trails its motion, plate px
+float lagB;   // and its end
+vec2 dirA;    // the way each end is moving (unit)
+vec2 dirB;
+float slen;   // the stroke's length, plate px
 
+// A spine point is carried by the modal field at its own rest position, so
+// the stroke bends where the crown shears but is never smeared: only an end
+// that trails its motion lags behind, by at most uCap, eased out over the
+// last uRamp of the stroke.
 vec2 placed(int id, int j, out vec4 F, out vec2 b) {
   b = spine(id, j);
   F = sky ? vec4(0.0) : fieldAt(b) * uMove;
-  float t = 0.5 + 0.5 * along * (float(j) / float(P - 1) * 2.0 - 1.0);
-  return b + F.xy * (1.0 - lam * (1.0 - t));
+  float s = float(j) / float(P - 1) * slen;
+  float wa = 1.0 - smoothstep(0.0, uRamp, s);
+  float wb = 1.0 - smoothstep(0.0, uRamp, slen - s);
+  return b + F.xy - dirA * lagA * wa - dirB * lagB * wb;
+}
+
+// how far an end trails: the share of its displacement uTrail, softly capped
+// at uCap, and only as much as the end faces away from where it is going
+float trailing(vec2 F, vec2 outward, out vec2 d) {
+  float m = length(F);
+  d = m > 1e-3 ? F / m : vec2(0.0);
+  float back = clamp(-dot(normalize(outward), d), 0.0, 1.0);
+  return uCap * (1.0 - exp(-m * uTrail / uCap)) * back;
 }
 
 vec2 toTarget(vec2 p) {
@@ -197,11 +221,15 @@ void main() {
   sky = meta.x > 0.5;
   vec2 b0 = spine(id, 0);
   vec2 b1 = spine(id, P - 1);
-  vec4 Fm = sky ? vec4(0.0) : fieldAt(0.5 * (spine(id, P / 2 - 1) + spine(id, P / 2))) * uMove;
-  float dm = length(Fm.xy);
-  float tl = uCap * (1.0 - exp(-dm * uTrail / uCap));
-  lam = dm > 1e-3 ? tl / dm : 0.0;
-  along = dm > 1e-3 ? clamp(dot(normalize(b1 - b0), Fm.xy / dm) * 4.0, -1.0, 1.0) : 1.0;
+  slen = meta.y;
+  lagA = 0.0;
+  lagB = 0.0;
+  dirA = vec2(0.0);
+  dirB = vec2(0.0);
+  if (!sky && uMove > 0.0) {
+    lagA = trailing(fieldAt(b0).xy, b0 - spine(id, 1), dirA);
+    lagB = trailing(fieldAt(b1).xy, b1 - spine(id, P - 2), dirB);
+  }
 
   vec4 F;
   vec2 b;
@@ -234,7 +262,8 @@ void main() {
     float cov = smoothstep(0.25, 0.7, t.a);
     float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * cov;
     float w = max(pow(clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0), 0.6), uFloor * cov);
-    float taper = pow(clamp(min(tp, 1.0 - tp) * 7.0, 0.0, 1.0), 0.6);
+    // tapered over a fixed length at each end, however long the line runs
+    float taper = pow(clamp(min(tp, 1.0 - tp) * meta.y / uCapLen, 0.0, 1.0), 0.6);
     // (in the cover pass every line is as wide as the cover reaches, unless
     // it is barely there itself)
     hw = uCover > 0.0 ? uCover * smoothstep(0.0, 0.3, w) : uHalf * w * taper;
@@ -259,7 +288,9 @@ void main() {
   // saturation keeps climbing with the swing's amplitude, so how hard each
   // part of the crown answers reads as a gradient, not a threshold
   float sat = 1.0 - exp(-length(F) / 26.0);
-  vCol = oklch(mix(0.95, 0.82, sat), mix(0.02, 0.19, sat), 1.66 + th);
+  // (its lightness falls only a little, so the lit clumps still read as the
+  // light of the print under a hard pull, not as a colour map)
+  vCol = oklch(mix(0.95, 0.88, sat), mix(0.02, 0.17, sat), 1.66 + th);
 }`;
 
 const STROKE_FRAG = `#version 300 es
@@ -546,7 +577,14 @@ export async function createPoke(host, { embedded = false } = {}) {
   const layLines = (sep) => {
     if (lines.sep && Math.abs(sep / lines.sep - 1) < 0.08) return;
     const space = createSpace(PW, PH, sep);
-    const crown = layStrokes(orient, sep, mulberry(23), { space, lumLo: SHADE > 0 ? -1 : LUM[0], solidMin: SPECK });
+    const crown = layStrokes(orient, sep, mulberry(23), {
+      space,
+      lumLo: SHADE > 0 ? -1 : LUM[0],
+      solidMin: SPECK,
+      cut: CROWN_RUN,
+      shortest: CROWN_SHORTEST,
+      dtest: 0.45,
+    });
     const sky = layStrokes(skyF, sep, mulberry(29), {
       space,
       sky: true,
@@ -786,6 +824,7 @@ export async function createPoke(host, { embedded = false } = {}) {
       gl.uniform1f(su.uLod, Math.log2(Math.max(1, (sep / k) * 0.35)));
       gl.uniform1f(su.uTrail, TRAIL);
       gl.uniform1f(su.uCap, (sep / k) * TRAIL_CAP);
+      gl.uniform1f(su.uRamp, (sep / k) * TRAIL_RAMP);
       gl.uniform2f(su.uLum, LUM[0], LUM[1]);
       gl.uniform1f(su.uFloor, SHADE);
       gl.uniform1f(su.uSkyHalf, sep * SKY_WIDTH);

@@ -13,7 +13,11 @@
 //    "Creating Evenly-Spaced Streamlines of Arbitrary Density", 1997), seeded
 //    in a shuffled jittered order and then outward from each finished line at
 //    the separation distance, so the hatch is blue-noise even with no grid in
-//    it. Each streamline is cut into strokes of varied length, each resampled
+//    it. A streamline may close to a little under half the separation before
+//    it stops, so neighbours bunch into moire where the contours converge,
+//    and one shorter than `shortest` is not laid at all. Each streamline is
+//    cut into strokes of varied length (the crown's long, so its lines run
+//    on through the leaves the way a burin's do), each resampled
 //    to P spine points in plate px; a stroke that lies wholly in deep shadow
 //    is dropped (its width would be zero) unless the renderer gives shadow a
 //    hairline (lumLo below zero). A line on a speck of the matte is not laid.
@@ -27,7 +31,7 @@
 // separation distance from them: the two meet the way two hatchings do on
 // a plate, with no cut-out edge between them.
 
-export const P = 12; // spine points per stroke
+export const P = 40; // spine points per stroke (a crown line may run 36 separations)
 export const META = 4; // per stroke: kind (0 crown, 1 sky, 2 sky under the crown), length, cap at start, cap at end
 
 const HATCH = (-28 * Math.PI) / 180; // fallback hatch angle (screen, y down)
@@ -118,7 +122,7 @@ function contour(L, W, H, R, nx, ny, bias) {
   return { c2, s2 };
 }
 
-export function orientation(bmp, PW, PH) {
+export function orientation(bmp, PW, PH, { R = 7 } = {}) {
   const W = PW >> 1;
   const H = PH >> 1;
   const px = pixels(bmp, W, H);
@@ -131,7 +135,7 @@ export function orientation(bmp, PW, PH) {
   }
   // the silhouette counts as an edge of the light too, so lines near the
   // rim run along it
-  const { c2, s2 } = contour(gauss(lum, W, H, 1), W, H, 7, -Math.sin(HATCH), Math.cos(HATCH), 0.2);
+  const { c2, s2 } = contour(gauss(lum, W, H, 1), W, H, R, -Math.sin(HATCH), Math.cos(HATCH), 0.2);
   // how deep inside the matte each spot is, to tell a speck from a twig
   const solid = gauss(alpha, W, H, 5);
   return { W, H, PW, PH, lum, alpha, solid, c2, s2 };
@@ -218,6 +222,7 @@ export function strokes(
     reach = 60,
     shortest = 1.2,
     under = 0,
+    dtest = 0.55,
   } = {},
 ) {
   const S = sampler(F);
@@ -252,7 +257,7 @@ export function strokes(
       if (bx * px + by * py < 0.8) break;
       const nx2 = x + bx * h;
       const ny2 = y + by * h;
-      if (!inside(nx2, ny2) || !far(nx2, ny2, sepAt(nx2, ny2) * 0.55)) break;
+      if (!inside(nx2, ny2) || !far(nx2, ny2, sepAt(nx2, ny2) * dtest)) break;
       x = nx2;
       y = ny2;
       px = bx;
@@ -331,7 +336,7 @@ export function strokes(
   if (sky && under > 0) {
     const hid = createSpace(F.PW, F.PH, dsep);
     for (const pts of lines) for (let i = 0; i < pts.length; i += 2) hid.add(pts[i], pts[i + 1]);
-    const dtest = dsep * 0.55;
+    const dclear = dsep * 0.55;
     const steps = Math.ceil((dsep * under) / h);
     const extend = (x0, y0, px, py) => {
       const out = [x0, y0];
@@ -344,7 +349,7 @@ export function strokes(
         const nx2 = x + bx * h;
         const ny2 = y + by * h;
         // its own line lies just behind it: test only once clear of that
-        const clear = Math.hypot(nx2 - x0, ny2 - y0) > dtest * 1.05;
+        const clear = Math.hypot(nx2 - x0, ny2 - y0) > dclear * 1.05;
         if (!inBox(nx2, ny2) || (clear && !hid.far(nx2, ny2, sepAt(nx2, ny2) * 0.55))) break;
         x = nx2;
         y = ny2;
@@ -386,7 +391,7 @@ export function strokes(
     let k = 0;
     while (a0 < total) {
       let a1 = a0 + dsep * (cut[0] + rand() * (cut[1] - cut[0]));
-      if (total - a1 < dsep * (sky ? cut[0] * 0.5 : 1.5)) a1 = total;
+      if (total - a1 < dsep * cut[0] * 0.5) a1 = total;
       const s0 = Math.max(0, a0);
       if (a1 - s0 >= dsep * 1.2) {
         const stroke = new Float32Array(P * 2);
