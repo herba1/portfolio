@@ -95,6 +95,7 @@ const DISC = 20; // px, the disc the coverage is sampled over
 const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the lens
 const ADAPT = 0.25; // stops the exposure gives back with the disc in clear view
 const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
+const EDGE_GLOW = 1; // every garment's clean edge, lit warm from the sun behind it
 const VS = 7; // floats per cloth vertex
 const MU_MIN = 0.15; // the view cosine's floor: edge-on is dense, not opaque
 // The dress's belt tie, in photograph px: a strip cut square at its end, so
@@ -212,6 +213,7 @@ uniform float uId;
 uniform vec3 uTau;
 uniform vec2 uBand; // mirror width past the left and right frame edge, 0 = not cut there
 uniform float uRim;  // how strongly this garment's edge catches the sun
+uniform float uEdge; // the thin warm rim on a garment's clean edge, 0 for the rope
 uniform float uOpen; // the share of the disc in clear view
 uniform int uPass;   // 0 the cloth, 1 the second layer of a sheer fold, multiplied in
 uniform vec4 uTie;   // a strip whose square-cut matte is rounded, in photograph px
@@ -314,14 +316,25 @@ void main() {
     o = vec4(mix(vec3(1.0), r, L.a), 1.0);
     return;
   }
+  vec2 ts = uSun - vPos;
+  float ds = length(ts);
+  vec2 dir = ts / max(ds, 1.0);
+  if (uEdge > 0.0) {
+    // The edge's own light. The bake took the photograph's pale ring off
+    // every matte (it read as a sticker's border once the cloth moved); what
+    // it stood for is the sun behind the line coming through the last fibres.
+    // So the pixel or two of edge that faces the sun warms: its own colour
+    // pushed toward amber (red up, blue down) with a touch of sunlight, never
+    // toward white, more the nearer the sun, wherever the cloth is now.
+    float thin = clamp(L.a - 0.5 * (alphaAt(s + dir * 1.5) + alphaAt(s + dir * 3.0)), 0.0, 1.0);
+    float w = thin * uEdge * (0.45 + 1.2 * exp(-ds / 420.0));
+    col = max(col + w * (col * vec3(0.5, 0.08, -0.3) + vec3(0.03, 0.011, 0.0)), 0.0);
+  }
   if (uRim * uOpen > 0.0) {
     // Rim: the edge that faces the sun, where the matte falls away towards
     // it, catches the light coming round it; strongest close to the disc.
-    vec2 ts = uSun - vPos;
-    float ds = length(ts);
-    vec2 dir = ts / max(ds, 1.0);
     float edge = clamp(L.a - 0.5 * (alphaAt(s + dir * 3.0) + alphaAt(s + dir * 9.0)), 0.0, 1.0);
-    col += vec3(1.0, 0.9, 0.74) * edge * exp(-ds / 380.0) * uOpen * uRim;
+    col += vec3(1.0, 0.84, 0.62) * edge * exp(-ds / 380.0) * uOpen * uRim;
   }
   col += veil(vPos);
   o = vec4(encode(col) * L.a, L.a);
@@ -754,6 +767,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       gl.uniform3f(clothP.u.uTau, r.tau[0], r.tau[1], r.tau[2]);
       gl.uniform2f(clothP.u.uBand, r.band[0], r.band[1]);
       gl.uniform1f(clothP.u.uRim, RIM[r.id] ?? 0);
+      gl.uniform1f(clothP.u.uEdge, r.id < 6 ? EDGE_GLOW : 0);
       if (r.id === 3) gl.uniform4f(clothP.u.uTie, TIE[0], TIE[1], TIE[2], TIE[3]);
       else gl.uniform4f(clothP.u.uTie, 0, 0, 0, 0);
       const draw = () => gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.start * 4);

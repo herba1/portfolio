@@ -20,6 +20,8 @@ What it does
  3. Colour unmixing: F = (I - (1 - a) P) / a against the filled plate P, so a
     garment edge carries no sky; F is push-pulled out under a = 0 so bilinear
     sampling never pulls in black.
+ 3b. Clean edges: the pale ring the backlit cloth carries against the sky is
+    eroded off the matte and the edge repainted from the fabric inward.
  4. Sheer fabric: the dress is see-through. Its low frequencies are regressed on
     the blurred plate behind it, O = A + tau * B, per channel; the layer stores A,
     the runtime adds tau * B at wherever the cloth is now. So the sun spot that
@@ -32,6 +34,7 @@ import json, os, sys
 import numpy as np
 from PIL import Image
 import cv2
+from scipy import ndimage
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import kit  # noqa: E402
@@ -223,6 +226,89 @@ for g in meta["garments"]:
     if max(g["tau"]) > 0:
         sel = ids == g["id"]
         F[sel] = np.clip(F[sel] - np.array(g["tau"]) * Bblur[sel], 0, 1)
+
+# ---- 3b. clean matte edges ---------------------------------------------------------
+# Against the sky every garment carries a pale ring a pixel or two wide: the
+# backlit fuzz of the cloth and the lens's glow round it, which the matte took
+# in as fabric and the unmixing cannot remove (it is brighter than the sky, so
+# it is no mix of sky and cloth). Cut out and moved, that ring reads as a
+# sticker's white border. Each edge pixel is held against the solid fabric
+# nearest it inward (in a cord too thin to have any, the darkest of the cord
+# round it): where it is paler, it is the ring. There the matte is eroded about
+# 1.5 px against the sky only (another layer, or the frame, counts as solid, so
+# no seam opens between two garments; a thin part by 1 px) and the colour is
+# replaced by that fabric's. A real dark edge (a rolled hem, a cord) is not
+# paler than the cloth behind it, so it stays. The runtime lights the clean
+# edge as a thin warm rim where it faces the sun.
+EDGE_BAND = 4.0   # px in from the matte's half-alpha line that can carry the ring
+EDGE_REACH = 7.0  # px; past this from solid fabric, a thin part: its darkest is used
+alpha_mesh = alpha.copy()  # the cloth's mass and wind area stay the photograph's
+# Sky the matte took in whole (between the pom-poms' cords): a patch of the
+# layer that is the plate's own colour carries a slab of sky with the cloth.
+# Out it goes, and a pixel round it fades by how far its colour is from the
+# sky's, so the cord it ran along keeps a soft edge.
+skyd = np.abs(F - plate).max(-1)
+skylike = (ids > 0) & (ids < 6) & (alpha > 0.5) & (skyd < 0.08)
+n_, lab_, st_, _ = cv2.connectedComponentsWithStats(skylike.astype(np.uint8))
+skylike = np.isin(lab_, np.nonzero(st_[1:, 4] >= 30)[0] + 1)
+near_sky = kit.dilate(skylike.astype(np.float32), 1) & (ids > 0) & (ids < 6)
+alpha = np.where(near_sky, alpha * kit.smoothstep(0.05, 0.2, skyd), alpha).astype(np.float32)
+print("edge: sky taken out of the mattes", int(skylike.sum()), "px")
+Wl = np.array([0.2126, 0.7152, 0.0722], np.float32)
+lum = F @ Wl
+cross = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+e1 = cv2.erode(alpha, cross, borderType=cv2.BORDER_REPLICATE)
+e2 = cv2.erode(e1, cross, borderType=cv2.BORDER_REPLICATE)
+survive = cv2.dilate(0.5 * (e1 + e2), kit.disk(3).astype(np.uint8))
+thick = kit.smoothstep(0.5, 0.9, survive)
+eroded = np.minimum(alpha, thick * 0.5 * (e1 + e2) + (1 - thick) * e1)
+inside = ndimage.distance_transform_edt(alpha >= 0.5)  # px to the nearest sky
+garm = (ids > 0) & (ids < 6)
+gate = np.zeros((H, Wd), np.float32)  # how much paler than its fabric an edge pixel is
+Cin = F.copy()
+sky_l = plate @ Wl
+# the darkest pixel of the same layer within 2 px that lies deeper inside: a
+# ring is paler than the cloth it wraps, even where that cloth is a dark hem
+# line or a cord with no solid interior at all
+deep_l = np.full((H, Wd), 9.0, np.float32)
+deep_c = F.copy()
+pad = 2
+idp = np.pad(ids, pad, mode="edge")
+lp = np.pad(np.where(alpha > 0.5, lum, 9.0), pad, mode="edge")
+ip = np.pad(inside, pad, mode="edge")
+Fp = np.pad(F, ((pad, pad), (pad, pad), (0, 0)), mode="edge")
+for dy in range(-pad, pad + 1):
+    for dx in range(-pad, pad + 1):
+        if dx * dx + dy * dy > pad * pad + 1 or (dx == 0 and dy == 0):
+            continue
+        sl = (slice(pad + dy, pad + dy + H), slice(pad + dx, pad + dx + Wd))
+        ok = (idp[sl] == ids) & (ip[sl] > inside + 0.5) & (lp[sl] < deep_l)
+        deep_l = np.where(ok, lp[sl], deep_l)
+        deep_c = np.where(ok[..., None], Fp[sl], deep_c)
+for g in meta["garments"]:
+    own = ids == g["id"]
+    band = own & (alpha > 0) & (inside < EDGE_BAND)
+    solid = own & (inside >= EDGE_BAND)
+    c = deep_c
+    if solid.any():
+        dn, (iy, ix) = ndimage.distance_transform_edt(~solid, return_indices=True)
+        # a pixel's worth of smoothing along the edge, so the repaint has no streaks
+        sw = kit.blur(solid.astype(np.float32), 1.0)
+        near = np.where(sw[..., None] > 0.2, kit.blur(F * solid[..., None], 1.0) / np.maximum(sw, 1e-4)[..., None], F[iy, ix])
+        use = (dn <= EDGE_REACH) & ((near @ Wl) <= deep_l + 0.02)
+        c = np.where(use[..., None], near, deep_c)
+    has = band & ((c @ Wl) < 8.0)
+    Cin[has] = c[has]
+    # paler than the cloth inward, and paler than the sky: a dark edge is no ring
+    pale = kit.smoothstep(0.03, 0.12, lum - c @ Wl) * kit.smoothstep(0.0, 0.08, lum - sky_l)
+    gate[has] = pale[has]
+# erode where the ring is, and a pixel round it, so the ring's outer half goes too
+S = np.where(garm & (inside < EDGE_BAND + 1), np.maximum(gate, cv2.dilate(gate, cross)), 0)
+alpha = (alpha * (1 - S) + eroded * S).astype(np.float32)
+alpha = np.where(alpha < 0.015, 0, alpha)
+F = F * (1 - gate[..., None]) + Cin * gate[..., None]
+print("edge: ring", int((gate > 0.5).sum()), "px; alpha", round(float(alpha_mesh.sum())), "->", round(float(alpha.sum())))
+
 w = (alpha > 0.02).astype(np.float32)
 F = np.where(w[..., None] > 0, F, kit.pushpull(F, w))
 ids_bleed = cv2.dilate(ids, np.ones((5, 5), np.uint8))
@@ -242,7 +328,7 @@ print("recomposite mean abs error (8-bit levels):", round(float(err), 2))
 # ---- 5. mesh cells -------------------------------------------------------------
 for g in meta["garments"]:
     gid = g["id"]
-    a = np.where(ids == gid, alpha, 0)
+    a = np.where(ids == gid, alpha_mesh, 0)
     x0, y0, x1, y1 = g["bbox"]
     gx0, gy0 = x0 - 6, y0 - 6
     nx = int(np.ceil((x1 + 6 - gx0) / CELL))
