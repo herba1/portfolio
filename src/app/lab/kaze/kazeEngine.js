@@ -12,9 +12,10 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 // a gust: a small stable-fluids velocity field (wind.js) carries it on through
 // the stalks, each one a damped spring that lies over under it and swings back
 // with a little overshoot. The grass is geometry, drawn opaque with 4x MSAA:
-// three culms with seed heads at your shoulder stand sharp and near-black
-// against the sky, the rest sits a touch diffused behind them, and the only
-// warm in it is the thin halation ring where a blade crosses the sun.
+// one tall culm with a seed head at your shoulder stands sharp and near-black
+// against the cloud, and the rest sits a touch diffused behind it, backlit:
+// dark cores, a warm yellow-green rim toward the sun, paler and bluer with
+// distance; where a blade crosses the sun, a thin halation ring.
 //
 // The sky behind (sky.webp) is a real towering cumulus cut from an HDRI
 // looking up (tools/depth/bakes/kaze/sky_hdri.py): a cauliflower cumulus
@@ -56,7 +57,7 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uSky;    // the sky
 uniform sampler2D uRest;   // the grass behind, half res, premultiplied linear
-uniform sampler2D uNear;   // the anchors, full res, premultiplied linear
+uniform sampler2D uNear;   // the anchor, full res, premultiplied linear
 uniform float uCloudT;     // cloud flow clock
 uniform vec2 uCloudV;      // cloud drift at the top of the frame, uv / s
 uniform float uExpo;
@@ -178,7 +179,7 @@ void main() {
   vec3 col = sky * (1.0 - gr.a) + gr.rgb;
   col = col * (1.0 - gn.a) + gn.rgb;
   float a = 1.0 - (1.0 - gr.a) * (1.0 - gn.a);
-  // Halation, the only warm in the grass: where a dark blade crosses the sun,
+  // Halation, the only orange in the grass: where a dark blade crosses the sun,
   // the sun's light bounced back off the film base spills a few pixels in
   // over the dark edge of the blade as a thin red-orange ring (the coverage
   // here less the coverage a few pixels round: only the blade's rim), and
@@ -394,6 +395,7 @@ export async function createKaze(host) {
     ["aCol", 3, 9],
     ["aK", 3, 12],
     ["aB", 3, 15],
+    ["aD", 1, 18],
   ];
   const layerVao = (geo) => {
     const vao = gl.createVertexArray();
@@ -438,7 +440,7 @@ export async function createKaze(host) {
     freeTarget(gl, nearT);
     freeTarget(gl, restT);
     cam = camera(W, H);
-    // the anchors at full resolution, the rest at half (its diffusion)
+    // the anchor at full resolution, the rest at half (its diffusion)
     nearT = msaaTarget(gl, L.rw, L.rh, floatOk);
     if (!nearT.ok) {
       freeTarget(gl, nearT);

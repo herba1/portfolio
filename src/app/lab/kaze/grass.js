@@ -13,9 +13,13 @@
 // into 4x MSAA targets, premultiplied, so every edge is the blade's own
 // coverage of the pixel: no matte, no alpha test, no fringe of another colour.
 //
-// Two layers: the anchors (three culms with seed heads at your shoulder,
+// Two layers: the anchor (one tall culm with a seed head at your shoulder,
 // near-black olive, full resolution, sharp) and the rest (half resolution, so
-// slightly diffused behind them).
+// slightly diffused behind it), lit against the light: a dark core, a warm
+// yellow-green rim on the side toward the sun, and the sky's value let in,
+// more with distance, so the field falls back paler and bluer behind the one
+// silhouette. The low leaves across the middle are thinned, so the
+// cumulus base stands clear behind the anchor.
 
 const DEG = Math.PI / 180;
 
@@ -114,8 +118,9 @@ const PROFILE = {
 };
 
 // Vertex layout: P(3) S(3) tip(3) col(3) lever, trans, phase, then the
-// shading frame: along (0 root .. 1 tip), across (-1 .. 1), the plant's seed.
-export const STRIDE = 18;
+// shading frame: along (0 root .. 1 tip), across (-1 .. 1), the plant's seed,
+// and its depth (0 at your shoulder .. 1 the field a few paces off).
+export const STRIDE = 19;
 
 // A seed in 0..1 from a plant's phase, so every ribbon of one plant (stem,
 // leaves, panicle) shares its hue and value without drawing on the layout's
@@ -129,6 +134,7 @@ function builder(cam) {
   const v = [];
   const idx = [];
   let nv = 0;
+  const st = { depth: 0 };
   // ribbon: points + tangents, half width per point, the wind's reference
   // point (the culm or blade tip) and the lever per point (metres of tip
   // travel per unit of bend), colours base -> tip; the plant's seed and where
@@ -145,7 +151,7 @@ function builder(cam) {
       const lv = lever(s);
       const al = along(s);
       for (const sg of [-1, 1]) {
-        v.push(P[0], P[1], P[2], side[0] * w * sg, side[1] * w * sg, side[2] * w * sg, tip[0], tip[1], tip[2], col[0], col[1], col[2], lv, trans, phase, al, sg, seed);
+        v.push(P[0], P[1], P[2], side[0] * w * sg, side[1] * w * sg, side[2] * w * sg, tip[0], tip[1], tip[2], col[0], col[1], col[2], lv, trans, phase, al, sg, seed, st.depth);
       }
       if (i < n - 1) {
         const a = nv + i * 2;
@@ -154,7 +160,20 @@ function builder(cam) {
     }
     nv += n * 2;
   };
-  return { ribbon, out: () => ({ verts: new Float32Array(v), index: new Uint32Array(idx), count: idx.length }) };
+  return { ribbon, st, raw: () => ({ v, idx, nv }), out: () => ({ verts: new Float32Array(v), index: new Uint32Array(idx), count: idx.length }) };
+}
+
+// One layer from two builders, the second drawn over the first.
+function merged(a, b) {
+  const A = a.raw();
+  const B = b.raw();
+  const index = new Uint32Array(A.idx.length + B.idx.length);
+  index.set(A.idx);
+  for (let i = 0; i < B.idx.length; i++) index[A.idx.length + i] = B.idx[i] + A.nv;
+  const verts = new Float32Array(A.v.length + B.v.length);
+  verts.set(A.v);
+  verts.set(B.v, A.v.length);
+  return { verts, index, count: index.length };
 }
 
 // Wind: the tip of a stalk of length L travels AMP * L * s^2 per unit of bend.
@@ -235,36 +254,56 @@ export function buildGrass() {
   const R = rng(7);
   const near = builder(cam);
   const rest = builder(cam);
+  // the two brome culms at your shoulder beside the hero, drawn with the
+  // rest but over it (they are the nearest of it)
+  const shoulder = builder(cam);
+  // what the thinning leaves out: built and thrown away, so the layout's
+  // random stream, and with it every blade that stays, is unchanged
+  const skip = builder(cam);
   const at = (D, phi) => [D * Math.sin(phi * DEG), D * Math.cos(phi * DEG), 0];
 
-  // ---- the anchors: three brome culms at your shoulder ----
-  // All nod downwind (the breeze runs to +x, az 70-120), at staggered lengths,
-  // so their heads hang at three heights and fan one way, never meeting.
+  // ---- one anchor, and two culms beside it ----
+  // All three nod downwind (the breeze runs to +x, az 70-120), at staggered
+  // lengths, so their heads hang at three heights and fan one way, never
+  // meeting. Only the tall right one is the anchor: full resolution, sharp,
+  // near-black against the cumulus. The other two are grass against the
+  // light like the field: a dark core, a warm yellow-green rim on the side
+  // toward the sun, and the sky's value let in, half resolution, so there is
+  // one silhouette against one cloud and the rest frames it.
   const ink = lin(0x1c2414);
   const inkTip = lin(0x232d18);
   const anchors = [
     { D: 0.17, phi: -40, L: 0.92, az: 70, lean: 0.07, nod: 1.1, leaves: 0 },
     { D: 0.22, phi: -16, L: 0.68, az: 80, lean: 0.05, nod: 0.7, leaves: 0 },
-    { D: 0.2, phi: 30, L: 1.0, az: 120, lean: 0.06, nod: 1.2, leaves: 0 },
+    { D: 0.2, phi: 30, L: 1.0, az: 120, lean: 0.06, nod: 1.2, leaves: 0, hero: 1 },
   ];
   for (const a of anchors) {
-    culmWithHead(near, R, {
+    const lit = !a.hero;
+    culmWithHead(lit ? shoulder : near, R, {
       root: at(a.D, a.phi),
       az: a.az * DEG,
       lean: a.lean,
       nod: a.nod,
       L: a.L,
-      w0: 0.0017,
-      cStem: ink,
-      cTip: inkTip,
-      cHead: ink,
-      trans: 0,
+      w0: lit ? 0.0015 : 0.0017,
+      cStem: lit ? lin(0x2c3a1a) : ink,
+      cTip: lit ? lin(0x4a5a26) : inkTip,
+      cHead: lit ? lin(0x3c4820) : ink,
+      trans: lit ? 1 : 0,
       segs: 72,
       leaves: a.leaves,
       whorls: 6,
-      big: 1.25,
+      big: lit ? 1.1 : 1.25,
     });
   }
+  // where the band of low leaves is thinned, across the middle of a wide
+  // frame, so the cumulus base and its blue underside stand clear
+  const camW = camera(16, 10);
+  const thin = (x) => x > -0.72 && x < 0.92;
+  const hash = (i) => {
+    const h = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
 
   // ---- the rest, far to near (painter's order), half resolution ----
   const items = [];
@@ -298,6 +337,7 @@ export function buildGrass() {
   }
   // one that crosses the sun, in from the left edge, for the halation to catch
   items.push({ kind: "culm", D: 0.32, phi: -60.5, L: 0.95, lean: 0.0 });
+  items.forEach((it, i) => (it.n = i));
   items.sort((p, q) => q.D - p.D);
   for (const it of items) {
     const root = at(it.D, it.phi);
@@ -305,13 +345,18 @@ export function buildGrass() {
     // depth tone: the nearer stalks stand dark against the sky, the field
     // behind is a lighter, greyer olive (more sky between you and it)
     const far = it.mat ? 0.15 : it.field ? 0.85 : Math.min(1, Math.max(0, (it.D - 0.45) / 2.3));
+    // half the low leaves in the middle of the frame go: the ones that would
+    // stand in front of the cloud's base as a curtain
+    const mid = project(camW, add(root, [0, 0, it.L * 0.6]));
+    const b = it.kind === "leaf" && thin(mid[0]) && mid[1] < 0.3 && hash(it.n) < 0.6 ? skip : rest;
+    b.st.depth = it.kind === "culm" && it.D < 0.4 ? 0.05 : it.mat ? 0.3 : Math.min(1, Math.max(0, (it.D - 0.4) / 2.6) * (it.field ? 1.1 : 1));
     const vary = 0.82 + 0.36 * R();
     const dry = R() < 0.12 ? 0.5 : 0;
     const base = mix3(mix3(lin(0x24301a), lin(0x3a4824), far), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
     const tipC = mix3(mix3(lin(0x3c4b20), lin(0x67763c), far), lin(0x7a7434), dry).map((c) => c * vary);
     const segs = Math.round(14 + 26 * (1 - far));
     if (it.kind === "culm") {
-      culmWithHead(rest, R, {
+      culmWithHead(b, R, {
         root,
         az: R() * 6.283,
         lean: it.lean ?? 0.04 + 0.12 * R(),
@@ -327,7 +372,7 @@ export function buildGrass() {
         whorls: 3 + Math.floor(R() * 2),
       });
     } else {
-      leaf(rest, R, {
+      leaf(b, R, {
         root,
         az: R() * 6.283,
         lean: it.lean ?? 0.05 + 0.3 * R(),
@@ -341,7 +386,7 @@ export function buildGrass() {
       });
     }
   }
-  return { near: near.out(), rest: rest.out() };
+  return { near: near.out(), rest: merged(rest, shoulder) };
 }
 
 export const GRASS_VERT = `#version 300 es
@@ -351,6 +396,7 @@ in vec3 aTip;    // the stalk's tip: where it reads the wind
 in vec3 aCol;    // linear colour
 in vec3 aK;      // lever (m of travel per unit bend), translucency, phase
 in vec3 aB;      // along (0 root .. 1 tip), across (-1 .. 1), the plant's seed
+in float aD;     // depth: 0 at your shoulder .. 1 the field a few paces off
 uniform vec3 uCam;
 uniform vec3 uR;
 uniform vec3 uU;
@@ -369,6 +415,7 @@ out vec2 vNdc;
 out float vAlong;
 out float vAcross;
 out float vSunward;
+out float vDepth;
 
 vec2 proj(vec3 P) {
   vec3 d = normalize(P - uCam);
@@ -422,6 +469,7 @@ void main() {
   vTrans = aK.y;
   vAlong = aB.x;
   vAcross = aB.y;
+  vDepth = aD;
   // Which edge faces the sun: this vertex's offset from the centreline
   // against the way to the sun, on screen. The pair's offsets are opposite,
   // so across the width it runs from +1 on the sunward edge to -1, faded
@@ -441,6 +489,7 @@ in vec2 vNdc;
 in float vAlong;
 in float vAcross;
 in float vSunward;
+in float vDepth;
 uniform vec2 uSun;        // the sun on screen, NDC
 uniform float uAspect;
 uniform vec4 uView;       // image uv on screen
@@ -458,29 +507,51 @@ void main() {
   float lift = mix(0.55, 1.15, smoothstep(0.0, 1.0, pow(s, 0.8)));
   vec3 c = vCol * lift;
   float x = clamp(vAcross, -1.0, 1.0);
+  float lit = clamp(vTrans, 0.0, 1.0);
 
   // What is behind the leaf: the sky photograph at this point, softened.
   // Lit cloud is what shines through; open blue (no red in it) barely does.
   vec2 uv = uView.xy + vec2(vNdc.x * 0.5 + 0.5, 0.5 - vNdc.y * 0.5) * uView.zw;
   vec3 sky = toLin(textureLod(uSky, uv, uSkyLod).rgb);
+  vec3 skyFar = toLin(textureLod(uSky, uv, uSkyLod + 2.0).rgb);
   float cloud = smoothstep(0.12, 0.7, min(sky.r, sky.g));
   vec2 d = (vNdc - uSun) * vec2(uAspect, 1.0);
   float sn = exp(-dot(d, d) / 0.35);
   float behind = max(cloud, 0.45 * sn);
   // Transmission: a thin blade with bright sky behind glows a translucent
   // yellow-green (#9DB04A), stronger toward the thin tip, less down the
-  // thicker midrib. The anchors carry none and stay ink.
+  // thicker midrib. Held back in the body (a leaf against the light is dark
+  // through its middle) and given to the rim below instead.
   const vec3 TRANS = vec3(0.337, 0.431, 0.069);
-  float tw = vTrans * behind * mix(0.35, 1.0, s);
-  c = mix(c, TRANS * mix(0.55, 1.0, s), 0.72 * tw);
+  float tw = lit * behind * mix(0.35, 1.0, s);
+  c = mix(c, TRANS * mix(0.55, 1.0, s), 0.45 * tw);
   // Across, over both: a shallow trough read as a cylinder, the edges about
   // a quarter darker, and a soft paler midrib down the centre.
   float cyl = mix(0.75, 1.0, sqrt(max(0.0, 1.0 - x * x)));
   float rib = 1.0 + 0.12 * exp(-x * x / 0.02);
   c *= cyl * rib;
-  // The sun-facing edge: a thin brighter rim where the light grazes through
-  // the leaf's margin, strongest with bright sky behind.
-  float rim = smoothstep(0.5, 0.92, vSunward);
-  c += TRANS * rim * (0.08 + 0.34 * behind) * (0.04 + 0.96 * vTrans) * mix(0.5, 1.0, s);
-  outColor = vec4(c * vA, vA);
+  // Backlit: the core darkens, toward the sun-facing half and away from it
+  // alike, so the light through the margin is what carries the blade.
+  c *= mix(1.0, 0.72, lit * exp(-x * x / 0.18));
+  // The value let in toward the sky: the air between you and a blade, and
+  // the skylight through it. A blade at your shoulder takes a little of
+  // what is behind it and stays green; the field a few paces off takes most
+  // of it, paler and bluer, so it falls back behind the anchor.
+  float dep = clamp(vDepth, 0.0, 1.0);
+  float air = lit * (0.08 + 0.6 * smoothstep(0.0, 1.0, dep));
+  vec3 tint = mix(vec3(0.78, 1.0, 0.5), vec3(0.94, 0.98, 1.0), smoothstep(0.2, 0.9, dep));
+  c = mix(c, skyFar * tint * mix(0.55, 0.84, dep), air);
+  // The sun-facing edge: a thin warm yellow-green rim where the light
+  // grazes through the leaf's margin. Against the light it is always there
+  // (the sun is in front of you, up to the left), brighter toward the sun
+  // and with bright cloud behind, warmer than the transmission in the body;
+  // it is the light coming through to you, so the air dims it only a little.
+  const vec3 RIM = vec3(0.62, 0.6, 0.1);
+  float rim = smoothstep(0.3, 0.85, vSunward);
+  float rimK = (0.3 + 0.6 * sn + 0.45 * behind) * mix(0.55, 1.0, s) * (1.0 - 0.45 * dep);
+  c += RIM * rim * rimK * (0.04 + 0.96 * lit);
+  // and softer with distance: the far blades give up some coverage, so the
+  // half-resolution layer reads as a haze of grass rather than flat cards
+  float cov = vA * mix(1.0, 0.5, lit * smoothstep(0.25, 1.0, dep));
+  outColor = vec4(c * cov, cov);
 }`;
