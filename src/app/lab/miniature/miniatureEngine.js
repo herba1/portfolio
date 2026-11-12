@@ -30,9 +30,12 @@ import { createStage, clamp } from "../_kit/stage";
 //           the foreground goes over, a depth-masked summer film sky grade
 //           (deep blue at the top to an open haze line, real clouds kept and
 //           toned), with a sharp silhouette's edge pixels unmixed into their
-//           pine and their sky so only the sky share is graded; then a gentle contrast lift, a print toe that lifts black
-//           to 40/255, a thin amber halation ring round the brightest stone
-//           and a print shoulder that stops short of white.
+//           pine and their sky so only the sky share is graded; then a
+//           gentle contrast lift and a print toe that lifts black to 40/255.
+//   film    after the composite (FILM_*): Pro-Mist diffusion of the
+//           highlights at 1/8 and 1/32, a thin red-orange halation ring round
+//           the brightest stone and the clouds, a print shoulder that stops
+//           short of white, and luminance-driven grain at 24 fps.
 
 const COLOR_SRC = "/lab/miniature/city.webp";
 const DEPTH_SRC = "/lab/miniature/depth.png";
@@ -326,7 +329,6 @@ uniform vec2 uCanvas;
 uniform vec3 uGround;
 uniform vec2 uSrc;      // photograph (and refined depth) size in pixels
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 const vec3 HILLS = vec3(0.4, 0.45, 0.51);     // far hills along the horizon
 const vec3 FOLIAGE = vec3(0.25, 0.26, 0.22);  // a typical pine, light and shadow
@@ -400,15 +402,6 @@ vec3 gradeSky(vec3 col, float y, float far, vec3 ref, float clear, float up) {
   vec3 cloudCol = mix(skyFilm(y), white, lit);
   return mix(graded, cloudCol, cloud * sky);
 }
-// Highlight on the stone, for halation: the image as the composite shows it
-// (sharp or through the blur buffer by its own CoC), sky and haze left out.
-float stoneLight(vec2 q) {
-  float d;
-  float s = cocAt(q, d);
-  vec3 c = mix(textureLod(uColor, q, 1.0).rgb, texture(uBlur, q).rgb, smoothstep(2.2, 5.0, s));
-  return smoothstep(0.64, 0.86, luma(c)) * smoothstep(0.66, 0.7, d);
-}
-
 void main() {
   vec2 frag = vec2(gl_FragCoord.x, uCanvas.y - gl_FragCoord.y);
   vec2 uv = (frag - uRect.xy) / uRect.zw;
@@ -558,22 +551,192 @@ void main() {
   // where they were, the way a print's paper never goes fully black.
   vec3 inv = 1.0 - col;
   col += (40.0 / 255.0) * inv * inv * inv * inv * inv * inv;
-  // Halation: light from the brightest stone scattered back through the film
-  // base, a thin amber ring about 0.6% of the print's width round it and
-  // none on the stone itself.
-  vec2 ringUv = vec2(0.006, 0.006 * uRect.z / uRect.w);
-  float halo = 0.0;
+  // The film passes take it from here: diffusion, halation, the shoulder and
+  // the grain (FILM_*).
+  outColor = vec4(col, 1.0);
+}`;
+
+// The film, after the composite. The composite is the light that reached the
+// emulsion; these passes are what the filter and the stock did with it.
+//
+//   mist     a Pro-Mist: the highlights (luminance above about 0.7, soft
+//            knee) at 1/8 and 1/32 of the device resolution, each blurred,
+//            added back warm-neutral at 8%, so sunlit travertine, the
+//            obelisk's base and the cloud tops bleed softly into what is
+//            beside them. Recomputed only when the image changes.
+//   halation light through the emulsion bounced off the film base and back
+//            through the red layer: a 2-4 device pixel red-orange ring round
+//            the brightest stone and the cloud edges, up to 15%, kept off the
+//            highlight itself so it only shows where the bright meets the
+//            dark. Then the print shoulder, so nothing reaches white.
+//   grain    at 24 frames a second (held two or three display frames at
+//            60 Hz), clumped at about 1.25 device pixels, driven by
+//            luminance: about 2% in the midtones, falling off into the
+//            shadows and the highlights. Only this pass runs between changes.
+const MIST = 0.08; // share of the blurred highlights added back
+const MIST_TINT = [1.0, 0.95, 0.88]; // warm neutral
+const HALATION = 0.15; // peak strength of the ring
+const HALATION_TINT = [1.0, 0.4, 0.14]; // red-orange
+const GRAIN = 0.021; // grain sd in the midtones, of full scale
+const GRAIN_SIZE = 1.25; // device px
+const GRAIN_FPS = 24;
+
+const FILM_COMMON = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform vec4 uRectGl;  // print rect in device px, GL orientation (x, y, w, h)
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+float inPrint(vec2 frag) {
+  vec2 q = (frag - uRectGl.xy) / uRectGl.zw;
+  return step(0.0, q.x) * step(0.0, q.y) * step(q.x, 1.0) * step(q.y, 1.0);
+}
+`;
+
+// Highlights at 1/8: sixteen bilinear taps, each the mean of a 2 x 2 block,
+// over the 8 x 8 device pixels this texel covers. The knee is applied per
+// tap, before the mean, so a bright figure in a grey square still counts.
+const FILM_BRIGHT = `${FILM_COMMON}
+uniform sampler2D uScene;
+uniform vec2 uCanvas;
+void main() {
+  vec2 o = floor(gl_FragCoord.xy) * 8.0;
+  vec4 acc = vec4(0.0);
+  for (int j = 0; j < 4; j++) {
+    for (int i = 0; i < 4; i++) {
+      vec2 f = o + vec2(1.0 + 2.0 * float(i), 1.0 + 2.0 * float(j));
+      vec3 c = texture(uScene, f / uCanvas).rgb;
+      float k = smoothstep(0.66, 0.84, luma(c)) * inPrint(f);
+      acc += vec4(c, 1.0) * k;
+    }
+  }
+  // rgb: the light that diffuses; a: how much of the block is hot, for the
+  // soft halation round a defocused cloud.
+  outColor = acc / 16.0;
+}`;
+
+// 1/8 to 1/32: four bilinear taps over the 4 x 4 block.
+const FILM_DOWN = `${FILM_COMMON}
+uniform sampler2D uSrc;
+void main() {
+  vec2 sz = vec2(textureSize(uSrc, 0));
+  vec2 o = floor(gl_FragCoord.xy) * 4.0;
+  vec4 c = texture(uSrc, (o + vec2(1.0, 1.0)) / sz) + texture(uSrc, (o + vec2(3.0, 1.0)) / sz)
+         + texture(uSrc, (o + vec2(1.0, 3.0)) / sz) + texture(uSrc, (o + vec2(3.0, 3.0)) / sz);
+  outColor = c * 0.25;
+}`;
+
+// Separable gaussian, sigma 2 texels, nine taps.
+const FILM_BLUR = `${FILM_COMMON}
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+void main() {
+  vec2 sz = vec2(textureSize(uSrc, 0));
+  vec2 st = gl_FragCoord.xy / sz;
+  vec4 c = vec4(0.0);
+  float w = 0.0;
+  for (int i = -4; i <= 4; i++) {
+    float k = exp(-float(i * i) / 8.0);
+    c += texture(uSrc, st + uDir * float(i) / sz) * k;
+    w += k;
+  }
+  outColor = c / w;
+}`;
+
+const FILM_FINISH = `${FILM_COMMON}
+uniform sampler2D uScene;
+uniform sampler2D uMist8;
+uniform sampler2D uMist32;
+uniform vec2 uCanvas;
+uniform float uMist;
+uniform vec3 uMistTint;
+uniform float uHal;
+uniform vec3 uHalTint;
+${COMMON.slice(COMMON.indexOf("vec3 shoulder"))}
+// Upsample a small, blurred buffer: four bilinear taps half a texel apart,
+// so the 1/32 veil has no diamond lattice in it.
+vec4 up(sampler2D s, vec2 st) {
+  vec2 h = 0.5 / vec2(textureSize(s, 0));
+  return 0.25 * (texture(s, st + vec2(-h.x, -h.y)) + texture(s, st + vec2(h.x, -h.y))
+               + texture(s, st + vec2(-h.x, h.y)) + texture(s, st + vec2(h.x, h.y)));
+}
+float hot(vec2 f) {
+  return smoothstep(0.66, 0.84, luma(texture(uScene, f / uCanvas).rgb)) * inPrint(f);
+}
+void main() {
+  vec2 f = gl_FragCoord.xy;
+  vec2 st = f / uCanvas;
+  vec3 col = texture(uScene, st).rgb;
+  if (inPrint(f) < 0.5) {
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  // Pro-Mist: a tight glow and a broad veil.
+  vec4 m8 = up(uMist8, st);
+  vec3 mist = 0.6 * m8.rgb + 0.4 * up(uMist32, st).rgb;
+  col += uMistTint * mist * uMist;
+  // Halation: how much of a 1.5-3.5 px ring round this pixel is hot, less
+  // how hot the pixel is itself. Half the ring hot is a pixel right on the
+  // dark side of the edge: full strength there, fading out over the ring.
+  float ring = 0.0;
+  float rw = 0.0;
   for (int i = 0; i < 24; i++) {
     float fi = float(i);
-    float r = 0.4 + 0.6 * float(i / 8) / 2.0;
-    float a = fi * 0.785398 + float(i / 8) * 0.26;
-    halo += stoneLight(uv + vec2(cos(a), sin(a)) * r * ringUv);
+    float band = float(i / 8);
+    float r = 1.5 + band;
+    float a = fi * 0.785398 + band * 0.2618;
+    float w = 1.0 - band * 0.25;
+    ring += hot(f + vec2(cos(a), sin(a)) * r) * w;
+    rw += w;
   }
-  halo = min(halo / 24.0 * 2.5, 1.0) * (1.0 - stoneLight(uv));
-  col += vec3(1.0, 0.62, 0.28) * 0.08 * halo;
-  // The shoulder comes last so nothing on the print reaches white.
-  col = shoulder(col);
-  col += (hash(frag) - 0.5) / 255.0;
+  float self = hot(f);
+  float halo = clamp((ring / rw - self) * 2.6, 0.0, 1.0);
+  // A defocused cloud has no edge for a 3 px ring to find: its ramp is tens
+  // of pixels long. There the hot share at 1/8 (blurred about 16 px) stands
+  // in, so the sky just outside the cloud's foot takes a soft warm fringe.
+  halo = max(halo, clamp((m8.a - self) * 1.6, 0.0, 0.7));
+  // Strongest against shadow: the darker this side, the more the red shows.
+  halo *= 1.0 - 0.4 * smoothstep(0.45, 0.85, luma(col));
+  col += uHalTint * uHal * halo;
+  outColor = vec4(shoulder(col), 1.0);
+}`;
+
+const FILM_GRAIN = `${FILM_COMMON}
+uniform sampler2D uFilm;
+uniform vec2 uCanvas;
+uniform float uSeed;
+uniform float uGrain;
+uniform float uSize;
+float h(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+// Value noise: a soft clump of about one cell, mean zero.
+float vn(vec2 g) {
+  vec2 i = floor(g);
+  vec2 t = fract(g);
+  t = t * t * (3.0 - 2.0 * t);
+  return mix(mix(h(i), h(i + vec2(1.0, 0.0)), t.x), mix(h(i + vec2(0.0, 1.0)), h(i + 1.0), t.x), t.y) - 0.5;
+}
+void main() {
+  vec2 f = gl_FragCoord.xy;
+  vec3 col = texelFetch(uFilm, ivec2(f), 0).rgb;
+  if (inPrint(f) < 0.5) {
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  vec2 o = vec2(h(vec2(uSeed, 7.0)), h(vec2(3.0, uSeed))) * 4096.0;
+  vec2 g = f / uSize + o;
+  // Two lattices, one turned, so the clumps sit on no grid; the pair has an
+  // sd of about 0.28, scaled to one.
+  mat2 turn = mat2(0.8, 0.6, -0.6, 0.8);
+  float n = (vn(g) + vn(turn * g * 0.9 + 91.7)) * 3.6;
+  // A little dye-cloud colour in it: each layer has its own grain.
+  vec3 c = vec3(vn(g * 0.8 + 17.3), vn(g * 0.8 + 53.1), vn(g * 0.8 + 211.9)) * 2.4;
+  float l = luma(col);
+  float mid = pow(clamp(4.0 * l * (1.0 - l), 0.0, 1.0), 1.5);
+  col += uGrain * mid * (n + 0.35 * c);
   outColor = vec4(col, 1.0);
 }`;
 
@@ -765,6 +928,32 @@ export async function createMiniature(host) {
   const dilate = compile(gl, VERT, DILATE);
   const gather = compile(gl, VERT, GATHER);
   const composite = compile(gl, VERT, COMPOSITE);
+  const filmBright = compile(gl, VERT, FILM_BRIGHT);
+  const filmDown = compile(gl, VERT, FILM_DOWN);
+  const filmBlur = compile(gl, VERT, FILM_BLUR);
+  const filmFinish = compile(gl, VERT, FILM_FINISH);
+  const filmGrain = compile(gl, VERT, FILM_GRAIN);
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+  // Film targets, device resolution: the composite (half float, so the light
+  // above the shoulder survives into the mist), the developed print, and the
+  // mist's 1/8 and 1/32 buffers with a ping-pong partner each.
+  const film = {};
+  const filmTarget = (key, w, h, hdr) => {
+    const old = film[key];
+    if (old) {
+      gl.deleteTexture(old.tex);
+      gl.deleteFramebuffer(old.fbo);
+    }
+    const tex = hdr && float ? target(gl, w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT) : target(gl, w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    film[key] = { tex, fbo, w, h };
+  };
 
   const blurTex = gl.createTexture();
   const nearTex = gl.createTexture();
@@ -816,6 +1005,18 @@ export async function createMiniature(host) {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, nearTex, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const cw = gl.drawingBufferWidth;
+    const ch = gl.drawingBufferHeight;
+    const w8 = Math.max(1, Math.ceil(cw / 8));
+    const h8 = Math.max(1, Math.ceil(ch / 8));
+    const w32 = Math.max(1, Math.ceil(w8 / 4));
+    const h32 = Math.max(1, Math.ceil(h8 / 4));
+    filmTarget("scene", cw, ch, true);
+    filmTarget("print", cw, ch, false);
+    filmTarget("m8", w8, h8, true);
+    filmTarget("m8b", w8, h8, true);
+    filmTarget("m32", w32, h32, true);
+    filmTarget("m32b", w32, h32, true);
     dirty = true;
   };
   stage.onResize(layout);
@@ -905,8 +1106,8 @@ export async function createMiniature(host) {
     gl.uniform1f(gu.uLod, Math.max(0, Math.log2(colorImg.naturalHeight / buf[1])));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // pass 4: composite (units: css pixels)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    // pass 4: composite (units: css pixels), into the film's scene buffer
+    gl.bindFramebuffer(gl.FRAMEBUFFER, film.scene.fbo);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.useProgram(composite.p);
     gl.activeTexture(gl.TEXTURE2);
@@ -933,13 +1134,80 @@ export async function createMiniature(host) {
     gl.uniform3f(cu.uGround, GROUND[0], GROUND[1], GROUND[2]);
     gl.uniform2f(cu.uSrc, colorImg.naturalWidth, colorImg.naturalHeight);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    develop();
   };
 
-  stage.onFrame((dt) => {
+  // The film passes read on units 5 and up, which no earlier pass samples, so
+  // none of them is ever read while it is being drawn into.
+  const rectGl = (u) => {
+    const dpr = stage.dpr;
+    gl.uniform4f(u.uRectGl, rect.x * dpr, gl.drawingBufferHeight - (rect.y + rect.h) * dpr, rect.w * dpr, rect.h * dpr);
+  };
+  const filmPass = (prog, out, inputs) => {
+    gl.useProgram(prog.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out ? out.fbo : null);
+    gl.viewport(0, 0, out ? out.w : gl.drawingBufferWidth, out ? out.h : gl.drawingBufferHeight);
+    inputs.forEach(([name, t], i) => {
+      gl.activeTexture(gl.TEXTURE5 + i);
+      gl.bindTexture(gl.TEXTURE_2D, t.tex);
+      gl.uniform1i(prog.u[name], 5 + i);
+    });
+    rectGl(prog.u);
+  };
+  const blur = (a, b) => {
+    filmPass(filmBlur, b, [["uSrc", a]]);
+    gl.uniform2f(filmBlur.u.uDir, 1, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    filmPass(filmBlur, a, [["uSrc", b]]);
+    gl.uniform2f(filmBlur.u.uDir, 0, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  const develop = () => {
+    for (let i = 5; i < 8; i++) {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+    filmPass(filmBright, film.m8, [["uScene", film.scene]]);
+    gl.uniform2f(filmBright.u.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    blur(film.m8, film.m8b);
+    filmPass(filmDown, film.m32, [["uSrc", film.m8]]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    blur(film.m32, film.m32b);
+    const fu = filmFinish.u;
+    filmPass(filmFinish, film.print, [
+      ["uScene", film.scene],
+      ["uMist8", film.m8],
+      ["uMist32", film.m32],
+    ]);
+    gl.uniform2f(fu.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.uniform1f(fu.uMist, MIST);
+    gl.uniform3f(fu.uMistTint, ...MIST_TINT);
+    gl.uniform1f(fu.uHal, HALATION);
+    gl.uniform3f(fu.uHalTint, ...HALATION_TINT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  const grain = (seed) => {
+    const u = filmGrain.u;
+    filmPass(filmGrain, null, [["uFilm", film.print]]);
+    gl.uniform2f(u.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.uniform1f(u.uSeed, seed % 997);
+    gl.uniform1f(u.uGrain, GRAIN);
+    gl.uniform1f(u.uSize, GRAIN_SIZE);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+
+  let grainFrame = -1;
+  stage.onFrame((dt, t) => {
     const moving = stepRing(focus, dt) | stepRing(focusY, dt, 40);
-    if (!moving && !dirty) return;
-    dirty = false;
-    draw();
+    // Reduced motion: the grain is there, but it holds still.
+    const g = reduce ? 0 : Math.floor(t * GRAIN_FPS);
+    if (moving || dirty) {
+      dirty = false;
+      draw();
+    } else if (g === grainFrame) return;
+    grainFrame = g;
+    grain(g);
   });
 
   return {
