@@ -1,8 +1,8 @@
 // The engraving's lines, laid out on the CPU.
 //
-// The crown is drawn as a line halftone, the way an engraver cuts a tree: long
-// strokes that run along the contours of the leaves' light, so they bunch,
-// curve and swell with the shading instead of sitting on a lattice.
+// The whole print is one line engraving, the way an engraver cuts a tree in a
+// ruled sky: long strokes that run along the contours of the light, so they
+// bunch, curve and swell with the shading instead of sitting on a lattice.
 //
 // 1. orientation(): the contour direction of the tree's luminance at every
 //    spot of the plate (half resolution), from the smoothed structure tensor
@@ -15,9 +15,20 @@
 //    the separation distance, so the hatch is blue-noise even with no grid in
 //    it. Each streamline is cut into strokes of varied length, each resampled
 //    to P spine points in plate px; a stroke that lies wholly in deep shadow
-//    is dropped (its width would be zero).
+//    is dropped (its width would be zero) unless the renderer gives shadow a
+//    hairline (lumLo below zero). A line on a speck of the matte is not laid.
+// 3. skyField(): the same for the sky behind the crown, with a much broader
+//    smoothing and a strong level bias, so its lines run nearly horizontally
+//    and drift with the polariser falloff, and a density that closes the
+//    lines up where a cloud brightens, so a cloud is lines swelling and
+//    bunching rather than a soft patch.
+// Both are laid into one shared separation grid (createSpace), the crown
+// first, so the sky's lines run up to the crown's and stop at the
+// separation distance from them: the two meet the way two hatchings do on
+// a plate, with no cut-out edge between them.
 
 export const P = 12; // spine points per stroke
+export const META = 4; // per stroke: kind (0 crown, 1 sky, 2 sky under the crown), length, cap at start, cap at end
 
 const HATCH = (-28 * Math.PI) / 180; // fallback hatch angle (screen, y down)
 
@@ -56,9 +67,7 @@ function gauss(src, W, H, r) {
   return a;
 }
 
-export function orientation(bmp, PW, PH) {
-  const W = PW >> 1;
-  const H = PH >> 1;
+function pixels(bmp, W, H) {
   let cv;
   if (typeof OffscreenCanvas !== "undefined") cv = new OffscreenCanvas(W, H);
   else {
@@ -68,17 +77,13 @@ export function orientation(bmp, PW, PH) {
   }
   const cx = cv.getContext("2d", { willReadFrequently: true });
   cx.drawImage(bmp, 0, 0, W, H);
-  const px = cx.getImageData(0, 0, W, H).data;
-  const lum = new Float32Array(W * H);
-  const alpha = new Float32Array(W * H);
-  for (let i = 0; i < W * H; i++) {
-    const a = px[i * 4 + 3] / 255;
-    alpha[i] = a;
-    lum[i] = ((0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2]) / 255) * a;
-  }
-  // the silhouette counts as an edge of the light too, so lines near the
-  // rim run along it
-  const L = gauss(lum, W, H, 1);
+  return cx.getImageData(0, 0, W, H).data;
+}
+
+// the contour direction of L (doubled angle, as cos and sin) from its
+// structure tensor smoothed over radius R (half px), leaning toward a
+// gradient (nx, ny) by bias times the tensor's mean
+function contour(L, W, H, R, nx, ny, bias) {
   const jxx = new Float32Array(W * H);
   const jxy = new Float32Array(W * H);
   const jyy = new Float32Array(W * H);
@@ -91,17 +96,13 @@ export function orientation(bmp, PW, PH) {
       jxy[i] = gx * gy;
       jyy[i] = gy * gy;
     }
-  const R = 7; // half px: ~14 plate px of smoothing
   const sxx = gauss(jxx, W, H, R);
   const sxy = gauss(jxy, W, H, R);
   const syy = gauss(jyy, W, H, R);
   let mean = 0;
   for (let i = 0; i < W * H; i++) mean += sxx[i] + syy[i];
   mean /= W * H;
-  // bias: a gradient normal to the fallback hatch
-  const nx = -Math.sin(HATCH);
-  const ny = Math.cos(HATCH);
-  const eps = mean * 0.2;
+  const eps = mean * bias;
   const c2 = new Float32Array(W * H);
   const s2 = new Float32Array(W * H);
   for (let i = 0; i < W * H; i++) {
@@ -114,7 +115,72 @@ export function orientation(bmp, PW, PH) {
     c2[i] = -Math.cos(g2);
     s2[i] = -Math.sin(g2);
   }
-  return { W, H, PW, PH, lum, alpha, c2, s2 };
+  return { c2, s2 };
+}
+
+export function orientation(bmp, PW, PH) {
+  const W = PW >> 1;
+  const H = PH >> 1;
+  const px = pixels(bmp, W, H);
+  const lum = new Float32Array(W * H);
+  const alpha = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const a = px[i * 4 + 3] / 255;
+    alpha[i] = a;
+    lum[i] = ((0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2]) / 255) * a;
+  }
+  // the silhouette counts as an edge of the light too, so lines near the
+  // rim run along it
+  const { c2, s2 } = contour(gauss(lum, W, H, 1), W, H, 7, -Math.sin(HATCH), Math.cos(HATCH), 0.2);
+  // how deep inside the matte each spot is, to tell a speck from a twig
+  const solid = gauss(alpha, W, H, 5);
+  return { W, H, PW, PH, lum, alpha, solid, c2, s2 };
+}
+
+// The sky: its light softened past the fill's leftover specks, its contours
+// smoothed over a wide radius and leaned hard toward level, and a density
+// (1 = the plate's line pitch) that closes up to CLOSE where a cloud lifts
+// the light above the clear sky.
+export function skyField(bmp, PW, PH, { cloud = [0.57, 0.72], close = 0.62 } = {}) {
+  const W = PW >> 1;
+  const H = PH >> 1;
+  const px = pixels(bmp, W, H);
+  const raw = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) raw[i] = (0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2]) / 255;
+  const lum = gauss(raw, W, H, 4);
+  const { c2, s2 } = contour(lum, W, H, 16, 0, 1, 6);
+  const dens = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const t = Math.min(1, Math.max(0, (lum[i] - cloud[0]) / (cloud[1] - cloud[0])));
+    dens[i] = 1 - (1 - close) * t * t * (3 - 2 * t);
+  }
+  return { W, H, PW, PH, lum, dens, c2, s2 };
+}
+
+// the separation grid every line of the plate is laid into
+export function createSpace(PW, PH, cs) {
+  const GX = Math.ceil(PW / cs) + 1;
+  const GY = Math.ceil(PH / cs) + 1;
+  const grid = new Array(GX * GY);
+  return {
+    far(x, y, d) {
+      const ci = Math.floor(x / cs);
+      const cj = Math.floor(y / cs);
+      const d2 = d * d;
+      for (let j = cj - 1; j <= cj + 1; j++)
+        for (let i = ci - 1; i <= ci + 1; i++) {
+          if (i < 0 || j < 0 || i >= GX || j >= GY) continue;
+          const c = grid[j * GX + i];
+          if (!c) continue;
+          for (let n = 0; n < c.length; n += 2) if ((c[n] - x) ** 2 + (c[n + 1] - y) ** 2 < d2) return false;
+        }
+      return true;
+    },
+    add(x, y) {
+      const k = Math.floor(y / cs) * GX + Math.floor(x / cs);
+      (grid[k] || (grid[k] = [])).push(x, y);
+    },
+  };
 }
 
 function sampler(F) {
@@ -132,9 +198,28 @@ function sampler(F) {
   };
 }
 
-// strokes at separation dsep (plate px), as a Float32Array of P points each
-export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] } = {}) {
-  const { PW, PH } = F;
+// Strokes at separation dsep (plate px), as a Float32Array of P points each
+// and META floats each. space: the shared separation grid. sky: lay the
+// sky's lines (anywhere not already engraved, closing up with F.dens) instead
+// of the crown's (inside the matte). cut: the range of stroke lengths, in
+// separations; a sky line is cut into long runs that join without a taper,
+// so it reads as one ruled line.
+export function strokes(
+  F,
+  dsep,
+  rand,
+  {
+    space,
+    sky = false,
+    lumLo = 0.05,
+    solidMin = 0,
+    box = [0, 0, F.PW, F.PH],
+    cut = [4, 9],
+    reach = 60,
+    shortest = 1.2,
+    under = 0,
+  } = {},
+) {
   const S = sampler(F);
   const dir = (x, y, px, py) => {
     const th = 0.5 * Math.atan2(S(F.s2, x, y), S(F.c2, x, y));
@@ -146,32 +231,14 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
     }
     return [dx, dy];
   };
-  const inTree = (x, y) => x >= box[0] && y >= box[1] && x < box[2] && y < box[3] && S(F.alpha, x, y) > 0.3;
+  const inBox = (x, y) => x >= box[0] && y >= box[1] && x < box[2] && y < box[3];
+  const inside = sky ? inBox : (x, y) => inBox(x, y) && S(F.alpha, x, y) > 0.3;
+  // local separation: the sky closes up where a cloud brightens
+  const sepAt = sky ? (x, y) => dsep * S(F.dens, x, y) : () => dsep;
 
   const h = Math.max(0.75, dsep * 0.25); // integration step
-  const dtest = dsep * 0.55;
-  const cs = dsep;
-  const GX = Math.ceil(PW / cs) + 1;
-  const GY = Math.ceil(PH / cs) + 1;
-  const grid = new Array(GX * GY);
-  const far = (x, y, d) => {
-    const ci = Math.floor(x / cs);
-    const cj = Math.floor(y / cs);
-    const d2 = d * d;
-    for (let j = cj - 1; j <= cj + 1; j++)
-      for (let i = ci - 1; i <= ci + 1; i++) {
-        if (i < 0 || j < 0 || i >= GX || j >= GY) continue;
-        const c = grid[j * GX + i];
-        if (!c) continue;
-        for (let n = 0; n < c.length; n += 2) if ((c[n] - x) ** 2 + (c[n + 1] - y) ** 2 < d2) return false;
-      }
-    return true;
-  };
-  const add = (x, y) => {
-    const k = Math.floor(y / cs) * GX + Math.floor(x / cs);
-    (grid[k] || (grid[k] = [])).push(x, y);
-  };
-  const maxSteps = Math.ceil((dsep * 60) / h);
+  const { far, add } = space;
+  const maxSteps = Math.ceil((dsep * reach) / h);
 
   const half = (x0, y0, sx, sy) => {
     const out = [];
@@ -185,7 +252,7 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
       if (bx * px + by * py < 0.8) break;
       const nx2 = x + bx * h;
       const ny2 = y + by * h;
-      if (!inTree(nx2, ny2) || !far(nx2, ny2, dtest)) break;
+      if (!inside(nx2, ny2) || !far(nx2, ny2, sepAt(nx2, ny2) * 0.55)) break;
       x = nx2;
       y = ny2;
       px = bx;
@@ -198,7 +265,10 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
   const lines = [];
   const queue = [];
   const trace = (x, y) => {
-    if (!inTree(x, y) || !far(x, y, dsep)) return;
+    // a sky line may start a little nearer its neighbours than the pitch, so
+    // where two fronts of level lines meet they close up instead of leaving
+    // a seam of ground nearly two lines wide
+    if (!inside(x, y) || !far(x, y, sepAt(x, y) * (sky ? 0.7 : 1))) return;
     const [dx, dy] = dir(x, y, 1, 0);
     const f = half(x, y, dx, dy);
     const b = half(x, y, -dx, -dy);
@@ -207,7 +277,14 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
     pts.push(x, y);
     for (let i = 0; i < f.length; i++) pts.push(f[i]);
     const n = pts.length / 2;
-    if (n * h < dsep * 1.2) return;
+    if (n * h < dsep * shortest) return;
+    if (solidMin > 0) {
+      // a line on a speck of the matte out in the sky is not laid at all, so
+      // the sky's ruling runs on over it
+      let deep = 0;
+      for (let i = 0; i < n; i++) deep += S(F.solid, pts[i * 2], pts[i * 2 + 1]);
+      if (deep / n < solidMin) return;
+    }
     for (let i = 0; i < n; i++) add(pts[i * 2], pts[i * 2 + 1]);
     lines.push(pts);
     // seeds for the neighbours, one separation off either side
@@ -220,8 +297,9 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
       const l = Math.hypot(tx, ty) || 1;
       tx /= l;
       ty /= l;
-      queue.push(pts[i * 2] - ty * dsep, pts[i * 2 + 1] + tx * dsep);
-      queue.push(pts[i * 2] + ty * dsep, pts[i * 2 + 1] - tx * dsep);
+      const d = sepAt(pts[i * 2], pts[i * 2 + 1]);
+      queue.push(pts[i * 2] - ty * d, pts[i * 2 + 1] + tx * d);
+      queue.push(pts[i * 2] + ty * d, pts[i * 2 + 1] - tx * d);
     }
   };
 
@@ -244,18 +322,71 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
     }
   }
 
+  // Under the crown: each sky line that stopped against the crown runs on
+  // beneath it, up to UNDER separations, kept apart from the sky's other
+  // lines and from each other but not from the crown's. These are drawn only
+  // where a pull swings the crown off the sky it covered at rest, so the
+  // ruling carries on behind it instead of leaving a hole.
+  const runs = lines.map((pts) => [pts, sky ? 1 : 0, 1, 1]);
+  if (sky && under > 0) {
+    const hid = createSpace(F.PW, F.PH, dsep);
+    for (const pts of lines) for (let i = 0; i < pts.length; i += 2) hid.add(pts[i], pts[i + 1]);
+    const dtest = dsep * 0.55;
+    const steps = Math.ceil((dsep * under) / h);
+    const extend = (x0, y0, px, py) => {
+      const out = [x0, y0];
+      let x = x0;
+      let y = y0;
+      for (let s = 0; s < steps; s++) {
+        const [ax, ay] = dir(x, y, px, py);
+        const [bx, by] = dir(x + ax * h * 0.5, y + ay * h * 0.5, ax, ay);
+        if (bx * px + by * py < 0.8) break;
+        const nx2 = x + bx * h;
+        const ny2 = y + by * h;
+        // its own line lies just behind it: test only once clear of that
+        const clear = Math.hypot(nx2 - x0, ny2 - y0) > dtest * 1.05;
+        if (!inBox(nx2, ny2) || (clear && !hid.far(nx2, ny2, sepAt(nx2, ny2) * 0.55))) break;
+        x = nx2;
+        y = ny2;
+        px = bx;
+        py = by;
+        out.push(x, y);
+      }
+      return out;
+    };
+    lines.forEach((pts, li) => {
+      const n = pts.length / 2;
+      if (n < 2) return;
+      for (const end of [0, 1]) {
+        const i = end ? n - 1 : 0;
+        const j = end ? n - 2 : 1;
+        let tx = pts[i * 2] - pts[j * 2];
+        let ty = pts[i * 2 + 1] - pts[j * 2 + 1];
+        const l = Math.hypot(tx, ty) || 1;
+        const e = extend(pts[i * 2], pts[i * 2 + 1], tx / l, ty / l);
+        if (e.length / 2 < 2 || (e.length / 2 - 1) * h < dsep * 3) continue;
+        for (let k = 2; k < e.length; k += 2) hid.add(e[k], e[k + 1]);
+        runs.push([e, 2, 0, 1]);
+        // the line runs on: no taper where it meets its continuation
+        runs[li][2 + end] = 0;
+      }
+    });
+  }
+
   // cut each line into strokes of varied length and resample them
   const out = [];
-  for (const pts of lines) {
+  const meta = [];
+  for (const [pts, kind, capA, capB] of runs) {
     const n = pts.length / 2;
     const arc = new Float32Array(n);
-    for (let i = 1; i < n; i++) arc[i] = arc[i - 1] + Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
+    for (let i = 1; i < n; i++)
+      arc[i] = arc[i - 1] + Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
     const total = arc[n - 1];
     let a0 = -rand() * dsep * 2; // a staggered start, so cuts don't line up
     let k = 0;
     while (a0 < total) {
-      let a1 = a0 + dsep * (4 + rand() * 5);
-      if (total - a1 < dsep * 1.5) a1 = total;
+      let a1 = a0 + dsep * (cut[0] + rand() * (cut[1] - cut[0]));
+      if (total - a1 < dsep * (sky ? cut[0] * 0.5 : 1.5)) a1 = total;
       const s0 = Math.max(0, a0);
       if (a1 - s0 >= dsep * 1.2) {
         const stroke = new Float32Array(P * 2);
@@ -268,14 +399,18 @@ export function strokes(F, dsep, rand, { lumLo = 0.05, box = [0, 0, F.PW, F.PH] 
           const y = pts[k * 2 + 1] + (pts[k * 2 + 3] - pts[k * 2 + 1]) * t;
           stroke[p * 2] = x;
           stroke[p * 2 + 1] = y;
-          lmax = Math.max(lmax, S(F.lum, x, y));
+          if (!sky) lmax = Math.max(lmax, S(F.lum, x, y));
         }
-        if (lmax > lumLo) out.push(stroke);
+        if (sky || lmax > lumLo) {
+          out.push(stroke);
+          // a sky run tapers only where its line really ends
+          meta.push(kind, a1 - s0, sky ? capA * +(s0 <= 0) : 1, sky ? capB * +(a1 >= total) : 1);
+        }
       }
       a0 = a1;
     }
   }
   const flat = new Float32Array(out.length * P * 2);
   out.forEach((s, i) => flat.set(s, i * P * 2));
-  return { data: flat, count: out.length };
+  return { data: flat, meta: new Float32Array(meta), count: out.length };
 }

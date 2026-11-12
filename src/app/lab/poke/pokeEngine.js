@@ -1,7 +1,7 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createModal } from "./modal";
-import { orientation, strokes as layStrokes, P } from "./engrave";
+import { orientation, skyField, createSpace, strokes as layStrokes, P, META } from "./engrave";
 
 // Poke: a still frame of a tree against a summer sky that you can pull.
 //
@@ -20,15 +20,18 @@ import { orientation, strokes as layStrokes, P } from "./engrave";
 // other part of the tree answers through the modes it shares with that spot,
 // with its own lag. Let go and each mode rings down at its own frequency and
 // damping. The modes are weighted toward the slow, crown-wide ones, so a pull
-// swings the whole crown. The tree is a matted layer over the sky behind it
-// (filled and regraded offline), cut into Voronoi patches that each move
-// rigidly, so leaves translate instead of smearing and a branch that swings
-// away uncovers sky.
+// swings the whole crown.
 //
-// The modes are also the image. Inside the matte the photograph is not drawn:
-// the crown is a line engraving on a cobalt-shadow ground, its lines cut
-// along the contours of the leaves' light (engrave.js) and each as wide as
-// the light under it. Every point of a line is carried by the modal field,
+// The modes are also the image. No photograph is drawn: the whole print is
+// one line engraving on a cobalt-shadow ground. The crown's lines are cut
+// along the contours of the leaves' light (engrave.js), each as wide as the
+// light under it; the sky (filled and regraded offline behind the matted
+// tree) is ruled with the same renderer at the same pitch, long nearly level
+// lines that drift with its falloff, finer than the crown's, swelling and
+// closing up where a cloud brightens. The two hatchings share one
+// separation grid, so where the crown's lines meet the sky's they stop
+// against each other. The sky's lines hold still; every point of a crown
+// line is carried by the modal field,
 // so a pull bends the lines and draws them out along the way the tree moves,
 // and each is tinted by where that point is in its swing relative to the
 // pull (with it, leading, against, lagging), on a continuous hue wheel whose
@@ -51,16 +54,23 @@ const DMAX = 260; // plate px: the most any part of the crown may travel under a
 const HAND = 48; // plate px: radius of the patch of crown a hand takes hold of
 const TILT = 2; // modal mass tilt toward the slow, crown-wide modes (see modal.js)
 const BREEZE = 0.45; // idle forcing, in units of each mode's static response
-const CELL = 34; // plate px: spacing of the rigid patches the tree is cut into
-const PATCH_BLUR = 80; // plate px: radius each patch's motion is averaged over
 const LINE = 6.5; // target px at DPR 2: separation of the engraving's lines
 const WIDTH = 0.42; // widest stroke half-width, as a share of the separation
 const TRAIL = 0.6; // share of the displacement a stroke's trailing end lags by
 const TRAIL_CAP = 5; // longest lag, in line separations
 const LUM = [0.04, 0.5]; // leaf light (sRGB luma) that starts and fills a stroke
-const GROUND = [0.03, 0.055, 0.12]; // cobalt shadow: the crown's ground
+const SHADE = 0.16; // the crown's hairline in deep shadow, as a share of its widest
+const SPECK = 0.25; // a crown line on less matte than this (softened) is a speck in the sky: not laid
+const SKY_WIDTH = 0.3; // the sky's widest half-width, as a share of the separation
+const SKY_LUM = [0.36, 0.74]; // sky light (sRGB luma, softened) from its finest line to its widest
+const SKY_THIN = 0.2; // the finest sky line, as a share of its widest
+const SKY_RUN = [14, 24]; // the sky's lines are cut into runs this long, in separations
+const SKY_INK = [0.84, 0.035, 4.3]; // OKLCH: a cool pale ink, so the crown stands off the sky
+const SKY_UNDER = 70; // how far, in separations, the sky's lines run on beneath the crown
+const MASK = [960, 540]; // the crown's cover, at rest and as it swings (plate, half resolution)
+const COVER = 1.0; // how far the cover reaches past a crown line, in separations
+const GROUND = [0.03, 0.055, 0.12]; // cobalt shadow: the print's ground
 const REVEAL = 1.8;
-const SHUTTER = 1 / 30; // s, for motion blur
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -70,110 +80,13 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
-const sceneFrag = (K) => `#version 300 es
-precision highp float;
-precision highp sampler2DArray;
-in vec2 vUv;
-out vec4 outColor;
-uniform sampler2D uTree;          // RGBA: decontaminated tree colour, matte
-uniform sampler2D uSky;           // the sky behind it, filled and regraded
-uniform sampler2DArray uModes;    // ${K} layers: re x, re y, im x, im y (0..1 = -1..1)
-uniform highp sampler2D uSiteA;   // per patch: site x, y and displacement x, y (plate px)
-uniform highp sampler2D uSiteB;   // per patch: travel while the shutter is open (plate px)
-uniform highp sampler2D uOwner;   // which patch owns each spot of the still frame (rg = i, j)
-uniform ivec2 uSites;             // patch grid
-uniform float uCell;              // patch spacing, plate px
-uniform vec2 uQ[${K}];            // modal coordinates times each layer's scale
-uniform vec4 uView;               // print window in plate uv
-uniform vec2 uPlate;
-uniform float uExpo;
-uniform vec3 uGround;             // the crown's ground
-
-vec2 field(vec2 uv) {
-  vec2 d = vec2(0.0);
-  for (int i = 0; i < ${K}; i++) {
-    vec4 m = texture(uModes, vec3(uv, float(i))) * 2.0 - 1.0;
-    d += m.xy * uQ[i].x - m.zw * uQ[i].y;
-  }
-  return d / uPlate;
-}
-
-ivec2 owner(vec2 q) {
-  ivec2 sz = textureSize(uOwner, 0);
-  ivec2 t = clamp(ivec2(q / uPlate * vec2(sz)), ivec2(0), sz - 1);
-  return ivec2(texelFetch(uOwner, t, 0).rg * 255.0 + 0.5);
-}
-
-void main() {
-  vec2 uv = uView.xy + vec2(vUv.x, 1.0 - vUv.y) * uView.zw;
-  vec2 p = uv * uPlate;
-  vec2 gx = dFdx(uv);
-  vec2 gy = dFdy(uv);
-  // The tree is cut into Voronoi patches (about a leaf clump each) that move
-  // rigidly, each by the modal displacement at its own site, so a leaf
-  // translates instead of stretching. Where patches part, sky shows through;
-  // where they meet, the one that moved further passes in front.
-  // First guess at where the material drawn here came from (the inverse of
-  // the smooth field, two fixed-point steps), then the patches around it.
-  vec2 d = field(uv);
-  vec2 s0 = p - field(uv - d) * uPlate;
-  ivec2 c0 = ivec2(floor(s0 / uCell));
-  vec4 acc = vec4(0.0);
-  float cover = 0.0;
-  float wsum = 0.0;
-  // open sky with no tree within a patch or two: nothing to gather
-  bool near = textureLod(uTree, s0 / uPlate, 6.5).a > 0.002;
-  if (near) for (int j = -1; j <= 1; j++)
-    for (int i = -1; i <= 1; i++) {
-      ivec2 cj = c0 + ivec2(i, j);
-      if (any(lessThan(cj, ivec2(0))) || any(greaterThanEqual(cj, uSites))) continue;
-      vec4 A = texelFetch(uSiteA, cj, 0);
-      vec2 q = p - A.zw;
-      // this patch draws here only if the material it would bring here is
-      // its own in the still frame
-      if (owner(q) != cj) continue;
-      float own = 1.0;
-      float pri = own * exp(min(length(A.zw), 400.0) / 40.0);
-      vec2 src = q / uPlate;
-      vec2 sh = texelFetch(uSiteB, cj, 0).xy / uPlate;
-      vec4 t = vec4(0.0);
-      if (dot(sh, sh) * uPlate.x * uPlate.x < 0.25) {
-        t = textureGrad(uTree, src, gx, gy);
-        t.rgb *= t.a;
-      } else {
-        // a film shutter: the patch is integrated along its own travel
-        for (int k = 0; k < 5; k++) {
-          vec4 s = textureGrad(uTree, src - sh * (float(k) / 4.0 - 0.5), gx, gy);
-          t += vec4(s.rgb * s.a, s.a);
-        }
-        t /= 5.0;
-      }
-      acc += t * pri;
-      cover += own;
-      wsum += pri;
-    }
-  vec4 tree = wsum > 0.0 ? acc / wsum : vec4(0.0);
-  // a seam no patch claims is filled by the continuous warp, so it reads as
-  // a thin stretch between clumps instead of a crack of sky
-  float cv = min(cover, 1.0);
-  if (near && cv < 0.999) {
-    vec4 f = textureGrad(uTree, (s0 / uPlate), gx, gy);
-    tree = tree * cv + vec4(f.rgb * f.a, f.a) * (1.0 - cv);
-  }
-  // Inside the matte the photograph is not drawn: the crown is a ground of
-  // cobalt shadow for the engraving's strokes, its edge kept firm so the
-  // silhouette reads crisp at any scale.
-  float a = smoothstep(0.08, 0.7, tree.a);
-  vec3 sky = texture(uSky, uv).rgb;
-  vec3 col = mix(sky, uGround, a);
-  outColor = vec4(col * uExpo, 1.0);
-}`;
-
-// The engraving. Inside the matte the photograph is not drawn at all: the
-// crown is only these strokes, cut along the contours of the leaves' light
-// (engrave.js) on a cobalt-shadow ground. Each stroke is a ribbon through P
-// spine points whose width at each point is the leaves' light there, tapered
-// at its ends, so at rest the tree reads as a line engraving. Every spine
+// The engraving. No photograph is drawn at all: the print is only these
+// strokes on a cobalt-shadow ground, the crown's cut along the contours of
+// the leaves' light and the sky's ruled nearly level (engrave.js). Each
+// stroke is a ribbon through P spine points whose width at each point is the
+// light there (the leaves', or the softened sky's on a finer scale), tapered
+// at its ends, so at rest the print reads as a line engraving. The sky's
+// strokes hold still and keep one cool ink; for the crown's: Every spine
 // point is carried by the modal field at its own rest position, so a pull
 // bends the strokes where the crown shears, and each stroke is drawn out
 // along its displacement: its leading end goes the whole way, its trailing
@@ -191,7 +104,9 @@ ${fieldTex ? "#define FIELD_TEX" : ""}
 #define P ${P}
 #define SPR ${SPR}
 uniform highp sampler2D uSpine;  // per stroke: P spine points, plate px
+uniform highp sampler2D uMeta;   // per stroke: kind (1 = sky), length (plate px), caps at start and end
 uniform sampler2D uTree;
+uniform sampler2D uSkyLum;       // the sky's softened light
 #ifdef FIELD_TEX
 uniform highp sampler2D uField;  // zr, zi (plate px), evaluated this frame
 #else
@@ -208,6 +123,15 @@ uniform float uLod;
 uniform float uTrail;   // share of the displacement the trailing end lags by
 uniform float uCap;     // longest lag, plate px
 uniform vec2 uLum;      // luminance that starts and fills a stroke
+uniform float uFloor;   // the crown's finest line in shadow, as a share of its widest
+uniform float uSkyHalf; // the sky's widest half-width, target px
+uniform vec3 uSkyLight; // sky light of its finest and widest line, finest share
+uniform float uCapLen;  // a sky line's taper, plate px
+uniform vec3 uSkyInk;   // OKLCH
+uniform float uMove;    // 1: carried by the modal field, 0: at rest
+uniform float uCover;   // > 0: the cover pass, every line this half-width (target px)
+out float vKind;
+out vec2 vPlate;
 out float vAcross;
 out float vHalf;
 out vec3 vCol;
@@ -252,10 +176,11 @@ vec3 oklch(float L, float C, float h) {
 
 float lam;    // the trailing end's lag, as a share of the displacement
 float along;  // -1..1: which end leads, eased through the perpendicular
+bool sky;
 
 vec2 placed(int id, int j, out vec4 F, out vec2 b) {
   b = spine(id, j);
-  F = fieldAt(b);
+  F = sky ? vec4(0.0) : fieldAt(b) * uMove;
   float t = 0.5 + 0.5 * along * (float(j) / float(P - 1) * 2.0 - 1.0);
   return b + F.xy * (1.0 - lam * (1.0 - t));
 }
@@ -268,9 +193,11 @@ void main() {
   int id = gl_InstanceID;
   int j = gl_VertexID >> 1;
   float side = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  vec4 meta = texelFetch(uMeta, ivec2(id - (id / SPR) * SPR, id / SPR), 0);
+  sky = meta.x > 0.5;
   vec2 b0 = spine(id, 0);
   vec2 b1 = spine(id, P - 1);
-  vec4 Fm = fieldAt(0.5 * (spine(id, P / 2 - 1) + spine(id, P / 2)));
+  vec4 Fm = sky ? vec4(0.0) : fieldAt(0.5 * (spine(id, P / 2 - 1) + spine(id, P / 2))) * uMove;
   float dm = length(Fm.xy);
   float tl = uCap * (1.0 - exp(-dm * uTrail / uCap));
   lam = dm > 1e-3 ? tl / dm : 0.0;
@@ -287,19 +214,43 @@ void main() {
   tg = dot(tg, tg) > 1e-8 ? normalize(tg) : vec2(1.0, 0.0);
   vec2 nrm = vec2(-tg.y, tg.x);
 
-  // width: the leaves' own light at this spine point's rest position
-  vec4 t = textureLod(uTree, b / uPlate, uLod);
-  float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * smoothstep(0.25, 0.7, t.a);
-  float w = pow(clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0), 0.6);
   float tp = float(j) / float(P - 1);
-  float taper = pow(clamp(min(tp, 1.0 - tp) * 7.0, 0.0, 1.0), 0.6);
-  float hw = uHalf * w * taper;
+  float hw;
+  if (sky) {
+    // width: the sky's light, so its falloff reads as the lines thinning
+    // toward the top and a cloud as them swelling; a run tapers only where
+    // its line ends, so the joins between runs don't show
+    float sl = texture(uSkyLum, b / uPlate).r;
+    float w = mix(uSkyLight.z, 1.0, pow(smoothstep(uSkyLight.x, uSkyLight.y, sl), 0.85));
+    float s0 = tp * meta.y;
+    float s1 = meta.y - s0;
+    float c = min(meta.z > 0.5 ? s0 : 1e6, meta.w > 0.5 ? s1 : 1e6) / uCapLen;
+    hw = uSkyHalf * w * pow(clamp(c, 0.0, 1.0), 0.6);
+  } else {
+    // width: the leaves' own light at this spine point's rest position
+    vec4 t = textureLod(uTree, b / uPlate, uLod);
+    // and a hairline floor inside the matte, so the crown's shadow is fine
+    // lines on the ground rather than a hole cut out of the sky's ruling
+    float cov = smoothstep(0.25, 0.7, t.a);
+    float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * cov;
+    float w = max(pow(clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0), 0.6), uFloor * cov);
+    float taper = pow(clamp(min(tp, 1.0 - tp) * 7.0, 0.0, 1.0), 0.6);
+    // (in the cover pass every line is as wide as the cover reaches, unless
+    // it is barely there itself)
+    hw = uCover > 0.0 ? uCover * smoothstep(0.0, 0.3, w) : uHalf * w * taper;
+  }
   float e = hw + 1.0;
   vec2 px = p + nrm * side * e;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
   vAcross = side * e;
   vHalf = hw;
 
+  vKind = meta.x;
+  vPlate = b / uPlate;
+  if (sky) {
+    vCol = oklch(uSkyInk.x, uSkyInk.y, uSkyInk.z);
+    return;
+  }
   // tint: the phase in the frame of the pull
   vec2 perp = vec2(-uRef.y, uRef.x);
   vec2 zr = F.xy;
@@ -313,14 +264,39 @@ void main() {
 
 const STROKE_FRAG = `#version 300 es
 precision highp float;
+in float vKind;
+in vec2 vPlate;
 in float vAcross;
 in float vHalf;
 in vec3 vCol;
 out vec4 outColor;
+uniform sampler2D uRestCover; // the plate the crown's lines cover at rest
+uniform sampler2D uNowCover;  // and now
 void main() {
   // an engraved line: hard-edged, its coverage antialiased across the width
   float a = clamp(vHalf + 0.5 - abs(vAcross), 0.0, 1.0) * clamp(vHalf * 2.0, 0.0, 1.0);
+  // the sky's ruling is hidden where the crown swings over it and carries on
+  // beneath it where the crown swings away
+  if (vKind > 0.5) {
+    // (the cover was drawn the way the print is, so its rows run bottom up)
+    vec2 cv = vec2(vPlate.x, 1.0 - vPlate.y);
+    float rest = smoothstep(0.3, 0.7, texture(uRestCover, cv).r);
+    float now = smoothstep(0.3, 0.7, texture(uNowCover, cv).r);
+    a *= vKind > 1.5 ? rest * (1.0 - now) : 1.0 - now * (1.0 - rest);
+  }
   outColor = vec4(vCol * a, a);
+}`;
+
+// The crown's cover: its lines drawn wide enough to run together, carried
+// as they are now or held at rest, into a coarse map of the plate.
+const COVER_FRAG = `#version 300 es
+precision highp float;
+in float vAcross;
+in float vHalf;
+out vec4 outColor;
+void main() {
+  float a = clamp(vHalf + 0.5 - abs(vAcross), 0.0, 1.0);
+  outColor = vec4(a);
 }`;
 
 // the modal field (displacement and its quarter-cycle on), once per frame on
@@ -360,7 +336,10 @@ async function loadBitmap(src) {
   const res = await fetch(src);
   if (!res.ok) throw new Error(`${src}: ${res.status}`);
   const blob = await res.blob();
-  return createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  return createImageBitmap(blob, {
+    premultiplyAlpha: "none",
+    colorSpaceConversion: "none",
+  });
 }
 
 function program(gl, vs, fs) {
@@ -485,9 +464,26 @@ export async function createPoke(host, { embedded = false } = {}) {
   const K = meta.modes.length;
   const [gw, gh] = meta.grid;
   const [PW, PH] = meta.plate;
-  const tex = { tree: imageTexture(gl, treeBmp), sky: imageTexture(gl, skyBmp) };
-  // the contour field of the leaves' light, which the engraving's lines follow
+  const tex = { tree: imageTexture(gl, treeBmp) };
+  // the contour fields of the leaves' light and of the sky's, which the
+  // engraving's lines follow
   const orient = orientation(treeBmp, PW, PH);
+  const skyF = skyField(skyBmp, PW, PH);
+  {
+    // the sky's softened light, which sets the width of its lines
+    const n = skyF.W * skyF.H;
+    const b = new Uint8Array(n);
+    for (let i = 0; i < n; i++) b[i] = Math.round(clamp(skyF.lum[i], 0, 1) * 255);
+    tex.skyLum = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex.skyLum);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, skyF.W, skyF.H, 0, gl.RED, gl.UNSIGNED_BYTE, b);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
   const ma = modeArray(gl, modesBmp, gw, gh, K);
   tex.modes = ma.tex;
   treeBmp.close?.();
@@ -495,98 +491,6 @@ export async function createPoke(host, { embedded = false } = {}) {
   modesBmp.close?.();
   const modal = createModal(meta, ma.layers, { tilt: TILT });
 
-  // the rigid patches: jittered sites on a grid over the plate; their
-  // displacement and shutter travel are evaluated on the CPU every frame
-  const SX = Math.ceil(PW / CELL);
-  const SY = Math.ceil(PH / CELL);
-  const siteXY = new Float32Array(SX * SY * 2);
-  {
-    const jr = mulberry(11);
-    for (let j = 0; j < SY; j++)
-      for (let i = 0; i < SX; i++) {
-        const o = (j * SX + i) * 2;
-        siteXY[o] = (i + 0.5 + (jr() - 0.5) * 0.7) * CELL;
-        siteXY[o + 1] = (j + 0.5 + (jr() - 0.5) * 0.7) * CELL;
-      }
-  }
-  const siteShapes = [];
-  // a patch moves rigidly by the mean of the modal field around it, so
-  // neighbouring patches differ only by the field's broad swing
-  for (let n = 0; n < SX * SY; n++) siteShapes.push(modal.meanShape(siteXY[n * 2], siteXY[n * 2 + 1], PATCH_BLUR));
-  const siteA = new Float32Array(SX * SY * 4);
-  const siteB = new Float32Array(SX * SY * 4);
-  const floatTexture = () => {
-    const t = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, SX, SY, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return t;
-  };
-  // the patches themselves: the owner of every spot of the still frame (half
-  // plate resolution), the nearest site among the jittered grid around it
-  {
-    const OW = PW >> 1;
-    const OH = PH >> 1;
-    const own = new Uint8Array(OW * OH * 4);
-    for (let y = 0; y < OH; y++)
-      for (let x = 0; x < OW; x++) {
-        const px = (x + 0.5) * 2;
-        const py = (y + 0.5) * 2;
-        const ci = Math.floor(px / CELL);
-        const cj = Math.floor(py / CELL);
-        let best = 1e18;
-        let bi = ci;
-        let bj = cj;
-        for (let b = -1; b <= 1; b++)
-          for (let a = -1; a <= 1; a++) {
-            const i = ci + a;
-            const j = cj + b;
-            if (i < 0 || j < 0 || i >= SX || j >= SY) continue;
-            const o = (j * SX + i) * 2;
-            const d = (siteXY[o] - px) ** 2 + (siteXY[o + 1] - py) ** 2;
-            if (d < best) {
-              best = d;
-              bi = i;
-              bj = j;
-            }
-          }
-        const o = (y * OW + x) * 4;
-        own[o] = bi;
-        own[o + 1] = bj;
-        own[o + 3] = 255;
-      }
-    const t = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, OW, OH, 0, gl.RGBA, gl.UNSIGNED_BYTE, own);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    tex.owner = t;
-  }
-  tex.siteA = floatTexture();
-  tex.siteB = floatTexture();
-  const updateSites = () => {
-    for (let n = 0; n < SX * SY; n++) {
-      const a = siteShapes[n];
-      const [dx, dy] = modal.disp(a, modal.q);
-      const [vx, vy] = modal.disp(a, modal.v);
-      siteA[n * 4] = siteXY[n * 2];
-      siteA[n * 4 + 1] = siteXY[n * 2 + 1];
-      siteA[n * 4 + 2] = dx;
-      siteA[n * 4 + 3] = dy;
-      siteB[n * 4] = vx * SHUTTER;
-      siteB[n * 4 + 1] = vy * SHUTTER;
-    }
-    gl.bindTexture(gl.TEXTURE_2D, tex.siteA);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SX, SY, gl.RGBA, gl.FLOAT, siteA);
-    gl.bindTexture(gl.TEXTURE_2D, tex.siteB);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SX, SY, gl.RGBA, gl.FLOAT, siteB);
-  };
   // the reference direction the strokes' phase is read against: the last pull
   const ref = [-1, 0];
 
@@ -597,7 +501,6 @@ export async function createPoke(host, { embedded = false } = {}) {
   gl.bindVertexArray(vao);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  const scene = program(gl, VERT, sceneFrag(K));
   // the modal field, evaluated once a frame on the mode grid, if the GPU can
   // render to half floats; otherwise the strokes evaluate it themselves
   let fieldT = null;
@@ -623,21 +526,47 @@ export async function createPoke(host, { embedded = false } = {}) {
   const fieldP = fieldT ? program(gl, VERT, fieldFrag(K)) : null;
   const SPR = 170; // strokes per row of the spine texture
   const strokes = program(gl, strokeVert(K, P, SPR, !!fieldT), STROKE_FRAG);
+  const coverP = program(gl, strokeVert(K, P, SPR, !!fieldT), COVER_FRAG);
+  const restCover = target(gl, MASK[0], MASK[1]);
+  const nowCover = target(gl, MASK[0], MASK[1]);
+  let restDirty = true;
   const strokeVao = gl.createVertexArray(); // no attributes: all from gl_VertexID
   tex.spine = gl.createTexture();
-  let lines = { count: 0, sep: 0 };
-  // lay the lines out for this size: their separation is fixed on the print
-  const layLines = (sep) => {
-    if (lines.sep && Math.abs(sep / lines.sep - 1) < 0.08) return;
-    const { data, count } = layStrokes(orient, sep, mulberry(23), { lumLo: LUM[0] });
-    const rows = Math.max(1, Math.ceil(count / SPR));
-    const texels = new Float32Array(SPR * (P / 2) * rows * 4);
-    texels.set(data);
-    gl.bindTexture(gl.TEXTURE_2D, tex.spine);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, SPR * (P / 2), rows, 0, gl.RGBA, gl.FLOAT, texels);
+  tex.meta = gl.createTexture();
+  let lines = { count: 0, crown: 0, sep: 0 };
+  const floats = (t, w, rows, data) => {
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, rows, 0, gl.RGBA, gl.FLOAT, data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    lines = { count, sep };
+  };
+  // lay the lines out for this size: their separation is fixed on the print.
+  // The crown is laid first and the sky after it into the same separation
+  // grid, so the sky's lines stop where they come within reach of the crown's.
+  const layLines = (sep) => {
+    if (lines.sep && Math.abs(sep / lines.sep - 1) < 0.08) return;
+    const space = createSpace(PW, PH, sep);
+    const crown = layStrokes(orient, sep, mulberry(23), { space, lumLo: SHADE > 0 ? -1 : LUM[0], solidMin: SPECK });
+    const sky = layStrokes(skyF, sep, mulberry(29), {
+      space,
+      sky: true,
+      cut: SKY_RUN,
+      reach: 800,
+      shortest: 8,
+      under: SKY_UNDER,
+    });
+    const count = crown.count + sky.count;
+    const rows = Math.max(1, Math.ceil(count / SPR));
+    const spine = new Float32Array(SPR * (P / 2) * rows * 4);
+    spine.set(crown.data);
+    spine.set(sky.data, crown.data.length);
+    floats(tex.spine, SPR * (P / 2), rows, spine);
+    const meta = new Float32Array(SPR * rows * META);
+    meta.set(crown.meta);
+    meta.set(sky.meta, crown.meta.length);
+    floats(tex.meta, SPR, rows, meta);
+    lines = { count, crown: crown.count, sep };
+    restDirty = true;
   };
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
@@ -663,7 +592,12 @@ export async function createPoke(host, { embedded = false } = {}) {
         w = W - side * 2;
         h = w / aspect;
       }
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - (W < 600 ? 8 : 4) });
+      Object.assign(L, {
+        w,
+        h,
+        x: (W - w) / 2,
+        y: (H - h) / 2 - (W < 600 ? 8 : 4),
+      });
     }
     // window in the plate: full print height of VIEW_H, anchored at the right
     const a = L.w / L.h;
@@ -687,7 +621,7 @@ export async function createPoke(host, { embedded = false } = {}) {
     sceneT = target(gl, L.rw, L.rh);
     filmT = target(gl, L.rw, L.rh);
     film.resize(L.rw, L.rh);
-    layLines(LINE * (stage.dpr / 2) * (L.rw / Math.max(1, L.pw)) / (L.rw / (L.view[2] * PW)));
+    layLines((LINE * (stage.dpr / 2) * (L.rw / Math.max(1, L.pw))) / (L.rw / (L.view[2] * PW)));
     dirty = true;
   };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
@@ -723,7 +657,13 @@ export async function createPoke(host, { embedded = false } = {}) {
     if (!grabbable(px, py)) return;
     const h = modal.grab(px, py, { dmax: DMAX, radius: HAND });
     // stiffer spots travel less: the limit scales with the spot's compliance
-    held = { px0: px, py0: py, dx0: h.tx, dy0: h.ty, lmax: Math.min(LMAX, h.reach) };
+    held = {
+      px0: px,
+      py0: py,
+      dx0: h.tx,
+      dy0: h.ty,
+      lmax: Math.min(LMAX, h.reach),
+    };
     host.dataset.grab = "held";
     dirty = true;
   });
@@ -782,44 +722,17 @@ export async function createPoke(host, { embedded = false } = {}) {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
-    gl.useProgram(scene.p);
-    const u = scene.u;
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex.tree);
-    gl.uniform1i(u.uTree, 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, tex.sky);
-    gl.uniform1i(u.uSky, 1);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex.modes);
-    gl.uniform1i(u.uModes, 2);
-    updateSites();
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, tex.siteA);
-    gl.uniform1i(u.uSiteA, 3);
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D, tex.siteB);
-    gl.uniform1i(u.uSiteB, 4);
-    gl.activeTexture(gl.TEXTURE5);
-    gl.bindTexture(gl.TEXTURE_2D, tex.owner);
-    gl.uniform1i(u.uOwner, 5);
-    gl.uniform2i(u.uSites, SX, SY);
-    gl.uniform1f(u.uCell, CELL);
-    gl.uniform3fv(u.uGround, GROUND);
-    for (let i = 0; i < K; i++) {
-      uQ[i * 2] = modal.q[i * 2] * modal.scale[i];
-      uQ[i * 2 + 1] = modal.q[i * 2 + 1] * modal.scale[i];
-    }
-    gl.uniform2fv(u.uQ, uQ);
-    gl.uniform4f(u.uView, ...L.view);
-    gl.uniform2f(u.uPlate, PW, PH);
-    gl.uniform1f(u.uExpo, 2 ** expoStops);
+    // the ground: cobalt shadow over the whole print
+    const ex = 2 ** expoStops;
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.clearColor(GROUND[0] * ex, GROUND[1] * ex, GROUND[2] * ex, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
     // the engraving, over its ground, before the film
     for (let i = 0; i < K; i++) {
+      uQ[i * 2] = modal.q[i * 2] * modal.scale[i];
+      uQ[i * 2 + 1] = modal.q[i * 2 + 1] * modal.scale[i];
       uW[i * 2] = (modal.v[i * 2] * modal.scale[i]) / modal.omega[i];
       uW[i * 2 + 1] = (modal.v[i * 2 + 1] * modal.scale[i]) / modal.omega[i];
     }
@@ -838,35 +751,78 @@ export async function createPoke(host, { embedded = false } = {}) {
     }
     const sep = LINE * (stage.dpr / 2) * (L.rw / Math.max(1, L.pw)); // target px
     const k = L.rw / (L.view[2] * PW); // plate px -> target px
-    const su = strokes.u;
-    gl.useProgram(strokes.p);
-    gl.bindVertexArray(strokeVao);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex.tree);
-    gl.uniform1i(su.uTree, 0);
-    gl.activeTexture(gl.TEXTURE6);
-    gl.bindTexture(gl.TEXTURE_2D, tex.spine);
-    gl.uniform1i(su.uSpine, 6);
-    if (fieldT) {
-      gl.activeTexture(gl.TEXTURE7);
-      gl.bindTexture(gl.TEXTURE_2D, fieldT.tex);
-      gl.uniform1i(su.uField, 7);
-    } else {
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex.modes);
-      gl.uniform1i(su.uModes, 2);
-      gl.uniform2fv(su.uQ, uQ);
-      gl.uniform2fv(su.uW, uW);
+    const bindStrokes = (pr, view, rw, rh, kk, move, cover) => {
+      const su = pr.u;
+      gl.useProgram(pr.p);
+      gl.bindVertexArray(strokeVao);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex.tree);
+      gl.uniform1i(su.uTree, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, tex.skyLum);
+      gl.uniform1i(su.uSkyLum, 1);
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, tex.meta);
+      gl.uniform1i(su.uMeta, 5);
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, tex.spine);
+      gl.uniform1i(su.uSpine, 6);
+      if (fieldT) {
+        gl.activeTexture(gl.TEXTURE7);
+        gl.bindTexture(gl.TEXTURE_2D, fieldT.tex);
+        gl.uniform1i(su.uField, 7);
+      } else {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex.modes);
+        gl.uniform1i(su.uModes, 2);
+        gl.uniform2fv(su.uQ, uQ);
+        gl.uniform2fv(su.uW, uW);
+      }
+      gl.uniform4f(su.uView, ...view);
+      gl.uniform2f(su.uPlate, PW, PH);
+      gl.uniform2f(su.uRes, rw, rh);
+      gl.uniform2f(su.uRef, ref[0], ref[1]);
+      gl.uniform1f(su.uHalf, sep * WIDTH);
+      gl.uniform1f(su.uLod, Math.log2(Math.max(1, (sep / k) * 0.35)));
+      gl.uniform1f(su.uTrail, TRAIL);
+      gl.uniform1f(su.uCap, (sep / k) * TRAIL_CAP);
+      gl.uniform2f(su.uLum, LUM[0], LUM[1]);
+      gl.uniform1f(su.uFloor, SHADE);
+      gl.uniform1f(su.uSkyHalf, sep * SKY_WIDTH);
+      gl.uniform3f(su.uSkyLight, SKY_LUM[0], SKY_LUM[1], SKY_THIN);
+      gl.uniform1f(su.uCapLen, (sep / k) * 1.5);
+      gl.uniform3fv(su.uSkyInk, SKY_INK);
+      gl.uniform1f(su.uMove, move);
+      gl.uniform1f(su.uCover, cover * kk);
+    };
+    // the crown's cover, now and (once per layout) at rest, at the mask's scale
+    const km = MASK[0] / PW;
+    const covers = restDirty
+      ? [
+          [restCover, 0],
+          [nowCover, 1],
+        ]
+      : [[nowCover, 1]];
+    restDirty = false;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    for (const [t, move] of covers) {
+      bindStrokes(coverP, [0, 0, 1, 1], MASK[0], MASK[1], km, move, (sep / k) * COVER);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.viewport(0, 0, MASK[0], MASK[1]);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, P * 2, lines.crown);
     }
-    gl.uniform4f(su.uView, ...L.view);
-    gl.uniform2f(su.uPlate, PW, PH);
-    gl.uniform2f(su.uRes, L.rw, L.rh);
-    gl.uniform2f(su.uRef, ref[0], ref[1]);
-    gl.uniform1f(su.uHalf, sep * WIDTH);
-    gl.uniform1f(su.uLod, Math.log2(Math.max(1, (sep / k) * 0.35)));
-    gl.uniform1f(su.uTrail, TRAIL);
-    gl.uniform1f(su.uCap, (sep / k) * TRAIL_CAP);
-    gl.uniform2f(su.uLum, LUM[0], LUM[1]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
+    gl.viewport(0, 0, L.rw, L.rh);
+    bindStrokes(strokes, L.view, L.rw, L.rh, k, 1, 0);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, restCover.tex);
+    gl.uniform1i(strokes.u.uRestCover, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, nowCover.tex);
+    gl.uniform1i(strokes.u.uNowCover, 4);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, P * 2, lines.count);
@@ -975,9 +931,11 @@ export async function createPoke(host, { embedded = false } = {}) {
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
       Object.values(tex).forEach((t) => gl.deleteTexture(t));
-      gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteProgram(strokes.p);
+      gl.deleteProgram(coverP.p);
+      freeTarget(gl, restCover);
+      freeTarget(gl, nowCover);
       if (fieldT) {
         gl.deleteProgram(fieldP.p);
         freeTarget(gl, fieldT);
