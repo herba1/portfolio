@@ -16,8 +16,6 @@ export const MH = Math.ceil(GH / CELL);
 export const LO0 = 0.5;
 export const LO1 = 0.0;
 export const HI = 1.0;
-export const HOLD_DEPTH = 44; // nearer than this (0..255), and not grass or sky, stands in front of the stack
-export const HOLD_TALL = 34; // a holdout must run this many grid rows unbroken
 export const JUMP = 16; // a depth step this large between neighbours breaks a span
 export const EDGE = 18; // depth step (0..255 over 4 layout px) that marks a silhouette
 export const REACH = 760 * S; // a band's reach at m = 1, before the clamp below
@@ -247,10 +245,11 @@ export function demoMask(amount) {
 // texel and the last vegetation on its row, as a fraction of EXIT x that
 // band's reach; 255 = out of reach), and the sort key. A span may only enter
 // at grass and run on, through sky and whatever else, as far as the mask
-// allows (m >= reach) and until a silhouette or a depth jump. So grass is
+// allows (m >= reach) and until a silhouette (the edge of something the
+// holdout matte keeps in front) or a depth jump. So grass is
 // carried out of the verge and over the sky, and a pole or a sign, with no
 // grass of its own, is never entered.
-export function bake(photoPx, depthPx) {
+export function bake(photoPx, depthPx, holdPx) {
   // Depth, opened (min then max over a few px): the overhead wires, a pixel
   // or two wide, drop out of it, so they neither break a span nor stop the
   // wave; anything thicker (a pole, a sign) keeps its outline.
@@ -297,6 +296,12 @@ export function bake(photoPx, depthPx) {
     const [dx, dy] = gx >= gy ? [r > l ? 1 : -1, 0] : [0, b > t ? 1 : -1];
     const far = D(x - dx * o, y - dy * o);
     if (greenAt(x + dx * o, y + dy * o)) return 0;
+    // Only the edge of something held in front stops a span: a cabinet or
+    // a sign housing the holdout dropped has the rows run on behind it.
+    if (holdPx) {
+      const hx = (k) => holdPx[clamp(y + dy * k * o, 0, GH - 1) * GW + clamp(x + dx * k * o, 0, GW - 1)];
+      if (Math.max(hx(1), hx(2)) < 96) return 0;
+    }
     // A wire (an object thinner than a few px) is no silhouette.
     if (D(x + dx * 2 * o, y + dy * 2 * o) - far <= EDGE * 0.6) return 0;
     return 1;
@@ -349,75 +354,7 @@ export function bake(photoPx, depthPx) {
       veg[k] = isVeg(photoPx[s], photoPx[s + 1], photoPx[s + 2]) ? 1 : 0;
     }
   }
-  // The holdout, per grid pixel: what stands in front of the stack. A pole,
-  // a sign or a cabinet is near in depth and neither grass nor sky; the
-  // strips pass behind it, so every pole stays whole. Opened, so a stray
-  // dark leaf in a tree holds nothing out.
-  const hold = new Uint8Array(GW * GH);
-  {
-    const a = new Uint8Array(GW * GH);
-    for (let p = 0; p < GW * GH; p++) {
-      const s = p * 4;
-      const r = photoPx[s];
-      const g = photoPx[s + 1];
-      const b = photoPx[s + 2];
-      const hi = Math.max(r, g, b);
-      const sky = (b > r + 24 && b >= g - 12) || (hi > 205 && hi - Math.min(r, g, b) < 34);
-      a[p] = dep[p] > HOLD_DEPTH && !isVeg(r, g, b) && !sky ? 1 : 0;
-    }
-    const b = new Uint8Array(GW * GH);
-    const R = 4;
-    const pass = (src, dst, horiz, lo) => {
-      for (let y = 0; y < GH; y++) {
-        for (let x = 0; x < GW; x++) {
-          let v = lo ? 1 : 0;
-          for (let k = -R; k <= R; k++) {
-            const w = horiz ? src[y * GW + clamp(x + k, 0, GW - 1)] : src[clamp(y + k, 0, GH - 1) * GW + x];
-            v = lo ? v & w : v | w;
-          }
-          dst[y * GW + x] = v;
-        }
-      }
-    };
-    pass(a, b, true, true);
-    pass(b, a, false, true);
-    pass(a, b, true, false);
-    pass(b, hold, false, false);
-    // Only what stands tall holds out: a pole, a sign or a cabinet runs
-    // unbroken down many rows, a clump of dry leaves in a tree does not, and
-    // would punch specks of photo through the sheet. Each holdout region is
-    // kept whole (a lamp's thin bracket with it) if any of it stands tall.
-    const keep = a; // reused: 255 = kept
-    keep.fill(0);
-    const stack = [];
-    for (let x = 0; x < GW; x++) {
-      let y = 0;
-      while (y < GH) {
-        if (!hold[y * GW + x]) {
-          y++;
-          continue;
-        }
-        const y0 = y;
-        while (y < GH && hold[y * GW + x]) y++;
-        if (y - y0 >= HOLD_TALL && !keep[y0 * GW + x]) {
-          keep[y0 * GW + x] = 255;
-          stack.push(y0 * GW + x);
-        }
-      }
-    }
-    while (stack.length) {
-      const p = stack.pop();
-      const x = p % GW;
-      const nb = [x > 0 ? p - 1 : -1, x < GW - 1 ? p + 1 : -1, p - GW, p + GW];
-      for (const q of nb) {
-        if (q < 0 || q >= GW * GH || keep[q] || !hold[q]) continue;
-        keep[q] = 255;
-        stack.push(q);
-      }
-    }
-    hold.set(keep);
-  }
-  return { lum16, key: key16, depth, reachQ, veg, hold };
+  return { lum16, key: key16, depth, reachQ, veg };
 }
 
 // The mask read once per band texel (on the band's centre row), 0..255.
@@ -529,7 +466,7 @@ const SRC_X1 = ROOT_X1 + 240;
 // 65535) for the whole row the tile is part of. The first tile that holds a pixel draws it,
 // so glints and end blocks are written first.
 export const PARTS = 16;
-export const F_LIFT = 1; // a lifted strip: held out behind poles, lit by its facing
+export const F_LIFT = 1; // a lifted strip: lit by its facing (the holdout matte covers every sorted pixel)
 export const F_GLINT = 2; // a glint tile: the run's brightest pixel, white-gold
 export const F_BLOWN = 4; // a row's end block: its run's tail, gone over to white-gold
 // A verge run in place slides right by up to this much of itself where it

@@ -1,6 +1,6 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
-import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_LIFT, F_GLINT, F_BLOWN, demoMask, bake, liftPlan, liftMask, links, restSort, geometry } from "./sortCore";
+import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_GLINT, F_BLOWN, demoMask, bake, liftPlan, liftMask, links, restSort, geometry } from "./sortCore";
 
 // Sort: a real pixel sort, after Kim Asendorf's ASDF Pixel Sort (2010), run
 // on the GPU over a summer photograph of a Japanese level crossing.
@@ -44,8 +44,10 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_LIFT, F_GLINT, F_BLOWN, d
 // drawn; a row ends where its last whole run ends, so the outer edge is
 // ragged and the sort's own. The stack leans over as it climbs, the crest's
 // rows run on over the top, and below them the lip hangs free, curling back
-// in over a hollow of open sky. Poles and signs stand in front of it (a holdout from the depth
-// map and the photo).
+// in over a hollow of open sky. Poles, crossbucks and signs stand in front of
+// it: a soft holdout matte baked offline at the print's full 2400x1600 from
+// the depth map and refined against the photo's own edges
+// (tools/depth/bakes/sort/hold.py), mixed over the strips per device pixel.
 //
 // Each row is one unbroken luminance ramp, inner edge to outer edge, lit by
 // the sort order: its facing (low under the lean, high at the crest) picks the
@@ -127,7 +129,7 @@ uniform usampler2D uState;
 uniform usampler2D uGeo;    // in place, per (x, band): source x + 1 (0 = not sorted here), source band
 uniform usampler2D uStripe; // per grid row, per tile: (x0, x1, source band + 1, flags), (run x0, run x1, facing, vegetation share), (row x0, row x1, row offset into the sort order, blow-out)
 uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band
-uniform usampler2D uHold;   // 255 where a pole or a sign stands in front of the stack
+uniform sampler2D uHold;    // holdout alpha, print-sized, top row first: the photo in front of the stack
 uniform sampler2D uFilm;    // the developed print, print-sized, GL orientation
 uniform sampler2D uClean;   // the photo developed at grid size without grain, for the strips
 uniform vec4 uPrint;        // x, y, w, h in device px, top-left origin
@@ -144,7 +146,8 @@ void main() {
   if (any(lessThan(l, vec2(0.0))) || any(greaterThanEqual(l, vec2(1.0)))) { o = vec4(uPaper, 1.0); return; }
   ivec2 fs = textureSize(uFilm, 0);
   ivec2 fp = ivec2(d - uPrint.xy);
-  vec3 col = texelFetch(uFilm, ivec2(fp.x, fs.y - 1 - fp.y), 0).rgb;
+  vec3 print = texelFetch(uFilm, ivec2(fp.x, fs.y - 1 - fp.y), 0).rgb;
+  vec3 col = print;
   ivec2 g = ivec2(floor(l * uGrid));
   ivec2 src = ivec2(-1);
   bool lifted = false;
@@ -154,14 +157,11 @@ void main() {
   float pr = 0.0;
   float sh = 0.0;
   int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
-  bool held = texelFetch(uHold, g, 0).r > 0u;
   for (int k = 0; k < ${PARTS}; k++) {
     uvec4 a = texelFetch(uStripe, ivec2(g.y, 3 * k), 0);
     if (a.b == 0u) break;
     uint fl = a.a;
     if (g.x < int(a.r) || g.x >= int(a.g)) continue;
-    // A pole or a sign stands in front of the stack.
-    if ((fl & ${F_LIFT}u) != 0u && held) continue;
     uvec4 b = texelFetch(uStripe, ivec2(g.y, 3 * k + 1), 0);
     uvec4 c = texelFetch(uStripe, ivec2(g.y, 3 * k + 2), 0);
     f = float(b.b) / 65535.0;
@@ -229,6 +229,10 @@ void main() {
       if (glint) col = mix(vec3(1.0, 0.8, 0.32), vec3(1.0, 0.97, 0.86), 0.25 + 0.35 * smoothstep(0.3, 0.8, y));
     }
   }
+  // A pole or a sign stands in front of the stack: the print over the
+  // strips by the holdout's soft alpha, read bilinearly at this device
+  // pixel, so its edge is the photo's own 1-2 px ramp, never a stair-step.
+  if (src.x >= 0) col = mix(col, print, texture(uHold, l).r);
   o = vec4(col, 1.0);
 }`;
 
@@ -288,7 +292,9 @@ export async function createSort(host, { embedded = false } = {}) {
   if (!gl) throw new Error("no webgl2");
   stage.canvas.style.cursor = "crosshair";
 
-  const [photoBm, depthBm] = await Promise.all([loadBitmap(`${ASSET}photo.webp`), loadBitmap(`${ASSET}depth.png`)]);
+  const [photoBm, depthBm, holdBm] = await Promise.all(
+    ["photo.webp", "depth.png", "hold.png"].map((f) => loadBitmap(`${ASSET}${f}`)),
+  );
   // ---- mask
   const mask = qMask === "none" ? new Float32Array(MW * MH) : demoMask(amount);
   const mask8 = new Uint8Array(MW * MH);
@@ -297,7 +303,15 @@ export async function createSort(host, { embedded = false } = {}) {
   };
   syncMask8();
 
-  const base = bake(pixels(photoBm, GW, GH), pixels(depthBm, GW, GH));
+  // The holdout matte, one byte per print pixel. Only what it holds
+  // out stops a span: the rows run on unbroken behind anything it dropped.
+  const holdA = new Uint8Array(GW * GH);
+  {
+    const px = pixels(holdBm, GW, GH);
+    for (let i = 0; i < GW * GH; i++) holdA[i] = px[i * 4];
+    holdBm.close?.();
+  }
+  const base = bake(pixels(photoBm, GW, GH), pixels(depthBm, GW, GH), holdA);
   depthBm.close?.();
   // The spans the mask opens, and the wave's slabs, rebuilt as the mask moves.
   const bm = new Uint8Array(DW * DH);
@@ -332,7 +346,7 @@ export async function createSort(host, { embedded = false } = {}) {
   const geoTex = tex(gl.RG16UI, gl.RG_INTEGER, gl.UNSIGNED_SHORT, DW, DH, wave.geo);
   const stripeTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, GH, 3 * PARTS, wave.table);
   const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 2, bandRows);
-  const holdTex = tex(gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, GW, GH, base.hold);
+  const holdTex = tex(gl.R8, gl.RED, gl.UNSIGNED_BYTE, GW, GH, holdA, gl.LINEAR);
   const uploadCpu = () => {
     gl.bindTexture(gl.TEXTURE_2D, linkTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RED_INTEGER, gl.UNSIGNED_BYTE, link);
