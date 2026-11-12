@@ -41,7 +41,13 @@ const DEPTH_HI = 400;
 // The bake finds steps at 0.05 over 5 px; a facade drifts ~1% across a splat.
 const DEPTH_TOL = [0.035, 0.07];
 
-const MAX_DEG = 5; // orbit range before the rubber band
+// Orbit range before the rubber band. The bake puts every step between two
+// structures (and between a tower and the sky) on the photograph's own edge,
+// one pixel wide, so the towers can part from each other and from the dome a
+// full ten degrees without tearing.
+const MAX_DEG = 10;
+// the swing over which the lens softens the edges (it stops softening there)
+const SOFT_DEG = 5;
 const PIVOT = 70; // metres up the optical axis: the camera swings round this point
 const DEG_PER_PX = 0.016;
 const OVERZOOM = 1.07; // a little more than cover, so the orbit has room
@@ -847,8 +853,14 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
 
     if (grab) {
       const [ix, iy] = toImage(V, p.x - grab.x, p.y - grab.y);
-      yaw.to = band(MAX_DEG, grab.y0 + ix * DEG_PER_PX);
-      pitch.to = band(MAX_DEG, grab.p0 - iy * DEG_PER_PX);
+      // The rubber band acts on the swing's radius, so a diagonal drag stops
+      // at the same ten degrees as a straight one.
+      const ty = grab.y0 + ix * DEG_PER_PX;
+      const tp = grab.p0 - iy * DEG_PER_PX;
+      const r = Math.hypot(ty, tp);
+      const k = r > 0 ? band(MAX_DEG, r) / r : 1;
+      yaw.to = ty * k;
+      pitch.to = tp * k;
       stepSpring(yaw, 40, 1, dt);
       stepSpring(pitch, 40, 1, dt);
     } else if (!held) {
@@ -879,7 +891,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
 
     // The lens softens the edges; they breathe, and go softer the further
     // the camera swings.
-    const swing = Math.min(1, Math.hypot(yd, pd) / MAX_DEG);
+    const swing = Math.min(1, Math.hypot(yd, pd) / SOFT_DEG);
     const reveal = qReveal != null ? qReveal : held || reduced ? 1 : expoOut(clamp((age - 0.25) / 2.6, 0, 1));
     const lens = stage.canvas.height * (BLUR_CORNER * (1 + 0.12 * breathe * Math.sin((t * 2 * Math.PI) / 9.1)) + BLUR_SWING * swing * swing);
     const soft = [0.3 + reveal * 1.25, 0];

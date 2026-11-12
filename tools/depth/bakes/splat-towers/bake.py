@@ -3,6 +3,10 @@
 #   python3 -I bake.py photo.jpg photo-depth.png outdir [target_leaves]
 #
 # photo-depth.png is tools/depth/depth_hr.py output (16-bit, white = near).
+# photo.jpg is the Unsplash original at full size (3024 x 4032). layers.png,
+# next to this script, labels each tower in that photo (0 = none): the depth of
+# every labelled structure is rebuilt as a plane or a corner of two (see "hard
+# layers"), so its edges stay straight and solid when the camera swings.
 # Writes outdir/splats.bin (quantised, structure of arrays), outdir/photo.webp
 # (the texture every splat samples through its own plane) and outdir/depth.png
 # (its depth, texel for texel, which the renderer tests every lookup against).
@@ -233,6 +237,149 @@ def snap_depth(dep, img8):
 
 
 dep = snap_depth(dep, img8)
+
+
+# ---- hard layers: one plane (or a corner of two) per structure
+# The snap above settles tower against sky pixel by pixel, but the depth the
+# model gives inside a structure is still wrong in two ways that only show
+# once the camera swings. It rounds every tower off: disparity falls away over
+# the last ~100 px before the sky, so a straight edge bends back like a tube
+# and tears into a ragged cutout. And it draws the step from the lattice
+# canopy (top left of the frame) to the towers behind it as a ramp ~150 px
+# wide, so the canopy's last bays sit halfway to the tower behind and its grid
+# stretches like rubber. No local test sees either (neither steps more than ~1%
+# over 5 px). So the structures are put back from outside: layers.png (next to
+# this script) labels each tower, one SAM 2.1 mask each (tools/depth/segment.py
+# prompt on the original 3024 x 4032 photo; points in LAYER_PROMPTS below), and
+# each layer's disparity is replaced by a plane, or by the corner of two planes,
+# fitted to its own core, where the model is right. A plane in space is exactly
+# a plane in disparity, so a facade comes back flat, slope and all, right up to
+# its edge, and every step, layer to layer and layer to sky, lies on the
+# photograph's own edge, one pixel wide. A tower seen from below shows two
+# faces meeting at a convex corner, and the face the eye sees at a pixel is the
+# farther one: its disparity is the smaller of the two planes', so the corner
+# lands where the planes cross, with no seam to place.
+LAYER_PROMPTS = {
+    1: "canopy  --point 720,600 --point 240,800 --point 900,1400 --neg 1200,600 --neg 800,1690 --neg 1200,1500",
+    2: "beige   --point 1210,605 --point 1371,1109 --point 1120,400 --point 1080,1000 --point 1140,680 --neg 605,605 --neg 1512,403 --neg 1100,1500 --neg 900,1200",
+    3: "brown   --point 605,1714 --point 907,1693 --point 870,1540 --neg 605,1300 --neg 1200,1500 --neg 403,1855 --neg 1400,1300",
+    4: "gold    --point 403,1855 --point 200,1950 --neg 605,1714 --neg 600,2050 --neg 600,1300",
+}
+RB = 110  # px: how far in from a layer's edge the model's depth is distrusted
+
+
+def plane_ls(x, y, d, w):
+    A = np.stack([x, y, np.ones_like(x)], -1) * np.sqrt(w)[:, None]
+    return np.linalg.lstsq(A, d * np.sqrt(w), rcond=None)[0]
+
+
+def plane_irls(x, y, d, w0, it=8):
+    # Tukey-weighted least squares: setbacks, rails and reflections the model
+    # read as depth do not pull the facade
+    w = w0.copy()
+    p = plane_ls(x, y, d, w)
+    for _ in range(it):
+        r = d - (p[0] * x + p[1] * y + p[2])
+        s = 1.4826 * np.median(np.abs(r[w0 > 0])) + 1e-4
+        u = np.clip(r / (4.0 * s), -1, 1)
+        w = w0 * (1 - u * u) ** 2
+        p = plane_ls(x, y, d, w + 1e-9)
+    return p
+
+
+def fit_layer(x, y, d, two=True):
+    # one plane, or two meeting at a corner (min: convex, the far face shows;
+    # max: concave). Returns (planes, mode, robust residual).
+    one = plane_irls(x, y, d, np.ones_like(d))
+    ev = lambda r: 1.4826 * np.median(np.abs(r))
+    e1 = ev(d - (one[0] * x + one[1] * y + one[2]))
+    best = ([one], "one", e1)
+    if not two:
+        return best
+    cx, cy = x.mean(), y.mean()
+    for mode, red in (("min", np.minimum), ("max", np.maximum)):
+        for a in np.radians(np.arange(0, 180, 22.5)):
+            side = ((x - cx) * np.cos(a) + (y - cy) * np.sin(a)) > 0
+            if side.mean() < 0.1 or side.mean() > 0.9:
+                continue
+            P = [plane_irls(x, y, d, s.astype(np.float64)) for s in (side, ~side)]
+            for _ in range(10):
+                e = [np.abs(d - (p[0] * x + p[1] * y + p[2])) for p in P]
+                side = e[0] <= e[1]
+                if side.mean() < 0.05 or side.mean() > 0.95:
+                    break
+                P = [plane_irls(x, y, d, s.astype(np.float64), it=4) for s in (side, ~side)]
+            m = red(P[0][0] * x + P[0][1] * y + P[0][2], P[1][0] * x + P[1][1] * y + P[1][2])
+            err = ev(d - m)
+            # a second plane has to earn its place
+            if err < e1 * 0.7 and err < e1 - 0.002 and err < best[2]:
+                best = (P, mode, err)
+    return best
+
+
+def hard_layers(dep, labels):
+    H_, W_ = dep.shape
+    tow = dep >= SKY_T
+    lab = np.where(tow, labels, 255).astype(np.uint8)
+    # A sliver of tower the snap kept that no mask holds, lying against a
+    # layer (an edge pixel or two, the end of a rail), joins the layer nearest
+    # to it, or it would keep the model's rounded depth as a loose fringe.
+    zero = (lab == 0).astype(np.uint8)
+    n_, cc, st_, _ = cv2.connectedComponentsWithStats(zero, connectivity=8)
+    small = np.zeros(n_, bool)
+    small[1:] = st_[1:, cv2.CC_STAT_AREA] < 40000
+    labelled = (lab > 0) & (lab < 255)
+    dl, nl = cv2.distanceTransformWithLabels((~labelled).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    lab_of = lab[labelled][np.maximum(nl, 1) - 1]
+    adopt = (lab == 0) & small[cc] & (dl < 24)
+    lab = np.where(adopt, lab_of, lab).astype(np.uint8)
+    print("hard layers: slivers adopted by the layer beside them", int(adopt.sum()), "px")
+    del cc, nl, lab_of, dl, zero, labelled
+    out = dep.copy()
+    yy, xx = np.mgrid[0:H_, 0:W_]
+    xs_, ys_ = (xx - W_ / 2) / 1000.0, (yy - H_ / 2) / 1000.0
+    del yy, xx
+    for k in np.unique(lab):
+        if k == 0 or k == 255:
+            continue
+        mine = lab == k
+        dist = cv2.distanceTransform(mine.astype(np.uint8), cv2.DIST_L2, 5)
+        # the core: clear of every edge by RB px, or by half the layer's
+        # thickness where it is thinner than that
+        thr = min(RB, 0.5 * float(dist.max()))
+        core = mine & (dist > thr)
+        iy, ix = np.nonzero(core)
+        if len(iy) < 500:
+            continue
+        sel = np.arange(0, len(iy), max(1, len(iy) // 60000))
+        iy, ix = iy[sel], ix[sel]
+        x, y, d = xs_[iy, ix].astype(np.float64), ys_[iy, ix].astype(np.float64), dep[iy, ix].astype(np.float64)
+        # a band thinner than 2 RB cannot tell two faces from one tilted one
+        P, mode, err = fit_layer(x, y, d, two=thr >= RB)
+        X, Y = xs_[mine], ys_[mine]
+        vals = [p[0] * X + p[1] * Y + p[2] for p in P]
+        v = vals[0] if mode == "one" else (np.minimum(*vals) if mode == "min" else np.maximum(*vals))
+        before = 1.4826 * np.median(np.abs(dep[mine] - v))
+        out[mine] = np.maximum(v, SKY_T + 0.01)
+        print(f"layer {k}: {int(mine.sum())} px, {mode} plane fit, core residual {err:.4f}, whole-layer change {before:.4f}")
+    return out.astype(np.float32)
+
+
+LAYERS = os.environ.get("LAYERS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "layers.png"))
+if os.path.exists(LAYERS):
+    labels = np.array(Image.open(LAYERS))
+    if labels.shape != dep.shape:
+        labels = cv2.resize(labels, (W, H), interpolation=cv2.INTER_NEAREST)
+    dep = hard_layers(dep, labels)
+    del labels
+    lzs_ = logz(dep)
+    k5_ = np.ones((5, 5), np.uint8)
+    ln_, lf_ = cv2.erode(lzs_, k5_), cv2.dilate(lzs_, k5_)
+    # (sky pixels go on the dome whatever their depth here, so only the
+    # towers' own pixels count)
+    mid_ = ((lf_ - ln_) > DISC_T) & (lzs_ - ln_ > DISC_T * 0.5) & (lf_ - lzs_ > DISC_T * 0.5) & (dep >= SKY_T)
+    print("hard layers: tower px left between layers", int(mid_.sum()))
+    del lzs_, ln_, lf_, mid_
 img8 = grade(img8, (dep < SKY_T).astype(np.uint8))
 lin = s2l(img8.astype(np.float32) / 255.0).astype(np.float32)
 
@@ -396,8 +543,8 @@ lin_sky = np.where((clean > 0)[..., None] | (cden < 1e-3)[..., None], lin, cfill
 del cden, cfill
 
 # ---- outpaint a margin round the frame
-# The orbit (up to 5 degrees, with only 7% of overzoom to spare) carries the
-# view up to ~140 px past the photograph's edge. Without texels there the edge
+# The orbit (up to 10 degrees, with only 7% of overzoom to spare) carries the
+# view several hundred px past the photograph's edge. Without texels there the edge
 # splats had nothing to sample and fell back to their own flat colour, and the
 # renderer hid that by inflating them into soft, radially stretched blobs:
 # streaks. So the frame is outpainted by ~12% on every side and everything from
