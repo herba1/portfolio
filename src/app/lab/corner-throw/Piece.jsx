@@ -18,6 +18,20 @@ const C = (4 * Math.PI * DAMPING) / RESPONSE;
 const STEP = 1 / 240;
 
 const INSET = 32;
+
+// Printer's crop marks: two short ticks per corner, set off the trim by GAP and
+// running outward along its lines. Half-pixel offsets keep the 1px rules on the
+// cover's own outer pixel rows, so the marks register with its edges exactly.
+const GAP = 6, TICK = 14;
+const crop = (size) => {
+  const lo = 0.5, hi = size - 0.5, a = GAP, b = GAP + TICK;
+  return [
+    `M${lo} ${-a}V${-b}M${-a} ${lo}H${-b}`,
+    `M${hi} ${-a}V${-b}M${size + a} ${lo}H${size + b}`,
+    `M${lo} ${size + a}V${size + b}M${-a} ${hi}H${-b}`,
+    `M${hi} ${size + a}V${size + b}M${size + a} ${hi}H${size + b}`,
+  ].join("");
+};
 const ALBUM = albumById("abbey-road");
 
 // The sleeve the window floats over. Side one starts with what is playing.
@@ -73,6 +87,7 @@ export default function Piece() {
   const rootRef = useRef(null);
   const tileRef = useRef(null);
   const ghostRef = useRef(null);
+  const cropRef = useRef(null);
   const lineRef = useRef(null);
   const haloRef = useRef(null);
   const crossRef = useRef(null);
@@ -181,11 +196,12 @@ export default function Piece() {
       // A PiP window is small: about a fifth of the short side.
       s.size = Math.round(Math.max(88, Math.min(168, Math.min(s.w, s.h) * 0.21)));
       root.style.setProperty("--ct-size", `${s.size}px`);
+      cropRef.current.setAttribute("d", crop(s.size));
       if (s.mode === "rest") {
         [s.x, s.y] = corners()[s.corner];
         paint();
       }
-      placeGhost(s.ghostCorner, ghost.dataset.show !== undefined);
+      placeGhost(s.ghostCorner, true);
       if (s.trace.shown) drawTrace();
     };
 
@@ -233,7 +249,7 @@ export default function Piece() {
       }
       const near = Math.hypot(s.x - tx, s.y - ty) < 0.25 && Math.hypot(s.vx, s.vy) < 4;
       if (Math.hypot(s.x - tx, s.y - ty) < s.size * 0.35) {
-        placeGhost(s.corner, false);
+        placeGhost(s.corner, true);
         if (s.trace.shown) showTrace(false);
       }
       if (near) {
@@ -303,6 +319,7 @@ export default function Piece() {
       if (d[1]) c = (c & 1) | (d[1] > 0 ? 2 : 0);
       if (c !== s.corner || s.mode === "fly") {
         showTrace(false);
+        placeGhost(c, true);
         fly(s.vx + d[0] * 600, s.vy + d[1] * 600, c);
       }
     };
@@ -386,7 +403,12 @@ export default function Piece() {
           ))}
         </div>
       </article>
-      <div ref={ghostRef} className="ct-ghost" aria-hidden="true" />
+      {/* The landing corner, ruled as crop marks at the cover's exact trim. */}
+      <div ref={ghostRef} className="ct-ghost" aria-hidden="true">
+        <svg className="ct-crop">
+          <path ref={cropRef} />
+        </svg>
+      </div>
       <svg className="ct-trace" aria-hidden="true">
         <line ref={haloRef} className="ct-halo" />
         <line ref={lineRef} className="ct-line" />
@@ -400,9 +422,6 @@ export default function Piece() {
       >
         <div className="ct-lift">
           <img className="ct-cover" src={ALBUM.cover} alt="" draggable={false} />
-          <div className="ct-progress" aria-hidden="true">
-            <span />
-          </div>
         </div>
       </div>
       {/* The two ends sit above the tile, so the landing mark shows even as the cover flies over it. */}
