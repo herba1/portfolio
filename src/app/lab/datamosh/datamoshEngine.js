@@ -31,19 +31,24 @@ import { readWebm } from "./webm";
 // the intra blocks and the quantised residuals, and rebuilds the picture
 // from its own last frame. While nothing goes wrong D is E, bit for bit.
 // It is starved one macroblock at a time, under the hand. A starved block
-// gets no I-frame, no residual and no intra blocks: each intra block is
-// turned into an inter block along the median of its neighbours' vectors,
-// the way a datamosher strips them (ffglitch's mb_type rewrite, Murata's
-// I-frame and intra removal), so the error stays one continuous smear
-// instead of squares of the true picture. It reads its own picture in
-// whole pels, nearest, with no half-pel filter (see mcHeld), so the smear
-// stays hard-edged however long the hold runs, and once it has missed an
-// I-frame it stops taking new vectors at all and repeats one P-frame, the
-// classic P-frame duplication: the same frozen vector field applied to its
-// own moshed picture frame after frame, so whatever it holds is dragged
-// again and again the same way into long stepped streaks. Every other block
-// is fed and decodes the true frame, so the mosh is a tear in an intact
-// picture.
+// gets no intra blocks: each intra block is turned into an inter block
+// along the median of its neighbours' vectors, the way a datamosher strips
+// them (ffglitch's mb_type rewrite, Murata's I-frame and intra removal), so
+// the error stays one continuous smear instead of squares of the true
+// picture. Until the next I-frame its P-frames still arrive whole, residual
+// and all, so the picture under the hand stays itself; that I-frame never
+// arrives, and from then on the block gets no residual and no new vectors
+// either and repeats one P-frame, the classic P-frame duplication: the
+// first P-frame after the lost I-frame, every 8x8 partition keeping its
+// own vector, applied to the block's own moshed picture frame after frame,
+// read in whole pels, nearest, with no half-pel filter (see mcHeld), so the
+// smear stays hard-edged however long the hold runs. Whatever sits near the
+// centre of that frame's motion is dragged out along its rays again and
+// again into long stepped streaks. One block past the starved ones the
+// edge of the tear repeats the same P-frame but still takes the I-frame,
+// so the new shot is torn into the strips there and the strips out across
+// it. Every other block is fed and decodes the true frame, so the mosh is a
+// tear in an intact picture.
 //
 // It tunes in the way a set joins a broadcast: between I-frames, with no
 // picture. Until the first I-frame arrives (three seconds) it builds what it
@@ -54,15 +59,16 @@ import { readWebm } from "./webm";
 // Press and drag and the hand paints a mask of starved macroblocks, a soft
 // brush a few blocks across dragged along its path, each block tearing at
 // its own level so the edge breaks raggedly on the grid. Under it the
-// I-frames and the residuals stop. Only the vectors are left. In the first
-// shot they still fit the picture they move, so the tear barely shows. The
-// real event is the cut. Its I-frame (and the loop seam's, the cut back) is
-// the one that matters to drop: the winter shot arrives everywhere else,
-// while inside the stroke the first winter P-frame is latched and repeated,
-// its radial vectors finding nothing of their own to move and pushing the
-// summer picture instead: the oak leaves at the vanishing point are pulled
-// out of it, a little further every frame, in long stepped streaks on the
-// macroblock grid. And while the hand stays down the tear spreads the way
+// next I-frame does not arrive, and after it nothing but one P-frame's
+// vectors. In the first shot they still fit the picture they move, so the
+// tear barely shows. The real event is the cut. Its I-frame (and the loop
+// seam's, the cut back) is the one that matters to drop: the winter shot
+// arrives everywhere else, while inside the stroke the first winter
+// P-frame is latched and repeated, its radial vectors finding nothing of
+// their own to move and pushing the summer picture instead: the oak
+// branches and the sky between them by the vanishing point are pulled out
+// of it, a little further every frame, in long stepped radial streaks on
+// the macroblock grid that run from the intact leaves out into strip. And while the hand stays down the tear spreads the way
 // the smear does, downstream along the vectors, fastest where the picture
 // moves fastest: a held stroke blooms outward over seconds until it has
 // taken most of the ground below the vanishing point, while the sky and
@@ -87,8 +93,10 @@ const ASSET = "/lab/datamosh/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const GOP = 90; // frames between I-frames (the cut, frame 180, is one too)
 const QP0 = 30; // encoder quantiser (H.264 scale)
-const LATCH = 4; // frames a starved block averages its vectors over before freezing them
-// (after the first I-frame it misses)
+const FOE_C = 0.01; // a frozen field diverging faster than this per px is a zoom, weighted by REACH
+const REACH = 500; // px from the centre of the motion at which a frozen vector steps at its own length
+// (the weight grows with the square of the distance: a quarter of it at half the reach)
+const REACH_MAX = 1.3; // and at most this many times it
 const GROW = 0.3; // spread of the starved field per frame, per 16 px of vector
 const GROW_MAX = 0.5; // and at most this much of the upstream block's level
 const REFRESH = 14; // frames for the intra refresh to sweep the picture
@@ -251,13 +259,17 @@ void main() {
 // (it decodes honestly from its own picture, so the damage drifts along the
 // true vectors until an intra block, an I-frame or the refresh column
 // reaches it), 2 starved (no I-frame, no intra blocks, no
-// residual: one latched P-frame duplicated, see mcHeld).
+// residual: one latched P-frame duplicated, see mcHeld), 3 the edge of the
+// starved field, one macroblock wide (the I-frame lands, then the same
+// duplicated P-frame as its starved neighbours), so the tear has no clean
+// cut-out edge: the winter picture is dragged into the strips from it and
+// the strips are dragged out across it.
 const STEP_FS = `${COMMON}${MC}
 uniform sampler2D uSrc;
 uniform sampler2D uE;
 uniform sampler2D uD;
 uniform sampler2D uRes;     // dequantised residual
-uniform sampler2D uState;   // MW x MH: x 0 fed, 1 drifting, 2 starved
+uniform sampler2D uState;   // MW x MH: x 0 fed, 1 drifting, 2 starved, 3 edge, 4 held, waiting
 uniform int uIframe;        // this frame is an I-frame
 uniform int uJoin;          // the decoder has not had an I-frame yet
 uniform float uRefresh;     // macroblock columns refreshed (intra), 0..80
@@ -284,6 +296,15 @@ void main() {
     // and every other frame is the latched P-frame again, a whole-pel copy
     // of the moshed picture along the frozen vector with no residual
     d = uIframe == 1 ? texelFetch(uD, ivec2(p), 0).rgb : mcHeld(uD, p);
+  } else if (state == 4) {
+    // held, but no I-frame missed yet: the P-frames still arrive whole,
+    // residual and all, only stripped of their intra blocks, so the picture
+    // under the hand stays itself until the I-frame it will lose
+    d = mc(uD, p, m) + r;
+  } else if (state == 3) {
+    // the edge of the tear: the I-frame lands, nothing else does; every
+    // other frame repeats the latched P-frame out of the moshed picture
+    d = uIframe == 1 ? e : mcHeld(uD, p);
   } else if (state == 1) {
     // fed again, still carrying the mosh: an honest decode drifts it along
     // the true vectors until something intra lands on it
@@ -799,32 +820,134 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   // The P-frame a starved block duplicates. Until it misses an I-frame it
   // follows the stream's own vectors (still a whole-pel copy with no
   // residual); the first I-frame it misses is the one a datamosher deletes,
-  // and from then on it repeats the P-frame after it: the mean of its
-  // partitions' vectors over the next LATCH frames, frozen for as long as
-  // the hold lasts. Repeating a short mean keeps a single frame's stray
-  // vector from sitting in the field for the whole hold, and the frozen
-  // field is passed through a 3x3 median on the partition grid (among
-  // frozen blocks), as an encoder's rate term would smooth it, so a lone
-  // zero vector in the ballast does not leave a still square in the
-  // stream. Intra blocks have their concealed vector here.
-  const latchN = new Uint8Array(MW * MH);
+  // and from then on it repeats the P-frame after it, exactly: each 8x8
+  // partition keeps its own vector from that one frame, at full magnitude,
+  // with no averaging over frames and no smoothing between neighbours, so
+  // the field keeps the radial divergence that pulls one partition away
+  // from the next. Averaged or median-filtered, neighbouring partitions
+  // step nearly alike, their copies chase each other round and the picture
+  // compounds into a uniform mottle; left as encoded, each partition reads
+  // a little further in toward the centre of the motion than the one inside
+  // it, so whatever sits near that centre is copied out along its ray again
+  // every frame, one partition further each time, and is pulled out into a
+  // long stepped streak that still carries the picture it came from: a
+  // trunk stays a dark ray, a gap of sky a pale one. Intra blocks have
+  // their concealed vector here.
+  //
+  // The frozen field is also weighted by distance from the centre of its
+  // own motion (the point the frame's vectors diverge from, fitted to the
+  // field: see foeOf), so the outer partitions step further each frame than
+  // the encoder's vector alone would take them and the inner ones hardly at
+  // all. What is near the centre stays itself; further out the same
+  // content is drawn out faster than it is fed, so a ray thins from intact
+  // picture into strip with distance, the way the street in ref 2 grades
+  // from the photo into its smear. A field with no centre (the summer pan,
+  // over the seam) is left at its own magnitude.
+  const latched = new Uint8Array(MW * MH);
+  const starved = new Uint8Array(MW * MH);
   const frozen = new Uint8Array(MW * MH);
   const latchRaw = new Float32Array(mv.GW * mv.GH * 2);
-  const latchFrom = (id, n) => {
+  // the centre of this frame's motion: v = -c (p - centre) + noise, least
+  // squares over the inter partitions; c > FOE_C is a zoom (the forward run),
+  // anything less is a pan and gets no weighting
+  const foeOf = (field) => {
+    const GW = mv.GW;
+    let n = 0;
+    let mx = 0;
+    let my = 0;
+    let ux = 0;
+    let uy = 0;
+    for (let y = 0; y < mv.GH; y++) {
+      for (let x = 0; x < GW; x++) {
+        const o = (y * GW + x) * 4;
+        if (field[o] === 2) continue;
+        n++;
+        mx += x * 8 + 4;
+        my += y * 8 + 4;
+        ux += field[o + 1] / 2;
+        uy += field[o + 2] / 2;
+      }
+    }
+    mx /= n;
+    my /= n;
+    ux /= n;
+    uy /= n;
+    let pv = 0;
+    let pp = 0;
+    for (let y = 0; y < mv.GH; y++) {
+      for (let x = 0; x < GW; x++) {
+        const o = (y * GW + x) * 4;
+        if (field[o] === 2) continue;
+        const dx = x * 8 + 4 - mx;
+        const dy = y * 8 + 4 - my;
+        pv += dx * (field[o + 1] / 2 - ux) + dy * (field[o + 2] / 2 - uy);
+        pp += dx * dx + dy * dy;
+      }
+    }
+    const c = -pv / pp;
+    return c > FOE_C ? { c, x: mx + ux / c, y: my + uy / c } : { c: 0 };
+  };
+  // the duplicated P-frame: the first one after the I-frame a held block
+  // missed, kept whole, so a block the tear takes over later repeats the
+  // same frame as the blocks around it (not whatever the stream is sending
+  // by then) and its rays run on from theirs
+  const dupField = new Float32Array(mv.GW * mv.GH * 4);
+  let dupFoe = { c: 0 };
+  let dupDue = false;
+  // In a zoom the bake's zero vectors are skips, not motion: it writes
+  // zero wherever standing still predicts about as well (featureless
+  // ballast, snow, overcast), and a decoder repeating the frame would hold
+  // those partitions still for the whole hold, scattered squares of the
+  // old picture sitting in the rays. Repeated, a skip is read the way
+  // H.264 reads P_Skip, along the predicted vector: here the median of the
+  // partitions around it. Every partition that carries a vector keeps its
+  // own.
+  const skipX = [];
+  const skipY = [];
+  const skipped = new Uint8Array(mv.GW * mv.GH);
+  const skipToPredicted = (field) => {
+    const GW = mv.GW;
+    const GH = mv.GH;
+    for (let g = 0; g < GW * GH; g++) skipped[g] = field[g * 4] !== 2 && field[g * 4 + 1] === 0 && field[g * 4 + 2] === 0 ? 1 : 0;
+    const out = [];
+    for (let y = 0; y < GH; y++) {
+      for (let x = 0; x < GW; x++) {
+        const g = y * GW + x;
+        if (!skipped[g]) continue;
+        skipX.length = 0;
+        skipY.length = 0;
+        for (let yy = Math.max(0, y - 1); yy <= Math.min(GH - 1, y + 1); yy++) {
+          for (let xx = Math.max(0, x - 1); xx <= Math.min(GW - 1, x + 1); xx++) {
+            if (xx === x && yy === y) continue;
+            skipX.push(field[(yy * GW + xx) * 4 + 1]);
+            skipY.push(field[(yy * GW + xx) * 4 + 2]);
+          }
+        }
+        skipX.sort((p, q) => p - q);
+        skipY.sort((p, q) => p - q);
+        out.push(g, skipX[skipX.length >> 1], skipY[skipY.length >> 1]);
+      }
+    }
+    for (let k = 0; k < out.length; k += 3) {
+      field[out[k] * 4 + 1] = out[k + 1];
+      field[out[k] * 4 + 2] = out[k + 2];
+    }
+  };
+  // latch block id from a field: weighted when it is the duplicated frame
+  const latchFrom = (id, field, f) => {
     const i = id % MW;
     const j = (id - i) / MW;
     for (let q = 0; q < 4; q++) {
-      const g = (j * 2 + (q >> 1)) * mv.GW + i * 2 + (q & 1);
-      latchRaw[g * 2] = (latchRaw[g * 2] * n + mvField[g * 4 + 1] / 2) / (n + 1);
-      latchRaw[g * 2 + 1] = (latchRaw[g * 2 + 1] * n + mvField[g * 4 + 2] / 2) / (n + 1);
+      const gx = i * 2 + (q & 1);
+      const gy = j * 2 + (q >> 1);
+      const g = gy * mv.GW + gx;
+      const w = f && f.c ? Math.min(REACH_MAX, ((gx * 8 + 4 - f.x) ** 2 + (gy * 8 + 4 - f.y) ** 2) / REACH ** 2) : 1;
+      latchRaw[g * 2] = (field[g * 4 + 1] / 2) * w;
+      latchRaw[g * 2 + 1] = (field[g * 4 + 2] / 2) * w;
     }
   };
-  const xs9 = [];
-  const ys9 = [];
-  const med9 = (a) => {
-    a.sort((p, q) => p - q);
-    return a[a.length >> 1];
-  };
+  // each partition's whole-pel step this frame: the fractional vector with
+  // its own rounding remainder carried from frame to frame
   const carry = new Float32Array(mv.GW * mv.GH * 2);
   const stepOf = (g, k, v) => {
     const r = carry[g * 2 + k] + v;
@@ -832,53 +955,13 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     carry[g * 2 + k] = r - d;
     return d;
   };
-  // blocks whose latch or starved state changed this frame: only the
-  // partitions around them need their median taken again
-  const changed = new Uint8Array(MW * MH);
-  const near = (id) => {
-    const i = id % MW;
-    const j = (id - i) / MW;
-    for (let jj = Math.max(0, j - 1); jj <= Math.min(MH - 1, j + 1); jj++) {
-      for (let ii = Math.max(0, i - 1); ii <= Math.min(MW - 1, i + 1); ii++) if (changed[jj * MW + ii]) return true;
+  const stepLatch = () => {
+    for (let g = 0; g < mv.GW * mv.GH; g++) {
+      latchField[g * 4] = latchRaw[g * 2];
+      latchField[g * 4 + 1] = latchRaw[g * 2 + 1];
+      latchField[g * 4 + 2] = stepOf(g, 0, latchRaw[g * 2]);
+      latchField[g * 4 + 3] = stepOf(g, 1, latchRaw[g * 2 + 1]);
     }
-    return false;
-  };
-  const smoothLatch = () => {
-    const GW = mv.GW;
-    for (let y = 0; y < mv.GH; y++) {
-      for (let x = 0; x < GW; x++) {
-        const g = y * GW + x;
-        const id = (y >> 1) * MW + (x >> 1);
-        if (frozen[id] && !near(id)) {
-          latchField[g * 4 + 2] = stepOf(g, 0, latchField[g * 4]);
-          latchField[g * 4 + 3] = stepOf(g, 1, latchField[g * 4 + 1]);
-          continue;
-        }
-        if (!frozen[id]) {
-          latchField[g * 4] = latchRaw[g * 2];
-          latchField[g * 4 + 1] = latchRaw[g * 2 + 1];
-          latchField[g * 4 + 2] = stepOf(g, 0, latchField[g * 4]);
-          latchField[g * 4 + 3] = stepOf(g, 1, latchField[g * 4 + 1]);
-          continue;
-        }
-        xs9.length = 0;
-        ys9.length = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const xx = x + dx;
-            const yy = y + dy;
-            if (xx < 0 || yy < 0 || xx >= GW || yy >= mv.GH || !frozen[(yy >> 1) * MW + (xx >> 1)]) continue;
-            xs9.push(latchRaw[(yy * GW + xx) * 2]);
-            ys9.push(latchRaw[(yy * GW + xx) * 2 + 1]);
-          }
-        }
-        latchField[g * 4] = med9(xs9);
-        latchField[g * 4 + 1] = med9(ys9);
-        latchField[g * 4 + 2] = stepOf(g, 0, latchField[g * 4]);
-        latchField[g * 4 + 3] = stepOf(g, 1, latchField[g * 4 + 1]);
-      }
-    }
-    changed.fill(0);
   };
   // While the hand holds, the starved field is carried along the vectors
   // the way the smear is: each fed block takes on its upstream neighbour's
@@ -949,33 +1032,56 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     if (joining && iframe && seq > 0) joining = false;
     mv.unpack(idx, mvField);
     if (held && !iframe) grow();
+    // the frame after an I-frame is the one a held block will duplicate
+    if (iframe) dupDue = true;
+    else if (dupDue) {
+      dupField.set(mvField);
+      dupFoe = foeOf(dupField);
+      if (dupFoe.c) skipToPredicted(dupField);
+      dupDue = false;
+    }
     // per macroblock: starved where the mask is over its (ragged) threshold,
-    // drifting where it was starved and nothing intra has reached it since
+    // and one block past it the edge: stripped and starved the same way
+    // (it repeats the same P-frame from the moshed picture) but still taking
+    // the I-frame, so the winter picture lands there and is then dragged
+    // across the seam, and the strips read winter back in from it; drifting
+    // where it was held and nothing intra has reached it since
+    for (let id = 0; id < MW * MH; id++) starved[id] = mask[id] > thresh[id] ? 1 : 0;
     let dirtyN = 0;
     for (let id = 0; id < MW * MH; id++) {
-      const on = mask[id] > thresh[id];
+      const i = id % MW;
+      const j = (id - i) / MW;
+      let edge = 0;
+      if (!starved[id]) {
+        for (let jj = Math.max(0, j - 1); jj <= Math.min(MH - 1, j + 1) && !edge; jj++) {
+          for (let ii = Math.max(0, i - 1); ii <= Math.min(MW - 1, i + 1); ii++) {
+            if (starved[jj * MW + ii]) {
+              edge = 1;
+              break;
+            }
+          }
+        }
+      }
+      const on = starved[id] || edge;
       // a block the spreading tear takes over joins the P-frame its
       // neighbours are repeating, if they are already repeating one
       if (on && age[id] === 0) {
-        const i = id % MW;
         frozen[id] = (i > 0 && frozen[id - 1] && age[id - 1]) || (i < MW - 1 && frozen[id + 1] && age[id + 1]) || (id >= MW && frozen[id - MW] && age[id - MW]) || (id < MW * (MH - 1) && frozen[id + MW] && age[id + MW]) ? 1 : 0;
-        latchN[id] = 0;
+        latched[id] = 0;
       }
       if (on && iframe) {
         frozen[id] = 1;
-        latchN[id] = 0;
+        latched[id] = 0;
       }
-      if (on !== age[id] > 0 || (on && iframe)) changed[id] = 1;
       age[id] = on ? age[id] + 1 : 0;
       if (on) {
         dirty[id] = 1;
-        if (!iframe && !frozen[id]) latchFrom(id, 0);
-        else if (!iframe && latchN[id] < LATCH) {
-          latchFrom(id, latchN[id]++);
-          changed[id] = 1;
+        if (frozen[id] && !iframe && !dupDue && !latched[id]) {
+          latchFrom(id, dupField, dupFoe);
+          latched[id] = 1;
         }
       } else if (dirty[id]) dirtyN++;
-      stateField[id * 4] = on ? 2 : dirty[id] ? 1 : 0;
+      stateField[id * 4] = on && !frozen[id] ? 4 : starved[id] ? 2 : edge ? 3 : dirty[id] ? 1 : 0;
     }
     // Once the hand lifts, an intra refresh column sweeps the macroblock
     // columns, quick then settling, and goes round again while anything fed
@@ -987,7 +1093,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
       refresh = Math.ceil((1 - (1 - Math.min(k, 1)) ** 2) * MW);
       if (k >= 1) refreshAt = -1;
     }
-    smoothLatch();
+    stepLatch();
     codecStep(idx, { iframe, join: joining, refresh });
     // what landed: an I-frame, an intra block or the refresh column cleans a
     // fed block
