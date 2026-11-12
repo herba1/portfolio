@@ -1,5 +1,6 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createOramicsSound } from "./oramicsSound";
+import { GESTURES } from "./gestures";
 
 // Daphne Oram's machine: several loops of clear 35mm film, run in step on
 // one transport past one line of light, each strip holding one control of
@@ -18,12 +19,17 @@ import { createOramicsSound } from "./oramicsSound";
 // across a strip's drawable band, 0 at the top), so drawings survive any
 // resize.
 //
-// The ink is a dye, held as optical density in one buffer at device
-// resolution, one lap wide and as tall as the stack. A slow, loaded brush
-// lays dense ink that pools where it lingers and at its ends and dries to a
-// darker rim; a quick one starves its bristles and leaves dry-brush streaks,
-// each bristle running out in its own places (seeded per stroke, so a mark
-// never changes once laid). The loops lie on a lightbox, black where there
+// A stroke is nothing but the hand's samples (where, when, how hard), and
+// the score the loop arrives with is real hands too: recorded pen and mouse
+// traces (./gestures) with their own tremor, hesitations and accelerations.
+// The ink is a dye a brush deposits from those samples, held as optical
+// density in one buffer at device resolution, one lap wide and as tall as
+// the stack. Pigment goes down in proportion to how long the brush dwelt,
+// so a slow hand lays dense ink that pools where it lingers and beads where
+// it lands; a quick one splits the nib into its bristles and leaves
+// dry-brush streaks, each bristle starving in its own places (seeded per
+// stroke, so a mark never changes once laid). As a stroke dries, its wet
+// pigment wicks to the edge: a darker rim round a paler wash. The loops lie on a lightbox, black where there
 // is no film: what you see is the lamp through the clear base, cut by the
 // dye as 10^-D, so a pool goes black, a thin wash passes amber and the gaps
 // a dry brush leaves between its bristles let the lamp through. What the
@@ -65,8 +71,7 @@ const VOICES = 6;
 const SPAN = 26; // semitones from the bottom of the pitch band to the top
 const ROOT = 130.81; // C3 at the bottom
 const SCALE = [0, 2, 4, 7, 9]; // major pentatonic
-const W_MIN = 0.006; // brush width, fraction of strip height
-const W_MAX = 0.058;
+const W_MAX = 0.058; // the nib's width at full press, fraction of strip height
 // Each strip has its own pen: the control strips take a broader nib, so a
 // hand can lay an envelope or a ramp, as Oram did with a mask.
 const NIB = [1, 3.2, 1.5, 2.4];
@@ -76,7 +81,6 @@ const VCA_FLOOR = 0.1; // clear film on the amplitude strip still leaks a little
 const HARM = 32; // harmonics read off the waveform strip
 const WAVE_N = 128; // samples down the strip for one cycle
 const TABLE_N = 256;
-const BLEED = 6; // device px a wet edge's dye can wick past it
 const PRINT_CYCLE = 224; // device px of film per cycle of the bottom note, in the print
 
 const frac = (x) => x - Math.floor(x);
@@ -113,7 +117,7 @@ const vn2 = (x, y) => {
 // The dye: a warm black that holds back blue more than red, so a thin wash
 // passes amber and a pool goes to black. Its optical density D transmits
 // 10^-(D k) per channel, as a lookup.
-const DYE = [1.15, 1.5, 2.2];
+const DYE = [0.62, 1.05, 1.9];
 const CELL = 1.85; // the photocell's response to the same density
 const LUT_N = 2048;
 const LUT_S = LUT_N / 5;
@@ -182,9 +186,6 @@ export function createOramics(host) {
   const strokes = [];
   let nextId = 1;
   let drawing = null;
-  let brush = W_MIN;
-  let load = 0.7;
-  let pool = 0;
 
   const voices = Array.from({ length: VOICES }, () => ({ on: false, y: 0, span: 0, lv: 0, amp: 0, fresh: false, snap: false }));
   // What the three control strips say at the reader, as targets.
@@ -231,145 +232,29 @@ export function createOramics(host) {
 
   // --- strokes -----------------------------------------------------------
 
-  // Raw points carry the brush as the hand left it: width (w), ink load (k,
-  // 1 for a slow wet stroke, near 0 for a quick flick) and pool (p, ink that
-  // collected while the pen dwelt).
-  const newStroke = (k = 0) => ({ id: nextId++, strip: k, seed: 0, u: [], v: [], w: [], k: [], p: [], du: null, dv: null, dw: null, dk: null, dp: null, da: null, dd: null, segAt: null, umin: 0, umax: 0, done: false, alpha: 1, dying: false, dirty: true, tile: null });
+  // A stroke is the hand's own samples and nothing else: u along the loop
+  // (laps), v across the band (0..1), t when it was taken (seconds) and p
+  // the pen's pressure (1 for a mouse). Every mark on the film is laid from
+  // those by the brush below, so how fast and how hesitantly the hand moved
+  // is what the ink shows, and what the cells then hear.
+  const newStroke = (k = 0) => ({ id: nextId++, strip: k, seed: 0, u: [], v: [], t: [], p: [], load: 1, done: false, alpha: 1, dying: false, dirty: true, tile: null, lay: null });
 
-  const kernel = (arr) => {
-    const n = arr.length;
-    return arr.map((_, i) => {
-      let sum = 0;
-      let wt = 0;
-      for (let k = -3; k <= 3; k += 1) {
-        const j = i + k;
-        if (j < 0 || j >= n) continue;
-        const f = 4 - Math.abs(k);
-        sum += arr[j] * f;
-        wt += f;
-      }
-      return sum / wt;
-    });
-  };
-
-  // Catmull-Rom through the raw points, with the brush's load, pools and
-  // dryness carried along; then the stroke is laid into the density buffer.
-  const densify = (s) => {
-    if (!s.seed) s.seed = Math.floor(hash1(s.id * 7919 + 13) * 0x3fffffff) + 1;
-    const n = s.u.length;
-    const du = [];
-    const dv = [];
-    const dw = [];
-    const dk = [];
-    const dp = [];
-    const segAt = new Int32Array(n);
-    // The brush width is eased along the stroke so a jittery hand reads as
-    // pressure, not as beads; so are its load and its pools.
-    const ws = kernel(s.w);
-    const ks = kernel(s.k);
-    const ps = kernel(s.p);
-    const bandH = strips[s.strip].bh;
-    const P = (i) => {
-      const k = clamp(i, 0, n - 1);
-      return [s.u[k] * L, s.v[k] * bandH, ws[k], ks[k], ps[k]];
-    };
-    if (n === 1) {
-      du.push(s.u[0]);
-      dv.push(s.v[0]);
-      dw.push(s.w[0] * 0.7);
-      dk.push(s.k[0]);
-      dp.push(s.p[0]);
-    }
-    for (let i = 0; i < n - 1; i += 1) {
-      segAt[i] = du.length;
-      const p0 = P(i - 1);
-      const p1 = P(i);
-      const p2 = P(i + 1);
-      const p3 = P(i + 2);
-      const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-      const k = Math.max(1, Math.ceil(len / 2.2));
-      for (let j = 0; j < k; j += 1) {
-        const t = j / k;
-        const t2 = t * t;
-        const t3 = t2 * t;
-        const cr = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
-        du.push(cr(p0[0], p1[0], p2[0], p3[0]) / L);
-        dv.push(clamp(cr(p0[1], p1[1], p2[1], p3[1]) / bandH, 0, 1));
-        dw.push(p1[2] + (p2[2] - p1[2]) * t);
-        dk.push(p1[3] + (p2[3] - p1[3]) * t);
-        dp.push(p1[4] + (p2[4] - p1[4]) * t);
-      }
-      if (i === n - 2) {
-        segAt[n - 1] = du.length;
-        du.push(p2[0] / L);
-        dv.push(p2[1] / bandH);
-        dw.push(p2[2]);
-        dk.push(p2[3]);
-        dp.push(p2[4]);
-      }
-    }
-    // Taper where the brush lands and lifts dry; where it lands or lifts
-    // wet, the ink pools into a swollen end instead.
-    const m = du.length;
-    const arc = new Float32Array(m);
-    for (let i = 1; i < m; i += 1) arc[i] = arc[i - 1] + Math.hypot((du[i] - du[i - 1]) * L, (dv[i] - dv[i - 1]) * bandH);
-    const total = arc[m - 1] || 0;
-    // While the hand is still moving the start keeps one taper, so the ink
-    // already laid down does not change under it.
-    const taper = s.done ? Math.min(h * 0.07, total * 0.4) : h * 0.07;
-    const wet0 = smoothstep(0.4, 0.9, dk[0]);
-    const wet1 = s.done ? smoothstep(0.4, 0.9, dk[m - 1]) : 0;
-    const r0 = (dw[0] * h) / 2 + 1;
-    const r1 = (dw[m - 1] * h) / 2 + 1;
-    const da = new Float32Array(m);
-    const dd = new Float32Array(m);
-    for (let i = 0; i < m; i += 1) {
-      if (taper > 0) {
-        let f = 0.18 + 0.82 * smooth(clamp(arc[i] / taper, 0, 1));
-        f += (1 - f) * 0.72 * wet0;
-        if (s.done) {
-          let fe = 0.18 + 0.82 * smooth(clamp((total - arc[i]) / taper, 0, 1));
-          fe += (1 - fe) * 0.72 * wet1;
-          f *= fe;
-        }
-        dw[i] *= f;
-      }
-      const pe = wet0 * Math.exp(-arc[i] / (r0 * 1.6)) + wet1 * Math.exp(-(total - arc[i]) / (r1 * 1.6));
-      dw[i] *= 1 + 0.3 * pe;
-      dp[i] = Math.min(1.2, dp[i] + 0.9 * pe);
-      da[i] = arc[i] * dpr;
-      // Dryness: a quick stroke starves the bristles, and the brush runs
-      // out the further it goes since it was loaded.
-      const run = smooth(clamp(arc[i] / (h * 2.2), 0, 1));
-      dd[i] = clamp(1.15 - 1.35 * dk[i] + 0.35 * (1 - dk[i]) * run - 0.9 * dp[i], 0, 1);
-    }
-    s.du = du;
-    s.dv = dv;
-    s.dw = dw;
-    s.dk = dk;
-    s.dp = dp;
-    s.da = da;
-    s.dd = dd;
-    s.segAt = segAt;
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const x of du) {
-      if (x < lo) lo = x;
-      if (x > hi) hi = x;
-    }
-    s.umin = lo;
-    s.umax = hi;
-    s.dirty = false;
-    if (s.done || !s.tile) deposit(s, 0, true);
-    else deposit(s, segAt[Math.max(0, n - 6)], false);
+  const addPoint = (s, u, v, t, p = 1) => {
+    s.u.push(u);
+    s.v.push(v);
+    s.t.push(t);
+    s.p.push(p);
+    s.dirty = true;
   };
 
   // --- the ink, as optical density ---------------------------------------
 
-  // Every stroke keeps its own tile of density in film device pixels (x is
-  // the unwrapped column, N to a lap; y the row from rowTop). Densities add,
-  // as dyes do: the film's density is the sum of its strokes, and what the
-  // eye and the photocell both see is the light that gets through it.
+  // Every stroke keeps its own tile in film device pixels (x the unwrapped
+  // column, N to a lap; y the row from rowTop): the pigment the brush has
+  // put down (P), the water still carrying it (Wt), and, once developed,
+  // its optical density (dens). Densities add, as dyes do: the film's
+  // density is the sum of its strokes, and what the eye and the photocell
+  // both see is the light that gets through it.
   let R = 1; // rows in the buffer
   let rowTop = 0; // box y of row 0
   let comp = new Float32Array(0); // the film's density, N x R
@@ -417,6 +302,7 @@ export function createOramics(host) {
     inkImg.data.fill(255);
     for (const s of strokes) {
       s.tile = null;
+      s.lay = null;
       s.dirty = true;
     }
     markCols(0, N);
@@ -430,158 +316,403 @@ export function createOramics(host) {
     if (y1 <= y0 || x1 <= x0) return false;
     const t = s.tile;
     if (t && x0 >= t.x0 && x1 <= t.x0 + t.w && y0 >= t.y0 && y1 <= t.y0 + t.h) return true;
-    const gx = s.done ? 0 : 64;
-    const gy = s.done ? 0 : 24;
+    const gx = s.done ? 0 : 96;
+    const gy = s.done ? 0 : 32;
     const nx0 = t ? Math.min(t.x0, x0 - gx) : x0 - gx;
     const nx1 = t ? Math.max(t.x0 + t.w, x1 + gx) : x1 + gx;
     const ny0 = Math.max(0, t ? Math.min(t.y0, y0 - gy) : y0 - gy);
     const ny1 = Math.min(R, t ? Math.max(t.y0 + t.h, y1 + gy) : y1 + gy);
-    const nt = { x0: nx0, y0: ny0, w: nx1 - nx0, h: ny1 - ny0, dens: null, edge: null };
-    nt.dens = new Float32Array(nt.w * nt.h);
-    nt.edge = new Float32Array(nt.w * nt.h).fill(1e9);
-    if (t && t.edge) {
+    const n = (nx1 - nx0) * (ny1 - ny0);
+    const nt = { x0: nx0, y0: ny0, w: nx1 - nx0, h: ny1 - ny0, P: new Float32Array(n), Wt: new Float32Array(n), dens: new Float32Array(n) };
+    if (t && t.P) {
       for (let y = 0; y < t.h; y += 1) {
         const src = y * t.w;
         const dst = (y + t.y0 - ny0) * nt.w + (t.x0 - nx0);
+        nt.P.set(t.P.subarray(src, src + t.w), dst);
+        nt.Wt.set(t.Wt.subarray(src, src + t.w), dst);
         nt.dens.set(t.dens.subarray(src, src + t.w), dst);
-        nt.edge.set(t.edge.subarray(src, src + t.w), dst);
       }
     }
     s.tile = nt;
     return true;
   };
 
-  // The density one stroke lays at one film pixel, given where the pixel
-  // sits against the brush (e: distance past the edge, d: signed distance
-  // from the spine, r: radius, all device px) and the brush's state there.
-  const inkAt = (s, e, d, r, ld, pl, a, dry, gx, gy) => {
-    const ad = Math.abs(d);
-    const qa = Math.min(1, ad / r);
-    // A dry brush's edge is ragged, not cut.
-    const rag = dry > 0.02 ? dry * 1.6 * (vn1(a / 3.1, s.seed ^ 0x51ed) - 0.5) * (d < 0 ? 1 : -1) : 0;
-    const cov = clamp(0.5 - e + rag, 0, 1);
-    // A wet edge wicks a little dye out into the base, unevenly along it:
-    // a faint fringe the lamp shows as a warm halo round the mark.
-    const wet = (1 - dry) * ld;
-    let bleed = 0;
-    if (wet > 0.05 && e > -1) {
-      const bw = 0.7 + 1.7 * wet;
-      bleed = 0.075 * wet * Math.exp(-Math.max(0, e) / bw) * (0.45 + vn1(a / 11 + (d < 0 ? 57 : 0), s.seed ^ 0x6b1));
-    }
-    if (cov <= 0) return bleed;
-    // The wet body: heavier with load, heavier still where it pooled, and
-    // as it dries the dye migrates from the middle out to a darker rim.
-    const pc = Math.min(1, pl);
-    let D = 0.22 + 0.9 * ld + 0.45 * pl;
-    D *= 1 - (0.3 * ld + 0.22 * pc) * (1 - qa * qa) * (0.75 + 0.5 * vn1(a / 23, s.seed ^ 0x3c3));
-    const rimW = Math.max(1.2, r * 0.12);
-    const z = (r - ad) / rimW - 0.9;
-    D += (0.45 * ld + 0.9 * pc) * Math.exp(-z * z * 1.2);
-    // Dry brush: the bristles are lanes across the stroke, each with its
-    // own reserve of ink, and each runs dry in its own places along it.
-    // Neighbouring bristles clump, so gaps open in bands of a few lanes.
-    const dg = smoothstep(0.12, 0.85, dry);
-    if (dg > 0.001) {
-      const lane = d / 2.2;
-      const j = Math.floor(lane);
-      const f = lane - j;
-      const hj = hash1(s.seed + j * 977);
-      const hj2 = hash1((s.seed ^ 0x2f6b) + j * 7919);
-      const clump = Math.floor((d + 40) / 7.5);
-      const nz = 0.62 * vn1(a / (16 + 46 * hj2) + j * 31.7, s.seed + j * 131) + 0.38 * vn1(a / 38 + clump * 17.3, (s.seed ^ 0x7a11) + clump * 59);
-      const gt = dg * (0.1 + 0.62 * (1 - hj)) + dg * 0.45 * qa * qa * qa;
-      const m = smoothstep(gt - 0.06, gt + 0.06, nz);
-      const rest = 0.3 * (1 - dg);
-      const sf = Math.sin(Math.PI * f);
-      D *= (rest + (1 - rest) * m) * (1 - 0.5 * dg * (1 - sf * sf));
-    }
-    // The hairs of the brush comb the dye into lanes along the stroke, a
-    // little more or less in each and changing slowly down it; a pool
-    // floods them level. Then the dye's slow clumping and the emulsion's
-    // grain, fixed to the film.
-    const sl = (d + 96) / 1.7;
-    const sj = Math.floor(sl);
-    const n0 = vn1(a / (22 + 34 * hash1(s.seed + sj * 31)), s.seed + sj * 113);
-    const n1 = vn1(a / (22 + 34 * hash1(s.seed + sj * 31 + 31)), s.seed + sj * 113 + 113);
-    const streak = n0 + (n1 - n0) * smooth(sl - sj) - 0.5;
-    const cx = ((gx % N) + N) % N;
-    const grain = 1 + 0.1 * (hash2(cx, gy) - 0.5) + (0.42 - 0.3 * pc) * streak + 0.18 * (vn2(cx / 31 + 7.1, gy / 23) - 0.5);
-    return cov * D * grain + (1 - cov) * bleed;
+  // --- the brush -----------------------------------------------------------
+
+  // The brush is run along the hand's samples, a device pixel or so at a
+  // time, and at every step it leaves pigment in proportion to how long it
+  // dwelt there: the time between the two samples it sits between, shared
+  // along the gap. So where the hand crawls the dye piles up, where it
+  // stops it pools and spreads, and where it flies the film barely gets
+  // any. Slow, it is pressed: the hairs splay and the mark widens. Fast, the
+  // nib splits into its bristles, each its own lane with its own reserve,
+  // and each starves in its own places, so a quick stroke breaks into dry
+  // streaks with bare base between them. It lands loaded, dumping a bead,
+  // and spends its reserve as it goes, drying toward the end of a long
+  // stroke; it lifts off by dragging its last hairs out ragged.
+  //
+  // All in device px of film and seconds, scaled to the strip's height so
+  // the same hand lays the same mark on any screen.
+  const DSAT = 3.4; // density at which a pool stops getting any darker
+  const DWELL = 8.4; // pigment flow, per px of nib radius, per strip-height of travel
+  const POOL = 2.2; // areal density in one step past which the pool spreads
+  const brushOf = (s) => {
+    const hd = h * dpr;
+    return { hd, R0: (W_MAX * hd * NIB[s.strip]) / 2, M: 5 + Math.floor(hash1(s.seed ^ 0x1b7) * 5) };
   };
 
-  // Lay stroke segments from `from` on into its tile. `full` starts over.
-  const deposit = (s, from, full) => {
-    const { du, dv, dw, dk, dp, da, dd } = s;
-    const m = du.length;
-    const X = (i) => du[i] * N;
-    const st = strips[s.strip];
-    const Y = (i) => (st.top + dv[i] * st.bh - rowTop) * dpr;
-    const Rr = (i) => Math.max(0.35, (dw[i] * h * dpr) / 2);
-    if (full) {
-      markTile(s);
-      s.tile = null;
-      let x0 = Infinity;
-      let x1 = -Infinity;
-      let y0 = Infinity;
-      let y1 = -Infinity;
-      for (let i = 0; i < m; i += 1) {
-        const r = Rr(i) + BLEED + 1;
-        x0 = Math.min(x0, X(i) - r);
-        x1 = Math.max(x1, X(i) + r);
-        y0 = Math.min(y0, Y(i) - r);
-        y1 = Math.max(y1, Y(i) + r);
+  // One dab of the brush: a disc of pigment `q` spread over radius `re`,
+  // its edge ragged a little either side of the spine (`ra`, `rb`), combed
+  // by the hairs into faint lanes along the stroke (`hair`, indexed by
+  // lateral offset), and carrying `wet` of water per unit of pigment.
+  const HAIR = new Float32Array(160);
+  const dab = (s, cx, cy, re, q, wet, nx, ny, hair, ra, rb, box, blob = 0, ph = 0) => {
+    const t = s.tile;
+    const area = Math.PI * Math.max(re, 0.7) ** 2 * 0.92;
+    const k = q / area;
+    const reach = re * (1 + Math.max(ra, rb, 0) + blob) + 1.5;
+    const xa = Math.max(t.x0, Math.floor(cx - reach));
+    const xb = Math.min(t.x0 + t.w, Math.ceil(cx + reach));
+    const ya = Math.max(t.y0, Math.floor(cy - reach));
+    const yb = Math.min(t.y0 + t.h, Math.ceil(cy + reach));
+    if (xa >= xb || ya >= yb) return;
+    const P = t.P;
+    const Wt = t.Wt;
+    const r2a = (re * (1 + ra)) ** 2;
+    const r2b = (re * (1 + rb)) ** 2;
+    for (let y = ya; y < yb; y += 1) {
+      const dy = y + 0.5 - cy;
+      const row = (y - t.y0) * t.w - t.x0;
+      for (let x = xa; x < xb; x += 1) {
+        const dx = x + 0.5 - cx;
+        const d2 = dx * dx + dy * dy;
+        const lat = dx * nx + dy * ny;
+        let rr2 = lat >= 0 ? r2a : r2b;
+        if (blob > 0) {
+          // A pool is not a disc: it spreads further where the film takes it.
+          const a = Math.atan2(dy, dx);
+          const g = 1 + blob * (0.55 * Math.sin(3 * a + ph) + 0.3 * Math.sin(5 * a + ph * 2.3) + 0.15 * Math.sin(8 * a + ph * 3.1));
+          rr2 *= g * g;
+        }
+        if (d2 > rr2 + 2 * Math.sqrt(rr2) + 1) continue;
+        const rr = Math.sqrt(rr2);
+        const d = Math.sqrt(d2);
+        const cov = smooth(clamp((rr + 0.5 - d) / Math.max(1.2, 0.25 * rr), 0, 1));
+        if (cov <= 0) continue;
+        let w = cov;
+        if (hair) w *= HAIR[clamp(Math.floor(lat / 1.6) + 80, 0, 159)];
+        const o = row + x;
+        P[o] += k * w;
+        Wt[o] += k * w * wet;
       }
-      if (!tileFit(s, Math.floor(x0), Math.floor(y0), Math.ceil(x1), Math.ceil(y1))) return;
     }
-    const last = m === 1 ? 0 : m - 2;
-    for (let i = Math.max(0, from); i <= last; i += 1) {
-      const i2 = m === 1 ? 0 : i + 1;
-      const ax = X(i);
-      const ay = Y(i);
-      const bx = X(i2);
-      const by = Y(i2);
-      const ra = Rr(i);
-      const rb = Rr(i2);
-      const bx0 = Math.floor(Math.min(ax - ra, bx - rb) - BLEED - 1);
-      const bx1 = Math.ceil(Math.max(ax + ra, bx + rb) + BLEED + 1);
-      const by0 = Math.floor(Math.min(ay - ra, by - rb) - BLEED - 1);
-      const by1 = Math.ceil(Math.max(ay + ra, by + rb) + BLEED + 1);
-      if (!tileFit(s, bx0, by0, bx1, by1)) continue;
-      const t = s.tile;
-      const ex = bx - ax;
-      const ey = by - ay;
-      const ll = ex * ex + ey * ey;
-      const len = Math.sqrt(ll);
-      const ya = Math.max(by0, t.y0);
-      const yb = Math.min(by1, t.y0 + t.h);
+    if (xa < box[0]) box[0] = xa;
+    if (xb > box[1]) box[1] = xb;
+    if (ya < box[2]) box[2] = ya;
+    if (yb > box[3]) box[3] = yb;
+  };
+
+  // One bristle's trace over one step, from (ax, ay) to (bx, by): fine dabs
+  // close enough to merge, so a lane is a continuous streak, not a row of
+  // dots, and bends with the stroke without seams.
+  const streak = (s, ax, ay, bx, by, rl, q, wet, box) => {
+    const t = s.tile;
+    const len = Math.hypot(bx - ax, by - ay);
+    const m = Math.max(1, Math.ceil(len / Math.max(0.4, 0.5 * rl)));
+    const k = q / m / (Math.PI * Math.max(rl, 0.6) ** 2);
+    for (let j = 0; j < m; j += 1) {
+      const f = (j + 0.5) / m;
+      const cx = ax + (bx - ax) * f;
+      const cy = ay + (by - ay) * f;
+      const xa = Math.max(t.x0, Math.floor(cx - rl - 1));
+      const xb = Math.min(t.x0 + t.w, Math.ceil(cx + rl + 1));
+      const ya = Math.max(t.y0, Math.floor(cy - rl - 1));
+      const yb = Math.min(t.y0 + t.h, Math.ceil(cy + rl + 1));
+      if (xa >= xb || ya >= yb) continue;
       for (let y = ya; y < yb; y += 1) {
-        const py = y + 0.5;
+        const dy = y + 0.5 - cy;
         const row = (y - t.y0) * t.w - t.x0;
-        for (let x = bx0; x < bx1; x += 1) {
-          const px = x + 0.5;
-          const tt = ll > 1e-9 ? clamp(((px - ax) * ex + (py - ay) * ey) / ll, 0, 1) : 0;
-          const dx = px - (ax + ex * tt);
-          const dy = py - (ay + ey * tt);
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const r = ra + (rb - ra) * tt;
-          const e = dist - r;
-          if (e > BLEED) continue;
-          const idx = row + x;
-          if (e >= t.edge[idx]) continue;
-          t.edge[idx] = e;
-          // Which side of the spine: the bristle lanes run either side of it.
-          const side = len > 1e-6 ? (ex * dy - ey * dx >= 0 ? 1 : -1) : dy >= 0 ? 1 : -1;
-          const ld = dk[i] + (dk[i2] - dk[i]) * tt;
-          const pl = dp[i] + (dp[i2] - dp[i]) * tt;
-          const a = da[i] + (da[i2] - da[i]) * tt;
-          const dry = dd[i] + (dd[i2] - dd[i]) * tt;
-          t.dens[idx] = inkAt(s, e, side * dist, r, ld, pl, a, dry, x, y);
+        for (let x = xa; x < xb; x += 1) {
+          const dx = x + 0.5 - cx;
+          const cov = clamp(rl + 0.5 - Math.sqrt(dx * dx + dy * dy), 0, 1);
+          if (cov <= 0) continue;
+          const o = row + x;
+          t.P[o] += k * cov;
+          t.Wt[o] += k * cov * wet;
         }
       }
-      markCols(bx0, bx1);
+      if (xa < box[0]) box[0] = xa;
+      if (xb > box[1]) box[1] = xb;
+      if (ya < box[2]) box[2] = ya;
+      if (yb > box[3]) box[3] = yb;
     }
-    // A finished stroke never changes again: drop its working edges.
-    if (s.done && s.tile) s.tile.edge = null;
+  };
+
+  // One step of the brush at (x, y), heading (dx, dy), having taken `tau`
+  // seconds over `dl` px. `force` holds the nib split open (the lift-off),
+  // `scale` thins what it lays.
+  const step = (s, B, x, y, dx, dy, tau, dl, box, force = 0, scale = 1) => {
+    const S = s.lay;
+    const { hd, R0, M } = B;
+    const nx = -dy;
+    const ny = dx;
+    const r = S.r;
+    const res = S.res;
+    // The nib opens and closes over a couple of its own widths of travel,
+    // not at once, so the bristles part one by one.
+    const want = Math.max(smoothstep(20 * hd, 46 * hd, S.v), 0.8 * smoothstep(0.42, 0.1, res));
+    S.split += (want - S.split) * (1 - Math.exp(-dl / Math.max(12, 5 * r)));
+    const split = Math.max(force, S.split);
+    const q = DWELL * hd * r * tau * clamp(0.3 + 0.7 * res, 0.2, 1.5) * scale;
+    const wet = clamp(res, 0, 1.2) * (1 - 0.85 * split);
+    const ragK = 0.1 + 0.35 * split;
+    const ra = ragK * (vn1(S.arc / 2.6, s.seed ^ 0x51ed) - 0.5) * 2;
+    const rb = ragK * (vn1(S.arc / 2.6 + 41.3, s.seed ^ 0x51ed) - 0.5) * 2;
+    let spent = 0;
+    const qr = q * (1 - split);
+    if (qr > 1e-5) {
+      // Where the step lays more than the film can take up in one place,
+      // the pool spreads instead of piling higher.
+      const lam = qr / (Math.PI * r * r);
+      const sp = clamp(Math.sqrt(lam / POOL), 1, 2.4);
+      const re = r * sp;
+      const b0 = Math.floor(-re / 1.6) + 80;
+      const b1 = Math.floor(re / 1.6) + 80;
+      for (let b = Math.max(0, b0 - 1); b <= Math.min(159, b1 + 1); b += 1) {
+        HAIR[b] = 1 + 0.55 * (vn1(S.arc / (12 + 30 * hash1(s.seed + b * 31)) + b * 17.3, s.seed + b * 113) - 0.5);
+      }
+      // Where the hand dawdles the ink spreads unevenly: the slower, the
+      // more a pool lobes out instead of keeping the nib's round.
+      const blob = 0.34 * Math.max(smoothstep(0.25, 1.3, lam / POOL), smoothstep(0.3, 0.75, Math.exp(-S.v / (6 * hd))));
+      dab(s, x, y, re, qr, wet, nx, ny, true, ra, rb, box, blob, hash1((s.seed ^ 0x9e37) + Math.floor(S.arc / 40)) * 6.283 + S.arc * 0.02);
+      spent += qr;
+    }
+    if (split > 0.02) {
+      // The bristles: lanes across the nib, each with its own reserve, each
+      // running dry in its own places along the stroke. The dry ones save
+      // their ink; the ones still touching wipe what they carry onto the
+      // film as they pass, however fast.
+      const rl = Math.max(0.5, (0.85 * r) / M);
+      for (let j = 0; j < M; j += 1) {
+        const hj = hash1(s.seed + j * 977);
+        // Lanes wander a little against each other as the hairs clump.
+        // Lanes sit unevenly across the nib, clumped and parted, and
+        // wander a little against each other as the hairs clump.
+        const off = (hash1(s.seed + j * 61) - 0.5) * 2 * r * 0.95 + 0.9 * (vn1(S.arc / 47 + j * 13.1, s.seed ^ 0x4c1) - 0.5) * ((0.9 * r) / M);
+        const nz = 0.78 * vn1(S.arc / (9 + 30 * hash1(s.seed + j * 7919)) + j * 31.7, s.seed + j * 131) + 0.22 * vn1(S.arc / 3.7 + j * 7.3, (s.seed ^ 0x2f6b) + j * 17);
+        const th = clamp(Math.pow(split, 0.6) * (0.46 + 0.5 * hj) + 0.35 * split * (1 - clamp(res, 0, 1)) + 0.5 * force, 0, 0.97);
+        const on = smoothstep(th - 0.06, th + 0.06, nz);
+        if (on <= 0.01) continue;
+        const ql = (((q * split) / M) * 0.6 + 0.32 * dl * 2 * rl * scale * Math.min(1, split * 1.4)) * on;
+        const lx = x + nx * off;
+        const ly = y + ny * off;
+        streak(s, lx - dx * dl, ly - dy * dl, lx, ly, rl * (0.5 + 0.9 * hash1(s.seed + j * 211)), ql, wet * 0.4, box);
+        spent += ql;
+      }
+    }
+    S.res = Math.max(0.12, res - spent / (DWELL * hd * R0 * 3));
+    S.arc += dl;
+  };
+
+  const lay = (s) => {
+    s.dirty = false;
+    if (!s.seed) s.seed = Math.floor(hash1(s.id * 7919 + 13) * 0x3fffffff) + 1;
+    const n = s.u.length;
+    if (!n) return;
+    const st = strips[s.strip];
+    const B = brushOf(s);
+    const { hd, R0 } = B;
+    const X = (i) => s.u[clamp(i, 0, n - 1)] * N;
+    const Y = (i) => (st.top + s.v[clamp(i, 0, n - 1)] * st.bh - rowTop) * dpr;
+    if (!s.lay) {
+      markTile(s);
+      s.tile = null;
+      s.lay = { i: 0, res: s.load, r: 0, v: 0, split: 0, arc: 0, dx: 1, dy: 0, landed: false, lifted: false };
+    }
+    const S = s.lay;
+    // While the hand is still moving the last two samples wait, so the
+    // curve through them is known.
+    const end = s.done ? n - 1 : n - 3;
+    let pmax = 0.5;
+    for (let i = Math.max(0, S.i - 1); i < n; i += 1) pmax = Math.max(pmax, s.p[i]);
+    const margin = R0 * pmax * 4.5 + 10;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (let i = Math.max(0, S.i - 1); i < n; i += 1) {
+      x0 = Math.min(x0, X(i));
+      x1 = Math.max(x1, X(i));
+      y0 = Math.min(y0, Y(i));
+      y1 = Math.max(y1, Y(i));
+    }
+    if (!tileFit(s, Math.floor(x0 - margin), Math.floor(y0 - margin), Math.ceil(x1 + margin), Math.ceil(y1 + margin))) return;
+    const box = [Infinity, -Infinity, Infinity, -Infinity];
+    const nib = (i, v) => R0 * s.p[clamp(i, 0, n - 1)] * (0.62 + 0.45 * Math.exp(-v / (12 * hd)));
+    if (!S.landed) {
+      // It lands loaded: the brush's surplus goes down at once as a bead.
+      S.landed = true;
+      S.r = nib(0, 0);
+      step(s, B, X(0), Y(0), 1, 0, 0.045 * s.load, 0, box);
+    }
+    for (; S.i < end; S.i += 1) {
+      const i = S.i;
+      const ax = X(i - 1);
+      const ay = Y(i - 1);
+      const bx = X(i);
+      const by = Y(i);
+      const cx = X(i + 1);
+      const cy = Y(i + 1);
+      const ex = X(i + 2);
+      const ey = Y(i + 2);
+      const len = Math.hypot(cx - bx, cy - by);
+      const dt = clamp(s.t[i + 1] - s.t[i], 1e-4, 0.6);
+      const v = len / dt;
+      S.v = S.v ? S.v + (v - S.v) * (1 - Math.exp(-dt / 0.03)) : v;
+      const target = nib(i, S.v);
+      const k = Math.max(1, Math.ceil(len / clamp(S.r * 0.4, 0.6, 6)));
+      const tau = dt / k;
+      for (let j = 0; j < k; j += 1) {
+        const t = (j + 0.5) / k;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const x = 0.5 * (2 * bx + (-ax + cx) * t + (2 * ax - 5 * bx + 4 * cx - ex) * t2 + (-ax + 3 * bx - 3 * cx + ex) * t3);
+        const y = 0.5 * (2 * by + (-ay + cy) * t + (2 * ay - 5 * by + 4 * cy - ey) * t2 + (-ay + 3 * by - 3 * cy + ey) * t3);
+        const tx = 0.5 * (-ax + cx + 2 * (2 * ax - 5 * bx + 4 * cx - ex) * t + 3 * (-ax + 3 * bx - 3 * cx + ex) * t2);
+        const ty = 0.5 * (-ay + cy + 2 * (2 * ay - 5 * by + 4 * cy - ey) * t + 3 * (-ay + 3 * by - 3 * cy + ey) * t2);
+        const tl = Math.hypot(tx, ty);
+        if (tl > 1e-6) {
+          S.dx = tx / tl;
+          S.dy = ty / tl;
+        }
+        S.r += (target - S.r) * (1 - Math.exp(-tau / 0.07));
+        step(s, B, x, y, S.dx, S.dy, tau, len / k, box);
+      }
+    }
+    if (s.done && !S.lifted) {
+      // It lifts off: the nib opens and its last hairs drag out past the
+      // final sample, thinning to nothing.
+      S.lifted = true;
+      const run = S.r * (1.4 + 2.2 * clamp(S.v / (24 * hd), 0, 1));
+      const k = Math.max(2, Math.ceil(run));
+      const r0 = S.r;
+      for (let j = 0; j < k; j += 1) {
+        const f = (j + 0.5) / k;
+        S.r = r0 * (1 - 0.65 * f);
+        step(s, B, X(n - 1) + S.dx * run * f, Y(n - 1) + S.dy * run * f, S.dx, S.dy, (run / k) / Math.max(S.v, hd), run / k, box, 0.6 + 0.4 * f, 1 - f);
+      }
+    }
+    if (s.done) dry(s);
+    else if (box[0] < box[1]) develop(s, box[0], box[2], box[1], box[3]);
+  };
+
+  // The pigment as the film keeps it: optical density, saturating where a
+  // pool can take no more, and settled unevenly into the emulsion's grain.
+  const develop = (s, xa, ya, xb, yb) => {
+    const t = s.tile;
+    xa = Math.max(xa, t.x0);
+    xb = Math.min(xb, t.x0 + t.w);
+    ya = Math.max(ya, t.y0);
+    yb = Math.min(yb, t.y0 + t.h);
+    for (let y = ya; y < yb; y += 1) {
+      const row = (y - t.y0) * t.w - t.x0;
+      for (let x = xa; x < xb; x += 1) {
+        const o = row + x;
+        const p = t.P[o];
+        if (p <= 0) {
+          t.dens[o] = 0;
+          continue;
+        }
+        const cx = ((x % N) + N) % N;
+        const gr = 1 + 0.22 * (hash2(cx, y) - 0.5) + 0.2 * (vn2(cx / 6.3, y / 6.3) - 0.5);
+        const pe = p * gr * smoothstep(0.035, 0.15, p * gr);
+        t.dens[o] = DSAT * (1 - Math.exp(-pe / DSAT));
+      }
+    }
+    markCols(xa, xb);
+  };
+
+  // Separable box blur of a tile-sized field, `rad` either side, in place.
+  const boxBlur = (a, w, hh, rad, tmp) => {
+    for (let y = 0; y < hh; y += 1) {
+      const o = y * w;
+      let acc = 0;
+      for (let x = -rad; x <= rad; x += 1) acc += x >= 0 && x < w ? a[o + x] : 0;
+      for (let x = 0; x < w; x += 1) {
+        tmp[o + x] = acc / (2 * rad + 1);
+        const xo = x - rad;
+        const xi = x + rad + 1;
+        if (xo >= 0) acc -= a[o + xo];
+        if (xi < w) acc += a[o + xi];
+      }
+    }
+    for (let x = 0; x < w; x += 1) {
+      let acc = 0;
+      for (let y = -rad; y <= rad; y += 1) acc += y >= 0 && y < hh ? tmp[y * w + x] : 0;
+      for (let y = 0; y < hh; y += 1) {
+        a[y * w + x] = acc / (2 * rad + 1);
+        const yo = y - rad;
+        const yi = y + rad + 1;
+        if (yo >= 0) acc -= tmp[yo * w + x];
+        if (yi < hh) acc += tmp[yi * w + x];
+      }
+    }
+  };
+
+  // The stroke dries. Water evaporates fastest at the wet edge, and the
+  // flow that replaces it carries pigment out from the middle, so a wash
+  // dries to a darker rim round a paler interior (pigment conserved), and a
+  // little dye wicks past the edge into the base as a faint warm fringe.
+  // Dry-brush streaks carried almost no water and stay as they fell.
+  const dry = (s) => {
+    const t = s.tile;
+    const { w, h: th, P, Wt } = t;
+    const n = w * th;
+    const wetAt = 0.1;
+    const mask = new Float32Array(n);
+    const tmp = new Float32Array(n);
+    let any = false;
+    for (let o = 0; o < n; o += 1) {
+      if (Wt[o] > wetAt) {
+        mask[o] = 1;
+        any = true;
+      }
+    }
+    if (any) {
+      boxBlur(mask, w, th, 3, tmp);
+      boxBlur(mask, w, th, 3, tmp);
+      // What the wet pigment nearby could bring to each edge pixel.
+      const fr = new Float32Array(n);
+      for (let o = 0; o < n; o += 1) if (Wt[o] > wetAt) fr[o] = P[o];
+      boxBlur(fr, w, th, 5, tmp);
+      boxBlur(fr, w, th, 3, tmp);
+      let added = 0;
+      let inner = 0;
+      const gain = new Float32Array(n);
+      for (let o = 0; o < n; o += 1) {
+        if (Wt[o] <= wetAt) continue;
+        const wl = Math.min(1, Wt[o] / 0.25);
+        const rim = smoothstep(0.12, 0.42, 1 - mask[o]);
+        gain[o] = rim * 2.2 * fr[o] * wl;
+        added += gain[o];
+        inner += P[o] * wl * (1 - rim) * (1 - rim);
+      }
+      const take = inner > 1e-6 ? Math.min(0.55, added / inner) : 0;
+      for (let o = 0; o < n; o += 1) {
+        if (Wt[o] > wetAt) {
+          const wl = Math.min(1, Wt[o] / 0.25);
+          const rim = smoothstep(0.12, 0.42, 1 - mask[o]);
+          P[o] += gain[o] - take * P[o] * wl * (1 - rim) * (1 - rim);
+        } else if (fr[o] > 0) {
+          // and a little wicks past the edge into the base, a faint fringe.
+          P[o] += 0.06 * fr[o];
+        }
+      }
+    }
+    develop(s, t.x0, t.y0, t.x0 + w, t.y0 + th);
+    // Dry, a stroke never changes again: keep only its density.
+    t.P = null;
+    t.Wt = null;
   };
 
   // Sum the strokes into the film's density and print it as transmitted
@@ -629,96 +760,113 @@ export function createOramics(host) {
     }
   };
 
-  const addPoint = (s, u, v, w, k, p) => {
-    s.u.push(u);
-    s.v.push(v);
-    s.w.push(w);
-    s.k.push(k);
-    s.p.push(p);
-    s.dirty = true;
-  };
-
   // The score on the loop when it arrives, one phrase across all four
-  // strips, laid down the way a brush would. In three sections:
+  // strips, laid down by real hands: every mark is one of the recorded
+  // traces in ./gestures, stretched along the film onto the path the score
+  // asks for, with its own wobble, hesitations and timing kept. In three
+  // sections:
   //   a chord held over a low D whose inner voices cross, under a swell
-  //   that blooms and fades, the vibrato ramping up and the room opening;
+  //   scrubbed in with a zigzag, the vibrato ramping up and the room opening;
   //   the bottom note alone, held long enough to print cycle after cycle,
-  //   under two swells, while the waveform strip changes its drawing under
-  //   it: one broad band (a square, printed as clear blocks) gives way to a
-  //   comb of five lines, light to heavy (five teeth a cycle, growing);
+  //   under two scrubbed swells, while the waveform strip changes its
+  //   drawing under it: one broad band (a square, printed as clear blocks)
+  //   gives way to a comb of five lines, a flick to a slow drag (five
+  //   teeth a cycle, growing);
   //   a drone with an arpeggio stacking into a chord over it and folding
-  //   into unison, under a long tremolo crescendo, the vibrato ramp
-  //   steepening into a pooled end.
+  //   into unison, under a long slow squiggle swelling to a crescendo, the
+  //   vibrato a wave that widens as it falls.
   function seed() {
     const U0 = seamU + 0.016;
     const at = (f) => U0 + f * 0.966;
-    // A stroke traced through a function of its own progress t (0..1):
-    // [value, width (fraction of strip height), load, pool]. On the pitch
-    // strip the value is in semitones; elsewhere it is v.
-    const trace = (k, f0, f1, fn, wob = 0.006) => {
+    // Lay trace G between f0 and f1 of the lap. In "line" mode the trace's
+    // own straight-line fit is replaced by path(f) and what is left (the
+    // hand's wobble) rides on it at the trace's own scale; in "fill" mode
+    // its height is fitted to amp(f) either side of path(f). The pitch
+    // strip's path is in semitones. Time keeps the hand's own speed: the
+    // trace is replayed as if drawn at the scale it lands at.
+    const lay1 = (k, f0, f1, G, { path, amp = null, p = () => 1, gain = 1, load = 1 }) => {
       const s = newStroke(k);
-      const n = Math.max(2, Math.ceil((f1 - f0) / 0.004));
-      for (let i = 0; i <= n; i += 1) {
-        const t = i / n;
-        const [val, w, ld, pl = 0] = fn(t);
-        const v = k === PITCH ? 1 - val / SPAN : val;
-        const j = (vn1(i * 0.31, s.id * 97) - 0.5) * wob;
-        addPoint(s, at(f0 + (f1 - f0) * t), clamp(v + j, 0, 1), w, ld, pl);
+      s.load = load;
+      const n = G.x.length;
+      let xa = Infinity;
+      let xb = -Infinity;
+      let ya = Infinity;
+      let yb = -Infinity;
+      let sx = 0;
+      let sy = 0;
+      let sxx = 0;
+      let sxy = 0;
+      for (let i = 0; i < n; i += 1) {
+        const x = G.x[i];
+        const y = G.y[i];
+        xa = Math.min(xa, x);
+        xb = Math.max(xb, x);
+        ya = Math.min(ya, y);
+        yb = Math.max(yb, y);
+        sx += x;
+        sy += y;
+        sxx += x * x;
+        sxy += x * y;
+      }
+      const slope = (n * sxy - sx * sy) / Math.max(1e-6, n * sxx - sx * sx);
+      const icpt = (sy - slope * sx) / n;
+      const bh = strips[k].bh;
+      const scale = ((f1 - f0) * 0.966 * L) / Math.max(1, xb - xa); // box px per trace px
+      for (let i = 0; i < n; i += 1) {
+        const f = (G.x[i] - xa) / Math.max(1, xb - xa);
+        let v = path(f);
+        if (k === PITCH) v = 1 - v / SPAN;
+        if (amp) v += ((G.y[i] - (ya + yb) / 2) / Math.max(1, (yb - ya) / 2)) * amp(f);
+        else v += ((G.y[i] - (icpt + slope * G.x[i])) * scale * gain) / bh;
+        addPoint(s, at(f0 + (f1 - f0) * f), clamp(v, 0, 1), (G.t[i] / 1000) * scale, p(f));
       }
       s.done = true;
       strokes.push(s);
     };
-    // The swell of a held phrase on the amplitude strip: a quick bloom, a
-    // long body, a fade.
-    const swell = (f0, f1, peak) =>
-      trace(AMP, f0, f1, (t) => [0.5, 0.03 + peak * smoothstep(0, 0.3, t) * (1 - 0.8 * smoothstep(0.72, 1, t)), 0.96]);
+    const flat = (val) => () => val;
+    const lerp = (a, b) => (f) => a + (b - a) * f;
+    const G = GESTURES;
 
     // 1  a chord over a low D
-    trace(PITCH, 0.0, 0.235, (t) => [1.6 + 0.15 * Math.sin(t * 9), 0.046 * (0.75 + 0.25 * smoothstep(0, 0.2, t)), 0.97]);
-    trace(PITCH, 0.014, 0.228, (t) => [9 + 10 * smooth(smoothstep(0.12, 0.88, t)), 0.032, 0.93], 0.01);
-    trace(PITCH, 0.021, 0.231, (t) => [19 - 10 * smooth(smoothstep(0.1, 0.86, t)), 0.027, 0.88], 0.01);
-    trace(PITCH, 0.05, 0.175, (t) => [24 + 0.25 * Math.sin(t * 23), 0.02, 0.3], 0.008);
-    trace(AMP, 0.0, 0.235, (t) => [0.5, 0.03 + 0.5 * smoothstep(0, 0.4, t) - 0.34 * smoothstep(0.62, 1, t), 0.96]);
-    trace(VIB, 0.01, 0.235, (t) => [0.86 - 0.56 * smooth(t), 0.012 + 0.2 * Math.pow(t, 1.3), 0.95]);
+    lay1(PITCH, 0.0, 0.235, G.lineSlowFlat, { path: flat(1.6), p: () => 1.15, load: 1.2 });
+    lay1(PITCH, 0.014, 0.228, G.lineRising, { path: (f) => 9 + 10 * smooth(smoothstep(0.12, 0.88, f)), p: () => 0.85 });
+    lay1(PITCH, 0.021, 0.231, G.lineFalling, { path: (f) => 19 - 10 * smooth(smoothstep(0.1, 0.86, f)), p: () => 0.8 });
+    lay1(PITCH, 0.05, 0.175, G.lineFlick, { path: flat(24), p: () => 0.7 });
+    lay1(AMP, 0.0, 0.235, G.zigSaw, { path: flat(0.5), amp: (f) => 0.04 + 0.3 * smoothstep(0, 0.4, f) - 0.2 * smoothstep(0.62, 1, f), p: () => 0.9 });
+    lay1(VIB, 0.01, 0.235, G.lineDiagonal, { path: lerp(0.86, 0.32), p: (f) => 0.3 + 1.5 * Math.pow(f, 1.4), load: 1.2 });
 
     // 2  the bottom note alone, under two swells
-    trace(PITCH, 0.255, 0.64, (t) => [0.3, 0.054 * (0.8 + 0.2 * smoothstep(0, 0.1, t)), 1]);
-    swell(0.262, 0.452, 0.46);
-    swell(0.462, 0.636, 0.52);
-    trace(VIB, 0.27, 0.63, () => [0.88, 0.016, 0.38], 0.01);
-    trace(VIB, 0.47, 0.63, (t) => [0.74 - 0.3 * t, 0.012 + 0.09 * t * t, 0.95]);
+    lay1(PITCH, 0.255, 0.64, G.lineSlowLong, { path: flat(0.3), p: () => 1.3, load: 1.3 });
+    lay1(AMP, 0.262, 0.452, G.zigRound, { path: flat(0.5), amp: (f) => 0.05 + 0.32 * smoothstep(0, 0.3, f) * (1 - 0.75 * smoothstep(0.72, 1, f)), p: () => 1 });
+    lay1(AMP, 0.462, 0.636, G.zigSlow, { path: flat(0.5), amp: (f) => 0.05 + 0.34 * smoothstep(0, 0.3, f) * (1 - 0.75 * smoothstep(0.72, 1, f)), p: () => 0.85 });
+    lay1(VIB, 0.27, 0.63, G.lineQuick, { path: flat(0.88), p: () => 0.6 });
+    lay1(VIB, 0.47, 0.63, G.lineRising, { path: lerp(0.74, 0.46), p: (f) => 0.4 + 1.3 * f * f });
 
-    // 3  timbre: one broad band, then a comb. The band covers half the
-    // band of the strip, so its cycle is a square; the comb's lines sit in
-    // the top half and thicken down it, so its cycle is five teeth, light
-    // to heavy, and then a rest of clear film before the next.
-    trace(WAVE, 0.0, 0.452, (t) => [0.5, 0.32 * (0.5 + 0.5 * smoothstep(0, 0.06, t)), 0.94], 0.004);
-    for (let j = 0; j < 5; j += 1) {
-      trace(WAVE, 0.458 + j * 0.003, 0.985, () => [0.07 + j * 0.115, 0.012 + 0.011 * j, 0.55 + 0.11 * j], 0.003);
-    }
+    // 3  timbre: one broad band, laid in two slow passes, then a comb of
+    // five lines across the top half, a flick to a slow drag, so the five
+    // teeth of each printed cycle grow light to heavy.
+    lay1(WAVE, 0.0, 0.452, G.lineSteady, { path: flat(0.5), p: () => 2.5, load: 1.3, gain: 0.6 });
+    lay1(WAVE, 0.01, 0.445, G.lineSlowFlat, { path: flat(0.48), p: () => 2.1, gain: 0.6 });
+    [G.lineFlick, G.lineQuick, G.lineRising, G.lineFalling, G.lineSlowLong].forEach((tr, j) => {
+      lay1(WAVE, 0.458 + j * 0.003, 0.985, tr, { path: flat(0.07 + j * 0.115), p: () => 0.45 + 0.17 * j, gain: 0.5 });
+    });
 
     // 4  a drone, an arpeggio stacking into a chord over it
-    trace(PITCH, 0.655, 0.985, () => [0.5, 0.055, 1]);
-    [7, 9, 12, 16, 19].forEach((n, j) => {
+    lay1(PITCH, 0.655, 0.985, G.lineHooked, { path: flat(0.5), p: () => 1.3, load: 1.25 });
+    [G.lineSteady, G.lineQuick, G.lineFalling, G.lineDiagonal, G.lineSlowLong].forEach((tr, j) => {
+      const n = [7, 9, 12, 16, 19][j];
       const f0 = 0.75 + j * 0.04;
-      trace(
-        PITCH,
-        f0,
-        0.975,
-        (t) => {
-          const f = f0 + (0.975 - f0) * t;
-          const fold = smoothstep(0.9, 0.97, f);
-          return [n + (12 - n) * fold, (j % 2 ? 0.022 : 0.032) * (1 - 0.5 * fold), j % 2 ? 0.5 : 0.93];
+      lay1(PITCH, f0, 0.975, tr, {
+        path: (f) => {
+          const fold = smoothstep(0.9, 0.97, f0 + (0.975 - f0) * f);
+          return n + (12 - n) * fold;
         },
-        0.01,
-      );
+        p: () => (j % 2 ? 0.65 : 0.95),
+        gain: 0.7,
+      });
     });
-    trace(AMP, 0.655, 0.978, (t) => {
-      const w = 0.04 + 0.12 * smoothstep(0, 0.08, t) + 0.38 * Math.pow(smoothstep(0, 0.92, t), 1.4);
-      const trem = 1 - 0.34 * smoothstep(0.42, 0.72, t) * (0.5 + 0.5 * Math.cos(Math.PI * 2 * t * 13));
-      return [0.5, w * trem, 0.97];
-    });
-    trace(VIB, 0.66, 0.982, (t) => [0.9 - 0.72 * Math.pow(t, 0.8), 0.012 + 0.27 * Math.pow(t, 1.2), 0.98]);
+    lay1(AMP, 0.655, 0.978, G.squigGrowing, { path: flat(0.5), amp: (f) => 0.06 + 0.36 * Math.pow(smoothstep(0, 0.92, f), 1.2), p: () => 0.9, load: 1.1 });
+    lay1(VIB, 0.66, 0.982, G.squigWave, { path: (f) => 0.84 - 0.6 * Math.pow(f, 0.8), amp: (f) => 0.03 + 0.12 * f, p: (f) => 0.5 + 1.4 * f, load: 1.2 });
   }
 
   // --- input -------------------------------------------------------------
@@ -728,43 +876,20 @@ export function createOramics(host) {
     return -1;
   };
 
-  // The pen trails the pointer a little, like a loaded brush, so a few
-  // coarse pointer events still lay down one smooth line; it is sampled once
-  // a frame, because the film keeps moving under it even when the hand stops.
-  const pen = { x: 0, y: 0 };
-  // Ink pools when the pen is slow over the film and thins when it hurries:
-  // the brush widens and stays loaded at a crawl, starves when it flicks,
-  // and where it all but stops on the film the ink collects in a pool. Felt
-  // in real time on every pointer event as well as every frame, so a flick
-  // dries the brush however few frames it spans.
-  let felt = 0;
-  const feel = () => {
-    const now = performance.now();
-    const dt = Math.min(0.1, (now - felt) / 1000);
-    felt = now;
-    if (dt <= 0) return;
-    const p = stage.pointer;
-    const rel = Math.hypot(p.vx + speed * L, p.vy);
-    brush = damp(brush, W_MIN + (W_MAX - W_MIN) * Math.exp(-rel / (h * 2.6)), 9, dt);
-    load = damp(load, Math.exp(-rel / (h * 1.7)), 16, dt);
-    pool = damp(pool, Math.exp(-rel / (h * 0.32)), rel < h * 0.4 ? 2.5 : 8, dt);
-  };
-  const sample = (dt, exact = false) => {
-    const p = stage.pointer;
-    if (exact) {
-      pen.x = p.x;
-      pen.y = p.y;
-    } else {
-      pen.x = damp(pen.x, p.x, 30, dt);
-      pen.y = damp(pen.y, p.y, 30, dt);
-    }
+  // The live pen records the same thing the score's traces did: every
+  // pointer event as it arrives, at the time it arrived, in film
+  // coordinates, and once a frame besides, because the film keeps moving
+  // under the pen even when the hand stops; a pen held still on the
+  // moving film lays a slow, heavy line. A stylus's pressure presses the
+  // nib; a mouse is pressed evenly.
+  let penP = 1;
+  const sample = (x, y) => {
     const st = strips[drawing.strip];
-    const u = phase + pen.x / L;
-    const v = clamp((pen.y - st.top) / st.bh, 0, 1);
-    feel();
-    const last = drawing.u.length - 1;
-    if (last >= 0 && Math.hypot((u - drawing.u[last]) * L, (v - drawing.v[last]) * st.bh) < 0.8) return;
-    addPoint(drawing, u, v, brush * NIB[st.k], load, pool);
+    const u = phase + x / L;
+    const v = clamp((y - st.top) / st.bh, 0, 1);
+    const n = drawing.u.length;
+    if (n && Math.hypot((u - drawing.u[n - 1]) * L, (v - drawing.v[n - 1]) * st.bh) < 0.75) return;
+    addPoint(drawing, u, v, performance.now() / 1000, penP);
     if (drawing.u[drawing.u.length - 1] - drawing.u[0] > 0.92) {
       // Nearly a whole lap in one stroke: begin another so it never laps itself.
       drawing.done = true;
@@ -772,20 +897,17 @@ export function createOramics(host) {
       begin(st.k);
     }
   };
+  const pressOf = (e) => (e && e.pointerType === "pen" && e.pressure > 0 ? 0.35 + 1.3 * e.pressure : 1);
 
   const begin = (k) => {
     drawing = newStroke(k);
     strokes.push(drawing);
-    brush = W_MIN + (W_MAX - W_MIN) * 0.7;
-    load = 0.75;
-    pool = 0.3;
-    felt = performance.now();
-    sample(0, true);
+    sample(stage.pointer.x, stage.pointer.y);
   };
 
   const finish = () => {
     if (!drawing) return;
-    sample(0, true);
+    sample(stage.pointer.x, stage.pointer.y);
     drawing.done = true;
     drawing.dirty = true;
     drawing = null;
@@ -800,13 +922,17 @@ export function createOramics(host) {
     }
   };
 
-  stage.on("down", (p) => {
+  stage.on("down", (p, e) => {
     sound?.start();
+    penP = pressOf(e);
     const k = stripAt(p.y);
     if (k >= 0) begin(k);
   });
-  stage.on("move", (p) => {
-    if (drawing) feel();
+  stage.on("move", (p, e) => {
+    if (drawing) {
+      penP = pressOf(e);
+      sample(p.x, p.y);
+    }
     stage.canvas.style.cursor = stripAt(p.y) >= 0 ? "crosshair" : "";
   });
   stage.on("up", finish);
@@ -1179,7 +1305,7 @@ export function createOramics(host) {
   // print. The loop arrives printed by the lap before it, so a run starts
   // one lap upstream of the reader.
   const runFrom = (end) => {
-    for (const s of strokes) if (s.dirty) densify(s);
+    for (const s of strokes) if (s.dirty) lay(s);
     flushInk();
     for (const v of voices) Object.assign(v, { on: false, lv: 0, amp: 0, level: 0, fresh: false, snap: false });
     for (const o of synth) Object.assign(o, { g: 0, a: 0, b: 0 });
@@ -1466,7 +1592,7 @@ export function createOramics(host) {
       const spin = 1 - Math.pow(1 - clamp((t - started) / 1.6, 0, 1), 3);
       phase += speed * spin * dt;
     }
-    if (drawing) sample(dt);
+    if (drawing) sample(stage.pointer.x, stage.pointer.y);
 
     for (let i = strokes.length - 1; i >= 0; i -= 1) {
       const s = strokes[i];
@@ -1476,7 +1602,7 @@ export function createOramics(host) {
       if (s.alpha < 0.02) strokes.splice(i, 1);
     }
 
-    for (const s of strokes) if (s.dirty) densify(s);
+    for (const s of strokes) if (s.dirty) lay(s);
     flushInk();
     advance(phase + rx / L, dt);
 
