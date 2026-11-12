@@ -13,49 +13,59 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // offset (C-1, M+1). A point marked * gets the house corner cut; one marked
 // # is cut as far as its two strokes allow, which is how diagonals are made.
 // Strokes are separated by |, and a stroke ending in z is closed.
+//
+// After the strokes come the left and right sidebearings, as a share of the
+// house bearing: 1 beside a straight full-height stem (H, E's left, N, M),
+// a little less beside a cut corner, and much less where the side is open
+// and the letter's own counter already brings white into the word: T on
+// both sides, the arms of L, F, P, K, the diagonals of V, X, Y, the stem of
+// J and the flag of 1 on the left, the narrow I. They are spacing, so they
+// are set by eye, by side, and never by width.
 const GLYPHS = {
-  A: [0.62, "LB LT* RT* RB | LM RM"],
-  B: [0.62, "LB LT RT* RM* LM | LM RM* RB* LB"],
-  C: [0.58, "RT LT* LB* RB"],
-  D: [0.64, "LB LT RT* RB* z"],
-  E: [0.56, "RT LT LB RB | LM RM"],
-  F: [0.56, "RT LT LB | LM RM"],
-  G: [0.62, "RT LT* LB* RB* RM CM"],
-  H: [0.62, "LT LB | RT RB | LM RM"],
-  I: [0, "CT CB"],
-  J: [0.5, "RT RB* LB* L,M+1"],
-  K: [0.6, "LT LB | LM RM# RT | LM RM# RB"],
-  L: [0.52, "LT LB RB"],
-  M: [0.86, "LB LT* RT* RB | CT CB"],
-  N: [0.62, "LB LT* RT* RB"],
-  O: [0.66, "LT* RT* RB* LB* z"],
-  P: [0.6, "LB LT RT* RM* LM"],
-  Q: [0.66, "RB LB* LT* RT* RB | RB R+1,B"],
-  R: [0.6, "LB LT RT* RM* LM | CM RM# RB"],
-  S: [0.6, "RT LT* LM* RM* RB* LB"],
-  T: [0.62, "LT RT | CT CB"],
-  U: [0.62, "LT LB* RB* RT"],
-  V: [0.62, "LT LB# RB# RT"],
-  W: [0.86, "LT LB* RB* RT | CB CM"],
-  X: [0.62, "LT LM# RM# RT | LB LM# RM# RB"],
-  Y: [0.62, "LT LM# RM# RT | CM CB"],
-  Z: [0.6, "LT RT RM# LM# LB RB"],
-  0: [0.54, "LT* RT* RB* LB* z | CM-1 CM+1"],
-  1: [0.4, "LT CT# CB"],
-  2: [0.58, "LT RT* RM* LM* LB RB"],
-  3: [0.58, "LT RT* RB* LB | CM RM"],
-  4: [0.6, "LT LM* RM | RT RB"],
-  5: [0.58, "RT LT LM RM* RB* LB"],
-  6: [0.58, "RT LT* LB* RB* RM* LM"],
-  7: [0.56, "LT RT* RB"],
-  8: [0.6, "LT* RT* RB* LB* z | LM RM"],
-  9: [0.58, "LB RB* RT* LT* LM* RM"],
+  A: [0.62, "LB LT* RT* RB | LM RM", 0.95, 0.95],
+  B: [0.62, "LB LT RT* RM* LM | LM RM* RB* LB", 1, 0.9],
+  C: [0.58, "RT LT* LB* RB", 0.9, 0.45],
+  D: [0.64, "LB LT RT* RB* z", 1, 0.9],
+  E: [0.56, "RT LT LB RB | LM RM", 1, 0.7],
+  F: [0.56, "RT LT LB | LM RM", 1, 0.3],
+  G: [0.62, "RT LT* LB* RB* RM CM", 0.9, 0.9],
+  H: [0.62, "LT LB | RT RB | LM RM", 1, 1],
+  I: [0, "CT CB", 0.8, 0.8],
+  J: [0.5, "RT RB* LB* L,M+1", 0.35, 1],
+  K: [0.6, "LT LB | LM RM# RT | LM RM# RB", 1, 0.45],
+  L: [0.52, "LT LB RB", 1, 0.25],
+  M: [0.86, "LB LT* RT* RB | CT CB", 1, 1],
+  N: [0.62, "LB LT* RT* RB", 1, 1],
+  O: [0.66, "LT* RT* RB* LB* z", 0.9, 0.9],
+  P: [0.6, "LB LT RT* RM* LM", 1, 0.5],
+  Q: [0.66, "RB LB* LT* RT* RB | RB R+1,B", 0.9, 0.7],
+  R: [0.6, "LB LT RT* RM* LM | CM RM# RB", 1, 0.85],
+  S: [0.6, "RT LT* LM* RM* RB* LB", 0.8, 0.8],
+  T: [0.62, "LT RT | CT CB", 0.2, 0.2],
+  U: [0.62, "LT LB* RB* RT", 1, 1],
+  V: [0.62, "LT LB# RB# RT", 0.45, 0.45],
+  W: [0.86, "LT LB* RB* RT | CB CM", 1, 1],
+  X: [0.62, "LT LM# RM# RT | LB LM# RM# RB", 0.45, 0.45],
+  Y: [0.62, "LT LM# RM# RT | CM CB", 0.3, 0.3],
+  Z: [0.6, "LT RT RM# LM# LB RB", 0.6, 0.6],
+  0: [0.54, "LT* RT* RB* LB* z | CM-1 CM+1", 0.9, 0.9],
+  1: [0.4, "LT CT# CB", 0.4, 0.8],
+  2: [0.58, "LT RT* RM* LM* LB RB", 0.75, 0.75],
+  3: [0.58, "LT RT* RB* LB | CM RM", 0.5, 0.85],
+  4: [0.6, "LT LM* RM | RT RB", 0.6, 1],
+  5: [0.58, "RT LT LM RM* RB* LB", 0.9, 0.75],
+  6: [0.58, "RT LT* LB* RB* RM* LM", 0.9, 0.8],
+  7: [0.56, "LT RT* RB", 0.45, 1],
+  8: [0.6, "LT* RT* RB* LB* z | LM RM", 0.9, 0.9],
+  9: [0.58, "LB RB* RT* LT* LM* RM", 0.8, 0.9],
 };
 
 const parsed = {};
-for (const [ch, [ratio, src]] of Object.entries(GLYPHS)) {
+for (const [ch, [ratio, src, lsb, rsb]] of Object.entries(GLYPHS)) {
   parsed[ch] = {
     ratio,
+    lsb,
+    rsb,
     strokes: src.split("|").map((s) => {
       const toks = s.trim().split(/\s+/);
       const closed = toks[toks.length - 1] === "z";
@@ -112,21 +122,44 @@ const N_MIN = 4;
 const N_MAX = 36;
 const DEFAULT_WORD = "RASTER";
 const cutFor = (n) => Math.max(1, Math.round(n * 0.14));
-const gapFor = (n) => Math.max(2, Math.round(n * 0.2));
+// The letters' stroke, as a share of a cell and bounded by the cap height
+// so a fine raster still sets a word and a coarse one does not fill in.
+const STROKE = 0.78;
+const STROKE_MIN = 0.05;
+const STROKE_MAX = 0.16;
+const inkCells = (n) => clamp(STROKE, STROKE_MIN * n, STROKE_MAX * n);
+// The house bearing in cells, measured from the edge of the ink: two full
+// stems sit a fifth of the cap height apart, centre to centre.
+const bearing = (n) => Math.max(0, (n * 0.2 - inkCells(n)) / 2);
+// The space between two letters, centre line to centre line: the stroke,
+// plus the right bearing of the first and the left bearing of the second,
+// resolved to whole cells so every letter still starts on a column of dots
+// and every vertex lands on one. At least half a cell of white is left, so
+// two open sides never touch on a coarse raster.
+const space = (a, b, n) => {
+  const ink = inkCells(n);
+  return Math.max(Math.ceil(ink + 0.5), Math.round(ink + (a.rsb + b.lsb) * bearing(n)));
+};
+
+// Set a word in cells: where each letter starts, and the run from the first
+// ink to the last. The outer bearings are not counted, so the word centres
+// on its ink.
+function setWord(glyphs, n) {
+  let x = 0;
+  const at = glyphs.map((g, i) => {
+    if (i > 0) x += glyphWidth(glyphs[i - 1], n) + space(glyphs[i - 1], g, n);
+    return x;
+  });
+  const total = glyphs.length ? x + glyphWidth(glyphs[glyphs.length - 1], n) : 0;
+  return { at, total };
+}
 
 // Lay out a word in cells around the raster's centre dot.
 function layout(word, n) {
   const c = cutFor(n);
-  const gap = gapFor(n);
   const glyphs = [...word].map((ch) => parsed[ch]);
-  let x = 0;
-  const placed = glyphs.map((g) => {
-    const w = glyphWidth(g, n);
-    const at = x;
-    x += w + gap;
-    return { g, at, w };
-  });
-  const total = Math.max(0, x - gap);
+  const { at: starts, total } = setWord(glyphs, n);
+  const placed = glyphs.map((g, i) => ({ g, at: starts[i] }));
   const ox = -Math.floor(total / 2);
   const oy = -Math.floor(n / 2);
   return placed.map(({ g, at }) => resolve(g, n, c).map((s) => ({ closed: s.closed, pts: s.pts.map(([px, py]) => [px + at + ox, py + oy]) })));
@@ -136,12 +169,9 @@ function layout(word, n) {
 // The widest the word gets at any raster, since rounding to whole cells
 // widens a coarse one.
 function aspect(word) {
+  const glyphs = [...word].map((ch) => parsed[ch]);
   let most = 1;
-  for (let n = N_MIN; n <= N_MAX; n++) {
-    let w = 0;
-    for (const ch of word) w += glyphWidth(parsed[ch], n) + gapFor(n);
-    most = Math.max(most, (w - gapFor(n)) / n);
-  }
+  for (let n = N_MIN; n <= N_MAX; n++) most = Math.max(most, setWord(glyphs, n).total / n);
   return most;
 }
 
@@ -195,22 +225,49 @@ export async function createAlphabet(host, { embedded = false } = {}) {
     const lay = layout(word, n);
     const cell = capH / n;
     const next = [];
-    // The word reseats letter by letter, left to right. A letter's strokes
-    // always move together, so its joins stay registered all the way.
+    // The word reseats letter by letter, and a letter's strokes always move
+    // together, so its joins stay registered all the way.
     const step = Math.min(0.045, 0.3 / Math.max(1, lay.length));
     const busy = (st) => st.born && st.due <= time && st.pts.some((p, i) => Math.abs(p.vx) + Math.abs(p.vy) > 4 || Math.abs(p.x - st.target[i][0]) + Math.abs(p.y - st.target[i][1]) > 0.5);
-    lay.forEach((glyph, gi) => {
-      const live = glyph.map((s, si) => {
+    const letters = lay.map((glyph, gi) =>
+      glyph.map((s, si) => {
         const key = `${gi}:${word[gi]}:${si}`;
         const target = s.pts.map(([x, y]) => [x * cell, y * cell]);
         // A new stroke is set whole on its own dots when its turn comes,
         // never grown out of its first point.
         const st = strokes.find((o) => o.key === key) || { key, closed: s.closed, born: immediate, pts: target.map(([x, y]) => ({ x, y, vx: 0, vy: 0 })) };
         return [st, target];
-      });
+      }),
+    );
+    // Which way each letter travels across the line to its new dots.
+    const shift = letters.map((live) => {
+      let d = 0;
+      let k = 0;
+      for (const [st, target] of live) {
+        if (!st.born) continue;
+        st.pts.forEach((p, i) => {
+          d += target[i][0] - p.x;
+          k++;
+        });
+      }
+      return k ? d / k : 0;
+    });
+    // The order follows the spacing: a letter never moves into the white of
+    // a neighbour that is still to go. As a word opens out, the ends leave
+    // first and each letter follows the one it would crowd; as it closes up,
+    // the letters next to the centre go first. A typed word is set left to
+    // right, as it is read.
+    const rank = [];
+    const rankOf = (i) => {
+      if (rank[i] !== undefined) return rank[i];
+      const j = shift[i] > 0.5 ? i + 1 : shift[i] < -0.5 ? i - 1 : -1;
+      const ahead = j >= 0 && j < letters.length && Math.sign(shift[j]) === Math.sign(shift[i]) && Math.abs(shift[j]) > 0.5;
+      return (rank[i] = ahead ? rankOf(j) + 1 : 0);
+    };
+    letters.forEach((live, gi) => {
       // A letter still on its way is not held back again, so a drag through
       // many rasters keeps it moving; one at rest waits its turn.
-      const due = immediate || live.some(([st]) => busy(st)) ? time : time + gi * step + (spawn ? 0.04 : 0);
+      const due = immediate || live.some(([st]) => busy(st)) ? time : time + (spawn ? gi * step + 0.04 : rankOf(gi) * step);
       for (const [st, target] of live) {
         st.target = target;
         st.due = due;
@@ -374,9 +431,8 @@ export async function createAlphabet(host, { embedded = false } = {}) {
     }
     ctx.fill();
 
-    // The letters: one stroke width of the raster, bounded so a fine
-    // raster still sets a word and a coarse one does not fill in.
-    const sw = clamp(p * 0.78, capH * 0.05, capH * 0.16);
+    // The letters: one stroke width of the raster (see inkCells).
+    const sw = clamp(p * STROKE, capH * STROKE_MIN, capH * STROKE_MAX);
     ctx.strokeStyle = "#141210";
     ctx.lineWidth = sw;
     ctx.lineJoin = "miter";
