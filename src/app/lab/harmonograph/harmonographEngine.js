@@ -15,8 +15,10 @@ import { createNib } from "./penAudio";
 // small fixed set each time. The impression is a plate, not a second pen
 // line: the time the nib spent over every pixel of the paper becomes a
 // continuous tone, and the plate is a halftone of it at the ink's own screen
-// angle, solid where the slow turns crowd and thinning out through ever
-// smaller dots to open paper where they spread, printed one fixed
+// angle, darkest where the slow turns crowd (never quite solid: the dots
+// stop short of closing, so paper shows through every overprint) and
+// thinning out through ever smaller dots to open paper where they spread,
+// banded like the loops that laid it, printed one fixed
 // misregistration off the key. The sheet builds up
 // as a riso or letterpress print with the pen's near-black key, the only
 // linework on it, always on top. The pen lifts itself once the swing has
@@ -394,20 +396,26 @@ export async function createHarmonograph(host) {
   // replayed into a field at device resolution as the time the nib spent
   // over each pixel (every stretch of line carries the seconds the pen took
   // to cross it), so the slow turns and the crowded inner winds build ink
-  // and the fast open loops barely mark. The field is softened over a few
-  // pen widths, read against its own spread (TONE_Q of the inked area prints
-  // at TONE_AT), and eased up to solid, so the tone runs continuously from
-  // solid in the crowded core to nothing on open paper. That tone is then
-  // set through an AM screen: round dots on a fixed ruling, turned to the
-  // ink's own angle, each dot's area matched to the tone. There is no cut and
-  // no edge anywhere; the plate thins out as dots along the outer loops.
+  // and the fast open loops barely mark. The field is softened only over
+  // about the spacing of the figure's own loops, so the plate keeps their
+  // banding as bands of light and dark tone. It is read against a high
+  // percentile of itself (TONE_P of the inked area), not its peak, and
+  // through a log curve, so the long tail of the crowded core compresses
+  // instead of clipping and the whole range from rich mid-tones to the
+  // finest highlight dots stays in use. That tone is then set through an AM
+  // screen: round dots on a fixed ruling, turned to the ink's own angle,
+  // each dot's area matched to the tone and capped at DOT_MAX, so even the
+  // densest core keeps open paper between its dots and four plates over it
+  // still rosette instead of printing to black. There is no cut and no edge
+  // anywhere; the plate thins out as dots along the outer loops.
   // Every ink sits at its own angle, as a four-colour printer sets them, so
   // the plates overprint into rosettes and moire against each other and
   // against the key's own line moire. Nothing of the line itself survives in
   // the plate; the near-black key is the only linework on the sheet.
-  const SIGMA = 3.6; // CSS px, the softening of the time field
-  const TONE_Q = 0.75; // this share of the inked area ...
-  const TONE_AT = 0.78; // ... prints at this tone or lighter
+  const SIGMA = 1.8; // CSS px, the softening of the time field: about a loop's pitch
+  const TONE_P = 0.95; // the field's own high percentile reads as full tone ...
+  const TONE_K = 18; // ... through log(1 + K x) / log(1 + K)
+  const DOT_MAX = 0.77; // the largest dot, as a share of its screen cell
   const SCREEN = 2.4; // CSS px, the halftone's pitch
   // The round-dot spot function, 0.5 + 0.25 (cos u + cos v), read as the
   // threshold for a given dot area: its values over one screen cell, sorted,
@@ -480,16 +488,15 @@ export async function createHarmonograph(host) {
       box(F, tmp, n, 1);
       box(tmp, F, 1, n);
     }
-    // The field's own spread, from a sample of the inked area: the tone
-    // curve 1 - exp(-d / ref) puts TONE_Q of it at TONE_AT or lighter.
+    // The field's own spread, from a sample of the inked area: its TONE_P
+    // percentile is full tone, and everything past it is the same.
     let peak = 0;
     for (let i = 0; i < F.length; i++) if (F[i] > peak) peak = F[i];
-    const floor = peak * 1e-4;
+    const floor = peak * 1e-3;
     const sample = [];
-    for (let i = 0; i < F.length; i += 7) if (F[i] > floor) sample.push(F[i]);
+    for (let i = 0; i < F.length; i += 5) if (F[i] > floor) sample.push(F[i]);
     sample.sort((a, b) => a - b);
-    const q = sample.length ? sample[Math.floor(TONE_Q * (sample.length - 1))] : 1;
-    const ref = q / -Math.log(1 - TONE_AT);
+    const ref = sample.length ? sample[Math.floor(TONE_P * (sample.length - 1))] : 1;
     return { F, ref, floor };
   };
 
@@ -520,11 +527,12 @@ export async function createHarmonograph(host) {
     const [cXs, sXs] = wave(su);
     const slope = 0.25 * kk; // the spot function's slope per device px, per unit of sin
     const inv = 1 / ref;
+    const logK = 1 / Math.log1p(TONE_K);
     for (let y = 0, p = 0; y < n; y++) {
       for (let x = 0; x < n; x++, p++) {
         const dens = F[p];
         if (dens <= floor) continue;
-        const tone = 1 - Math.exp(-dens * inv);
+        const tone = DOT_MAX * Math.log1p(TONE_K * Math.min(1, dens * inv)) * logK;
         const c = tone * 1024;
         const ci = c | 0;
         const thr = ci >= 1024 ? SPOT_LUT[1024] : SPOT_LUT[ci] + (SPOT_LUT[ci + 1] - SPOT_LUT[ci]) * (c - ci);
@@ -534,10 +542,11 @@ export async function createHarmonograph(host) {
         const sinV = sXu[y] * cXs[x] - cXu[y] * sXs[x];
         const s = 0.5 + 0.25 * (cosU + cosV);
         // About one device pixel of edge on every dot, whatever its size,
-        // leaning toward paper in the light tones and ink in the dark, so
-        // a speck can vanish into the paper and the solid can close up.
+        // centred on the dot's true edge, leaning a little toward paper for
+        // a speck so it can vanish into the paper; the largest dots never
+        // close up.
         const g = Math.max(0.06, slope * Math.hypot(sinU, sinV));
-        const ink = clamp((s - thr) / g + tone, 0, 1);
+        const ink = clamp((s - thr) / g + 0.3 + 0.2 * tone, 0, 1);
         if (ink <= 0) continue;
         const al = Math.min(1, 0.94 * ink * grain[p]);
         const i = p * 4;
