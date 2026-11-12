@@ -45,6 +45,16 @@ const GROUND = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const K_COC = 0.26; // circle of confusion, in print heights per unit of inverse depth
 const DOF = 0.06; // inverse depth either side of the plane that still reads as sharp
 const MAX_COC = 0.03; // cap, in print heights
+// The near field's own cap, a little over half the far one. The pine below
+// the terrace is the nearest thing in the frame and would take the full cap
+// at once; at that size it spread over a quarter of the print as one dark
+// blot. Kept smaller, it is a soft frame for the square, not a wall.
+const NEAR_MAX_COC = 0.017;
+// The window of the photograph the print shows, in photograph uv (x, y, w,
+// h): the bottom and right edges cut by 10% each, which keeps the print at 3:2
+// and leaves the blurred pine as a dark margin on the right and the bottom
+// corners rather than a quarter of the frame.
+const CROP = [0, 0, 0.9, 0.9];
 const TILT = 0.16; // reverse tilt of the focal plane, inverse depth per print height
 const BUF_SCALE = 0.5; // gather buffer pixels per CSS pixel
 const TAPS = 88;
@@ -77,17 +87,27 @@ uniform float uTilt;
 uniform float uK;     // coc per unit inverse depth, in output units
 uniform float uMax;   // coc cap, in output units
 uniform float uDof;
+uniform float uNearMax; // the near field's coc cap, in output units
+uniform vec4 uCrop;     // the photograph's window on the print: x, y, w, h in photograph uv
+// Print uv to photograph uv. Every pass works in print uv; only a read of the
+// photograph or its depth goes through this.
+vec2 photo(vec2 uv) {
+  return uCrop.xy + uv * uCrop.zw;
+}
+// uFocusY is a height in the photograph, so a focus point means the same
+// place in the square whatever the crop.
 float planeAt(vec2 uv) {
-  return uFocus - uTilt * (uv.y - uFocusY);
+  return uFocus - uTilt * (photo(uv).y - uFocusY);
 }
 float cocAt(vec2 uv, out float d) {
-  d = texture(uDepth, uv).r;
-  return min(max(abs(d - planeAt(uv)) - uDof, 0.0) * uK, uMax);
+  d = texture(uDepth, photo(uv)).r;
+  float gap = d - planeAt(uv);
+  return min(max(abs(gap) - uDof, 0.0) * uK, gap > 0.0 ? uNearMax : uMax);
 }
 // Circle of confusion of the near field only: zero for anything at or behind
 // the plane (white = near, so nearer means larger d).
 float nearCoc(vec2 uv, float d) {
-  return min(max(d - planeAt(uv) - uDof, 0.0) * uK, uMax);
+  return min(max(d - planeAt(uv) - uDof, 0.0) * uK, uNearMax);
 }
 // Print white: everything above the knee rolls off towards 0.95 and never
 // reaches it, so a bright roof or a windscreen keeps its texture as it opens
@@ -189,12 +209,12 @@ uniform vec2 uBuf;
 uniform float uSnap;  // buffer px
 void main() {
   vec2 px = 1.0 / uBuf;
-  float d = texture(uDepth, vUv).r;
+  float d = texture(uDepth, photo(vUv)).r;
   for (int i = 0; i < ${SNAP_TAPS}; i++) {
     float fi = float(i);
     float r = uSnap * sqrt((fi + 0.5) / ${SNAP_TAPS}.0);
     float a = fi * 2.39996323;
-    d = max(d, texture(uDepth, vUv + vec2(cos(a), sin(a)) * r * px).r);
+    d = max(d, texture(uDepth, photo(vUv + vec2(cos(a), sin(a)) * r * px)).r);
   }
   outCoc = vec4(nearCoc(vUv, d) / uMax, 0.0, 0.0, 1.0);
 }`;
@@ -216,7 +236,7 @@ void main() {
   float best = nearCocAt(vUv);
   for (int i = 0; i < ${DILATE_TAPS}; i++) {
     float fi = float(i);
-    float r = (uMax + 1.0) * sqrt((fi + 0.5) / ${DILATE_TAPS}.0);
+    float r = (uNearMax + 1.0) * sqrt((fi + 0.5) / ${DILATE_TAPS}.0);
     float a = fi * 2.39996323;
     float s = nearCocAt(vUv + vec2(cos(a), sin(a)) * r * px);
     if (s >= r - 1.0) best = max(best, s);
@@ -240,7 +260,7 @@ void main() {
   float s0 = cocAt(vUv, d0);
   float n0 = nearCocAt(vUv);
   bool nearC = n0 > 0.0;
-  vec3 c0 = textureLod(uColor, vUv, uLod).rgb;
+  vec3 c0 = textureLod(uColor, photo(vUv), uLod).rgb;
   vec3 acc = c0;
   float cacc = s0;
   float tot = 1.0;
@@ -265,7 +285,7 @@ void main() {
     bool nearS = nearCocAt(uv) > 0.0;
     // Foreground spreads in its own layer, not into the background's.
     if (!nearC && nearS) m = 0.0;
-    vec3 c = textureLod(uColor, uv, uLod).rgb;
+    vec3 c = textureLod(uColor, photo(uv), uLod).rgb;
     if (!nearS) {
       float w = 1.0 - r / (uMax + 1.0);
       hid += c * w;
@@ -290,9 +310,24 @@ void main() {
   // premultiplied by how far it is into the near field. The covered share of
   // the disc is the coverage: one inside a blurred pine, a half on its
   // silhouette, falling to nothing a full CoC outside it.
+  //   The colour is weighted apart from the coverage, towards the nearest
+  // samples in the disc: the paving at the foot of the frame is near field
+  // too, and averaged in at full weight it turned the pine's disc a pale
+  // grey-green. A sample a tenth of the depth range behind the nearest weighs
+  // about a quarter as much, so the pine stays pine over the bright stone,
+  // and where there is only paving the paving is its own colour. The disc
+  // mean also loses chroma (sunlit needles and the dark between them average
+  // to grey), so the mean is carried back to the weighted chroma of its
+  // samples, and a little past it, with its light held a little under: the
+  // print's lifted toe and the Pro-Mist veil both push dark foliage towards a
+  // pale neutral, and a sharp pine keeps its colour through them on the
+  // contrast of its own needles, which a disc no longer has. So a blurred
+  // pine prints the dark green of a sharp one, not grey-olive.
   float R = texture(uNearCoc, vUv).r * uMax;
   vec3 fc = vec3(0.0);
   float fa = 0.0;
+  float fw = 0.0;
+  float fchroma = 0.0;
   if (R > 0.25) {
     for (int i = 0; i < ${NEAR_TAPS}; i++) {
       float fi = float(i);
@@ -301,12 +336,19 @@ void main() {
       vec2 uv = vUv + vec2(cos(a), sin(a)) * r * px;
       float reach = texture(uNearCoc, uv).r * uMax;
       float m = smoothstep(r - 1.1, r + 0.6, reach) * smoothstep(0.0, 1.5, nearCocAt(uv));
-      fc += textureLod(uColor, uv, uLod).rgb * m;
+      vec3 c = textureLod(uColor, photo(uv), uLod).rgb;
+      float w = m * exp(14.0 * (texture(uDepth, photo(uv)).r - 1.0));
+      fc += c * w;
+      fchroma += length(c - dot(c, vec3(0.2126, 0.7152, 0.0722))) * w;
+      fw += w;
       fa += m;
     }
   }
   float alpha = fa / ${NEAR_TAPS}.0;
-  vec3 fcol = fc / max(fa, 1e-6);
+  vec3 fcol = fc / max(fw, 1e-6);
+  float fl = dot(fcol, vec3(0.2126, 0.7152, 0.0722));
+  float fch = length(fcol - fl);
+  fcol = 0.9 * fl + (fcol - fl) * clamp(1.3 * fchroma / max(fw, 1e-6) / max(fch, 1e-4), 1.0, 1.8);
   // Barely-defocused foreground is the full-resolution small disc's job.
   alpha *= smoothstep(0.9, 2.2, R);
   outNear = vec4(fcol * alpha, alpha);
@@ -414,7 +456,7 @@ void main() {
 
   // Near focus: a small full-resolution disc, depth-weighted so an edge
   // between two distances does not smear.
-  vec3 small = texture(uColor, uv).rgb;
+  vec3 small = texture(uColor, photo(uv)).rgb;
   float ws = 1.0;
   float rs = min(s0, 4.0) * uDpr;
   if (rs > 0.35) {
@@ -423,9 +465,9 @@ void main() {
       float r = rs * sqrt((fi + 0.5) / 12.0);
       float a = fi * 2.39996323 + 0.7;
       vec2 o = vec2(cos(a), sin(a)) * r / uOut;
-      float d = texture(uDepth, uv + o).r;
+      float d = texture(uDepth, photo(uv + o)).r;
       float w = exp(-abs(d - d0) * 40.0);
-      small += texture(uColor, uv + o).rgb * w;
+      small += texture(uColor, photo(uv + o)).rgb * w;
       ws += w;
     }
   }
@@ -446,7 +488,7 @@ void main() {
     t = clamp(t, vec2(0.0), uBuf - 1.0);
     vec2 tuv = (t + 0.5) / uBuf;
     float g = exp(-dot(dv, dv) * 0.7);
-    float d = textureLod(uDepth, tuv, 2.0).r;
+    float d = textureLod(uDepth, photo(tuv), 2.0).r;
     float w = g * (exp(-abs(d - d0) * sharpness) + 0.002);
     big += texture(uBlur, tuv) * w;
     wb += w;
@@ -468,11 +510,14 @@ void main() {
   // Depth: the nearest-to-infinity value within one CoC cap, so the sky the
   // gather filled in behind a defocused pine counts as sky.
   vec2 cssUv = uDpr / uOut;
-  float dFar = textureLod(uDepth, uv, 3.0).r;
+  // Height in the photograph: the sky's source and film gradients are
+  // measured down the photograph, not down the cropped print.
+  float sy = photo(uv).y;
+  float dFar = textureLod(uDepth, photo(uv), 3.0).r;
   float dNear = dFar;
   for (int i = 0; i < 8; i++) {
     float a = float(i) * 0.785398 + 0.39;
-    float dt = textureLod(uDepth, uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv, 3.0).r;
+    float dt = textureLod(uDepth, photo(uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv), 3.0).r;
     dFar = min(dFar, dt);
     dNear = max(dNear, dt);
   }
@@ -493,17 +538,17 @@ void main() {
   vec3 bg = vec3(0.0);
   float bw = 0.0;
   if (far > 0.0) {
-    vec3 srcSky = skySource(uv.y);
+    vec3 srcSky = skySource(sy);
     vec3 e = srcSky - FOLIAGE;
     for (int i = 0; i < 24; i++) {
       float fi = float(i);
       float ring = float(i / 12);
       float a = fi * 0.5235988 + ring * 0.2618;
-      vec2 dir = vec2(cos(a), sin(a)) / uSrc;
+      vec2 dir = vec2(cos(a), sin(a)) / (uSrc * uCrop.zw);
       vec2 q = uv + dir * (4.0 + 4.0 * ring);
-      float dq = textureLod(uDepth, q, 0.0).r;
+      float dq = textureLod(uDepth, photo(q), 0.0).r;
       float sq = min(max(abs(dq - planeAt(q)) - uDof, 0.0) * uK, uMax);
-      vec3 cq = textureLod(uColor, q, 0.0).rgb;
+      vec3 cq = textureLod(uColor, photo(q), 0.0).rgb;
       float w = smoothstep(0.67, 0.71, dq) * (1.0 - smoothstep(2.2, 5.0, sq));
       float notSky = 1.0 - clamp(dot(cq - FOLIAGE, e) / dot(e, e), 0.0, 1.0);
       notSky *= notSky;
@@ -512,18 +557,18 @@ void main() {
       fgSum += w * notSky * notSky;
       // The background a little further out, clear of the silhouette.
       vec2 qb = uv + dir * (6.0 + 6.0 * ring);
-      float wb = smoothstep(0.67, 0.65, textureLod(uDepth, qb, 0.0).r);
+      float wb = smoothstep(0.67, 0.65, textureLod(uDepth, photo(qb), 0.0).r);
       bg += textureLod(uBlur, qb, 0.0).rgb * wb;
       bw += wb;
     }
   }
   float fgW = smoothstep(0.5, 3.0, fw) * smoothstep(0.0, 0.05, fgSum);
   fg /= max(fgSum, 1e-5);
-  bg = bw > 0.5 ? bg / bw : skySource(uv.y);
+  bg = bw > 0.5 ? bg / bw : skySource(sy);
   vec2 dy = vec2(0.0, 0.014);
-  float up = luma(textureLod(uColor, uv + dy, 4.0).rgb) - luma(textureLod(uColor, uv - dy, 4.0).rgb);
+  float up = luma(textureLod(uColor, photo(uv + dy), 4.0).rgb) - luma(textureLod(uColor, photo(uv - dy), 4.0).rgb);
   float clear = smoothstep(0.69, 0.655, dNear);
-  vec3 alone = gradeSky(col, uv.y, far, HILLS, clear, up);
+  vec3 alone = gradeSky(col, sy, far, HILLS, clear, up);
   if (fgW > 0.0) {
     // The pixel's background share: its colour projected onto the line from
     // the pine to the background. It takes exactly that share of the grade
@@ -531,7 +576,7 @@ void main() {
     // plus film sky, and pine plus haze stays pine plus haze.
     vec3 e = bg - fg;
     float share = clamp(dot(col - fg, e) / max(dot(e, e), 1e-4), 0.0, 1.0);
-    vec3 unmixed = col + (gradeSky(bg, uv.y, far, HILLS, clear, up) - bg) * share;
+    vec3 unmixed = col + (gradeSky(bg, sy, far, HILLS, clear, up) - bg) * share;
     col = mix(alone, unmixed, fgW);
   } else {
     col = alone;
@@ -540,7 +585,7 @@ void main() {
   // cloud: its silhouette is snapped a little outward, so a blurred pine
   // against the sky carries some source sky in its rim, which would
   // otherwise come back as a pale baby-blue halo round the pine.
-  if (near.a > 1e-3) near.rgb = gradeSky(near.rgb / near.a, uv.y, far, FOLIAGE, 0.0, 0.0) * near.a;
+  if (near.a > 1e-3) near.rgb = gradeSky(near.rgb / near.a, sy, far, FOLIAGE, 0.0, 0.0) * near.a;
 
   col = col * (1.0 - near.a) + near.rgb;
 
@@ -1022,8 +1067,10 @@ export async function createMiniature(host) {
   stage.onResize(layout);
 
   const aim = (p) => {
-    const u = (p.x - rect.x) / rect.w;
-    const v = clamp((p.y - rect.y) / rect.h, 0, 1);
+    // Print to photograph coordinates: depth and the focus height are both
+    // read in the photograph, through the crop.
+    const u = CROP[0] + ((p.x - rect.x) / rect.w) * CROP[2];
+    const v = CROP[1] + clamp((p.y - rect.y) / rect.h, 0, 1) * CROP[3];
     // Off the print, the pointer still racks by height alone.
     focus.target = depthAt(clamp(u, 0.02, 0.98), v);
     focusY.target = v;
@@ -1074,6 +1121,8 @@ export async function createMiniature(host) {
       gl.uniform1f(u.uDof, DOF);
       gl.uniform1f(u.uK, K_COC * ph * BUF_SCALE);
       gl.uniform1f(u.uMax, MAX_COC * ph * BUF_SCALE);
+      gl.uniform1f(u.uNearMax, NEAR_MAX_COC * ph * BUF_SCALE);
+      gl.uniform4f(u.uCrop, ...CROP);
       gl.uniform2f(u.uBuf, buf[0], buf[1]);
     };
     gl.viewport(0, 0, buf[0], buf[1]);
@@ -1103,7 +1152,7 @@ export async function createMiniature(host) {
     bufferUniforms(gu);
     gl.uniform1i(gu.uNear0, 4);
     gl.uniform1i(gu.uNearCoc, 3);
-    gl.uniform1f(gu.uLod, Math.max(0, Math.log2(colorImg.naturalHeight / buf[1])));
+    gl.uniform1f(gu.uLod, Math.max(0, Math.log2((colorImg.naturalHeight * CROP[3]) / buf[1])));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     // pass 4: composite (units: css pixels), into the film's scene buffer
@@ -1126,6 +1175,8 @@ export async function createMiniature(host) {
     gl.uniform1f(cu.uK, K_COC * ph);
     gl.uniform1f(cu.uMax, MAX_COC * ph);
     gl.uniform1f(cu.uMaxCss, MAX_COC * ph);
+    gl.uniform1f(cu.uNearMax, NEAR_MAX_COC * ph);
+    gl.uniform4f(cu.uCrop, ...CROP);
     gl.uniform2f(cu.uBuf, buf[0], buf[1]);
     gl.uniform2f(cu.uOut, rect.w * dpr, rect.h * dpr);
     gl.uniform1f(cu.uDpr, dpr);
