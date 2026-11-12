@@ -16,14 +16,13 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 // against the sky, the rest sits a touch diffused behind them, and the only
 // warm in it is the thin halation ring where a blade crosses the sun.
 //
-// The sky behind (sky.webp) is a real summer cumulus sky cut from an HDRI
-// looking up into the dome, aimed so its sun sits in the frame's top left
-// corner (tools/depth/bakes/kaze/sky_hdri.py) and turned so the big cumulus
-// lies along the top: the sun is a warm white diffusion bloom in the corner,
-// burning through the cloud's edge, the cumulus runs off to the right with
-// warm white domes and pale skylight-blue shade, the open sky deepens from
-// pale cyan low in the frame to cobalt at the top, and a lit dome rises
-// behind the grass. It drifts with a two-phase flow map
+// The sky behind (sky.webp) is a real towering cumulus cut from an HDRI
+// looking up (tools/depth/bakes/kaze/sky_hdri.py): a cauliflower cumulus
+// stands up from the grass behind the culms, warm white on its sunlit domes
+// and pale skylight blue in its shaded flanks and base, the open sky deepens
+// from pale cyan low in the frame to cobalt at the top, and the sun is a
+// tight warm white bloom in the frame's top left corner with the cobalt
+// running saturated nearly up to it. It drifts with a two-phase flow map
 // (Vlachos 2010), faster toward the zenith, and the clouds lean after your
 // gusts.
 //
@@ -39,7 +38,7 @@ const ASPECT = 1.5;
 // in from; the crop window is cover-fitted to the box, held to its top edge.
 const OVER = 0.02;
 const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.68, ax: 0.05 };
-// The sun (image uv): where sky_hdri.py aims the HDRI's sun, in the frame's
+// The sun (image uv): where sky_hdri.py lays the sun's bloom, in the frame's
 // top left corner (keep the two SUNs equal).
 const SUN = [0.09, 0.1];
 
@@ -65,6 +64,7 @@ uniform vec2 uSkyLod;      // the sky's own: x its sharp level, y uLod at its si
 uniform vec4 uView;        // the part of the image on screen: x0, y0, w, h (uv)
 
 const vec2 SUN = vec2(${SUN[0].toFixed(4)}, ${SUN[1].toFixed(4)});
+const float DOME = 0.7;     // the sunlit domes' lift into the print's warm white
 
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
@@ -76,12 +76,17 @@ void main() {
   // crosses faster; near the grass it barely moves.
   float k = 0.35 + 0.65 * pow(clamp(1.0 - uv.y, 0.0, 1.0), 1.2);
   vec2 v = uCloudV * k;
-  const float CP = 18.0;
+  // Each phase is weighted by a triangle peaking mid-cycle, so it is out of
+  // sight when its offset wraps, and the triangle is sharpened so each phase
+  // stands alone for most of its cycle: the two offset copies of a cumulus
+  // only meet in a short crossfade, where they would otherwise lie doubled
+  // over every lit edge as a pale ghost a few pixels off.
+  const float CP = 12.0;
   float c0 = fract(uCloudT / CP);
   float c1 = fract(uCloudT / CP + 0.5);
   vec3 a0 = textureLod(uSky, uv - v * (c0 * CP), uSkyLod.x).rgb;
   vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uSkyLod.x).rgb;
-  float cw = abs(1.0 - 2.0 * c0);
+  float cw = smoothstep(0.3, 0.7, 1.0 - abs(1.0 - 2.0 * c0));
   vec3 sky = toLin(mix(a1, a0, cw));
   // ---- the sky's grade (the sky layer only; the grass is never touched) ----
   // Distance from the sun, in image heights. The sun stands still while the
@@ -146,16 +151,24 @@ void main() {
   const vec3 CREAM = vec3(1.0, 0.86, 0.66);
   float Yh = dot(sky, vec3(0.2126, 0.7152, 0.0722));
   sky = mix(sky, Yh * CREAM / dot(CREAM, vec3(0.2126, 0.7152, 0.0722)), 0.35 * hl * hl);
+  // The sunlit domes are the brightest thing in the sky after the sun: the
+  // film's contrast and the shoulder below print the bake's dome white a
+  // little under the warm white the reference cumulus carries (about 245),
+  // so the lit tops alone are lifted into it; the shade between them, and
+  // the open blue, are left where they are, so the lift is the domes'
+  // modelling, not a veil.
+  float dome = smoothstep(0.5, 0.85, Yh) * (1.0 - blue);
+  sky *= 1.0 + DOME * dome * dome;
   // The sun, in the frame's top left corner: a small hot core and a smooth
   // exponential roll-off, three widths summed, warm white (the print's own
-  // #F5F0E1 rather than an orange), added over the sky so the cloud texture
-  // runs on through it, with no edge anywhere for a ring to form on. The
-  // bake already lays the sun's wide diffusion into the sky round it; the
-  // wide lobe here only lets the core fall away through it, so the corner
-  // reads as a bloom with a heart and not a flat pale plate. The shoulder
-  // below carries it the rest of the way, under the clip.
+  // #F5F0E1 rather than an orange), added over the sky with no edge
+  // anywhere for a ring to form on. Tight: the bake lays only a narrow
+  // diffusion into the sky round it (sky_hdri.py, BLOOMR), and the lobes
+  // here are a third of the old reach, so the cobalt runs saturated almost
+  // up to the sun instead of a milky veil over the corner. The shoulder
+  // below carries the core the rest of the way, under the clip.
   vec3 sunC = vec3(1.0, 0.94, 0.8);
-  sky += sunC * (0.32 * exp(-r / 0.012) + 0.2 * exp(-r / 0.05) + 0.1 * exp(-r / 0.16));
+  sky += sunC * (0.34 * exp(-r / 0.006) + 0.18 * exp(-r / 0.018) + 0.05 * exp(-r / 0.055));
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:

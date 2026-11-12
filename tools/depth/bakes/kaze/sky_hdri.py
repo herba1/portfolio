@@ -1,46 +1,56 @@
-"""Kaze sky: a real summer cumulus sky, cut from an HDRI looking up.
+"""Kaze sky: a towering summer cumulus, cut from an HDRI looking up.
 
 The photograph's own sky (bake.py) is a fill: behind the grass it is a grey
 closing of what showed between the blades, so its clouds came out as mottled
-cotton with no volume. This replaces sky.webp with the view straight out of
-Poly Haven's "Kloofendal 48d Partly Cloudy (Pure Sky)" (Greg Zaal, Jarod
-Guest; CC0, https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky):
-a pinhole camera pitched up into the dome, aimed so that the HDRI's sun
-lands in the frame's top left corner (SUN, the same as in kazeEngine.js), and
-rolled about that sun (ROLL -8) so the big cumulus lies along the top of the
-frame: the sun burns through its edge in the corner, the cloud runs off to
-the right through the upper third, the middle of the frame is open sky, and
-a lit cumulus dome rises from the grass at the lower left. (At -16 the
-corner sun pitched the view down until the big cloud left the frame; toward
-0 and past it the cloud's shaded underside fills the top half.)
+cotton with no volume. The first HDRI sky (Kloofendal 48d Partly Cloudy)
+had only flat fair-weather cumulus overhead, torn at the edges by the grade.
+This one is the view out of Poly Haven's "Skidpan" (Dimitrios Savva, Jarod
+Guest; CC0, https://polyhaven.com/a/skidpan): a pinhole camera turned to
+the towering cauliflower cumulus that stands over its eastern horizon
+(YAW 63, PITCH 20.5, ROLL -3, HFOV 43), pitched just high enough that the
+gum trees, lamp post and wires sit under the frame on screen (fill_ground()
+paints out what is left of them below it), and mirrored, so the tower
+stands to the right behind the hero culms, as in herb's ref 3, and the open
+cobalt runs up to the sun in the top left corner.
+
+The HDRI's own sun is hidden in the storm behind the camera, so the sun is a
+point of the frame (SUN, the same as in kazeEngine.js): a tight warm white
+diffusion bloom, a third of the old reach, laid into the blue by angle.
 
 The HDRI is linear radiance. A shoulder applied pixel by pixel cannot both
-bring the sunward cloud under white and keep its billows (the old soft
-log-log print squeezed the whole silver lining into one blurred cream
-value), so the print is local: log luminance is split by an edge-aware blur
-into the cloud's light (base) and its billows (detail); only the base goes up
-a filmic shoulder, with headroom left above it, and the detail (read a pixel
-or two soft, so the HDRI's noise does not print as grit and crunchy edges)
-goes back on amplified before a last roll to a warm paper white (#FFF3E2).
-The sun's own core is held down, softly and well above the brightest cloud.
+bring the sunward cloud under white and keep its billows, so the print is
+local: log luminance is split by an edge-aware blur into the cloud's light
+(base) and its billows (detail); only the base goes up a filmic shoulder,
+with headroom left above it, and the detail (read a pixel or two soft, so
+the HDRI's noise does not print as grit) goes back on before a last roll to
+a warm paper white (#FFF3E2).
 
 Then the grade, toward summer film (grade()):
 
-- The sun is a diffusion bloom, not a disc: the HDRI's aureole is read through
-  a wide soft blur, and toward the sun every grade runs to the same warm
-  near-white, falling off with the angle from it, so the corner glows and fades
-  into cloud and blue with no edge, no grey core and no clip. The engine adds
-  the bloom's hot heart analytically.
-- The cumulus is lit: its light is lifted toward a dome white (#FCF7EC at
-  display 0.97) with its billows kept, and coloured by that light, warm white
-  on the domes to a pale skylight blue (#B0C6E2) in the shade, never the slate
-  grey the HDRI's underside prints as.
+- The sun is a tight diffusion bloom, not a disc and not a veil: toward it
+  the open sky's value rises ahead of its saturation's fall (an exponential
+  in the angle, BLOOMR), so the corner rolls from cobalt through light blue
+  to warm white within a few degrees, with no grey ring and no clip. The
+  engine adds the bloom's hot heart analytically.
+- The cumulus is lit by a monotone curve on its own value, pixel by pixel:
+  its lit domes (a high percentile over the cloud) go to the dome white
+  (display 0.97, about 247; the print lands them near 245), and under it the
+  curve (CGAM > 1) keeps the shade between the billows, so the cloud has
+  volume. It is coloured by that light, warm white (#FCF7EC) on the domes to
+  a pale skylight blue (#B0C6E2) in the shaded flanks and base. No blur of
+  the cloud's light is laid over it (that drew a pale rim round every edge
+  and flattened the domes) and the cloud mask is soft, so its edges are soft
+  but defined, with no threshold fringe and no mottled holes.
 - The open sky is a real zenith gradient: pale cyan (hue 200, light) low in the
   frame to deep cobalt (hue ~223 here, ~213 once the film's blue has it) at the
   top, by true elevation; the sky's own level is divided out and replaced, so
   its rays and small variations stay and the flat slate goes.
 
-  python tools/depth/bakes/kaze/sky_hdri.py path/to/kloofendal_48d_partly_cloudy_puresky_8k.hdr [out_dir]
+- Last, a print's gentle unsharp mask on the value, for the magnified billows.
+
+  python tools/depth/bakes/kaze/sky_hdri.py path/to/skidpan_16k.hdr [out_dir]
+
+(16k: the 8k magnifies the 43 degree crop about 3.7x; the 16k about 1.8x.)
 """
 import os
 import sys
@@ -51,17 +61,25 @@ from PIL import Image
 
 W, H = 3600, 2400  # finer than the plate: the crop is magnified about 1.5x on a wide screen
 SUN = (0.09, 0.10)             # image uv of the sun: the frame's top left corner (SUN in kazeEngine.js)
-HFOV = float(os.environ.get("HFOV", 78))
-ROLL = float(os.environ.get("ROLL", -8))
+HFOV = float(os.environ.get("HFOV", 43))
+YAW = float(os.environ.get("YAW", 63))
+PITCH = float(os.environ.get("PITCH", 20.5))
+ROLL = float(os.environ.get("ROLL", -3))
+MIRROR = int(os.environ.get("MIRROR", 1))
 EXPO = float(os.environ.get("EXPO", 0.34))
 SCALE = float(os.environ.get("SCALE", 1.0))   # preview scale
-BLOOMR = float(os.environ.get("BLOOMR", 8.5))   # degrees: the sun's diffusion, its e-folding angle
+BLOOMR = float(os.environ.get("BLOOMR", 1.7))   # degrees: the sun's diffusion, its e-folding angle (a third of the old reach on screen)
+BPOW = float(os.environ.get("BPOW", 0.8))    # the bloom's profile: 1 a pure exponential, no flat core
 BSAT = float(os.environ.get("BSAT", 0.06))    # the open sky's saturation at the heart of the bloom
 # the cloud: its light lifted toward the dome white, its billows kept
-CBLUR = float(os.environ.get("CBLUR", 40))    # px at 3600 wide: the cloud's light, against its billows
-CLIFT = float(os.environ.get("CLIFT", 0.62))  # how much of the light's distance under the white is kept
+CWHITE = float(os.environ.get("CWHITE", 99.5))  # percentile of the cloud's value taken as its white
+CGAM = float(os.environ.get("CGAM", 1.4))     # the curve under it: > 1 deepens the shade between the domes, the cloud's volume
+CSOFT = float(os.environ.get("CSOFT", 6))     # px at 3600 wide: how soft the shade's colour is read
+CSH0 = float(os.environ.get("CSH0", 0.78))    # the shade's blue is full under this (of the white) ...
+CSH1 = float(os.environ.get("CSH1", 0.97))    # ... and gone over this
+SHARP = float(os.environ.get("SHARP", 0.45))   # the print's sharpening: amount ...
+SHARPR = float(os.environ.get("SHARPR", 2.5))  # ... and radius, px at 3600 wide
 CTOP = float(os.environ.get("CTOP", 0.97))    # the dome white, display value
-CDET = float(os.environ.get("CDET", 1.3))    # the billows' contrast kept over the lifted light
 # the open sky: pale cyan low in the frame to deep cobalt at the top (HSV, display)
 HUE_LO = float(os.environ.get("HUE_LO", 200))
 HUE_HI = float(os.environ.get("HUE_HI", 223))
@@ -70,7 +88,7 @@ SAT_HI = float(os.environ.get("SAT_HI", 0.72))
 VAL_LO = float(os.environ.get("VAL_LO", 0.88))
 VAL_HI = float(os.environ.get("VAL_HI", 0.47))
 OBLUR = float(os.environ.get("OBLUR", 160))   # px at 3600 wide: the open sky's own level, divided out
-EDGE = float(os.environ.get("EDGE", 14))       # px at 3600 wide: how far the lift reaches into a cloud edge
+EDGE = float(os.environ.get("EDGE", 0))        # px at 3600 wide: how far the open sky's lift reaches into a cloud edge (0: none, a pale rim)
 KNEE = float(os.environ.get("KNEE", 0.4))     # the shoulder's knee, as a fraction of its white
 TOPW = float(os.environ.get("TOPW", 0.92))     # the print's white (display value) the shoulder rolls to
 BASER = float(os.environ.get("BASER", 0.06))  # the base layer's reach, as a fraction of the width
@@ -81,9 +99,6 @@ DSOFT = float(os.environ.get("DSOFT", 1.8))    # px at 3600 wide: how soft the d
 DETH = float(os.environ.get("DETH", 0.5))     # and how much more it gains at the top
 CAPX = float(os.environ.get("CAPX", 3.5))     # the sun's hold, in multiples of the sky's 99.7th percentile
 HSOFT = float(os.environ.get("HSOFT", 0.35))  # stops: how soft the knee's turn is
-SUNR = float(os.environ.get("SUNR", 11))     # degrees: the aureole eased to white
-SUND = float(os.environ.get("SUND", 11))     # degrees: the reach of the sun's diffusion
-SUNB = float(os.environ.get("SUNB", 2.5))    # degrees: how wide it spreads the aureole
 WARMS = float(os.environ.get("WARMS", 1.0))    # how far the shoulder is drawn to the warm white
 # the shoulder's white, #FFF3E2 in linear light, and the same at unit luminance
 WARM_WHITE = np.array([1.0, 0.896, 0.761], np.float32)
@@ -140,23 +155,6 @@ def project(d, yaw, pitch, roll, w, h):
     x = (d @ r) / z / t
     y = (d @ u) / z / (t * h / w)
     return (x + 1) / 2, (1 - y) / 2
-
-
-def aim(sun, roll):
-    # yaw, pitch so that the sun lands on SUN in the image (Gauss-Newton)
-    su, sv = uv_of(sun)
-    yaw, pitch = su * 2 * np.pi - 0.3, np.arcsin(sun[1]) - 0.25
-    for _ in range(60):
-        p = np.array(project(sun, yaw, pitch, roll, W, H))
-        e = p - np.array(SUN)
-        J = np.zeros((2, 2))
-        for k, (dy, dp) in enumerate([(1e-4, 0), (0, 1e-4)]):
-            J[:, k] = (np.array(project(sun, yaw + dy, pitch + dp, roll, W, H)) - p) / 1e-4
-        step = np.linalg.solve(J, e)
-        yaw, pitch = yaw - step[0], pitch - step[1]
-        if np.abs(e).max() < 1e-7:
-            break
-    return yaw, pitch
 
 
 def render(hdr, yaw, pitch, roll, w, h):
@@ -289,12 +287,10 @@ def grade(T, ang, t):
     edge is sunlit and warm white on its domes and lit by the blue sky alone
     in its shaded flanks and base. On summer film both are light: the domes
     a warm paper white and the shade a pale skylight blue, never the slate
-    grey the HDRI's underside prints as. So the cloud's light (its blurred
-    luminance) is lifted toward the white, a shadow at display 0.4 to about
-    0.66, while each billow against its neighbours goes back on unchanged:
-    the domes stay modelled, only the whole cloud is lit. The colour then
-    follows the lifted luminance, warm white on top to skylight blue (hue
-    ~210) in the shade.
+    grey the HDRI's underside prints as. So the cloud's value goes through
+    one monotone curve, its own white to the dome white and the shade kept
+    under it (CGAM), and the colour follows the printed value read a few
+    pixels soft, warm white on top to skylight blue (hue ~213) in the shade.
 
     The open sky is regraded as a gradient in height, the way a summer sky
     deepens overhead: pale cyan (hue ~200) low in the frame to deep cobalt
@@ -324,23 +320,29 @@ def grade(T, ang, t):
     H_, W_ = Y.shape
     px = W_ / 3600
 
-    # ---- the cloud: lifted, then coloured by its own light ----
+    # ---- the cloud: lit by a curve on its own value, then coloured by it ----
+    # Pixel by pixel and monotone, so a billow keeps its own modelling and a
+    # thin edge (part sky) takes only its share: no blur of the cloud's light
+    # is laid over it, which drew a pale rim round every edge and flattened
+    # the domes. The cloud's own white (its lit domes, a high percentile over
+    # the cloud) goes to the dome white CTOP; under it the curve lifts the
+    # shade a little (CGAM < 1), so the base reads pale, not slate.
     v = enc(Y).astype(np.float32)
-    vb = blur_in(v, cloud + 0.02, CBLUR * px)
+    inc = cloud > 0.6
+    vw = float(np.percentile(v[inc], CWHITE)) if inc.any() else float(v.max())
     top = CTOP
-    keep = CLIFT * (1 - 0.8 * bloom)  # the cloud's distance under the white kept
-    v2 = np.clip(top - (top - vb) * keep + (v - vb) * CDET * (1 - 0.5 * bloom), 0, top)
+    vn = np.clip(v / vw, 0, None)
+    v2 = top * shoulder(np.power(vn, CGAM), 0.8, 1.0)
+    # toward the sun the cloud runs to the same white as the bloom
+    v2 = v2 + (top - v2) * smooth(0.2, 0.9, bloom)
     Y2 = dec(v2).astype(np.float32)
-    # the shade's blue grows as the cloud's light falls (read over the cloud,
-    # not pixel by pixel, or every billow flips between cream and blue into
-    # a mottle) and the domes go warm; round the sun all of it is the sun's
-    # own warm light, so no grey or blue sits under the glow
-    vl = top - (top - vb) * keep
-    sh = ((1 - smooth(0.74, 0.93, vl)) * (1 - smooth(0.35, 0.7, bloom)))[..., None]
+    # The shade's blue grows as the cloud's light falls, read a few pixels
+    # soft (pixel by pixel every billow flips between cream and blue into a
+    # mottle), and the domes go warm.
+    vl = cv2.GaussianBlur(v2, (0, 0), CSOFT * px)
+    sh = ((1 - smooth(CSH0, CSH1, vl / top)) * (1 - smooth(0.35, 0.7, bloom)))[..., None]
     col = WARM_DOME * (1 - sh) + SHADE_BLUE * sh
     Tc = Y2[..., None] * col
-    # a cloud's thin edge is part sky: it takes the lift by how much cloud
-    # it is, so the rim softens into the blue instead of standing as a matte
     cm = cloud[..., None]
     T = T * (1 - cm) + Tc * cm
 
@@ -353,9 +355,12 @@ def grade(T, ang, t):
     sat_t = SAT_LO + (SAT_HI - SAT_LO) * ge
     val_t = VAL_LO + (VAL_HI - VAL_LO) * ge
     # and toward the sun, its bloom: paler and lighter, to the dome white
-    bw = smooth(0.0, 1.0, bloom * 1.6)
-    sat_t = sat_t * (1 - bw) + BSAT * bw
-    val_t = val_t * (1 - bw) + top * bw
+    # (the value rises ahead of the saturation's fall, so the roll-off passes
+    # from cobalt through light blue to warm white, never through a grey)
+    bv = np.power(bloom, BPOW)
+    bs = np.power(bloom, BPOW * 1.8)
+    sat_t = sat_t * (1 - bs) + BSAT * bs
+    val_t = val_t * (1 - bv) + top * bv
     # Only blues are drawn round, and by how blue they are (the blue's lead
     # over red, which is continuous in the colour): a near-neutral pixel's
     # hue is arbitrary, and drawn round by it the cream aureole flipped to
@@ -389,72 +394,113 @@ def grade(T, ang, t):
     tgt = cv2.cvtColor(np.stack([hue_t, sat_t, hsv[..., 2]], -1).astype(np.float32), cv2.COLOR_HSV2RGB)
     out = out + (tgt - out) * (0.85 * neutral)[..., None]
     # the bloom's colour: warm white at the sun, whatever lay under it
-    wb = (smooth(0.3, 0.9, bloom) * 0.85)[..., None]
+    wb = (np.power(bloom, BPOW * 1.8) * 0.85)[..., None]
     lum = out @ LUM
     warm = np.clip(enc(dec(lum)[..., None] * WARM_DOME), 0, 1).astype(np.float32)
     return out * (1 - wb) + warm * wb
 
 
-def bake(hdr):
-    """The print, from the upper hemisphere as load() returns it."""
-    WW = hdr.shape[1]
-    HH = 2 * (hdr.shape[0] - 64)
-    Y = hdr @ np.array([0.2126, 0.7152, 0.0722], np.float32)
-    iy, ix = np.unravel_index(np.argmax(cv2.GaussianBlur(Y, (0, 0), 3)), Y.shape)
-    sun = dir_of((ix + 0.5) / WW, (iy + 0.5) / HH)
-    print("sun px", ix, iy, "elev", np.degrees(np.arcsin(sun[1])), "peak", Y[iy, ix])
-    # the sun's core: radiance far above anything else in the sky is held to
-    # the brightest cloud, so the print has no hard disc for the engine's
-    # glow to sit on
-    # The hold is soft (a hinge in log, like the shoulder) and set well above
-    # the brightest cloud: a hard clamp at the 99.7th percentile took in the
-    # whole silver lining for several degrees round the sun, two or three
-    # stops of billow, and printed it as one flat cream plateau.
-    cap = np.percentile(Y, 99.7) * CAPX
-    x = np.log2(np.maximum(Y, 1e-6) / cap)
-    sc = np.exp2(-0.5 * (np.sqrt(x * x + HSOFT * HSOFT) + x) + 0.5 * HSOFT)
-    sc = np.minimum(sc, 1.0)
-    hdr = hdr * sc[..., None]
-    roll = np.radians(ROLL)
-    yaw, pitch = aim(sun, roll)
-    print("yaw", np.degrees(yaw), "pitch", np.degrees(pitch), "roll", ROLL, "cap", cap)
-    w, h = int(W * SCALE), int(H * SCALE)
-    L = render(hdr, yaw, pitch, roll, w, h)
-    # Round the sun the HDRI's bracket merge leaves coloured rings (orange,
-    # violet) in the clipped aureole; within a few degrees of it the colour is
-    # eased to a warm white at its own luminance.
+def view_dirs(yaw, pitch, roll, w, h):
+    # unit view direction of every pixel, as render() samples them
     f, r, u = basis(yaw, pitch, roll)
     t = np.tan(np.radians(HFOV) / 2)
     xs = ((np.arange(w) + 0.5) / w * 2 - 1) * t
     ys = (1 - (np.arange(h) + 0.5) / h * 2) * t * h / w
     X, Yc = np.meshgrid(xs, ys)
     d = f[None, None] + X[..., None] * r[None, None] + Yc[..., None] * u[None, None]
-    d /= np.linalg.norm(d, axis=-1, keepdims=True)
-    ang = np.degrees(np.arccos(np.clip(d @ sun, -1, 1)))
-    wsun = np.exp(-((ang / SUNR) ** 2))[..., None].astype(np.float32)
-    Yl = (L @ np.array([0.2126, 0.7152, 0.0722], np.float32))[..., None]
-    L = L * (1 - wsun) + Yl * np.array([1.04, 1.0, 0.93], np.float32) * wsun
-    # Round the sun the sky is read through a wide soft blur. The HDRI's
-    # aureole is a plateau some 8 degrees across that the edge-aware print
-    # below would keep hard-edged, a flat cream disc with the merge's
-    # coloured ring round it; blurred, it falls off smoothly into the cloud
-    # and the blue, as the light scattered in a Pro-Mist and the emulsion
-    # would spread it, with no edge for a ring to form on. The bloom itself
-    # is the engine's (kazeEngine.js), drawn over the print analytically.
-    ppd = w / HFOV  # pixels per degree, near the centre
-    Lb = wide_blur(L, SUNB * ppd)
-    wd = np.exp(-((ang / SUND) ** 2))[..., None].astype(np.float32)
-    L = L * (1 - wd) + Lb * wd
-    Ls = L @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    return d / np.linalg.norm(d, axis=-1, keepdims=True)
+
+
+def fill_ground(L):
+    """The skidpan's trees, lamp post and wires, painted out.
+
+    The view is pitched so they sit under the frame on screen (VIEW_V), but
+    the drifting sky and the engine's wide mip reads reach a little below
+    it, and an ultra-wide screen shows the crown of the big gum at the
+    bottom right: they are filled in from the cloud round them, so nothing
+    dark is ever read there. Everything in the frame is far brighter than a
+    leaf (the cloud's darkest shade is ten times a tree's), and a wire is a
+    thin dark line against it.
+    """
+    h, w = L.shape[:2]
+    px = w / 3600
+    Y = L @ LUM
+    kk = int(round(15 * px)) | 1
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kk, kk))
+    cl = cv2.morphologyEx(Y, cv2.MORPH_CLOSE, k)
+    wire = (cl - Y) / np.maximum(cl, 1e-4) > 0.15
+    yy = (np.arange(h) / h)[:, None]
+    # a leaf, even with sky through it, is green over blue and darker than any cloud
+    leaf = (Y < 0.2) | ((L[..., 1] > L[..., 2]) & (Y < 0.6))
+    # (and the crown's sparse top twigs, dark against the cloud round them)
+    twig = (cl - Y) / np.maximum(cl, 1e-4) > 0.3
+    m = (leaf & (yy > 0.55)) | (wire & (yy > 0.74)) | (twig & (yy > 0.66))
+    if not m.any():
+        return L
+    g = int(round(15 * px)) | 1
+    m = cv2.dilate(m.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g))).astype(np.float32)
+    # filled from the sky round it, by normalised convolution at widening
+    # reach: each hole takes the narrowest blur of the unmasked sky that
+    # reaches into it, so a wire is closed from its own few pixels and the
+    # gum's crown from the cloud round it
+    valid = 1 - m
+    out = L.copy()
+    todo = m > 0
+    for sg in (4, 12, 36, 108, 324):
+        sg = sg * px
+        num = wide_blur(L * valid[..., None], sg) if sg > 30 else cv2.GaussianBlur(L * valid[..., None], (0, 0), sg)
+        den = wide_blur(valid, sg) if sg > 30 else cv2.GaussianBlur(valid, (0, 0), sg)
+        ok = todo & (den > (0.25 if sg < 300 * px else 1e-4))
+        out[ok] = num[ok] / den[ok][..., None]
+        todo &= ~ok
+    a = cv2.GaussianBlur(m, (0, 0), 2 * px)[..., None]
+    return (L * (1 - a) + out * a).astype(np.float32)
+
+
+def bake(hdr):
+    """The print, from the upper hemisphere as load() returns it."""
+    Y = hdr @ LUM
+    # radiance far above the brightest cloud (the hidden sun's rim, glints) is
+    # held softly, a hinge in log, so nothing prints as a hard white plate
+    cap = np.percentile(Y[:: 4, :: 4], 99.7) * CAPX
+    x = np.log2(np.maximum(Y, 1e-6) / cap)
+    del Y
+    sc = np.exp2(-0.5 * (np.sqrt(x * x + HSOFT * HSOFT) + x) + 0.5 * HSOFT)
+    del x
+    hdr = hdr * np.minimum(sc, 1.0)[..., None]
+    del sc
+    yaw, pitch, roll = np.radians(YAW), np.radians(PITCH), np.radians(ROLL)
+    w, h = int(W * SCALE), int(H * SCALE)
+    L = render(hdr, yaw, pitch, roll, w, h)
+    d = view_dirs(yaw, pitch, roll, w, h)
+    if MIRROR:
+        L, d = L[:, ::-1].copy(), d[:, ::-1].copy()
+    L = fill_ground(L)
+    el = np.arcsin(np.clip(d[..., 1], -1, 1))
+    print("yaw", YAW, "pitch", PITCH, "roll", ROLL, "hfov", HFOV, "cap", cap,
+          "frame bottom elev", np.degrees(el[int(VIEW_V[1] * h)]).min())
+    # The sun: a point of the frame, not the HDRI's (that one is hidden in
+    # the storm behind the camera); every pixel's angle from it
+    sun = d[int(SUN[1] * h), int(SUN[0] * w)]
+    ang = np.degrees(np.arccos(np.clip(d @ sun, -1, 1))).astype(np.float32)
+    Ls = L @ LUM
     print("lum pct 5/50/95/99.5", [round(float(np.percentile(Ls, p)), 3) for p in (5, 50, 95, 99.5)])
     # height in the sky, 0 at the bottom of the frame on screen and 1 at its
     # top, by true elevation, so the gradient lies level with the horizon
-    el = np.arcsin(np.clip(d[..., 1], -1, 1))
     cx = w // 2
     e_top = el[int(VIEW_V[0] * h), cx]
     e_bot = el[min(h - 1, int(VIEW_V[1] * h)), cx]
     t = np.clip((el - e_bot) / (e_top - e_bot), 0, 1)
     s = grade(tone(L * EXPO), ang, t)
+    # A print's sharpening, on the value alone (no colour fringe): the HDRI
+    # is magnified about 1.8x into this frame, and its billows' edges come
+    # out a touch soft; a small unsharp mask gives the domes their defined
+    # tops without a ring (it is a few pixels wide and gentle). Nothing
+    # passes the dome white.
+    v = s @ LUM
+    r = SHARPR * w / 3600
+    s = s + (SHARP * (v - cv2.GaussianBlur(v, (0, 0), r)))[..., None]
+    s = np.clip(s, 0, CTOP + 0.005)
     return (s * 255 + 0.5).astype(np.uint8)
 
 
