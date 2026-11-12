@@ -29,23 +29,25 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    (insulator rims, hangers) opens into discs; the sky is a plain energy-
 //    conserving average, because cloud is a diffuse source, not a highlight,
 //    and out of focus it only softens, it never sparkles;
-//  - the latent image: the scene itself, faint and low in contrast. On the
-//    sky it holds the developed sky's own chroma: the blue is lifted, not
-//    greyed, the cloud left as it is, so it comes up from a soft, light field
-//    of the same blue into the deep one. Never brighter than the finished
-//    print (the lift is held under the developed cloud's luminance round each
-//    pixel), and none of the sky's latent terms (lift, halation) inside the
-//    structure's matte, dilated a few pixels, so wires, hangers and
-//    insulators never pick them up;
+//  - the latent image. On the sky it holds the developed sky's own chroma:
+//    the blue is lifted, not greyed, the cloud left as it is, so it comes up
+//    from a soft, light field of the same blue into the deep one, and none of
+//    that lift lands inside a developed structure's matte (dilated a few
+//    pixels), so wires, hangers and insulators never pick it up. The steel
+//    is not drawn as itself at all: it is a density in the sky round it,
+//    sky x (1 - 0.25 x matte), a faint darker shadow in the sky's own colour
+//    that builds into the steel in log light, never a lighter, greyer copy
+//    laid over the sky;
 //  - the strata lifted towards you in z (a scale about the principal point
 //    in proportion to nearness), held clean by the fill behind them.
-// On the structure the front is the film's halation: a thin warm ring on
-// the steel's rim as it passes, never a fill across a member's face. On the sky it is a soft band (an eighth of the sky's
-// key, never narrower on screen than a few dozen pixels where the key is
-// steep) with no light of its own, only a faint amber halation in its middle
-// where it crosses cloud, so the edge glows instead of being drawn. Release
-// and it carries the hand's speed with friction; the strata,
-// stirred by that speed, settle on a spring.
+// The front itself is the film's halation: a thin amber line along the
+// depth's iso-band only, a few device pixels wide, weighted by the light
+// under it, so it glows where it crosses cloud, all but vanishes over the
+// blue and is nothing on dark steel or wire. On the sky the developed and
+// latent states meet in a soft band (an eighth of the sky's key, never
+// narrower on screen than a few dozen pixels where the key is steep) with no
+// light of its own. Release and it carries the hand's speed with friction;
+// the strata, stirred by that speed, settle on a spring.
 //
 // The painted sky is graded towards a deep cobalt in log light, darkest at
 // the zenith (the top of the print), keyed off the cloud so the cores stay
@@ -74,8 +76,10 @@ const AHEAD = 0.36; // key distance over which a layer goes from just-ahead to f
 const SIGMA = 0.016; // structure band half-width in key units
 const SKY_BAND = 0.12; // sky band width, in the sky's own key (0..1)
 const SKY_PX = 80; // ...and never narrower on screen than this, in print px
-const HALO = 0.07; // amber halation in the middle of the sky's band, linear
-const HALO_FG = 0.3; // ...and on the steel's rim as the front crosses it
+const HALO = 0.22; // the front's halation line over cloud, linear
+const ISO = 0.02; // ...drawn only within this key distance of the front
+const LINE_PX = 2.5; // ...and this wide on screen (device px, Gaussian)
+const LATENT = 0.25; // the latent steel's density in the sky, at full matte
 const F_START = -0.1;
 const F_END = 1.06;
 
@@ -367,14 +371,13 @@ const float SKY_BAND = ${f(SKY_BAND)};
 const float SKY_PX = ${f(SKY_PX)};
 const float BAND = ${f(BAND)};
 const float HALO = ${f(HALO)};
-const float HALO_FG = ${f(HALO_FG)};
-// The cool white-blue an overexposed sky washes out to (linear).
-const vec3 WASH = vec3(0.66, 0.77, 0.92);
-// The level the latent sky's blue is lifted towards (linear luminance).
-const float SKY_LAT = 0.2;
 // Halation: the red layer's glow, amber-orange (linear).
 const vec3 AMBER = vec3(1.0, 0.5, 0.12);
-const vec3 WARM = vec3(1.04, 0.9, 0.66); // its filter on the light under it
+// The level the latent sky's blue is lifted towards (linear luminance).
+const float SKY_LAT = 0.2;
+const float LATENT = ${f(LATENT)};
+const float LINE_PX = ${f(LINE_PX)};
+const float ISO = ${f(ISO)};
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -387,26 +390,8 @@ float vnoise(vec2 p) {
   u = u * u * (3.0 - 2.0 * u);
   return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
 }
-vec3 toSrgb(vec3 c) {
-  c = clamp(c, 0.0, 1.0);
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-vec3 toLin(vec3 c) {
-  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
-}
 
 ${GRADE}
-// The latent image: the scene itself, a positive at low contrast on a
-// cool white-blue wash, fainter the further it is from the developer.
-// Clouds stay the brightest thing in it, so the cores that develop first
-// come up as cloud, not as grey on a paler sheet. Density builds (it is not
-// a cross-fade): interpolate in log light, so the darks come up through
-// clean tones rather than a grey mix.
-vec3 latent(vec3 c, float d, float dev, vec3 wash) {
-  float an = clamp(d / AHEAD, 0.0, 1.0);
-  vec3 lat = mix(wash, c, mix(0.55, 0.3, an));
-  return exp(mix(log(max(lat, 1e-4)), log(max(c, 1e-4)), dev));
-}
 
 // The sky's latent image holds the developed sky's chroma: its luminance
 // is drawn up towards a light level (low contrast, fainter the further from
@@ -444,72 +429,51 @@ float cloudWhite(vec2 iuv) {
   return m;
 }
 
-// Never brighter than the finished print: the latent lift (from the
-// developed light c to lat) goes only as far as keeps its luminance at or
-// under cap. It is the lift that is held, not the light: over cap the
-// latent tone falls back towards the print's own, never towards grey.
-vec3 liftUnder(vec3 c, vec3 lat, float cap) {
-  float lc = dot(c, LUMA);
-  float ll = dot(lat, LUMA);
-  float t = ll > lc + 1e-4 ? clamp((max(cap, lc) - lc) / (ll - lc), 0.0, 1.0) : 1.0;
-  return c + (lat - c) * t;
-}
-
-// The sky at key distance d past the front. A soft band, SKY_BAND of the
+// The sky at key distance d past the front: a soft band, SKY_BAND of the
 // sky's key wide, widened by the key's gradient on screen so it stays soft
-// where the key is steep; no light of its own, only a faint amber halation
-// in its middle where it crosses cloud, warming what is under it. c is the sky as the lens sees it
-// (developed light, defocused); every undeveloped term (the latent lift,
-// the halation) is gated by 1 - cov, the dilated structure.
+// where the key is steep, with no light of its own. c is the sky as the lens
+// sees it (developed light, defocused); the latent lift is gated by 1 - cov,
+// the dilated structure where it has developed, so a developed wire never
+// carries the latent sky's light on it.
 vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   float w = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(d));
   float dev = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
-  float open = 1.0 - cov;
-  vec3 r = mix(c, latentSky(c, d, dev, iuv.y), open);
-  float h = 4.0 * dev * (1.0 - dev);
-  float leak = 0.7 + 0.3 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
-  // Halation is the red layer's own glow: on a cool sky it has to take a
-  // little blue out as well as add amber, or it reads as lilac, not warm.
-  // It is light scattered back from what is bright, so it glows where the
-  // band crosses cloud and all but vanishes over the blue: laid evenly along
-  // the band, amber over blue reads as a pale grey strip, and where the key's
-  // contours run straight (left of the pole, the top right) a seam.
-  float glow = mix(0.15, 1.0, smoothstep(0.32, 0.7, dot(c, LUMA)));
-  float g = h * (uBand / BAND) * leak * open * glow;
-  r = mix(r, r * WARM, 0.32 * g);
-  return r + AMBER * (g * HALO);
+  return mix(c, latentSky(c, d, dev, iuv.y), 1.0 - cov);
 }
 
-// The front on the steel is halation, not light: a thin warm ring on the
-// steel's rim where the developer meets it. Each member's key is nearly
-// constant, so a band in key units alone lights a whole member at once (a
-// flat cream cut-out); the band is held to a screen-space width (frontOn)
-// and then to the rim, a few pixels either side of the matte's edge, so it
-// never fills a face. It is the red layer's glow: it filters what is under it
-// warm and adds a little amber (halate), and never comes up past the cloud
-// round it (cap), so the nearest, darkest steel comes up dark, ringed.
-float frontOn(float d, vec2 iuv) {
-  float sig = uSig;
-  // trailing a little behind; never under a pixel and a half wide
-  float w = max(0.35 * sig, 1.5 * fwidth(d)) * (d >= 0.0 ? 1.0 : 1.3);
-  float leak = 0.78 + 0.22 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
-  return exp(-(d * d) / (w * w)) * (uBand / BAND) * leak;
-}
-vec3 halate(vec3 r, float g, float cap) {
-  vec3 h = mix(r, r * WARM, g) + AMBER * (g * HALO_FG);
-  float l0 = dot(r, LUMA);
-  float l1 = dot(h, LUMA);
-  float top = max(cap, l0);
-  return l1 > top ? r + (h - r) * clamp((top - l0) / max(l1 - l0, 1e-4), 0.0, 1.0) : h;
+// The latent steel. Ahead of the front the structure is not drawn at all as
+// itself: it is the sky round it with a little density in it, sky times
+// (1 - LATENT x matte x strength), the way an undeveloped image sits in an
+// emulsion, a faint darker shadow of the mast in the sky's own colour, never
+// a lighter, greyer copy over it. strength comes in from the front (a
+// structure just ahead is already most of the way to latent) and the density
+// builds in log light, so the steel comes up through the sky's tones into
+// its own, rather than as a grey cross-fade. The defocus (fg, by the depth
+// still to cover) has already spread both the steel and its matte.
+vec3 develop(vec3 c, float d, float dev, vec3 sky, float a) {
+  float an = clamp(d / AHEAD, 0.0, 1.0);
+  float L = (1.0 - dev) * mix(0.7, 1.0, an);
+  // as straight colour (the caller premultiplies by a): sky * (1 - LATENT L a)
+  // over the matte, so the pixel ends as that, with the sky behind
+  // (a shade cooler than neutral, as a shadow in skylight is, so over the
+  // cumulus it is the cloud's own shade, not a grey fog laid on it)
+  vec3 lat = sky * (1.0 - LATENT * L * vec3(1.12, 1.0, 0.78));
+  return exp(mix(log(max(c, 1e-4)), log(max(lat, 1e-4)), L));
 }
 
-// The structure at key distance d past the front (d < 0: developed).
-vec3 develop(vec3 c, float d, vec2 iuv, float cap, vec3 wash, float rim) {
-  float sig = uSig;
-  float dev = 1.0 - smoothstep(-0.3 * sig, 0.7 * sig, d);
-  // the latent steel may come up towards the sky's tone, never past it
-  vec3 r = liftUnder(c, latent(c, d, dev, wash), cap);
-  return halate(r, frontOn(d, iuv) * rim, cap);
+// The front, as the film's halation: a thin line along the depth's iso-band
+// only (|key - front| under ISO), its width held to a few device pixels by
+// the key's gradient on screen, so it is a contour, never a fill. Where a
+// member's key is flat the line has no width and does not appear: a wire
+// is never lit along its length. It is the red layer's glow, light scattered
+// back from what is bright, so it is weighted by the luminance under it: it
+// glows where it crosses cloud, all but vanishes over the blue, and on dark
+// steel and wire it is nothing, so no edge goes copper.
+float isoLine(float d) {
+  float fw = max(fwidth(d), 1e-6);
+  float px = abs(d) / fw;
+  float inBand = 1.0 - smoothstep(0.6 * ISO, ISO, abs(d));
+  return exp(-(px * px) / (LINE_PX * LINE_PX)) * inBand;
 }
 
 // A smooth read of a coarse level: cubic B-spline from four bilinear taps,
@@ -592,36 +556,38 @@ void main() {
   // wires' paths showed through the latent truss as seams.
   float cov = mix(max(cover(q), cover(iuv)), clamp(1.5 * fg.a, 0.0, 1.0), mF);
 
-  // Sky, as the lens sees it. The cap, for the latent steel: the developed
+  // How developed the structure is here. Where it has developed, the
+  // sky's latent lift stays off it (cov); where it is still latent it is
+  // only a density in that same lifted sky, so the lift runs under it.
+  float devF = 1.0 - smoothstep(-0.3 * uSig, 0.7 * uSig, dF);
+
+  // Sky, as the lens sees it. The cap, for the print's finish: the developed
   // cloud's luminance here, the brightest the finished print reaches round
-  // this pixel, so the steel's wash never outshines the sky behind it.
+  // this pixel.
   float dB = ahead(skyKey(iuv));
   float rB = SKY_COC * cocOf(dB);
   vec3 skyDev = gradeSky(texture(uFill, iuv).rgb, iuv);
   float cap = max(dot(skyDev, LUMA), cloudWhite(iuv));
   vec3 sky = mix(skyDev, gradeSky(texture(uBgBlur, vUv).rgb, iuv), smoothstep(0.25, 1.25, rB));
-  sky = developSky(sky, dB, iuv, cov);
+  sky = developSky(sky, dB, iuv, cov * devF);
 
-  // The latent steel's wash: the graded sky round it, a little cooler and
-  // paler, so ahead of the front the steel is a faint density in the sky's
-  // own blue rather than a white cut-out on it (a constant pale wash read as
-  // a negative, light-on-blue, once the sky went deep).
-  vec3 skyHere = gradeSky(textureLod(uFill, iuv, 4.0).rgb, iuv);
-  vec3 wash = 1.15 * mix(skyHere, WASH * dot(skyHere, LUMA) / dot(WASH, LUMA), 0.3);
-  // The steel's rim: its silhouette on screen, and a few pixels inside the
-  // matte's edge (where a coarser mip of it falls off).
-  float aM = textureLod(uAlpha, q, 2.5).r;
-  float rim = max(smoothstep(0.0, 0.15, fwidth(fg.a)), smoothstep(0.03, 0.3, a - aM));
-  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap, wash, rim) * fg.a;
-  // ...and the glow spills a little past the silhouette onto the sky.
-  float spill = smoothstep(0.02, 0.3, aM - a) * (1.0 - fg.a);
-  sky = halate(sky, 0.4 * frontOn(dF, iuv) * spill, cap);
+  // The steel over it: developed, or a density in that sky (develop()).
+  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, devF, sky, fg.a) * fg.a;
   vec3 col = fgP + sky * (1.0 - fg.a);
 
   // How developed this pixel is: the sky's band and the steel's, by cover.
   float wB = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(dB));
   float devB = 1.0 - smoothstep(-0.5 * wB, 0.5 * wB, dB);
-  float devF = 1.0 - smoothstep(-0.3 * uSig, 0.7 * uSig, dF);
+
+  // The front: a thin halation line on each layer's iso-band, by cover,
+  // weighted by the light under it (none on steel or wire, a little over the
+  // blue, full over cloud), added as amber, never a filter on what is there.
+  float line = mix(isoLine(dB), isoLine(dF), fg.a);
+  float lum = dot(col, LUMA);
+  float glow = mix(0.12, 1.0, smoothstep(0.3, 0.75, lum)) * smoothstep(0.08, 0.25, lum);
+  float leak = 0.75 + 0.25 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
+  col += AMBER * (HALO * line * glow * leak * (uBand / BAND));
+
   col = finish(col, iuv, mix(devB, devF, fg.a), cap, fg.a);
   o = vec4(grain(col), 1.0);
 }`;
