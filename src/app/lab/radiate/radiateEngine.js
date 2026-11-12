@@ -15,10 +15,12 @@ import { GLYPHS, ADVANCE } from "./radiateGlyphs";
 // The field runs wall to wall: the word sits inside its own echoes out to
 // every edge of the frame. The pointer is a magnet that changes the line
 // period: inside its bell new offset curves open between the old ones, up
-// to three to a period. Under it lies a second level set, circles around
-// the hand at a period just off the field's, and the two multiply, so the
-// hand raises true moire fringes against the type's offset curves. A click
-// sends a dense band out through the lines.
+// to three to a period. Around it the field is laid over a copy of
+// itself, scaled a few percent about the hand; both gratings are offset
+// curves of the same letters, so they run near-parallel and their
+// difference beats into broad moire contours that follow the letterforms
+// and swim as the hand moves. A click sends a dense band out through the
+// lines.
 
 const DIST_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -137,7 +139,8 @@ uniform float uN;         // rings in the field: enough to reach every edge
 uniform vec3 uMag;        // magnet x, y (css px), strength
 uniform float uSigma;
 uniform float uM;         // how many extra lines per period the magnet packs in
-uniform float uBeat;      // the circles' period over the field's, at the pointer
+uniform float uScale;     // the echo's scale around the hand at full pull
+uniform float uSpread;    // the moire bell's width over the magnet's
 uniform vec4 uPulse[4];   // radius, amplitude, -, -
 out vec4 o;
 
@@ -171,54 +174,84 @@ float cover(float x, float duty){
   return clamp((ink(x + h * 0.5, duty) - ink(x - h * 0.5, duty)) / h, 0.0, 1.0);
 }
 
+// The same box filter on an endless grating at half duty, for the echo,
+// whose lines run on through the inside of its letters.
+float inkOpen(float x){ return floor(x) * 0.5 + max(0.0, fract(x) - 0.5); }
+float coverOpen(float x){
+  float h = max(length(vec2(dFdx(x), dFdy(x))), 1e-4);
+  return clamp((inkOpen(x + h * 0.5) - inkOpen(x - h * 0.5)) / h, 0.0, 1.0);
+}
+
+// The magnet changes the period, not the distance. It is a Gaussian
+// bell on the pointer, split into its run along the field's normal
+// (u = d - dm, dm the distance under the pointer) and across it (t), and
+// the line density along the normal is raised to 1 + m·bell. Integrating
+// that along u gives the phase:
+//   F = d + m·exp(-t²/σ²)·σ·(√π/2)·(erf(u/σ) + erf(dm/σ))
+// F(0) = 0, so the letters never move; dF/dd >= 1, so no line folds or
+// runs back into them; and inside the bell up to m new lines open
+// between every pair, so the period drops to a half, a third.
+float phase(float d, float dm, vec2 v, float m){
+  float u = max(d, 0.0) - dm;
+  float t2 = max(dot(v, v) - u * u, 0.0);
+  return d + m * exp(-t2 / (uSigma * uSigma)) * uSigma * 0.886227 * (erf(u / uSigma) + erf(dm / uSigma));
+}
+// Click waves: a band travelling out along the distance. Its phase term
+// A·w·z·exp(-z²) adds no net lines, so the field behind it is untouched,
+// but it packs the band 1 + A times denser and stretches its flanks
+// into fat crests.
+float pulse(float d, vec4 q){
+  float w = uP * 2.4;
+  float z = (d - q.x) / w;
+  return q.y * w * z * exp(-z * z);
+}
+
 void main(){
   vec2 css = vec2(gl_FragCoord.x, uH - gl_FragCoord.y) / uDpr;
   float d = field(css);
 
-  // The magnet changes the period, not the distance. It is a Gaussian
-  // bell on the pointer, split into its run along the field's normal
-  // (u = d - dm, dm the distance under the pointer) and across it (t), and
-  // the line density along the normal is raised to 1 + m·bell. Integrating
-  // that along u gives the phase:
-  //   F = d + m·exp(-t²/σ²)·σ·(√π/2)·(erf(u/σ) + erf(dm/σ))
-  // F(0) = 0, so the letters never move; dF/dd >= 1, so no line folds or
-  // runs back into them; and inside the bell up to m new lines open
-  // between every pair, so the period drops to a half, a third.
+
   vec2 v = css - uMag.xy;
-  float g = exp(-dot(v, v) / (uSigma * uSigma));
   float m = uMag.z * uM;
   float dm = max(field(uMag.xy), 0.0);
-  float u = max(d, 0.0) - dm;
-  float t2 = max(dot(v, v) - u * u, 0.0);
-  float F = d + m * exp(-t2 / (uSigma * uSigma)) * uSigma * 0.886227 * (erf(u / uSigma) + erf(dm / uSigma));
+  float F = phase(d, dm, v, m);
 
-  // Click waves: a band travelling out along the distance. Its phase term
-  // A·w·z·exp(-z²) adds no net lines, so the field behind it is untouched,
-  // but it packs the band 1 + A times denser and stretches its flanks
-  // into fat crests.
+  // The echo: the type's own field again, scaled up around the hand,
+  //   d2 = s·field(mag + (css - mag)/s),
+  // so its lines are offset curves of the same letters, a touch larger,
+  // centred on the pointer. It takes the same pull, so the two gratings
+  // run near-parallel everywhere and only drift apart slowly, by about
+  // (s - 1) lines for every line of distance from the hand. Where they
+  // agree their difference is white, where they sit half a period apart
+  // it closes to black: broad moire contours that follow the letterforms
+  // and swim as the hand moves. Inside the echo's own letters the lines
+  // carry on inward, so it shows only through the fringes.
+  float s = 1.0 + (uScale - 1.0) * uMag.z;
+  float d2 = s * field(uMag.xy + v / s);
+  float F2 = phase(d2, dm * s, v, m);
+
+  // Click waves run through both, so the fringes ride the band.
   for (int k = 0; k < 4; k++) {
     vec4 q = uPulse[k];
     if (q.y <= 0.0) continue;
-    float w = uP * 2.4;
-    float z = (d - q.x) / w;
-    F += q.y * w * z * exp(-z * z);
+    F += pulse(d, q);
+    F2 += pulse(d2, q);
   }
 
   float cov = cover(d > 0.0 ? F / uP : d / uP, 0.5);
+  float cov2 = coverOpen(F2 / uP);
 
-  // A second level set under the hand: circles around the pointer, packed
-  // by the same bell (density 1 + m·g along the radius, integrated the
-  // same way) at a period just off the field's. Where the two gratings
-  // agree the white survives, where they drift half a period apart it
-  // closes up, so their product raises moire fringes, the beat of the
-  // type's offset curves against the hand, one every 1 / (beat - 1) lines
-  // where they run parallel. The circles thin out toward the bell's edge.
-  float r = length(v);
-  float phase2 = (r + m * uSigma * 0.886227 * erf(r / uSigma)) / (uP * uBeat);
-  float duty = 0.5 * smoothstep(0.06, 0.45, g) * clamp(uMag.z * 2.0, 0.0, 1.0);
-  float cov2 = duty > 0.002 ? cover(phase2 + 0.25, duty) : 0.0;
-
-  float paper = (1.0 - cov) * (1.0 - cov2);
+  // Difference of the two (XOR on hard ink), held to a wide bell on the
+  // hand by fading the result, never the lines. The letters stay solid.
+  float moire = cov + cov2 - 2.0 * cov * cov2;
+  float wide = exp(-dot(v, v) / (uSigma * uSigma * uSpread * uSpread));
+  float w = smoothstep(0.03, 0.55, wide) * clamp(uMag.z * 1.6, 0.0, 1.0);
+  // Right at the letters, and through their counters, the two gratings
+  // cross instead of running together, so the first few echoes stay plain
+  // and the word keeps its own clean outline.
+  w *= smoothstep(uP * 1.0, uP * 4.0, d);
+  float letter = clamp(0.5 - d * uDpr, 0.0, 1.0);
+  float paper = 1.0 - max(mix(cov, moire, w), letter);
   o = vec4(vec3(paper), 1.0);
 }`;
 
@@ -267,7 +300,7 @@ export async function createRadiate(host) {
   const drawProg = program(gl, DIST_VS, DRAW_FS);
   const uD = uniforms(gl, distProg, ["uSegs", "uGlyphs", "uOrigin", "uFont", "uDpr", "uH"]);
   const uRange = gl.getUniformLocation(distProg, "uRange");
-  const uR = uniforms(gl, drawProg, ["uDist", "uRes", "uDpr", "uH", "uP", "uN", "uMag", "uSigma", "uM", "uBeat"]);
+  const uR = uniforms(gl, drawProg, ["uDist", "uRes", "uDpr", "uH", "uP", "uN", "uMag", "uSigma", "uM", "uScale", "uSpread"]);
   const uPulse = gl.getUniformLocation(drawProg, "uPulse");
 
   const vao = gl.createVertexArray();
@@ -289,11 +322,13 @@ export async function createRadiate(host) {
     return t;
   };
 
-  // The magnet packs up to MAG_M + 1 lines into each period; its circles
-  // run BEAT times the field's period, so the moire beats every
-  // 1 / (BEAT - 1) lines.
+  // The magnet packs up to MAG_M + 1 lines into each period. Its echo of
+  // the field is ECHO times the size around the hand, so the two gratings
+  // beat about once every 1 / (ECHO - 1) lines of distance from it, over
+  // a bell SPREAD times the magnet's width.
   const MAG_M = 2;
-  const BEAT = 1.14;
+  const ECHO = 1.045;
+  const SPREAD = 1.5;
 
   let segTex = null;
   let distTex = null;
@@ -457,7 +492,8 @@ export async function createRadiate(host) {
     gl.uniform3f(uR.uMag, mag.x, mag.y, mag.k);
     gl.uniform1f(uR.uSigma, L.sigma);
     gl.uniform1f(uR.uM, MAG_M);
-    gl.uniform1f(uR.uBeat, BEAT);
+    gl.uniform1f(uR.uScale, ECHO);
+    gl.uniform1f(uR.uSpread, SPREAD);
     gl.uniform4fv(uPulse, pulseData);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   });
