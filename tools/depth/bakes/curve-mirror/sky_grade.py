@@ -21,14 +21,16 @@ import numpy as np
 import kit
 
 # the target clear sky, sRGB HSV by elevation (degrees): cyan-cobalt, paler
-# and lighter at the horizon, deepest overhead. These are the plate's values;
-# the summer film then turns the hue about 5 degrees toward cyan, lifts the
-# saturation (0.42 prints at about 0.53) and deepens it a little, so the print
-# lands at about 205 deg, S 0.45-0.58, V 0.80 falling to 0.72 overhead
+# and lighter at the horizon, deepening steadily overhead. These are the
+# plate's values; the summer film then turns the hue about 5 degrees toward
+# cyan, lifts the saturation (0.55 prints at about 0.65) and deepens it a
+# little, so the print lands at about 205 deg, S 0.5 and V 0.8 over the roofs,
+# S 0.65 and V 0.65 at the top of the frame (46 deg), and the convex glass,
+# which sees up to the zenith, carries the gradient on to a deep cobalt
 EL = np.array([-5.0, 0.0, 10.0, 20.0, 35.0, 50.0, 70.0, 90.0])
 HUE = np.array([212.0, 212.0, 211.5, 211.0, 210.0, 209.5, 209.0, 209.0])
-SAT = np.array([0.28, 0.30, 0.35, 0.39, 0.42, 0.44, 0.47, 0.49])
-VAL = np.array([0.91, 0.90, 0.89, 0.875, 0.855, 0.83, 0.80, 0.77])
+SAT = np.array([0.28, 0.30, 0.36, 0.42, 0.49, 0.55, 0.60, 0.63])
+VAL = np.array([0.91, 0.90, 0.88, 0.84, 0.76, 0.67, 0.60, 0.56])
 KEEP = 0.65  # how much of its own colour a cloud keeps (its brightest tops)
 NATURAL = 0.25  # how much of the plate's own clear-sky brightness variation survives
 

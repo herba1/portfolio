@@ -17,8 +17,9 @@
             (the sky-graded plate) and aux.png depend only on the photo and
             are unchanged by the 360)
 
-The mirror stands 2.9 m in front of the lens, high on its pole over the old house
-on the left. Everything it can reflect is gathered into one equirect panorama
+The mirror stands close to the lens, 1.9 m out and 1.3 m over it (2.75 m above
+the road), high on its pole at the upper left, so the lens looks up at it from
+below and its glass fills nearly half the frame's height. Everything it can reflect is gathered into one equirect panorama
 centred on it, in a world frame whose y axis is the true vertical (from the
 photo's vertical vanishing point):
 
@@ -70,8 +71,8 @@ EW, EH = 4096, 2048
 CLOUD_SHIFT = (0.2, -0.96)  # the cloud plane slid back over the mirror (cloud heights)
 K = 0.62  # MoGe metric -> real metres (crossbuck board ~0.22 m wide, pole ~0.2 m)
 CAM_H = 1.45  # lens height above the road, m (the frame shows no ground)
-MIRROR_PX = (520.0, 392.0)  # face centre in photo px (2464 wide)
-MIRROR_Z = 2.9  # its depth along the optical axis, m
+MIRROR_PX = (640.0, 430.0)  # face centre in photo px (2464 wide)
+MIRROR_Z = 2.1  # its depth along the optical axis, m (1.9 m out, horizontally)
 SUN_AZ, SUN_EL = 135.0, 46.0  # degrees left of the camera's heading, elevation
 
 os.makedirs(OUT, exist_ok=True)

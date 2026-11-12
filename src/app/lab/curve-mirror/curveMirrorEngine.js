@@ -1343,7 +1343,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       Object.assign(V, { x: 0, y: (PH - h) * 0.4, w: PW, h });
     } else {
       const w = PH * aspect;
-      Object.assign(V, { x: clamp(560 - w * 0.42, 0, PW - w), y: 0, w, h: PH });
+      Object.assign(V, { x: clamp(640 - w * 0.45, 0, PW - w), y: 0, w, h: PH });
     }
     L.x = Math.round(L.x * dpr) / dpr;
     L.y = Math.round(L.y * dpr) / dpr;
