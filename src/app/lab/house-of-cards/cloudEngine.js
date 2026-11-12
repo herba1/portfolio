@@ -33,14 +33,24 @@ const YAW = 0.55;
 const PITCH = 0.16;
 const PIVOT = 2.1;
 // Return intensity: the floor a black surface still reflects, and the gain at
-// the nearest point (a dark coat up close comes back at FLOOR x GAIN).
+// the nearest point, ahead of a soft shoulder (a dark coat up close comes
+// back at FLOOR x GAIN, which the shoulder holds just under full strength).
 const FLOOR = 0.35;
-const GAIN = 2.9;
+const GAIN = 8.5;
+// Local detail: what the photo's structure does to a return. Luminance less
+// an 8 px Gaussian of itself, plus Sobel edge strength, mapped so a flat
+// interior comes back at DETAIL[0] and a hard edge or a letter at DETAIL[1].
+const DETAIL = [0.5, 1.7];
+const DETAIL_SIGMA = 8; // photo px
+// Contrast is read against the local mean plus this, so a hood's edge in a
+// dark coat counts as much as a letter on a lit panel.
+const DETAIL_KNEE = 0.08;
 
 const VS = `#version 300 es
 layout(location=0) in float aCell;
 layout(location=1) in float aDepth;
 layout(location=2) in float aUpright; // 1 standing square to the sensor, 0 the street
+layout(location=3) in float aDetail;  // local detail gain from the photo, DETAIL[0]..DETAIL[1]
 uniform sampler2D uColor;
 uniform vec2 uGrid;        // depth grid size in cells
 uniform vec2 uRect;        // drawn image size, device px
@@ -119,14 +129,17 @@ void main(){
     float keep = ret ? 1.0 : 1.0 - smoothstep(0.08, 0.42, s);
     w *= keep;
     if (w < 0.004) { cull(); return; }
-    // Returns are a whole device pixel wider than the grid's dots.
-    size = ret ? 2.0 : 1.0;
+    // Returns off an edge, a letter or a seam are a whole device pixel wider
+    // than the grid's dots; returns off a flat interior stay one pixel, so
+    // the structure is written in the size of the points as well as their
+    // strength, and dense flat surfaces never pile up into a white slab.
+    size = ret && aDetail > 0.9 ? 2.0 : 1.0;
     // Return intensity, not photo colour. A lidar measures how much of its
     // own laser comes back, so a black coat, a tyre or wet asphalt still
     // returns: reflectance has a floor, and the photo's luminance only lifts
     // it. Incidence takes it down: the street the beam skims returns 30% of
-    // what a body standing square to it does. Range takes it down too, full strength at the nearest point to about
-    // 30% at the far end, so the figure in front is the brightest thing in
+    // what a body standing square to it does. Range takes it down too, full
+    // strength at the nearest point to about 30% at the far end, so the figure in front is the brightest thing in
     // the cloud and the far towers are faint.
     float y = dot(srgb, vec3(0.2126, 0.7152, 0.0722));
     float refl = max(uFloor, pow(y, 0.6));
@@ -138,7 +151,14 @@ void main(){
     float lit = smoothstep(0.5, 0.85, m) * smoothstep(0.3, 0.65, chroma / max(m, 1e-3));
     vec3 hue = srgb / max(m, 1e-3);
     vec3 tint = mix(vec3(0.9, 0.96, 1.0), hue, 0.75 * lit);
-    vec3 c = min(tint * I, vec3(1.0));
+    // A soft shoulder on the return, then structure: a beam that crosses an
+    // edge, a letter, a seam or a window frame scatters more back than the
+    // flat panel around it, so the photo's local detail is multiplied in,
+    // brighter on edges and lettering, dimmer across flat interiors. It goes
+    // in after the shoulder, so a bright panel keeps its letters instead of
+    // clipping to a blank slab. The tint's brightest channel is 1, so the
+    // final clip keeps a sign's hue.
+    vec3 c = tint * min(I / sqrt(1.0 + I * I) * aDetail, 1.0);
     // While the photo is still handing over, a dot starts as its own pixel
     // and turns into a return as it loosens.
     c = mix(srgb, c, smoothstep(0.04, 0.3, s));
@@ -193,6 +213,102 @@ async function loadBitmap(url) {
   return createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
 }
 
+// One pass of a box blur along rows (step 1) or columns (step w), radius r,
+// edges held. Three of them make a Gaussian.
+function boxPass(src, dst, w, h, r, horizontal) {
+  const len = horizontal ? w : h;
+  const lines = horizontal ? h : w;
+  const step = horizontal ? 1 : w;
+  const span = 2 * r + 1;
+  for (let l = 0; l < lines; l++) {
+    const base = horizontal ? l * w : l;
+    const at = (i) => src[base + (i < 0 ? 0 : i >= len ? len - 1 : i) * step];
+    let sum = 0;
+    for (let i = -r; i <= r; i++) sum += at(i);
+    for (let i = 0; i < len; i++) {
+      dst[base + i * step] = sum / span;
+      sum += at(i + r + 1) - at(i - r);
+    }
+  }
+}
+
+function percentile(a, p) {
+  const s = Float32Array.from(a).sort();
+  return s[Math.min(s.length - 1, Math.floor(p * s.length))] || 1e-6;
+}
+
+// The photo's local structure per grid cell, as a gain on the return: high
+// pass (luminance less an ~8 px Gaussian of itself) plus Sobel edge strength,
+// both measured on the full photo relative to the local mean, averaged into
+// each cell, normalised against the frame's own 95th percentile and mapped to
+// DETAIL.
+function detailMap(img, gw, gh) {
+  const w = img.width;
+  const h = img.height;
+  const cv = document.createElement("canvas");
+  cv.width = w;
+  cv.height = h;
+  const cx = cv.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(img, 0, 0);
+  const px = cx.getImageData(0, 0, w, h).data;
+  const m = w * h;
+  const y = new Float32Array(m);
+  for (let i = 0; i < m; i++) y[i] = (0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2]) / 255;
+
+  // Three box passes each way approximate the Gaussian.
+  const r = Math.max(1, Math.round(Math.sqrt((4 * DETAIL_SIGMA * DETAIL_SIGMA) + 1) / 2));
+  let a = Float32Array.from(y);
+  let b = new Float32Array(m);
+  for (let k = 0; k < 3; k++) {
+    boxPass(a, b, w, h, r, true);
+    boxPass(b, a, w, h, r, false);
+  }
+
+  const hp = new Float32Array(gw * gh);
+  const sob = new Float32Array(gw * gh);
+  const cnt = new Float32Array(gw * gh);
+  const Y = (x, yy) => y[(yy < 0 ? 0 : yy >= h ? h - 1 : yy) * w + (x < 0 ? 0 : x >= w ? w - 1 : x)];
+  for (let yy = 0; yy < h; yy++) {
+    const cy = Math.min(gh - 1, Math.floor((yy * gh) / h)) * gw;
+    for (let x = 0; x < w; x++) {
+      const gx = Y(x + 1, yy - 1) + 2 * Y(x + 1, yy) + Y(x + 1, yy + 1) - Y(x - 1, yy - 1) - 2 * Y(x - 1, yy) - Y(x - 1, yy + 1);
+      const gy = Y(x - 1, yy + 1) + 2 * Y(x, yy + 1) + Y(x + 1, yy + 1) - Y(x - 1, yy - 1) - 2 * Y(x, yy - 1) - Y(x + 1, yy - 1);
+      const c = cy + Math.min(gw - 1, Math.floor((x * gw) / w));
+      const mean = a[yy * w + x] + DETAIL_KNEE;
+      hp[c] += (y[yy * w + x] - a[yy * w + x]) / mean;
+      sob[c] += Math.hypot(gx, gy) / mean;
+      cnt[c] += 1;
+    }
+  }
+  const n = gw * gh;
+  const ah = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    hp[i] /= cnt[i] || 1;
+    sob[i] /= cnt[i] || 1;
+    ah[i] = Math.abs(hp[i]);
+  }
+  const pe = percentile(sob, 0.95);
+  const ph = percentile(ah, 0.95);
+  const score = new Float32Array(n);
+  for (let i = 0; i < n; i++) score[i] = 0.55 * Math.min(sob[i] / pe, 1.5) + 0.45 * clamp(hp[i] / ph, -1, 1.2);
+  // Widen each edge by a cell up and down, so the sparse scan rings land on
+  // a horizontal edge instead of stepping over a one-cell line.
+  const out = new Float32Array(n);
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let s = -Infinity;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = gy + dy < 0 ? 0 : gy + dy >= gh ? gh - 1 : gy + dy;
+        const v = score[yy * gw + gx];
+        if (v > s) s = v;
+      }
+      const t = clamp((s + 0.1) / 1.2, 0, 1);
+      out[gy * gw + gx] = DETAIL[0] + (DETAIL[1] - DETAIL[0]) * t * t * (3 - 2 * t);
+    }
+  }
+  return out;
+}
+
 export async function createCloud(host) {
   const params = new URLSearchParams(window.location.search);
   const scene = SCENES[params.get("scene")] || SCENES.city;
@@ -245,13 +361,17 @@ export async function createCloud(host) {
     }
   }
 
+  const detail = detailMap(img, gw, gh);
+
   const cells = new Float32Array(n);
   const ds = new Float32Array(n);
   const us = new Float32Array(n);
+  const es = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     cells[i] = order[i];
     ds[i] = depth[order[i]];
     us[i] = upright[order[i]];
+    es[i] = detail[order[i]];
   }
 
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false, alpha: false });
@@ -281,6 +401,11 @@ export async function createCloud(host) {
   gl.bufferData(gl.ARRAY_BUFFER, us, gl.STATIC_DRAW);
   gl.enableVertexAttribArray(2);
   gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+  const b3 = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b3);
+  gl.bufferData(gl.ARRAY_BUFFER, es, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(3);
+  gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
 
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
