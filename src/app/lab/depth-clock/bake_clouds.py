@@ -17,13 +17,17 @@
 #      light: at -10 the dome's big sunlit cumulus fills the well under the
 #      figures, from the lower right (toward the sun) up behind the 4 and 1;
 #   3. the clear blue is matched to the conifers' seen sky (per channel), while
-#      cloud is matched in light only and lit as cloud is: its tops by the
-#      low, warm sun, its bellies by the cobalt around it (mixed in as light,
-#      so they go skylight blue, never cyan), with its own range widened a
-#      little (FORM) so the tops and the shaded bellies separate;
-#   4. the cloud is held just under its real light and a soft shoulder rounds
-#      only its brightest tops, so on film nothing clips (0% at 255 measured)
-#      while the cloud keeps its form.
+#      cloud is matched in light only, then given form by scale: its broad
+#      mass dodged under a soft shoulder (KNEE, TOP), its billows widened
+#      FORM times, its grain left as shot; and only then lit as cloud is, from
+#      the light it now has: its sunlit tops by the low, warm sun, its bellies
+#      a stop down (DARK) in skylight (SHADE of a paled cobalt, mixed in as
+#      light, so they go skylight blue, never cyan and never so saturated that
+#      the film's summer blue posterises them into the sky);
+#   4. its rim and billows are crisped in light only (EDGE, SHARP), so the
+#      cloud at infinity draws as crisply as the needles in front of it, and
+#      a last soft shoulder holds the odd brightest texel under the file's
+#      ceiling, so on film nothing clips (0% at 255 measured).
 # Writes clouds.webp at quality 97 (at 90 the cloud's micro-texture went):
 # scene-linear light / ENC, sRGB-encoded, like the others.
 import sys, os
@@ -93,8 +97,8 @@ sat = (mx - mn) / np.maximum(mx, 1e-5)
 satClear = np.percentile(sat, 92)
 clear = sat > np.percentile(sat, 70)
 w = np.clip(1 - sat / satClear, 0, 1)
-w = cv2.GaussianBlur(w, (0, 0), 2.0)
-w = np.clip((w - 0.12) / 0.6, 0, 1)  # 0 clear blue .. 1 cloud
+w = cv2.GaussianBlur(w, (0, 0), float(os.environ.get('WBLUR', 1.5)))
+w = np.clip((w - 0.12) / float(os.environ.get('WRAMP', 0.5)), 0, 1)  # 0 clear blue .. 1 cloud
 print('cloud cover %.2f' % (w > 0.5).mean())
 
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
@@ -105,58 +109,116 @@ gc = np.median(ref[refCore], 0) / np.median(sky[clear], 0)  # clear blue, per ch
 # its skylit undersides keep their shade.
 CLOUD = float(os.environ.get('CLOUD', 0.9))
 gl = CLOUD * float(np.median(ref[refCore] @ LUMA) / np.median(sky[clear] @ LUMA))
+# Clear blue takes the conifers' sky colour, per channel; cloud is matched
+# in light only, neutral for now (the capture's own cool cast taken off: its
+# own sky's blue is in it even where the sun strikes; its local variation is
+# kept). It is lit below, once it has its form.
+own = np.median(sky[w > 0.6], 0)
+own = own / (own @ LUMA)
+print('clear gain', gc.round(3), 'light gain %.3f' % gl, 'cloud cast', own.round(3))
+sky = sky * gc * (1 - w[..., None]) + sky * (gl / own) * w[..., None]
+# Form: the capture's cloud spans about two stops from its skylit undersides
+# to its sunlit tops; held CLOUD down, that reads as one flat pillow. So the
+# cloud's light is taken apart by scale, in log light and over cloud alone
+# (each blur weighted by the cloud, so no clear blue leaks into it):
+#   broad  its overall mass (BASE px): brought down the way a printer dodges
+#          a cloud, through a soft shoulder from KNEE up to TOP, so the big
+#          sunlit cloud by the sun is not pressed into one flat cream plateau;
+#   billow its billows and their shaded folds (MID px up to BASE): widened
+#          FORM times about the cloud's median, so each billow gets a sunlit
+#          top and a skylit belly;
+#   grain  everything finer: kept as shot (DETAIL 1), so the form never
+#          amplifies the capture's noise into speckle.
+# The clear blue is left exactly as matched.
+FORM = float(os.environ.get('FORM', 2.0))
+BASE, MID = float(os.environ.get('BASE', 24)), float(os.environ.get('MID', 2.5))
+KNEE, TOP = float(os.environ.get('KNEE', 0.32)), float(os.environ.get('TOP', 0.62))
+DETAIL = float(os.environ.get('DETAIL', 1.0))
+
+
+def cloud_blur(x, r):
+    wb = cv2.GaussianBlur(w, (0, 0), r)
+    xb = cv2.GaussianBlur(x * w, (0, 0), r) / np.maximum(wb, 1e-4)
+    return np.where(wb > 1e-3, w * xb + (1 - w) * x, x)
+
+
+lg = np.log(np.maximum(sky @ LUMA, 1e-6))
+med = float(np.median(lg[w > 0.6]))
+broad = cloud_blur(lg, BASE)
+mid = cloud_blur(lg, MID)
+billow, grain = mid - broad, lg - mid
+broad = med + (broad - med) * (1 + (FORM - 1) * w)
+lk, lt = np.log(KNEE), np.log(TOP)
+broad = np.where(broad > lk, lk + (lt - lk) * np.tanh((broad - lk) / (lt - lk)), broad)
+lg2 = broad + billow * (1 + (FORM - 1) * w) + grain * (1 + (DETAIL - 1) * w)
+sky = sky * np.exp(lg2 - lg)[..., None]
+# Then the cloud is lit as cloud is, from the light it now has: its tops by
+# the low sun, warm, and its shaded folds and bellies by the sky around it,
+# so they take SHADE of the skylight as light added to white (a mix, not a
+# filter: a filter by a blue this deep, whose red is a twentieth of its blue,
+# turns cloud cyan). Lit from the formed light, a fold the form has darkened
+# goes skylight blue, never a muddy darker cream. The skylight is the
+# conifers' cobalt as a whole dome casts it, paler than the zenith (its
+# chroma taken to the power SKYLIGHT): so the deepest belly stays a skylight
+# blue (red a little under half its blue) and the film's summer blue, which deepens only
+# truly saturated blue, never pulls a belly down into the sky's cobalt and
+# posterises the cloud into white islands.
+SHADE = float(os.environ.get('SHADE', 0.5))
+SKYLIGHT = float(os.environ.get('SKYLIGHT', 0.5))
+SUN = np.array([1.0, 0.965, 0.9], np.float32)  # elevation 20: warmer than noon
+blue = np.median(ref[refCore], 0)
+blue = blue / (blue @ LUMA)
+blue = blue ** SKYLIGHT
+blue = blue / (blue @ LUMA)
 # How far round toward the sun each bit of cloud faces, from its light: 0 its
 # dimmest skylit belly, 1 its brightest sunlit top, with the mass of the
 # cloud spread between them (not just the part above its median, which left
 # most of it in full shade and the whole cloud one cool tone).
-Ls = sky @ LUMA
+# Read off the cloud's shape (a few px), not its grain, so the sun's warmth
+# and the sky's blue fall on billows and never speckle the cloud.
+Ls = cv2.GaussianBlur(sky @ LUMA, (0, 0), 3.0)
 cl = Ls[w > 0.6]
 lo, hi = np.percentile(cl, 5), np.percentile(cl, 99)
 lit = np.clip((Ls - lo) / max(hi - lo, 1e-4), 0, 1)
 lit = lit * lit * (3 - 2 * lit)
-# Clear blue takes the conifers' sky colour, per channel. Cloud is matched in
-# light only and lit as cloud is: its tops by the low sun, warm, and its
-# shaded side by the sky around it, so that side takes SHADE of the conifers'
-# cobalt as light added to white (a mix, not a filter: a filter by a blue this
-# deep, whose red is a twentieth of its blue, turns cloud cyan). The capture's
-# own cool cast is taken off first (its own sky's blue is in it even where the
-# sun strikes); its local variation is kept.
-SHADE = float(os.environ.get('SHADE', 0.3))
-SUN = np.array([1.0, 0.965, 0.9], np.float32)  # elevation 20: warmer than noon
-blue = np.median(ref[refCore], 0)
-blue = blue / (blue @ LUMA)
-own = np.median(sky[w > 0.6], 0)
-own = own / (own @ LUMA)
-print('clear gain', gc.round(3), 'light gain %.3f' % gl, 'cloud cast', own.round(3))
+# Seen from straight below, most of what shows of a cumulus is its belly:
+# LITG above 1 leaves the sun only on the brightest billows and their rims,
+# and lets the skylight have the rest.
+lit = lit ** float(os.environ.get('LITG', 1.6))
 s = (SHADE * (1 - lit))[..., None]
 tint = ((1 - s) + s * blue) * (1 + lit[..., None] * (SUN - 1))
 tint = tint / (tint @ LUMA)[..., None]
-cloud = sky * (gl / own) * tint
-sky = sky * gc * (1 - w[..., None]) + cloud * w[..., None]
-# Form: the capture's cloud spans about two stops from its skylit undersides
-# to its sunlit tops; held CLOUD down and rounded by the shoulder, that reads
-# as one flat pillow. FORM widens the cloud's own range about its median, in
-# the cloud only, so the tops and the shaded bellies separate.
-FORM = float(os.environ.get('FORM', 1.4))
-Ls = sky @ LUMA
-med = float(np.median(Ls[w > 0.6]))
-sky = sky * ((np.maximum(Ls, 1e-6) / med) ** ((FORM - 1) * w))[..., None]
-# A touch of local contrast in the cloud only, as a lens with some bite
-# draws it (the 16k already carries the detail; SHARP 0 leaves it as shot).
-SHARP = float(os.environ.get('SHARP', 0.4))
-blur = cv2.GaussianBlur(sky, (0, 0), 2.5)
-sky = np.maximum(sky + SHARP * (sky - blur) * w[..., None], 0)
+# A belly lit by the sky alone is not only bluer but darker than a top lit by
+# the sun: DARK of its light goes with the sun (on film a pale blue at the
+# brightness of a sunlit top bleaches to white; a stop down it reads blue).
+DARK = float(os.environ.get('DARK', 0.35))
+tint = tint * (1 - DARK * (1 - lit))[..., None]
+sky = sky * ((1 - w[..., None]) + w[..., None] * tint)
+# The cloud's drawing as a lens with bite draws it, crisper than the needles
+# in front, never softer: a fine unsharp pass in the cloud only (the 16k
+# carries the detail; the frame shows the plate at about 0.7, so a radius
+# under 2 px of it is what reads as an edge).
+# Two radii, in light only (so no colour fringe): SHARP at 1.5 px for the
+# billows' drawing, EDGE at 4 px for the cloud's own rim against the blue,
+# which the capture draws as a slow ramp of thinning cloud. Both are weighted
+# by the cloud, so the rim brightens on its cloud side and the clear blue
+# beside it takes almost none of the undershoot (no dark halo in the sky).
+SHARP, EDGE = float(os.environ.get('SHARP', 0.6)), float(os.environ.get('EDGE', 0.5))
+lum = sky @ LUMA
+d = SHARP * (lum - cv2.GaussianBlur(lum, (0, 0), 1.5)) + EDGE * (lum - cv2.GaussianBlur(lum, (0, 0), 4.0))
+sky = sky * (np.maximum(lum + d * w, 0.02 * lum) / np.maximum(lum, 1e-6))[..., None]
 
-# Soft shoulder on the largest channel: everything under KNEE untouched, the
-# brightest cloud approaches LIMIT and never reaches the file's ceiling (ENC),
-# so no channel clips and the hue of a bright edge holds.
-KNEE, LIMIT = float(os.environ.get('KNEE', 0.5)), float(os.environ.get('LIMIT', 0.92))
+# A last soft shoulder on the largest channel, for safety only: everything
+# under SAFE is untouched, the odd brightest texel approaches LIMIT and never
+# the file's ceiling (ENC), so no channel clips and the hue of a bright edge
+# holds.
+SAFE, LIMIT = float(os.environ.get('SAFE', 0.8)), float(os.environ.get('LIMIT', 0.92))
 Ls = sky.max(2)
-Lc = np.where(Ls > KNEE, KNEE + (LIMIT - KNEE) * np.tanh((Ls - KNEE) / (LIMIT - KNEE)), Ls)
+Lc = np.where(Ls > SAFE, SAFE + (LIMIT - SAFE) * np.tanh((Ls - SAFE) / (LIMIT - SAFE)), Ls)
 sky = sky * (Lc / np.maximum(Ls, 1e-6))[..., None]
 Lc = sky @ LUMA
-print('clear L %.3f  cloud L median %.3f p99 %.3f max %.3f  channel max %.3f' % (
-    np.median(Lc[w < 0.1]), np.median(Lc[w > 0.6]), np.percentile(Lc[w > 0.6], 99), Lc.max(), sky.max()))
+print('clear L %.3f  cloud L p10 %.3f median %.3f p99 %.3f max %.3f  channel max %.3f' % (
+    np.median(Lc[w < 0.1]), np.percentile(Lc[w > 0.6], 10), np.median(Lc[w > 0.6]), np.percentile(Lc[w > 0.6], 99), Lc.max(), sky.max()))
 
 
 def enc(x):

@@ -25,9 +25,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // drifts slowly on its own, so cumulus passes behind the figures while the
 // crowns cross in front. The figures are lit by the sky around them, pale and
 // never white, and bleed a broad, faint veil of their own light into the air.
-// The frame is then developed by the shared film kit (summer preset), whose
-// diffusion is keyed to the highlights: the figures and the cumulus share one
-// soft bloom, as from a single filter on the lens.
+// The frame is then developed by the shared film kit (summer preset) with
+// its diffusion off: the cumulus at infinity is drawn as crisply as the
+// needles in front of it, and only the figures veil into the air.
 //
 // Query (stills): ?tilt=x,y (-1..1) holds the camera; ?time=HH:MM holds the
 // clock. ?roll=0..1 holds a minute change part way through. ?drift=-1..1
@@ -61,11 +61,12 @@ const FILM = {
   input: "linear",
   headroom: 0,
   exposure: 0.35,
-  // One lens filter for the whole frame: the diffusion takes only the light
-  // past the clear blue (a soft knee from 0.22 to 0.68 of scene luminance),
-  // so the cumulus and the figures veil into the air around them alike while
-  // the sky and the needles keep their drawing.
-  bloom: 0.8,
+  // No diffusion on the frame: keyed to the highlights, it veiled the cumulus
+  // most of all, so the cloud at infinity drew softer than the needles in
+  // front of it. The figures carry their own bleed (the scene shader); the
+  // threshold stays set so the film's dye-colour bleed reads a narrow spread
+  // of the frame, not the pyramid, and keeps the cloud's edge against blue.
+  bloom: 0,
   bloomThreshold: 0.45,
   // The all-over veil used to lift the deep crowns; the scan's black holds
   // them where they were.
@@ -105,9 +106,13 @@ void main() {
   vec2 s = p / uRes;
   vec2 b = uCrop.xy + s * uCrop.zw;
 
-  // Sky, at infinity (well, nearly).
+  // Sky, at infinity (well, nearly), and drawn as crisply as anything in
+  // front of it: a bias of -0.75 keeps the full-resolution level wherever the
+  // frame shows the plate at 0.6 or more (a trilinear blend with the next
+  // level softened every cloud edge by about a texel), and still steps down
+  // in a small box so it never shimmers.
   vec2 uvS = b + shift(${SKY_D.toFixed(3)}) + uWind;
-  vec3 col = texture(uSky, uvS).rgb * uEnc;
+  vec3 col = texture(uSky, uvS, -0.75).rgb * uEnc;
 
   // The numerals' plane.
   vec2 dn = shift(uPlane.z) / uCrop.zw * uRes;
