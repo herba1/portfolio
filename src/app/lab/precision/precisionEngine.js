@@ -2,7 +2,7 @@
 //
 // Dragging moves t by the pointer's horizontal travel times a gain. The gain
 // falls continuously as the pointer leaves the track vertically, 1 → 1/2 →
-// 1/4 → 1/8, and the page answers with no labels at all: the ruler grows a
+// 1/4 → 1/8 → 1/16, and the page answers with no labels at all: the ruler grows a
 // loupe around the playhead whose magnification is exactly 1 / gain (so the
 // magnified ticks slide under the finger one to one), and the readout opens
 // a drawer of precision digits.
@@ -17,7 +17,7 @@ const MARGIN = 56; // canvas overhang each side of the track, for the loupe
 const H = 80; // canvas height, css px
 const MID = 40; // track centre line in the canvas
 const DEAD = 24; // px either side of the track that stay at full speed
-const K_MAX = 3; // 2^-3 = 1/8
+const K_MAX = 4; // 2^-4 = 1/16: at full precision tenths are ~5px apart
 
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const smooth = (a, b, x) => {
@@ -25,15 +25,39 @@ const smooth = (a, b, x) => {
   return u * u * (3 - 2 * u);
 };
 
-// Tick levels in tenths of a second, coarsest first.
+// Tick levels in tenths of a second, coarsest first. Each level is drawn
+// only where its own local output spacing gives it room: it fades in across
+// [lo, hi] css px. Each level's lo times the step to its coarser neighbour
+// clears that neighbour's hi, so a finer level can never show where a
+// coarser one is missing and only one level is ever mid-fade at a place.
+// The windows are also low enough that when a level hands over, the next
+// coarser one is no more than ~30px apart: the glass never opens a hole.
+// Tenths are short hairlines and so may sit closer than the rest.
 const LEVELS = [
-  { n: 600, h: 20 },
-  { n: 100, h: 12 },
-  { n: 50, h: 8 },
-  { n: 10, h: 6 },
-  { n: 5, h: 4 },
-  { n: 1, h: 3 },
+  { n: 600, h: 20, lo: 0, hi: 0 },
+  { n: 100, h: 12, lo: 5, hi: 8 },
+  { n: 50, h: 8, lo: 9, hi: 13 },
+  { n: 10, h: 6, lo: 4.5, hi: 7 },
+  { n: 5, h: 4, lo: 7, hi: 10 },
+  { n: 1, h: 3, lo: 3.6, hi: 4.6 },
 ];
+const levelAlpha = (lvl, spacing) => {
+  const L = LEVELS[lvl];
+  return L.hi > 0 ? smooth(L.lo, L.hi, spacing) : 1;
+};
+// Magnified ticks grow by zoom^0.75. Every level shares that one factor (up
+// to S_MAX) so the glass keeps the ruler's proportions instead of flattening
+// them into a comb; only the tallest marks are then eased onto ~H_CAP px.
+const H_CAP = 34;
+const H_KNEE = 24;
+const S_MAX = 4;
+const tickHeight = (base, zoom) => {
+  let s = zoom ** 0.75;
+  if (s > 1) s = 1 + (S_MAX - 1) * Math.tanh((s - 1) / (S_MAX - 1));
+  const h = base * s;
+  if (h <= H_KNEE || base * s <= base) return h;
+  return Math.max(base, H_KNEE + (H_CAP - H_KNEE) * Math.tanh((h - H_KNEE) / (H_CAP - H_KNEE)));
+};
 
 // ---------- the loupe ----------
 // Inside ±R output px of the playhead, rho(v) is input px per output px at
@@ -94,7 +118,6 @@ export function createPrecision(root, { embedded, stage, canvas, readout, whole,
   if (frozen) root.setAttribute("data-frozen", "");
 
   const ink = [26, 26, 26];
-  const ground = "rgb(242, 240, 235)";
   let labelFont = "540 10px monospace";
 
   let t = frozenT ?? START;
@@ -135,7 +158,7 @@ export function createPrecision(root, { embedded, stage, canvas, readout, whole,
     W = Math.round(clamp(r.width - side * 2, 220, 760));
     pps = W / DURATION;
     R = Math.round(clamp(W * 0.34, 112, 272));
-    unitY = clamp(Math.round((r.height * 0.36 - DEAD) / K_MAX), 32, 72);
+    unitY = clamp(Math.round((r.height * 0.36 - DEAD) / K_MAX), 24, 56);
     stage.style.width = `${W + MARGIN * 2}px`;
     dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
     canvas.width = Math.round((W + MARGIN * 2) * dpr);
@@ -275,7 +298,7 @@ export function createPrecision(root, { embedded, stage, canvas, readout, whole,
       k = kS;
       return;
     }
-    const kGoal = mode === "drag" ? k : now < keyFineUntil ? 1.6 : 0;
+    const kGoal = mode === "drag" ? k : now < keyFineUntil ? 2 : 0;
     // Precision eases in a little slower than it lets go.
     const rate = kGoal > kS ? 12 : 9;
     kS += (kGoal - kS) * (1 - Math.exp(-dt * rate));
@@ -314,15 +337,18 @@ export function createPrecision(root, { embedded, stage, canvas, readout, whole,
   };
 
   const updateDigits = (now) => {
-    // Hysteresis so a hand hovering at a threshold never flickers a digit.
-    let want = dec;
-    if (kS > 2.05) want = 2;
-    else if (kS < 1.85 && kS > 0.75) want = 1;
-    else if (kS < 0.6) want = 0;
-    if (dec === 2 && kS > 1.85) want = 2;
-    if (dec >= 1 && kS > 0.6 && want === 0) want = 1;
+    // The readout claims exactly one digit past the finest mark under the
+    // playhead, as you would read a ruler: seconds on the glass earn the
+    // tenths digit, tenths on the glass earn the hundredths. Hysteresis so a
+    // hand hovering at a threshold never flickers a digit.
+    const M = 2 ** kS;
+    const aSec = levelAlpha(3, pps * M);
+    const aTenth = levelAlpha(5, 0.1 * pps * M);
+    let want = aTenth > 0.6 ? 2 : aSec > 0.6 ? 1 : 0;
+    if (dec === 2 && aTenth > 0.3) want = 2;
+    if (dec >= 1 && want === 0 && aSec > 0.3) want = 1;
     if (want < dec && now < holdUntil && mode !== "drag") want = dec;
-    if (frozen) want = kS > 1.95 ? 2 : kS > 0.7 ? 1 : 0;
+    if (frozen) want = aTenth > 0.5 ? 2 : aSec > 0.5 ? 1 : 0;
     if (want !== dec) {
       dec = want;
       frac.style.setProperty("--pr-n", String(dec ? dec + 1 : 0));
@@ -383,19 +409,25 @@ export function createPrecision(root, { embedded, stage, canvas, readout, whole,
       const L = LEVELS[lvl];
       const xin = (n / 10) * pps;
       const r = rhoAt(xin);
-      const spacing = ((L.n / 10) * pps) / r;
-      let a = lvl <= 2 ? smooth(2.5, 6, spacing) : smooth(6, 12, spacing);
+      // The level is chosen here, from this tick's own output spacing.
+      let a = levelAlpha(lvl, ((L.n / 10) * pps) / r);
       if (a <= 0.01) return;
       const x = mapX(xin);
       // Fade anything the loupe pushes past the ends of the track.
       if (x < 0 || x > W) a *= 1 - smooth(0, MARGIN - 8, x < 0 ? -x : x - W);
       if (a <= 0.01) return;
       // The glass magnifies the marks themselves, not just their spacing:
-      // taller and heavier under the middle, a little shorter in the
-      // compressed rim, so the lens has a visible edge.
+      // under the core they grow toward H_CAP, keeping their order, and step
+      // up a device pixel or two in weight; in the compressed rim they run a
+      // little short, so the lens has an edge. A mark that is still finding
+      // room grows out of the centre line rather than hanging there faint.
       const zoom = 1 / r;
-      const h = Math.round(Math.min(L.h * zoom ** 0.42, 36) * 2) / 2;
-      const lw = Math.max(1, Math.round(zoom ** 0.22 * dpr) / dpr);
+      const full = tickHeight(L.h, zoom);
+      let h = Math.max(full * (0.5 + 0.5 * a), Math.min(full, 4));
+      h = Math.max(1, Math.round(h * 2) / 2);
+      a **= 0.75;
+      const weight = (1 + smooth(1.5, 6, zoom)) * (lvl === 5 ? 0.5 : 1);
+      const lw = Math.max(1, Math.round(weight * dpr)) / dpr;
       const played = n / 10 <= t;
       ctx.fillStyle = `rgba(${ink[0]}, ${ink[1]}, ${ink[2]}, ${(played ? 1 : 0.24) * a})`;
       ctx.fillRect(snap(MARGIN + x - lw / 2), snap(MID - h / 2), lw, snap(h));
@@ -444,15 +476,52 @@ export function createPrecision(root, { embedded, stage, canvas, readout, whole,
       label(sec, smooth(45, 47, room) * smooth(41, 43, near60));
     }
 
-    // The playhead: a ground-coloured collar so no tick ever touches it.
+    // The playhead, with a clear collar so no tick ever touches it. The
+    // collar is cut out of the ticks rather than painted in paper colour, so
+    // it leaves no notch in the glass beneath.
     const hx = snap(MARGIN + tx);
-    ctx.fillStyle = ground;
     const th = 16 + 6 * lift;
+    ctx.globalCompositeOperation = "destination-out";
     ctx.fillRect(hx - 3, MID - th - 2, 6, th * 2 + 4);
+    ctx.globalCompositeOperation = "source-over";
     ctx.fillStyle = `rgb(${ink[0]}, ${ink[1]}, ${ink[2]})`;
     ctx.beginPath();
     ctx.roundRect(hx - 1, MID - th, 2, th * 2, 1);
     ctx.fill();
+
+    // The glass itself: a slightly darker ground under the band of the
+    // ruler, as dense as the magnification at each point, so the core reads
+    // as a body and the shoulder feathers it back into paper. Painted behind
+    // everything already drawn. Its edges sit on the 4px grid.
+    if (lens) {
+      const body = (xo) => {
+        const u = Math.abs(xo - tx) / R;
+        if (u >= 1) return 0;
+        return clamp(-Math.log2(loupe.rho(u)) / Math.log2(M), 0, 1);
+      };
+      const g = ctx.createLinearGradient(MARGIN + tx - R, 0, MARGIN + tx + R, 0);
+      const STOPS = 48;
+      for (let i = 0; i <= STOPS; i += 1) {
+        const xo = tx - R + (2 * R * i) / STOPS;
+        const b = body(xo) * smooth(0, 1, lift * 2);
+        g.addColorStop(i / STOPS, `rgba(${ink[0]}, ${ink[1]}, ${ink[2]}, ${0.055 * b})`);
+      }
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = g;
+      ctx.fillRect(MARGIN + tx - R, 16, 2 * R, 44);
+      // Hairline rails along the top and bottom of the glass.
+      const rail = ctx.createLinearGradient(MARGIN + tx - R, 0, MARGIN + tx + R, 0);
+      for (let i = 0; i <= STOPS; i += 1) {
+        const xo = tx - R + (2 * R * i) / STOPS;
+        const b = body(xo) ** 1.5 * smooth(0, 1, lift * 2);
+        rail.addColorStop(i / STOPS, `rgba(${ink[0]}, ${ink[1]}, ${ink[2]}, ${0.22 * b})`);
+      }
+      ctx.fillStyle = rail;
+      const hair = 1 / dpr;
+      ctx.fillRect(MARGIN + tx - R, 16, 2 * R, hair);
+      ctx.fillRect(MARGIN + tx - R, 60 - hair, 2 * R, hair);
+      ctx.globalCompositeOperation = "source-over";
+    }
   };
 
   let lastLabel = -1;

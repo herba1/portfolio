@@ -1,6 +1,6 @@
 {
   "title": "Precision",
-  "description": "A scrubber for a four-minute track, set alone on warm paper. Drag the playhead and it follows the finger one to one; slide the pointer away from the track while you drag and the scrub slows continuously, from full speed through half and quarter to an eighth. Nothing says so: the ticks around the playhead swell under a loupe and sprout seconds and half-seconds, and the time readout grows a tenth and then a hundredth digit. Come back to the track and the playhead eases back under the finger without a jump. Only a full-speed release keeps its momentum.",
+  "description": "A scrubber for a four-minute track, set alone on warm paper. Drag the playhead and it follows the finger one to one; slide the pointer away from the track while you drag and the scrub slows continuously, from full speed through half, quarter and eighth to a sixteenth. Nothing says so: the ruler darkens under a loupe whose marks swell and sprout seconds, half-seconds and then tenths, and the time readout grows a tenth digit when seconds reach the glass and a hundredth when tenths do. Come back to the track and the playhead eases back under the finger without a jump. Only a full-speed release keeps its momentum.",
   "tags": [
     "Input",
     "Motion",
