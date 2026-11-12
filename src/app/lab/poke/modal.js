@@ -21,14 +21,22 @@
 
 const TAU = Math.PI * 2;
 
-export function createModal(meta, layers) {
+export function createModal(meta, layers, { tilt = 0 } = {}) {
   const K = meta.modes.length;
   const [gw, gh] = meta.grid;
   const [PW, PH] = meta.plate;
   const cell = PW / gw;
   const omega = meta.modes.map((m) => TAU * m.f);
   const zeta = meta.modes.map((m) => m.zeta);
-  const scale = meta.modes.map((m) => m.scale);
+  // Modal mass. The decomposition hands back each shape at unit norm, so how
+  // heavy each mode is relative to the others is a free choice (Davis et al.
+  // fix it the same way). Unit mass for all of them lets the quick, local
+  // shivers of single branches answer a hand as readily as the slow sway of
+  // the whole crown. Here the shapes are tilted by (f0 / f)^tilt, so the
+  // slow, crown-wide modes carry the pull and the quick ones ride on top of
+  // them: a pull swings the crown, not one clump.
+  const f0 = Math.min(...meta.modes.map((m) => m.f));
+  const scale = meta.modes.map((m) => m.scale * Math.pow(f0 / m.f, tilt));
   // decoded shapes: K x (gw*gh*4), plate px per unit coordinate
   const shapes = layers.map((bytes, i) => {
     const out = new Float32Array(gw * gh * 4);
@@ -129,9 +137,28 @@ export function createModal(meta, layers) {
   // the hand mode at 0.85. Also returns how far the hand may pull before the
   // most-moved part of the picture would pass dmax: the static response of
   // every cell to the hand, D(x) = G(x, m) S d with S = k (I + k G(m, m))^-1.
-  const grab = (x, y, { kh = 3, dmax = 70 } = {}) => {
+  // A hand takes hold of a branch, not a pixel: the grabbed shape is the
+  // Gaussian-weighted mean of the modes over a hand-sized patch (radius in
+  // plate px), so the incoherent shivers inside it cancel and the shared,
+  // coherent motion of that part of the crown is what the hand drives.
+  const handShape = (mx, my, radius) => {
+    const a = new Float64Array(K * 4);
+    if (radius <= 0) return at(mx, my, a);
+    const tmp = new Float64Array(K * 4);
+    let wsum = 0;
+    for (let j = -3; j <= 3; j++)
+      for (let i = -3; i <= 3; i++) {
+        const w = Math.exp(-(i * i + j * j) / 4.5);
+        at(mx + (i * radius) / 3, my + (j * radius) / 3, tmp);
+        for (let c = 0; c < K * 4; c++) a[c] += tmp[c] * w;
+        wsum += w;
+      }
+    for (let c = 0; c < K * 4; c++) a[c] /= wsum;
+    return a;
+  };
+  const grab = (x, y, { kh = 3, dmax = 70, radius = 0 } = {}) => {
     const [mx, my] = sourceOf(x, y);
-    const a = at(mx, my);
+    const a = handShape(mx, my, radius);
     const { g, gmax, mmax } = pointMatrices(a);
     const k = kh / Math.max(gmax, 1e-9);
     const wh = Math.sqrt(k * mmax);
@@ -257,6 +284,7 @@ export function createModal(meta, layers) {
     q,
     v,
     at,
+    meanShape: handShape,
     disp,
     displacementAt,
     sourceOf,
