@@ -31,7 +31,7 @@
 # the frame on the pole's axis; everything that falls, falls away from it (the
 # verticals converge there), so a wire's drop is along the converging verticals
 # where it hangs, not straight down the frame.
-import sys, json, numpy as np, cv2
+import os, sys, json, numpy as np, cv2
 
 wd = sys.argv[1].rstrip("/") + "/"
 out = sys.argv[2].rstrip("/") + "/"
@@ -96,9 +96,6 @@ acc = np.zeros((H, W), bool)
 for k in (1, 2, 3):
     acc = acc | grow(holes[k], 6)
     R.append(acc.copy())
-rk = np.zeros((H, W), np.uint8)
-for k in (3, 2, 1):
-    rk[R[k]] = k
 
 # ---------------------------------------------------------------- ids, over their holes
 wire_id = M["wire_id"].astype(np.int32)
@@ -111,17 +108,33 @@ tail = grow(lead, 3) & ~((M["wire_id"] > 0) & ~lead)
 hid = grow_labels(M["hw_id"].astype(np.int32), None, within=holes[2])
 shaft_any = M["shaft"] | (SA > 0)
 sid = (grow(shaft_any, 4) & holes[3]).astype(np.int32)
+# a pixel of p3's region that no element owns (the rim of sky plates.py takes
+# round the plant, the islands it closes round and the sky it darkens) would
+# show p3 from the first year: a clean rim round the standing plant. It goes
+# with whatever stands nearest it, a wire, a hardware piece or the pole, so the
+# photograph shows there until that has gone (R3 below; a wire's id on a pixel
+# with no matte only picks the plate: its line is `fit` in elements.json)
+wid0, hid0, sid0 = wid, hid, sid  # the elements' own pixels: their mattes, the table
+free = holes[3] & (wid == 0) & (hid == 0) & (sid == 0)
+near = grow_labels(np.where(wid > 0, wid, np.where(hid > 0, 1000 + hid, np.where(sid > 0, 2000, 0))).astype(np.int32), None, within=free)
+wid = np.where(free & (near < 1000), near, wid)
+hid = np.where(free & (near >= 1000) & (near < 2000), near - 1000, hid)
+sid = np.where(free & (near == 2000), 1, sid)
+
+rk = np.zeros((H, W), np.uint8)
+for k in (3, 2, 1):
+    rk[R[k]] = k
+rk[free] = 3
 
 # ---------------------------------------------------------------- alphas
 o = M["o"]
-wa = np.where(wid > 0, M["wire_alpha"], 0)
-ha = np.where(hid > 0, M["hw_alpha"], 0)
+wa = np.where(wid0 > 0, M["wire_alpha"], 0)
+ha = np.where(hid0 > 0, M["hw_alpha"], 0)
 JOIN = info["hw_bottom_row"] + 6
 sa = np.where(ys < JOIN, SA, np.maximum(SA, np.where(M["shaft"], o, 0)))
-sa = np.where(sid > 0, sa, 0)
+sa = np.where(sid0 > 0, sa, 0)
 
 # ---------------------------------------------------------------- write images
-import os
 os.makedirs(out, exist_ok=True)
 def webp(path, rgb, q):
     cv2.imwrite(path, (np.clip(rgb, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, q])
@@ -143,8 +156,8 @@ cv2.imwrite(out + "alpha.png", (np.clip(al, 0, 1)[:, :, ::-1] * 255 + 0.5).astyp
 # ---------------------------------------------------------------- the element table and its years
 k, c = pole["k"], pole["c"]
 hardware = []
-for g in sorted(set(np.unique(hid)) - {0}):
-    m = (hid == g) & (ha > 0.04)
+for g in sorted(set(np.unique(hid0)) - {0}):
+    m = (hid0 == g) & (ha > 0.04)
     hy, hx = ys[m], xs[m]
     reach = float(np.abs(hx - (k * hy + c)).max())
     hardware.append(dict(id=int(g), k=round(k, 5), c=round(c, 2), top=int(hy.min()), bottom=int(hy.max()), base=H - 1,
@@ -154,7 +167,7 @@ poles = [dict(id=1, k=round(k, 5), c=round(c, 2), top=int(pole["top"]), base=H -
 k_, c_ = pole["k"], pole["c"]
 wires = []
 for w in info["wires"]:
-    m = wid == w["id"]
+    m = wid0 == w["id"]
     if not m.any():
         continue
     wx, wy = xs[m], ys[m]

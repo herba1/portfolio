@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..")))
 import fill  # noqa: E402,F401  tools/depth/fill.py
 import kit  # noqa: E402
 sys.path.insert(0, HERE)
-from membrane import sky_fill  # noqa: E402
+from membrane import sky_fill, enclosed, fringe  # noqa: E402
 
 wd = sys.argv[1].rstrip("/") + "/"
 M = np.load(wd + "masks.npz")
@@ -150,7 +150,18 @@ P3 = sky_fill(P1, hole3, sky, seed=3)
 Yd = (cv2.GaussianBlur(P3, (0, 0), 2) - cv2.GaussianBlur(P1, (0, 0), 2)).mean(2)
 faint = near_pole & (Yd > 0.006) & ~hole3
 hole3 |= kit.dilate(faint, 6)
-P3 = sky_fill(P1, hole3, sky & ~kit.dilate(faint, 8), seed=3)
+# the islands of sky the hole closes round at the pole head (between crossarms,
+# transformers and wires: the plant darkens them) and the darkened sky round its
+# thick part (flare, the out-of-focus edge: membrane.fringe) go too (export.py
+# gives them, as every pixel of hole3 no element owns, the id of whatever stands
+# nearest, so the photograph shows there until it has gone); and the hole's low
+# frequencies are rebuilt from the clear sky (membrane.refit_low): the membrane
+# alone leaves darker blotches where the crossarms and transformers stood
+isl = kit.dilate(enclosed(kit.dilate(hole3, 6)), 6) & ~hole3
+isl |= fringe(P1, hole3 | isl, sky & ~kit.dilate(faint, 8) & ~isl)
+hole3 |= isl
+P3 = sky_fill(P1, hole3, sky & ~kit.dilate(faint, 8) & ~isl, seed=3, refit=True)
+print(f"p3: {isl.sum()} px of enclosed and darkened sky added")
 print(f"p3: {faint.sum()} px of faint plant added")
 print(f"p3: hole {hole3.mean() * 100:.2f}%, {time.time() - t0:.0f}s")
 
