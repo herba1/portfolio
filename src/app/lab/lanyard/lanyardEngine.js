@@ -7,6 +7,7 @@ import { createSim, CARD } from "./lanyardSim";
 
 const BG = "#f2f0eb";
 const WALL_Z = -0.85;
+const LOOK_Y = 0.28;
 
 // A dark studio for the laminate and the metal to reflect: a near-black room
 // with nothing in it but softboxes. The clearcoat mirrors only the panels, so
@@ -316,10 +317,14 @@ export async function createLanyard(host, { embedded = false } = {}) {
     const aspect = w / h;
     camera.aspect = aspect;
     const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    // Keep the whole swing in frame on narrow boxes.
-    const dist = Math.max(embedded ? 8.6 : 9.2, 1.5 / (tanHalf * aspect));
-    camera.position.set(0, 0.1, dist);
-    camera.lookAt(0, 0.1, 0);
+    // Close in: the pass is the poster, about 55% of the frame's height,
+    // with the strap running off the top edge. On narrow boxes back out just
+    // enough to keep the swing's half-width (about a unit) in frame.
+    const dist = Math.max(embedded ? 6.1 : 6.5, 1.05 / (tanHalf * aspect));
+    // The pass hangs at rest centred near y 0.4; looking a touch above that
+    // seats it just over the middle, at about 45% of the frame's height.
+    camera.position.set(0, LOOK_Y, dist);
+    camera.lookAt(0, LOOK_Y, 0);
     camera.updateProjectionMatrix();
   });
 
