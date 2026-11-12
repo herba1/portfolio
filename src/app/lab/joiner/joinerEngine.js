@@ -154,23 +154,24 @@ void main() {
 // and on how blue the scene light is there:
 //   - cloud: its luminance goes through a filmic shoulder with a toe, so the
 //     sunlit tops climb to a warm-neutral paper white (#F4F1EA, never past it)
-//     while the undersides keep their depth; the mids and shadows are split
-//     toned towards skylight blue (hue 205, sat 0.25), the colour of shade
-//     under an open sky;
+//     while the undersides keep their depth; the shadow side is toned
+//     towards skylight blue (hue 208, sat 0.40), the colour of shade under an
+//     open sky, in proportion to how far the cloud sits below the shoulder;
 //   - clear sky: recoloured along a zenith gradient, deep cobalt (#0E5FB0)
 //     straight up, opening towards the rim, carrying the print's own exposure,
 //     vignette and grain as a ratio so every print still meters for itself.
 const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const SKY_GRADE = {
-  cloudGain: 4.6, // gain on cloud luminance (linear) into the shoulder
-  cloudToe: 2.8, // power on cloud luminance before the shoulder: deepens the undersides
+  cloudGain: 5.5, // gain on cloud luminance (linear) into the shoulder
+  cloudToe: 1.6, // power on cloud luminance before the shoulder: deepens the undersides
   splitTone: 1, // 0 leaves cloud neutral, 1 is the full skylight split
   keep: 0.5, // share of the print's own dye cast kept in the cloud
   skyKeep: 0.7, // power of the print's own exposure ratio kept in the clear sky
   grade: 1, // overall strength
 };
 const CLOUD_HI = srgbHex("#F4F1EA");
-const CLOUD_SHADE = [0.75, 0.896, 1.0]; // HSV(205, 0.25, 1)
+const CLOUD_SHADE = [0.552, 0.7483, 0.92]; // HSV(208, 0.40, 0.92)
+const CLOUD_SHADE_DEPTH = 0.84; // cloud luminance kept at full shade, past SHADE's V
 const SKY_ZENITH = srgbHex("#0E5FB0");
 const SKY_RIM = srgbHex("#3F8AD0");
 const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at the zenith
@@ -196,6 +197,8 @@ const vec3 HI = ${vec3(CLOUD_HI)};
 const vec3 SHADE = ${vec3(CLOUD_SHADE)};
 const vec3 ZEN = ${vec3(SKY_ZENITH)};
 const vec3 RIM = ${vec3(SKY_RIM)};
+const float SHADE_V = ${Math.max(...CLOUD_SHADE).toFixed(4)};
+const float SHADE_DEPTH = ${CLOUD_SHADE_DEPTH.toFixed(4)};
 const float VREF = ${SKY_VREF.toFixed(4)};
 
 vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
@@ -249,8 +252,13 @@ void main() {
   float Yc = W * (1.0 - exp(-x / W)) * pow(clamp((Y + 0.004) / (Yb + 0.004), 0.8, 1.25), 0.75);
   vec3 shadeL = toLin(SHADE);
   shadeL /= dot(shadeL, LUMA);
-  float zone = smoothstep(0.3, 0.95, Yc / W);
-  vec3 tint = mix(mix(vec3(1.0), shadeL, uCloud.z), hiL / W, zone);
+  // skylight shade by inverse cloud luminance, read before the shoulder (past
+  // it every cloud body is within a few percent of HI and the undersides
+  // would be lost): full in the undersides, gone on the sunlit tops. The
+  // shade sits lower as well as cooler (SHADE's V, then the shadow depth), so
+  // the body is modelled in value and the blue side never reads as clear sky.
+  float shade = (1.0 - smoothstep(0.8, 3.2, x / W)) * uCloud.z;
+  vec3 tint = mix(hiL / W, shadeL * SHADE_V * SHADE_DEPTH, shade);
   vec3 own = mix(vec3(1.0), (lin + 0.002) / (Y + 0.002), uCloud.w);
   vec3 cloud = min(tint * Yc * own, hiL);
 
