@@ -241,7 +241,7 @@ uniform vec3 uSkyLow;         // and at its horizon end
 uniform float uSkyCurve;
 uniform vec3 uUp;             // the vertical, camera space
 uniform vec2 uSkyElev;        // sin(elevation) at the frame's horizon end, at its zenith end
-uniform sampler2D uClear;     // the plate's clear sky, linear x2 (coarse)
+uniform sampler2D uClear;     // the plate's clear sky, linear x2 (coarse); a its broad modulation
 uniform vec3 uCloudY;         // cloud starts this far above the clear sky; unmix contrast; clear-sky bias
 uniform vec3 uWarmCloud;      // linear, relative
 uniform vec3 uUnderBlue;      // linear, relative
@@ -306,6 +306,24 @@ vec3 toLin(vec3 c) {
 // frame, and the cloud keeps its luminance but goes warm-neutral, its
 // undersides lit by that blue. Steel, cable and the loose objects never pass
 // through here.
+float hash(vec2 p) {
+  p = fract(p * vec2(443.897, 441.423) + uSeed);
+  p += dot(p, p.yx + 19.19);
+  return fract((p.x + p.y) * p.x);
+}
+
+vec3 toSrgb(vec3 c) {
+  c = max(c, 0.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
+// cloud opacity of the clean sky at uv + d (photo px), against the clear
+// sky's luminance ySky and the dimmest cloud's yCl at the centre
+float cloudAt(vec2 uv, vec2 d, float ySky, float yCl) {
+  float y = dot(texture(uSky, uv + d / uSize).rgb, vec3(0.2126, 0.7152, 0.0722));
+  return clamp((y - ySky) / (yCl - ySky), 0.0, 1.0);
+}
+
 vec3 gradeSky(vec3 c, vec2 uv) {
   float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // How much of the pixel is cloud: a linear unmix on luminance between the
@@ -313,20 +331,43 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   // opacity. (Luminance, not chroma: the plate's colour is coarser than its
   // drawing, and a chroma key blotches.) Kept linear and the range narrow, so
   // a translucent wisp is partly cloud rather than keyed out to sky.
-  vec3 cSky = 0.5 * texture(uClear, uv).rgb * uCloudY.z;
+  vec4 cl = texture(uClear, uv);
+  vec3 cSky = 0.5 * cl.rgb * uCloudY.z;
   float ySky = dot(cSky, vec3(0.2126, 0.7152, 0.0722));
   float yCl = ySky + uCloudY.x;
   float w = clamp((Y - ySky) / (yCl - ySky), 0.0, 1.0);
+  // A pocket where the plate dips to the clear sky's luminance inside a
+  // cloud body is the cloud thinning, not a hole through it: it would punch
+  // to full cobalt. Closed: the least cloud on a ring round the pixel (two
+  // radii, eight directions each), so a pixel ringed by cloud takes the
+  // ring's cloud, while one at a cloud's edge (open sky on part of the
+  // ring) keeps its own and the outline stays where it is.
+  float ring = 0.0;
+  for (int j = 0; j < 2; j++) {
+    float rr = 4.0 + 5.0 * float(j);
+    float m = 1.0;
+    for (int i = 0; i < 8; i++) {
+      float a = 0.7854 * float(i) + 0.39 * float(j);
+      m = min(m, cloudAt(uv, rr * vec2(cos(a), sin(a)), ySky, yCl));
+    }
+    ring = max(ring, m);
+  }
+  w = max(w, ring);
   w = mix(w, w * w * (3.0 - 2.0 * w), uCloudY.y);
   // clear sky: the ramp by elevation, not by frame row. The camera is
   // rolled, so the zenith end is the top-left corner (~50 deg up) and the
   // horizon end the bottom-right (~6 deg): cobalt overhead relaxing to a
   // paler cyan toward the horizon, along the real sky's own gradient. It
-  // keeps a little of the plate's own modulation.
+  // keeps a trace of the plate's own modulation, and only its slowest part
+  // (the clear map's alpha: the plate's luminance over its clear sky,
+  // spread over ~1/8 of the frame; see clearSky), so no cell edge or haze
+  // patch of the plate prints into the blue. Dithered by ~1/255 (in the
+  // print's own steps), so the elevation ramp lands without bands.
   vec3 dir = normalize(vec3((uv * uSize - uC) / uF, 1.0));
   float t = clamp((dot(dir, uUp) - uSkyElev.x) / (uSkyElev.y - uSkyElev.x), 0.0, 1.0);
   vec3 tgt = toLin(mix(uSkyLow, uSkyTop, pow(t, uSkyCurve)));
-  vec3 S = tgt * clamp(pow(Y / max(ySky, 1e-4), 0.6), 0.75, 1.0);
+  vec3 S = tgt * clamp(pow(max(cl.a, 1e-3), 0.15), 0.9, 1.0);
+  S = toLin(toSrgb(S) + (hash(gl_FragCoord.xy + 3.7) + hash(gl_FragCoord.yx + 11.1) - 1.0) / 255.0);
   // the cloud itself, unmixed: the pixel is w of cloud over (1 - w) of the
   // plate's clear blue, so taking that blue back out leaves the cloud in its
   // own colour, at the dimmest cloud's luminance (yCl) until it is solid.
@@ -348,17 +389,6 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   float yg = max(dot(g, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
   float mid = smoothstep(0.01, 0.06, yg) * (1.0 - smoothstep(0.45, 0.8, yg));
   return max(g, 0.0) * pow(yg, mix(1.0, uDensity, mid) - 1.0);
-}
-
-vec3 toSrgb(vec3 c) {
-  c = max(c, 0.0);
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-
-float hash(vec2 p) {
-  p = fract(p * vec2(443.897, 441.423) + uSeed);
-  p += dot(p, p.yx + 19.19);
-  return fract((p.x + p.y) * p.x);
 }
 
 void main() {
@@ -730,8 +760,12 @@ function pixels(bm) {
 // The plate's clear sky, as a coarse field: per cell the dim end of the
 // sky's luminance (the blue between the clouds) in the colour of the dimmest
 // fifth of the cell, spread from cells that are all cloud by a min on
-// luminance, then smoothed. Linear RGB x2, in bytes (luminance stays linear
-// through the smoothing, so it is the map's own luminance).
+// luminance, then smoothed. Only into a cell that is all cloud (its dim end
+// over a tenth above its dimmest neighbour's): a plain min drags the clear
+// sky down wherever the blue only deepens toward a neighbour, and the open
+// blue there then reads as a veil of cloud, in cell-sized patches of grey. Linear RGB x2, in bytes (luminance stays linear
+// through the smoothing, so it is the map's own luminance); alpha the
+// plate's broad modulation of it (below).
 function clearSky(px, w, h) {
   const C = 25;
   const gw = Math.ceil(w / C);
@@ -775,12 +809,65 @@ function clearSky(px, w, h) {
     }
     g = o;
   };
-  pass((n) => n.reduce((a, b) => (lum(b) < lum(a) ? b : a)));
+  pass((n) => {
+    const m = n.reduce((a, b) => (lum(b) < lum(a) ? b : a));
+    return lum(n[4]) > 1.1 * lum(m) ? m : n[4];
+  });
   for (let i = 0; i < 3; i++) pass((n) => [0, 1, 2].map((k) => n.reduce((a, b) => a + b[k], 0) / n.length));
+  // The plate's own modulation of the clear blue, for gradeSky to keep a
+  // little of: each pixel's luminance over the map's clear sky there (as the
+  // shader reads it, bias included), taken only where it is below the clear
+  // sky (above it is cloud, and the modulation saturates there anyway) and
+  // held to [0.5, 1], then spread over ~1/8 of the frame. Read per pixel the
+  // ratio prints every cell edge and haze patch of the plate into the
+  // cobalt; this broad it is only the sky's own slow unevenness.
+  const yc = g.map((c) => lum(c) * SKY.cloud[2]);
+  const ycAt = (x, y) => {
+    const fx = clamp(x / C - 0.5, 0, gw - 1);
+    const fy = clamp(y / C - 0.5, 0, gh - 1);
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const x1 = Math.min(x0 + 1, gw - 1);
+    const y1 = Math.min(y0 + 1, gh - 1);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    const top = yc[y0 * gw + x0] * (1 - tx) + yc[y0 * gw + x1] * tx;
+    const bot = yc[y1 * gw + x0] * (1 - tx) + yc[y1 * gw + x1] * tx;
+    return top * (1 - ty) + bot * ty;
+  };
+  let r = new Float32Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0;
+      let n = 0;
+      for (let y = gy * C; y < Math.min(h, gy * C + C); y += 2) {
+        for (let x = gx * C; x < Math.min(w, gx * C + C); x += 2) {
+          const i = (y * w + x) * 4;
+          const yp = lum([L[px[i]], L[px[i + 1]], L[px[i + 2]]]);
+          sum += clamp(yp / Math.max(ycAt(x + 0.5, y + 0.5), 1e-4), 0.5, 1);
+          n++;
+        }
+      }
+      r[gy * gw + gx] = sum / n;
+    }
+  }
+  const R = Math.max(1, Math.round(gw / 16)); // a box 1/8 of the frame wide
+  const box = (src, dx, dy) => {
+    const o = new Float32Array(gw * gh);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        let a = 0;
+        for (let k = -R; k <= R; k++) a += src[clamp(y + k * dy, 0, gh - 1) * gw + clamp(x + k * dx, 0, gw - 1)];
+        o[y * gw + x] = a / (2 * R + 1);
+      }
+    }
+    return o;
+  };
+  for (let i = 0; i < 3; i++) r = box(box(r, 1, 0), 0, 1);
   const data = new Uint8Array(gw * gh * 4);
   for (let i = 0; i < g.length; i++) {
     for (let k = 0; k < 3; k++) data[i * 4 + k] = clamp(Math.round(g[i][k] * 2 * 255), 0, 255);
-    data[i * 4 + 3] = 255;
+    data[i * 4 + 3] = clamp(Math.round(r[i] * 255), 0, 255);
   }
   return { data, w: gw, h: gh };
 }
