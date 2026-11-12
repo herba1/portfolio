@@ -1,9 +1,9 @@
 {
   "format": "splat4d",
   "version": 1,
-  "exportId": "1794478585",
-  "count": 228499,
-  "staticCount": 196104,
+  "exportId": "1794504959",
+  "count": 219756,
+  "staticCount": 187361,
   "dynamicCount": 32395,
   "frames": 5,
   "duration": 6.0,
@@ -11,7 +11,7 @@
     "min": [
       -37.192436987705356,
       -21.940974504115367,
-      3.176261799240112
+      3.8141480850219724
     ],
     "max": [
       37.63948495841847,
@@ -19,12 +19,12 @@
       40.0001
     ]
   },
-  "covScale": 4772.272640805148,
+  "covScale": 3699.8402952023084,
   "coords": "opencv-camera0",
   "camera": {
     "vfovDeg": 33.0,
     "aspect": 1.5,
-    "pivotDepth": 3.3,
+    "pivotDepth": 5.453823955910403,
     "aperture": 0.0015
   },
   "source": {

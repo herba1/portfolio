@@ -14,7 +14,7 @@
 #   python3 -I tools/depth/bakes/splat-video/bake.py $W public/lab/splat-video/fumikiri-sky
 #
 # Three layers, all in the OpenCV camera frame of the phone (x right, y down,
-# z forward), so the player's lean pivots round the signal head:
+# z forward), so the player's lean pivots round the silhouette:
 #   sky     big soft splats on a plane far behind everything, coloured by a
 #           push-pull of the visible blue, running well past the frame so a
 #           lean never opens a hole;
@@ -23,7 +23,8 @@
 #           billows sit nearer than the shadowed folds. Its upper towers are
 #           the dynamic set: they climb and boil slowly over the clip;
 #   near    the signal, gantry and wires, unmixed against the plate with the
-#           sky matte, placed by the depth map. Flat interiors collapse into
+#           sky matte, on one rigid plane fitted to the depth map (never
+#           per-pixel depth, which bends thin wires). Flat interiors collapse into
 #           larger splats (a quadtree held clear of every edge), wires stay at
 #           full resolution.
 # The grade is baked into the colours: cobalt zenith deepening upward, cloud
@@ -50,7 +51,6 @@ VIEW_VFOV_DEG = 33.0       # the player shows the middle ~80 %, the rest is lean
 FRAMES = 5
 DURATION = 6.0
 
-Z_PIVOT = 3.3              # the signal head
 APERTURE = 0.0015          # lean depth of field: a phone lens, the sky stays nearly sharp
 Z_SKY = 40.0
 Z_CLOUD = 30.0
@@ -271,7 +271,6 @@ NW, NH = int(round(W * NEAR_SCALE)), int(round(H * NEAR_SCALE))
 n_photo = cv2.resize(s2l(photo), (NW, NH), interpolation=cv2.INTER_AREA)
 n_sky = cv2.resize(sky, (NW, NH), interpolation=cv2.INTER_AREA)
 n_plate = cv2.resize(lin_plate[OY:OY + H, OX:OX + W], (NW, NH), interpolation=cv2.INTER_AREA)
-n_depth = cv2.resize(depth, (NW, NH), interpolation=cv2.INTER_AREA)
 n_alpha = 1 - n_sky
 na3 = np.maximum(n_alpha, 1e-3)[..., None]
 n_col = np.clip((n_photo - (1 - na3) * n_plate) / na3, 0, 1)
@@ -282,18 +281,54 @@ solid = (n_alpha > 0.9).astype(np.float32)
 solid_col = pushpull(n_col.astype(np.float32), solid, 3.0)
 trust = smoothstep(0.45, 0.92, n_alpha)[..., None]
 n_col = solid_col * (1 - trust) + n_col * trust
-# Relative depth is noisy on one-pixel wires and jumps across edge bands, so
-# smooth the disparity hard, inside the silhouettes only (normalised by the matte):
-# a wire then holds one depth along its length instead of scattering into
-# beads when you lean, and a silhouette keeps its own depth up to its edge.
-w_near = np.clip((n_alpha - 0.05) / 0.5, 0, 1).astype(np.float32)
-n_depth = cv2.dilate(n_depth, np.ones((3, 3), np.uint8))
-n_depth = (cv2.GaussianBlur(n_depth * w_near, (0, 0), 8.0) / np.maximum(cv2.GaussianBlur(w_near, (0, 0), 8.0), 1e-4)).astype(np.float32)
-n_z = 1.0 / (0.025 + 0.3 * np.clip(n_depth, 0.12, 1))
-# fade the layer out at the photo's edge, where the plate keeps going
+# Depth Anything cannot place a 1-3 px wire: its value bleeds toward the sky
+# and wanders along the span, and per-pixel depth turns that noise into
+# parallax, so a lean bent hangers into S-curves, combed the post edges and
+# left dotted ladders off every wire. The signal, gantry and catenary are one
+# rigid thing, so the whole matte gets ONE plane in disparity, fitted robustly
+# to the silhouette (Tukey-reweighted, the thick bodies and the thin wires
+# weighted equally, on a max-filtered map so a wire's own value beats the
+# bleed). Inverse depth affine in the image is an actual 3D plane, so every
+# straight wire is a straight 3D line, every pixel keeps its neighbours and a
+# lean moves the silhouette as one piece (a homography) across the cloud.
+d_max = cv2.dilate(depth, np.ones((5, 5), np.uint8))
+fit_mask = sky < 0.4
+thick = cv2.distanceTransform((sky < 0.5).astype(np.uint8), cv2.DIST_L2, 3)[fit_mask] > 4
+fy, fx = np.nonzero(fit_mask)
+fd = d_max[fit_mask].astype(np.float64)
+fw = np.where(thick, 0.5 / max(thick.mean(), 1e-3), 0.5 / max(1 - thick.mean(), 1e-3))
+X = np.stack([fx / W, fy / H, np.ones_like(fd)], axis=1)
+robust = np.ones_like(fd)
+for _ in range(10):
+    ww = fw * robust
+    plane = np.linalg.solve(X.T @ (X * ww[:, None]), X.T @ (ww * fd))
+    res = fd - X @ plane
+    scale = max(1.4826 * np.median(np.abs(res)), 0.01)
+    robust = np.clip(1 - (res / (4.685 * scale)) ** 2, 0, 1) ** 2
+
+
+def plane_z(u, v):
+    """Depth of the silhouette plane at photo pixel (u, v)."""
+    disparity = np.clip(plane[0] * u / W + plane[1] * v / H + plane[2], 0.12, 1)
+    return 1.0 / (0.025 + 0.3 * disparity)
+
+
 yy, xx = np.mgrid[0:NH, 0:NW]
+n_z = plane_z((xx + 0.5) / NEAR_SCALE, (yy + 0.5) / NEAR_SCALE).astype(np.float32)
+# the lean pivots where the optical axis meets the silhouette plane, so the
+# subject holds still in the middle of the frame and the cloud slides behind it
+Z_PIVOT = float(plane_z(CX, CY))
+print(f"near plane: disparity {plane.round(3)}, z {n_z.min():.2f} .. {n_z.max():.2f}, pivot {Z_PIVOT:.2f}")
+# fade the layer out at the photo's edge, where the plate keeps going
 edge = np.minimum.reduce([xx, NW - 1 - xx, yy, NH - 1 - yy]).astype(np.float32)
 n_alpha_eff = n_alpha * smoothstep(0, 0.012 * NW, edge)
+# The sky matte leaves a grey mist of 0.1-0.3 alpha in the sky beside every
+# wire and dropper. Unmixed, it borrows the silhouette's ink and prints as hair
+# and beads along the wires, so the alpha band is held to the antialiased rim
+# of a solid core: full strength next to the core, gone two pixels out.
+core = (n_alpha > 0.4).astype(np.uint8)
+from_core = cv2.distanceTransform(1 - core, cv2.DIST_L2, 3)
+n_alpha_eff = n_alpha_eff * smoothstep(2.0, 1.0, from_core)
 
 opaque = (n_alpha > 0.96).astype(np.uint8)
 dist = cv2.distanceTransform(opaque, cv2.DIST_L2, 3)

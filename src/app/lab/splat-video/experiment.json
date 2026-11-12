@@ -1,6 +1,6 @@
 {
   "title": "Splat video",
-  "description": "A phone clip you can step into: looking up past a level-crossing signal into a summer cumulus, rebuilt as Gaussian splats. The signal, the catenary and the cloud sit at their own depths, the cumulus tops boil and climb while it plays, and dragging leans you round the signal so the wires slide across the sky.",
+  "description": "A phone clip you can step into: looking up past a level-crossing signal into a summer cumulus, rebuilt as Gaussian splats. The signal and its catenary are one rigid silhouette well in front of the cloud, the cumulus tops boil and climb while it plays, and dragging leans you round the signal so the wires slide across the sky.",
   "tags": [
     "WebGL",
     "Player",
