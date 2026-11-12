@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 import { ALBUM, ICONS, TRACKS, menuFor } from "./menuData";
@@ -34,11 +34,16 @@ const TRAIL = { k: 520, zeta: 1 };
 
 const EASE_OUT = [0.22, 1, 0.36, 1];
 
+const RADIUS = 12; // the panel's corner radius, as in submenu.css
+
 // The still's cut: unless ?aim names a point, a held cascade freezes the
-// pointer here, relative to the root menu's top-left — over Go to, having
-// crossed Share from Add to Playlist, heading for the submenu.
-const AIM_STILL = { x: 186, y: 160 };
-const AIM_ANGLE = 0.67; // the still's cut: px across per px down since the exit
+// pointer in the deepest panel that owns an open submenu, AIM_DROP px past
+// the open row and AIM_IN px in from the far side, having left the row on
+// the angle for its level (px across per px down since the exit). From Add
+// to Playlist that is over Go to; from Seasons, over Mixtapes.
+const AIM_DROP = 52;
+const AIM_IN = 46;
+const AIM_ANGLE = [0.67, 1.5];
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -170,10 +175,90 @@ function parsePt(v) {
 }
 
 // The safe triangle for a panel and its open child: apex just behind where the
-// pointer left the open row, base on the child's near edge.
+// pointer left the open row, base on the straight run of the child's near
+// edge — its top and bottom, each inset by the corner radius.
 function triFor(child, E) {
   const nx = child.dir > 0 ? child.x : child.x + child.w;
-  return { nx, tri: [{ x: E.x - child.dir * APEX_BACK, y: E.y }, { x: nx, y: child.y - PAD }, { x: nx, y: child.y + child.h + PAD }] };
+  return { nx, tri: [{ x: E.x - child.dir * APEX_BACK, y: E.y }, { x: nx, y: child.y + RADIUS }, { x: nx, y: child.y + child.h - RADIUS }] };
+}
+
+// Where the still's pointer sits: below the open row when the panel has room,
+// above it otherwise, on the side of the panel nearest the child.
+function stillPoint(owner, rowIdx) {
+  const r = owner.rows[rowIdx];
+  const room = owner.h - PAD - (r.top + ROW);
+  const y = room >= 24 ? r.top + ROW + Math.min(AIM_DROP, room - 12) : r.top - Math.min(AIM_DROP, r.top - PAD - 12);
+  const x = owner.dir > 0 ? owner.w - AIM_IN : AIM_IN;
+  return { x: owner.x + x, y: owner.y + y };
+}
+
+// The aim's marks, in root coordinates. One drawing, painted at every layer
+// it crosses: on the ground beneath the panels, and inside each panel between
+// its surface and its rows, so no hairline ever runs over a glyph.
+function paintAim(svg, g) {
+  if (!svg || !g) return;
+  const q = (c) => svg.querySelector(c);
+  q(".sm-aim-wedge").setAttribute("points", g.wedge);
+  q(".sm-aim-edge").setAttribute("points", g.wedge);
+  q(".sm-aim-cut").setAttribute("d", g.cut);
+  q(".sm-aim-ray").setAttribute("d", g.ray);
+  q(".sm-aim-tick").setAttribute("d", g.tick);
+  q(".sm-aim-knock").setAttribute("d", g.knock);
+  q(".sm-aim-exit").setAttribute("cx", g.E.x);
+  q(".sm-aim-exit").setAttribute("cy", g.E.y);
+  q(".sm-aim-at").setAttribute("cx", g.P.x);
+  q(".sm-aim-at").setAttribute("cy", g.P.y);
+}
+
+// The lines break around every label, count, shortcut, icon and chevron they
+// pass under — a knockout, as on a printed diagram — so a hairline never
+// strikes through a glyph. The wedge's faint fill runs on unbroken.
+function AimMarks({ svgRef, className, style, W, H }) {
+  const id = `sm-knock${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  return (
+    <svg className={className} style={style} width={W} height={H} aria-hidden="true" ref={svgRef}>
+      <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}>
+        <rect width={W} height={H} fill="#fff" />
+        <path className="sm-aim-knock" d="" fill="#000" />
+      </mask>
+      <polygon className="sm-aim-wedge" points="" />
+      <g mask={`url(#${id})`}>
+        <polygon className="sm-aim-edge" points="" />
+        <path className="sm-aim-cut" d="" />
+        <path className="sm-aim-ray" d="" />
+      </g>
+      <path className="sm-aim-tick" d="" />
+      <circle className="sm-aim-exit" r="2.5" />
+      <circle className="sm-aim-at" r="2.5" />
+    </svg>
+  );
+}
+
+// Glyph boxes, in root coordinates, opened by a few px of air.
+const KNOCK = ".sm-panel .sm-label, .sm-panel .sm-meta, .sm-panel .sm-kbd, .sm-panel .sm-ico, .sm-panel .sm-chev, .sm-panel .sm-avatar";
+
+function knockoutFor(root) {
+  if (!root) return "";
+  const b = root.getBoundingClientRect();
+  const k = root.offsetWidth ? b.width / root.offsetWidth : 1;
+  const range = document.createRange();
+  let d = "";
+  for (const el of root.querySelectorAll(KNOCK)) {
+    // Text by its contents (a shortcut or count carries left padding that
+    // holds no ink); drawn marks by their own box.
+    const text = !el.matches(".sm-ico, .sm-chev, .sm-avatar");
+    if (text) range.selectNodeContents(el);
+    const r = text ? range.getBoundingClientRect() : el.getBoundingClientRect();
+    if (!r.width) continue;
+    const ax = 3;
+    const ay = el.matches(".sm-label, .sm-meta") ? -1 : 2;
+    const x = (r.left - b.left) / k - ax;
+    const y = (r.top - b.top) / k - ay;
+    const w = r.width / k + 2 * ax;
+    const h = r.height / k + 2 * ay;
+    d += `M${x.toFixed(1)} ${y.toFixed(1)}h${w.toFixed(1)}v${h.toFixed(1)}h${(-w).toFixed(1)}z`;
+  }
+  return d;
 }
 
 // "playlist.seasons.long-summer" → open each named submenu; a final leaf
@@ -197,7 +282,7 @@ function parseOpen(items, spec) {
 export default function Piece() {
   const rootRef = useRef(null);
   const debugRef = useRef({ tri: null, ray: null, dot: null });
-  const aimRef = useRef({});
+  const aimRef = useRef({ svgs: new Map(), g: null });
   const stillAim = useRef(null);
   const [box, setBox] = useState({ W: 0, H: 0 });
   const [st, setSt] = useState({ menu: null, path: [], hl: [], flash: null });
@@ -235,29 +320,32 @@ export default function Piece() {
   // child's near edge, the cut travelled since, and where the current
   // heading meets that edge. It fades out as the pointer lands.
   const aimOff = useCallback(() => {
-    aimRef.current.svg?.removeAttribute("data-on");
+    rootRef.current?.removeAttribute("data-aim");
   }, []);
 
   const drawAim = useCallback((child, E, P, v) => {
-    const R = aimRef.current;
-    if (!R.svg) return;
-    const { nx, tri } = triFor(child, E);
-    const [, A, B] = tri;
-    R.wedge.setAttribute("points", tri.map((q) => `${q.x},${q.y}`).join(" "));
-    R.cut.setAttribute("d", `M${E.x} ${E.y}L${P.x} ${P.y}`);
-    R.exit.setAttribute("cx", E.x);
-    R.exit.setAttribute("cy", E.y);
-    R.at.setAttribute("cx", P.x);
-    R.at.setAttribute("cy", P.y);
+    const { tri } = triFor(child, E);
+    const [apex, A, B] = tri;
+    // The far side is drawn on the child's 1px border ring, which sits just
+    // outside its near edge, so the wedge lands on the border itself.
+    const bx = A.x - child.dir * 0.5;
+    const g = { E, P, wedge: `${apex.x},${apex.y} ${bx},${A.y} ${bx},${B.y}`, cut: `M${E.x} ${E.y}L${P.x} ${P.y}`, ray: "", tick: "", knock: knockoutFor(rootRef.current) };
     if (v.x * child.dir > 0) {
-      const yh = clamp(P.y + (v.y * (nx - P.x)) / v.x, A.y, B.y);
-      R.ray.setAttribute("d", `M${P.x} ${P.y}L${nx} ${yh}`);
-      R.tick.setAttribute("d", `M${nx - 6} ${yh}h12`);
-    } else {
-      R.ray.setAttribute("d", "");
-      R.tick.setAttribute("d", "");
+      const yh = clamp(P.y + (v.y * (bx - P.x)) / v.x, A.y, B.y);
+      g.ray = `M${P.x} ${P.y}L${bx} ${yh}`;
+      g.tick = `M${bx} ${yh - 6}V${yh + 6}`;
     }
-    R.svg.setAttribute("data-on", "");
+    aimRef.current.g = g;
+    for (const svg of aimRef.current.svgs.values()) paintAim(svg, g);
+    rootRef.current?.setAttribute("data-aim", "");
+  }, []);
+
+  const aimSvgRef = useCallback((key) => (el) => {
+    const R = aimRef.current;
+    if (el) {
+      R.svgs.set(key, el);
+      paintAim(el, R.g);
+    } else R.svgs.delete(key);
   }, []);
 
   // ── Size against the piece box ──────────────────────────────────────
@@ -330,17 +418,38 @@ export default function Piece() {
     const spec = q.get("open");
     if (spec) {
       const items = menuFor(TRACKS[CONTEXT_TRACK]);
-      const { path, hl, deepest } = parseOpen(items, spec);
+      const opened = parseOpen(items, spec);
+      let { path, hl } = opened;
+      // The cut, held: ?aim=x,y (from the root menu's top-left) names the
+      // pointer; otherwise, unless the path ends on a highlighted leaf (the
+      // pointer is already in the deepest panel), it cuts from the deepest
+      // open row toward its submenu. ?aim=none leaves it off. A cut is only
+      // ever made toward the submenu it is aiming at, so the cascade is cut
+      // back to that level, and nothing past it is open or highlighted.
+      const aim = q.get("aim");
+      const pt = parsePt(aim);
+      let cut = false;
+      if (aim !== "none" && path.length && (pt || hl[hl.length - 1] < 0)) {
+        const ps = layoutFor({ menu: { key: "boot", x: Math.round(ax), y: Math.round(ay), ox, oy, items }, path }, box.W, box.H);
+        let owner = ps[ps.length - 2];
+        let P = owner && stillPoint(owner, path[owner.level]);
+        if (pt) {
+          P = { x: ps[0].x + pt.x, y: ps[0].y + pt.y };
+          owner = ps.slice(0, -1).findLast((p) => inside(p, P.x, P.y));
+        }
+        if (owner) {
+          path = path.slice(0, owner.level + 1);
+          hl = hl.slice(0, owner.level + 1).concat(-1);
+          stillAim.current = { level: owner.level, P, k: AIM_ANGLE[Math.min(owner.level, AIM_ANGLE.length - 1)] };
+          cut = true;
+        }
+      }
       openAt(CONTEXT_TRACK, ax, ay, ox, oy, { path, hl, held: true });
       fl.current = hl.length - 1;
-      // The cut, held: ?aim=x,y (from the root menu's top-left) or the
-      // default over Go to once a submenu is open; ?aim=none leaves it off.
-      const aim = q.get("aim");
-      if (aim !== "none" && path.length) stillAim.current = parsePt(aim) ?? AIM_STILL;
       const from = q.get("from");
       const t = parseFloat(q.get("t"));
-      if (from && Number.isFinite(t)) {
-        const fi = deepest.findIndex((it) => it.id === from);
+      if (!cut && from && Number.isFinite(t)) {
+        const fi = opened.deepest.findIndex((it) => it.id === from);
         if (fi >= 0) frozen.current = { level: hl.length - 1, from: fi, t };
       }
     } else {
@@ -348,7 +457,7 @@ export default function Piece() {
     }
     // On its own page the menu takes focus so the keyboard works at once.
     if (rootRef.current?.closest(".piece-box--viewport")) wantFocus.current = true;
-  }, [box.W, listGeo, openAt]);
+  }, [box.W, box.H, listGeo, openAt]);
 
   // ── The highlight pill: two edge springs per panel ──────────────────
   const paintPill = (s) => {
@@ -455,14 +564,13 @@ export default function Piece() {
     const a = stillAim.current;
     if (a && panels.length > 1) {
       stillAim.current = null;
-      const r0 = panels[0];
-      const P = { x: r0.x + a.x, y: r0.y + a.y };
-      const owner = panels.slice(0, -1).findLast((p) => inside(p, P.x, P.y));
-      const row = owner && owner.rows[st.path[owner.level]];
+      const owner = panels[a.level];
+      const child = panels[a.level + 1];
+      const row = owner && child && owner.rows[st.path[a.level]];
       if (row) {
-        const child = panels[owner.level + 1];
+        const { P } = a;
         const ey = owner.y + row.top + (P.y > owner.y + row.top ? ROW : 0);
-        const E = { x: clamp(P.x - Math.abs(P.y - ey) * AIM_ANGLE * child.dir, owner.x + PAD, owner.x + owner.w - PAD), y: ey };
+        const E = { x: clamp(P.x - Math.abs(P.y - ey) * a.k * child.dir, owner.x + PAD, owner.x + owner.w - PAD), y: ey };
         const d = Math.hypot(P.x - E.x, P.y - E.y) || 1;
         const v = { x: (P.x - E.x) / d, y: (P.y - E.y) / d };
         drawAim(child, E, P, v);
@@ -572,11 +680,7 @@ export default function Piece() {
     let active = false;
     const owner = ps.length > 1 ? ps[ps.length - 2] : null;
     if (owner) {
-      const child = ps[ps.length - 1];
-      const nx = child.dir > 0 ? child.x : child.x + child.w;
-      const E = exitPt.current[owner.level] ?? { x, y };
-      const apex = { x: E.x - child.dir * APEX_BACK, y: E.y };
-      tri = [apex, { x: nx, y: child.y - PAD }, { x: nx, y: child.y + child.h + PAD }];
+      tri = triFor(ps[ps.length - 1], exitPt.current[owner.level] ?? { x, y }).tri;
     }
 
     if (!hit) {
@@ -836,6 +940,9 @@ export default function Piece() {
         style={{ width: p.w, height: p.h }}
       >
         <div className="sm-pill" ref={pillRef(p.key)} data-path={openIdx !== undefined ? "" : undefined} data-flash={st.flash?.startsWith(`${p.key}:`) ? "" : undefined} />
+        <div className="sm-aim-clip">
+          <AimMarks className="sm-aim" svgRef={aimSvgRef(p.key)} style={{ left: -p.x, top: -p.y }} W={box.W} H={box.H} />
+        </div>
         {p.items.map((it, i) =>
           it.sep ? (
             <div key={`s${i}`} className="sm-sep" role="separator" />
@@ -920,6 +1027,8 @@ export default function Piece() {
         </div>
       ) : null}
 
+      {box.W ? <AimMarks className="sm-aim" svgRef={aimSvgRef("ground")} W={box.W} H={box.H} /> : null}
+
       <AnimatePresence initial={false}>
         {root ? (
           <motion.div key={root.key} className="sm-layer" exit={{ opacity: 0, transition: { duration: 0.12, ease: EASE_OUT } }}>
@@ -955,25 +1064,6 @@ export default function Piece() {
           </motion.div>
         ) : null}
       </AnimatePresence>
-
-      {box.W ? (
-        <svg
-          className="sm-aim"
-          width="100%"
-          height="100%"
-          aria-hidden="true"
-          ref={(el) => {
-            aimRef.current.svg = el;
-          }}
-        >
-          <polygon className="sm-aim-wedge" ref={(el) => (aimRef.current.wedge = el)} points="" />
-          <path className="sm-aim-cut" ref={(el) => (aimRef.current.cut = el)} d="" />
-          <path className="sm-aim-ray" ref={(el) => (aimRef.current.ray = el)} d="" />
-          <path className="sm-aim-tick" ref={(el) => (aimRef.current.tick = el)} d="" />
-          <circle className="sm-aim-exit" ref={(el) => (aimRef.current.exit = el)} r="2.5" />
-          <circle className="sm-aim-at" ref={(el) => (aimRef.current.at = el)} r="2.5" />
-        </svg>
-      ) : null}
 
       {debug ? (
         <svg className="sm-debug" width="100%" height="100%" aria-hidden="true">

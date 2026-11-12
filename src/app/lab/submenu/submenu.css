@@ -343,19 +343,31 @@
 
 /* ── The aim: the safe triangle, while it is holding ─────────────── */
 
+/* One drawing in root coordinates, painted twice over: once on the ground
+   beneath every panel, and once inside each panel, clipped to its corners,
+   between the surface (and its pill) and the rows. The type always sits on
+   top of the diagram. */
 .sm-aim {
   position: absolute;
-  inset: 0;
-  z-index: 4;
+  top: 0;
+  left: 0;
   pointer-events: none;
   overflow: visible;
   opacity: 0;
   transition: opacity 120ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.sm-aim[data-on] {
+.sm-root[data-aim] .sm-aim {
   opacity: 1;
   transition-duration: 40ms;
+}
+
+.sm-aim-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 .sm-aim * {
@@ -365,6 +377,11 @@
 /* The wedge sits back a step; the cut and its points are full ink. */
 .sm-aim-wedge {
   fill: var(--sm-aim-fill);
+  stroke: none;
+}
+
+.sm-aim-edge {
+  fill: none;
   stroke: var(--sm-aim-edge);
   stroke-width: 1;
   stroke-linejoin: miter;
@@ -386,7 +403,7 @@
 .sm-aim-tick {
   fill: none;
   stroke: var(--sm-ink);
-  stroke-width: 1;
+  stroke-width: 2;
 }
 
 .sm-aim-exit {
@@ -401,7 +418,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .sm-aim,
-  .sm-aim[data-on] {
+  .sm-root[data-aim] .sm-aim {
     transition: none;
   }
 }
