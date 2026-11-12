@@ -311,22 +311,40 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   const capRatio = fitted.capRatio;
 
   const build = (W, H, dpr) => {
-    // Full-bleed: the bands run to the top and bottom of the box, with no
-    // plate around them; only the sides keep a margin.
+    // One margin all the way round. The lips stand inside the frame, on
+    // open paper, so a letter rolling away is seen flattening into a
+    // hairline against its lip instead of being cut off by the screen edge.
+    // The margin is measured to the ink, not to the lips: at the sides the
+    // ink stands its sidebearing in from the cell, and at the lips a cap at
+    // rest already stops a little short (its top and foot sit at ±0.98·α of
+    // the drum, R·sin(0.98α) out of R·sin(θ)). So the lips are set out from
+    // the side margin by exactly that shortfall and the ink lands on one
+    // margin on all four sides.
     const pad = Math.round(Math.min(W, H) * 0.035);
     const gapY = Math.round(Math.min(W, H) * 0.03);
+    const short = 1 - Math.sin(0.98 * ALPHA) / Math.sin(THETA);
     // Rows of wheels: pick the split whose letters come closest to Druk's
     // narrow proportions without the face being squeezed past recognition.
     let best = null;
     for (const r of [1, 2, 3]) {
       const c = K / r;
       const cellW = (W - 2 * pad) / c;
-      const bandH = (H - (r - 1) * gapY) / r;
-      const R = bandH / 2 / Math.sin(THETA);
-      const cap = 2 * ALPHA * R * 0.98;
-      const s = (cellW * (1 - 2 * SIDE)) / (cap * T);
+      // The band and the letter's condensation depend on each other through
+      // the side margin; a few passes settle it to well under a pixel.
+      let y0 = pad;
+      let bandH;
+      let R;
+      let s;
+      for (let it = 0; it < 4; it++) {
+        bandH = (H - 2 * y0 - (r - 1) * gapY) / r;
+        R = bandH / 2 / Math.sin(THETA);
+        const cap = 2 * ALPHA * R * 0.98;
+        s = (cellW * (1 - 2 * SIDE)) / (cap * T);
+        const side = pad + (cellW - cap * T * Math.min(s, 1)) / 2;
+        y0 = Math.max(pad, side - (bandH / 2) * short);
+      }
       const score = Math.abs(Math.log(Math.min(s, 1.15) / 0.62)) + (s > 1 ? 1 : 0);
-      if (!best || score < best.score) best = { r, c, cellW, bandH, R, s: Math.min(s, 1), score };
+      if (!best || score < best.score) best = { r, c, cellW, bandH, R, y0, s: Math.min(s, 1), score };
     }
     const { r, c, cellW, bandH, R } = best;
     const s = best.s;
@@ -379,7 +397,7 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
     // filtering keeps its stems sharp there instead of blurring them sideways.
     if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
     const x0 = (W - c * cellW) / 2;
-    const y0 = 0;
+    const y0 = best.y0;
     geo = { r, c, cellW, bandH, R, gapY, x0, y0, ac, ar, insetU: inset / cw, insetV: inset / ch, dpr };
   };
   stage.onResize(build);
