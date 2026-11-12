@@ -81,16 +81,39 @@ export default function Piece({ embedded = false }) {
       y: g.y0 + Math.floor(s / COLS) * g.rowPitch,
     });
 
+    // Optical metrics of one set word, read from the real font: where the
+    // ink starts left of the origin, and how far the ascender sits below
+    // the top of the CSS line box. Lets the block hang on its margins by
+    // the ink, not by the sidebearing or the half-leading.
+    const ink = (size, lineH) => {
+      const cs = getComputedStyle(measure);
+      const ctx = document.createElement("canvas").getContext("2d");
+      if (!ctx) return { left: 0, top: 0 };
+      ctx.font = `${cs.fontWeight} ${size}px ${cs.fontFamily}`;
+      if ("letterSpacing" in ctx) ctx.letterSpacing = cs.letterSpacing;
+      const m = ctx.measureText(WORD);
+      const asc = m.fontBoundingBoxAscent ?? size * 0.9;
+      const desc = m.fontBoundingBoxDescent ?? size * 0.22;
+      const baseline = (lineH - (asc + desc)) / 2 + asc;
+      return {
+        left: -(m.actualBoundingBoxLeft ?? 0),
+        top: baseline - (m.actualBoundingBoxAscent ?? size * 0.75),
+      };
+    };
+
     const layout = (snap) => {
       const r = box.getBoundingClientRect();
       g.W = r.width;
       g.H = r.height;
       g.dpr = window.devicePixelRatio || 1;
-      // The poem is the poster: the 5x3 block fills ~70% of the height
-      // (four row pitches of 1.75em plus one 1.25em line), capped so it
-      // never runs wider than ~84% of the page.
+      // Set the way Gomringer set it: a dense block of text, not a grid of
+      // labels. Lines on a ~1.04em pitch (whole 4px), one word space
+      // (0.3em) between words, so each row reads "silence silence
+      // silence" and the fourteen words knit into one grey texture that
+      // the empty slot is punched out of.
       const setSize = (size) => {
-        const lineH = round4(size * 1.25);
+        const rowPitch = round4(size * 1.04);
+        const lineH = rowPitch;
         const ls = tracking(size);
         for (const el of [measure, ...els]) {
           if (!el) continue;
@@ -99,26 +122,29 @@ export default function Piece({ embedded = false }) {
           el.style.letterSpacing = ls;
         }
         const wordW = measure.getBoundingClientRect().width;
-        const rowPitch = round4(size * 1.75);
-        // Even spacing: the gap between columns matches the gap between
-        // rows, read from the x-height band. Whole pixels.
-        const colPitch = Math.round(wordW + (rowPitch - size * 0.72));
+        const colPitch = Math.round(wordW + size * 0.3);
         return { size, lineH, wordW, rowPitch, colPitch };
       };
-      let m = setSize(Math.max(15, Math.floor((0.7 * g.H) / (4 * 1.75 + 1.25))));
+      // The block owns the format: hung on a left margin, run across most
+      // of the width, top-anchored so the open white falls below it.
+      const margin = round4(Math.max(16, Math.min(g.W, g.H) * 0.07));
       const blockW = (q) => q.wordW + (COLS - 1) * q.colPitch;
-      const maxW = g.W * 0.84;
-      if (blockW(m) > maxW) {
-        m = setSize(Math.max(15, Math.floor((m.size * maxW) / blockW(m))));
+      const inkH = (q) => (ROWS - 1) * q.rowPitch + q.size * 0.76;
+      const maxW = g.W - margin * 2;
+      const maxH = g.H - margin * 2;
+      let m = setSize(100);
+      const fit = Math.min(maxW / blockW(m), maxH / inkH(m));
+      m = setSize(Math.max(12, Math.floor(100 * fit)));
+      while (m.size > 12 && (blockW(m) > maxW || inkH(m) > maxH)) {
+        m = setSize(m.size - 1);
       }
       g.wordW = m.wordW;
       g.lineH = m.lineH;
       g.rowPitch = m.rowPitch;
       g.colPitch = m.colPitch;
-      const totalW = blockW(m);
-      const totalH = (ROWS - 1) * g.rowPitch + g.lineH;
-      g.x0 = Math.round((g.W - totalW) / 2);
-      g.y0 = Math.round((g.H - totalH) / 2 / 4) * 4;
+      const o = ink(m.size, m.lineH);
+      g.x0 = Math.round(margin - o.left);
+      g.y0 = Math.round(margin - o.top);
       if (snap) {
         for (const w of words) {
           const p = slotPos(w.slot);
