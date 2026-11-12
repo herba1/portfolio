@@ -101,9 +101,11 @@
 }
 
 /* ---- the clock ----------------------------------------------------------
-   The only thing left of the status bar. Its midline sits at half the page's
-   step-back, so the tint flips as a whole exactly when the page's edge
-   passes through it, never splitting the glyphs. */
+   The only thing left of the status bar, set twice on top of itself: the
+   dark copy is clipped to the page, the white one to the black band above
+   the page's edge, both cut along that edge as it moves. Whatever part of
+   the glyphs the edge has passed is white on black, the rest is ink on the
+   page, so the time never sits half on the wrong ground. */
 
 .sh-clock {
   position: absolute;
@@ -111,14 +113,20 @@
   left: 0;
   right: 0;
   z-index: 2;
+  height: 20px;
   text-align: center;
-  color: var(--sh-ink);
   pointer-events: none;
-  transition: color 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.sh-root[data-tint="light"] .sh-clock {
+.sh-clock > span {
+  position: absolute;
+  inset: 0;
+  color: var(--sh-ink);
+}
+
+.sh-clock > [data-ink="light"] {
   color: #fff;
+  clip-path: inset(0 0 100% 0);
 }
 
 /* ---- the sheet --------------------------------------------------------- */
@@ -155,15 +163,15 @@
   background: #d6d3cd;
 }
 
-.sh-head {
+/* Side two's first row: the grabber's 16pt band, then one line of the pitch,
+   on the page's own axis and side margins. At half the sheet's edge sits 8pt
+   under side one's total, so this row lands exactly one empty line under it,
+   where the page's next group would. */
+.sh-credits.sh-head {
   --sh-rule: 0;
   position: relative;
-  display: grid;
-  grid-template-columns: var(--sh-label) minmax(0, 1fr) auto;
-  column-gap: var(--sh-gutter);
-  align-items: center;
-  height: 88px;
-  padding: 24px 20px 16px;
+  height: 40px;
+  padding: 16px 20px 0;
 }
 
 .sh-head::after {
@@ -177,38 +185,24 @@
   opacity: var(--sh-rule);
 }
 
-.sh-thumb {
-  justify-self: end;
-  width: 48px;
-  height: 48px;
-  border-radius: 6px;
-  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08);
-  pointer-events: none;
-}
-
-.sh-head-title {
-  margin: 0;
-  min-width: 0;
-  font-weight: var(--font-weight-strong);
-}
-
-.sh-head-time {
-  color: var(--sh-ink-2);
-}
-
 .sh-body {
   position: absolute;
-  top: 88px;
+  top: 40px;
   left: 0;
   right: 0;
-  height: 692px; /* 844 - 64 - 88: the viewport at full, ending at the screen's foot */
+  height: 740px; /* 844 - 64 - 40: the viewport at full, ending at the screen's foot */
   overflow: hidden;
-  /* The last lines fade into the screen's rounded foot instead of being cut. */
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent);
+  /* The last line fades into the screen's rounded foot instead of being cut
+     by it, wherever the sheet stands: --sh-foot is how much of the body is
+     on screen. */
+  --sh-foot: 100%;
+  mask-image: linear-gradient(to bottom, #000 calc(var(--sh-foot) - 24px), transparent var(--sh-foot));
 }
 
+/* No top padding: the first line under the head is side two's second
+   title, on the next line of the pitch. */
 .sh-scroll {
-  padding: 20px 20px 64px;
+  padding: 0 20px 64px;
 }
 
 /* ---- the credits, set like the back of a sleeve ------------------------ */
@@ -253,8 +247,15 @@
 
 .sh-v {
   margin: 0;
+  min-width: 0;
   font-weight: var(--font-weight-body);
   text-wrap: pretty;
+}
+
+/* A value with no label of its own: side two carrying on, a song's title
+   over its credits. */
+.sh-cont {
+  grid-column: 2;
 }
 
 /* The record's name: the same size and line as every value, a step up the
@@ -287,15 +288,14 @@
   list-style: none;
 }
 
+/* A title that turns over carries its running time down to its last line,
+   the way a contents page sets a broken entry, so the turnover reads as one
+   title running on to its time and not as a row out of line. */
 .sh-side li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: 12px;
-  align-items: baseline;
-}
-
-.sh-side li[data-current] {
-  font-weight: var(--font-weight-strong);
+  align-items: last baseline;
 }
 
 .sh-dur {

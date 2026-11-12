@@ -10,11 +10,17 @@ import "./sheet.css";
 // the whole screen is scaled once to fit the box.
 const W = 390;
 const H = 844;
+// The page sets the front of the sleeve on a 24pt pitch: the cover, the
+// record's three rows, then side one, its titles and the side's total. The
+// sheet is the back of the sleeve and carries the same listing on: its head
+// is side two's first row, set one empty line under side one's total, exactly
+// where the page's next group would start. Half is measured off the page
+// (titles can turn over) so that holds whatever the face sets.
 const FULL = 64; // sheet top at each detent
-const HALF = 444; // 20pt under the record's Year row, so half frames cover, title, artist and year whole
-const PEEK = 732; // the track row and the home indicator's band
-const DETENTS = [PEEK, HALF, FULL];
-const HEAD = 88; // grabber and the track row: the part that is always out
+const HALF = 656; // until measured: side one ends at 648 when "I Want You" turns over
+const PEEK = 756; // the head row and the next title, clear of the screen's rounded foot
+const HEAD_PAD = 16; // the grabber's band above the head row
+const HEAD = HEAD_PAD + 24; // the grabber's band and side two's first row: the part that is always out
 const VIEW = H - FULL - HEAD; // the credits' scroll viewport at full
 
 // The page behind, at full. It goes from 0 at half to 1 at full.
@@ -23,7 +29,7 @@ const CARD_SCALE = 0.94;
 const SCREEN_R = 55;
 const CARD_R = 12;
 const DIM = 0.12;
-const TINT_AT = 0.5; // the clock's midline sits at CARD_DY / 2
+const CLOCK_TOP = 16; // the clock's line box, in screen points
 
 // Springs in UIKit terms: response (s) and damping ratio.
 const spring = (response, damping) => ({
@@ -48,7 +54,6 @@ const unband = (v, lo, hi, d) => (v < lo ? lo - unrubber(lo - v, d) : v > hi ? h
 const sheetBand = (v) => band(v, FULL, PEEK, TOP_BAND);
 const sheetUnband = (v) => unband(v, FULL, PEEK, TOP_BAND);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const nearest = (y) => DETENTS.reduce((best, d) => (Math.abs(d - y) < Math.abs(best - y) ? d : best), DETENTS[0]);
 
 const velocityOf = (samples) => {
   if (samples.length < 2) return 0;
@@ -64,6 +69,7 @@ export default function Piece() {
   const stageRef = useRef(null);
   const cardRef = useRef(null);
   const dimRef = useRef(null);
+  const clockRef = useRef(null);
   const sheetRef = useRef(null);
   const headRef = useRef(null);
   const bodyRef = useRef(null);
@@ -74,11 +80,17 @@ export default function Piece() {
     const stage = stageRef.current;
     const card = cardRef.current;
     const dim = dimRef.current;
+    const [clockDark, clockLight] = clockRef.current.children;
     const sheet = sheetRef.current;
     const head = headRef.current;
     const body = bodyRef.current;
     const inner = scrollRef.current;
     const box = root.closest(".piece-box") || root;
+
+    // peek, half, full; half is set from the page in measure().
+    const DETENTS = [PEEK, HALF, FULL];
+    const nearest = (y) => DETENTS.reduce((best, d) => (Math.abs(d - y) < Math.abs(best - y) ? d : best), DETENTS[0]);
+    const record = card.querySelector(".sh-record");
 
     const s = {
       k: 1,
@@ -105,6 +117,16 @@ export default function Piece() {
       stage.style.height = `${H * s.k}px`;
       root.style.setProperty("--sh-k", s.k);
       s.scMax = Math.max(0, inner.offsetHeight - VIEW);
+      // Half: the sheet's edge 8pt under side one's total, so the head row's
+      // line starts one empty line (24pt) under it, on the page's pitch.
+      const end = Math.ceil((record.offsetTop + record.offsetHeight) / 4) * 4;
+      const half = end + 24 - HEAD_PAD;
+      if (half !== DETENTS[1]) {
+        const was = DETENTS[1];
+        DETENTS[1] = half;
+        if (s.target === was) s.target = half;
+        if (s.mode === "rest" && s.top === was) s.top = half;
+      }
       s.sc = clamp(s.sc, 0, s.scMax);
       paint();
     };
@@ -112,15 +134,18 @@ export default function Piece() {
     const paint = () => {
       const top = s.top;
       sheet.style.transform = `translate3d(0, ${top - FULL}px, 0)`;
-      const p = clamp((HALF - top) / (HALF - FULL), 0, 1);
+      body.style.setProperty("--sh-foot", `${H - top - HEAD}px`);
+      const p = clamp((DETENTS[1] - top) / (DETENTS[1] - FULL), 0, 1);
       const scale = 1 - (1 - CARD_SCALE) * p;
       card.style.transform = `translate3d(0, ${CARD_DY * p}px, 0) scale(${scale})`;
       card.style.borderRadius = `${SCREEN_R + (CARD_R - SCREEN_R) * p}px`;
       dim.style.opacity = `${DIM * p}`;
-      // The clock flips its tint as a whole, the way iOS does, once the page's
-      // edge has passed its midline: dark over the page, light over the black.
-      const tint = p > TINT_AT ? "light" : "dark";
-      if (root.dataset.tint !== tint) root.dataset.tint = tint;
+      // The clock is set twice and each copy is cut along the page's top edge:
+      // dark ink where the page is under it, white where the black is. While
+      // the edge crosses the glyphs every part of them stays legible.
+      const edge = Math.max(0, CARD_DY * p - CLOCK_TOP);
+      clockDark.style.clipPath = `inset(${edge}px 0 0 0)`;
+      clockLight.style.clipPath = `inset(0 0 calc(100% - ${edge}px) 0)`;
       const sc = band(s.sc, 0, s.scMax, VIEW);
       inner.style.transform = `translate3d(0, ${-sc}px, 0)`;
       head.style.setProperty("--sh-rule", `${clamp(sc / 12, 0, 1)}`);
@@ -352,6 +377,8 @@ export default function Piece() {
     const ro = new ResizeObserver(measure);
     ro.observe(box);
     measure();
+    let alive = true;
+    document.fonts?.ready.then(() => alive && measure());
     root.dataset.ready = "";
 
     let release = 0;
@@ -364,6 +391,7 @@ export default function Piece() {
     }
 
     return () => {
+      alive = false;
       clearTimeout(release);
       if (s.wheel) clearTimeout(s.wheel.timer);
       cancelAnimationFrame(s.raf);
@@ -379,7 +407,7 @@ export default function Piece() {
 
 
   return (
-    <div className="sh-root" ref={rootRef} data-tint="dark">
+    <div className="sh-root" ref={rootRef}>
       <div className="sh-stage" ref={stageRef}>
         <div className="sh-screen">
           <div className="sh-page" ref={cardRef}>
@@ -387,17 +415,25 @@ export default function Piece() {
             <div className="sh-dim" ref={dimRef} />
           </div>
 
-          <span className="sh-clock text-heading tabular-nums" aria-hidden>
-            9:41
-          </span>
+          <div className="sh-clock" ref={clockRef} aria-hidden>
+            <span className="text-heading tabular-nums" data-ink="dark">
+              9:41
+            </span>
+            <span className="text-heading tabular-nums" data-ink="light">
+              9:41
+            </span>
+          </div>
 
-          <section className="sh-sheet" ref={sheetRef} role="dialog" aria-label="Song credits">
+          <section className="sh-sheet" ref={sheetRef} role="dialog" aria-label={`${TRACK.sideLabel}, ${TRACK.title}`}>
             <div className="sh-grabber" aria-hidden />
-            <div className="sh-head" ref={headRef}>
-              <img className="sh-thumb" src={ALBUM.cover} alt="" draggable={false} />
-              <h2 className="sh-head-title text-heading">{TRACK.title}</h2>
-              <span className="sh-head-time text-ui-lg tabular-nums">{TRACK.length}</span>
-            </div>
+            {/* The head is side two's first row, set exactly as the page sets
+                side one's: the sheet at rest reads as the same listing
+                carrying on, and raising it turns the record over. */}
+            <dl className="sh-head sh-credits" ref={headRef}>
+              <Row label={TRACK.sideLabel}>
+                <Side tracks={TRACK.side} to={1} total={false} />
+              </Row>
+            </dl>
             <div className="sh-body" ref={bodyRef} data-scroll-contain>
               <div className="sh-scroll" ref={scrollRef}>
                 <Credits />
@@ -443,6 +479,23 @@ const clock = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 function Credits() {
   return (
     <dl className="sh-credits">
+      {/* The rest of side two, straight on from the head's row, on the same
+          axis with no label of its own, and the whole side's total. */}
+      <dd className="sh-v sh-cont text-body">
+        <Side tracks={TRACK.side} from={1} />
+      </dd>
+
+      {TRACK.label.map(([k, v], i) => (
+        <Row key={k} label={k} group={i === 0}>
+          {v}
+        </Row>
+      ))}
+
+      {/* The current track's credits, under its title set in the value
+          column the way a sleeve heads each song's credits. */}
+      <dd className="sh-v sh-cont text-body" data-group="" data-strong="">
+        {TRACK.title}
+      </dd>
       {TRACK.credits.map(([k, v]) => (
         <Row key={k} label={k}>
           {v}
@@ -478,36 +531,30 @@ function Credits() {
         ))}
       </Row>
 
-      <Row label={TRACK.sideLabel} group>
-        <Side tracks={TRACK.side} current={0} />
-      </Row>
-
-      {TRACK.label.map(([k, v], i) => (
-        <Row key={k} label={k} group={i === 0}>
-          {v}
-        </Row>
-      ))}
     </dl>
   );
 }
 
 // A side as the sleeve lists it: titles flush left from the axis, running
 // times flush right in tabular figures, one 24px pitch and no rules, and the
-// side's total under the durations like a ledger.
-function Side({ tracks, current }) {
-  const total = clock(tracks.reduce((sum, [, d]) => sum + seconds(d), 0));
+// side's total under the durations like a ledger. A side can be set in
+// pieces (from, to) and still total the whole of it.
+function Side({ tracks, from = 0, to = tracks.length, total = true }) {
+  const sum = clock(tracks.reduce((acc, [, d]) => acc + seconds(d), 0));
   return (
-    <ol className="sh-side">
-      {tracks.map(([t, d], i) => (
-        <li key={t} data-current={i === current ? "" : undefined}>
+    <ol className="sh-side" start={from + 1}>
+      {tracks.slice(from, to).map(([t, d]) => (
+        <li key={t}>
           <span>{t}</span>
           <span className="sh-dur tabular-nums">{d}</span>
         </li>
       ))}
-      <li className="sh-total">
-        <span className="sr-only">Total</span>
-        <span className="sh-dur tabular-nums">{total}</span>
-      </li>
+      {total && (
+        <li className="sh-total">
+          <span className="sr-only">Total</span>
+          <span className="sh-dur tabular-nums">{sum}</span>
+        </li>
+      )}
     </ol>
   );
 }
