@@ -42,11 +42,20 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Still params: ?t=0..1 time between the presses, ?cam=-1..1 orbit.
 
 const BASE = "/lab/moment/";
-const ZOOM = 1.075; // crop: the room the orbit turns in
-// The print: a 4:5 upright crop of the 3:2 plate, round the jumper, the way
-// a worm's-eye frame wants to be (sky above, the hotel and the tree only as
-// edges). Plate px: x0, y0, width, height.
-const VIEW = [362, 0, 852, 1066];
+// The print is full-bleed: the 3:2 plate covers the viewport, cropped by
+// the viewport's own aspect, the way a worm's-eye frame wants to be (you are
+// lying in the grass under it, not looking at a photo of it). The camera is
+// rolled a few degrees (a Dutch tilt), so the post, the wires and the
+// hotel's converging verticals cut the frame on diagonals instead of
+// standing square; the crop is the largest upright rectangle that the
+// rolled plate still covers, less a margin for the orbit, tightened a
+// little so the jumper can sit on a thirds line, not dead centre.
+const ROLL = (5 * Math.PI) / 180; // + turns the picture anticlockwise
+const EDGE = [46, 40]; // plate px kept clear of the plate's edge: the room the orbit turns in
+const TIGHT = 1.1; // crop inside the largest one that fits, for room to place him
+const ANCHOR = [725, 470]; // plate px: his chest, between the two presses
+const THIRD = [1 / 3, 1 / 3]; // where in a landscape print he sits (fractions of w, h)
+const MIN_ASPECT = 2 / 3; // narrower than 2:3 would cut into him: the print is letterboxed
 const ORBIT_X = 0.075; // m of camera travel either side
 const ORBIT_Y = 0.028;
 const PIVOT = 2.0; // m: the camera keeps looking at this distance
@@ -61,7 +70,7 @@ const SUBJ_STEP = 4; // plate px per jumper cell
 
 const PROJECT = `
 uniform vec2 uSize;     // plate px
-uniform vec4 uView;     // the print's crop of the plate, px (x0, y0, w, h)
+uniform vec4 uView;     // the print's crop of the rolled plate, px (x0, y0, w, h)
 uniform float uF;
 uniform vec2 uC;
 uniform vec3 uRx;       // camera axes (rows of R^T)
@@ -70,13 +79,12 @@ uniform vec3 uRz;
 uniform vec3 uCam;      // camera position, m
 uniform vec4 uFrame;    // frame rect, device px, top left origin
 uniform vec2 uRes;      // target size, device px
-uniform float uZoom;
 // p: plate px, d: disparity 1/m (0 = sky). Homogeneous: X = ray / d.
 vec4 project(vec2 p, float d, float zOrder) {
   vec3 ray = vec3((p - uC) / uF, 1.0) - uCam * d;
   vec3 q = vec3(dot(uRx, ray), dot(uRy, ray), dot(uRz, ray));
   vec2 pp = q.xy / q.z * uF + uC;
-  vec2 s = ((pp - uView.xy) / uView.zw - 0.5) * uZoom + 0.5;
+  vec2 s = (pp - uView.xy) / uView.zw;
   vec2 px = uFrame.xy + s * uFrame.zw;
   vec2 c = px / uRes * 2.0 - 1.0;
   return vec4(c.x, -c.y, zOrder, 1.0);
@@ -534,17 +542,81 @@ export async function createMoment(host, { embedded = false } = {}) {
     }
   };
 
+  // ---- the crop. The roll turns the picture about the principal point, so
+  // a point of the plate lands at C + R(p - C) in the rolled picture (the
+  // sky's exactly; nearer things move with the orbit too, inside EDGE).
+  const cr = Math.cos(ROLL);
+  const sr = Math.sin(ROLL);
+  const [Cx, Cy] = scene.c;
+  const toRolled = (x, y) => [Cx + cr * (x - Cx) + sr * (y - Cy), Cy - sr * (x - Cx) + cr * (y - Cy)];
+  const toPlate = (u, v) => [Cx + cr * (u - Cx) - sr * (v - Cy), Cy + sr * (u - Cx) + cr * (v - Cy)];
+  // does an upright w x h crop centred at (cx, cy) stay on the plate?
+  const fits = (cx, cy, w, h) => {
+    for (const [dx, dy] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      const [x, y] = toPlate(cx + (dx * w) / 2, cy + (dy * h) / 2);
+      if (x < EDGE[0] || x > PW - EDGE[0] || y < EDGE[1] || y > PH - EDGE[1]) return false;
+    }
+    return true;
+  };
+  const view = [0, 0, PW, PH];
+  const fitView = (aspect) => {
+    // the largest crop of this aspect: by symmetry it is centred on the
+    // plate's own (rolled) centre
+    const [ox, oy] = toRolled(PW / 2, PH / 2);
+    let lo = 1;
+    let hi = PH;
+    for (let i = 0; i < 30; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(ox, oy, mid * aspect, mid)) lo = mid;
+      else hi = mid;
+    }
+    const h = lo / TIGHT;
+    const w = h * aspect;
+    // where he would sit on the thirds; the crop slides that way only as
+    // far as the plate allows (the feasible centres are convex, so bisect
+    // along the way, then let each axis slide on alone)
+    const [ax, ay] = toRolled(ANCHOR[0], ANCHOR[1]);
+    // an upright print is too narrow for a vertical third: he is centred
+    // across it, and only the horizontal third holds
+    const tx = THIRD[0] + (0.5 - THIRD[0]) * clamp((1.3 - aspect) / 0.55, 0, 1);
+    const want = [ax + (0.5 - tx) * w, ay + (0.5 - THIRD[1]) * h];
+    const reach = (from, to) => {
+      if (fits(to[0], to[1], w, h)) return to;
+      let a = 0;
+      let b = 1;
+      for (let i = 0; i < 24; i++) {
+        const m = (a + b) / 2;
+        if (fits(from[0] + (to[0] - from[0]) * m, from[1] + (to[1] - from[1]) * m, w, h)) a = m;
+        else b = m;
+      }
+      return [from[0] + (to[0] - from[0]) * a, from[1] + (to[1] - from[1]) * a];
+    };
+    let c = reach([ox, oy], want);
+    c = reach(c, [want[0], c[1]]);
+    c = reach(c, [c[0], want[1]]);
+    view[0] = c[0] - w / 2;
+    view[1] = c[1] - h / 2;
+    view[2] = w;
+    view[3] = h;
+  };
+
   let dirty = true;
   const box = { w: 1, h: 1, dpr: 1, pw: 1, ph: 1 };
   const frame = { x: 0, y: 0, w: 1, h: 1 };
   stage.onResize((w, h, dpr) => {
     Object.assign(box, { w, h, dpr, pw: Math.round(w * dpr), ph: Math.round(h * dpr) });
-    // a large print, centred, on black
-    const a = VIEW[2] / VIEW[3];
-    const narrow = w < 640;
-    const fw = Math.min(narrow ? w - 32 : w * 0.9, h * (narrow ? 0.9 : 0.84) * a);
-    const fh = fw / a;
-    Object.assign(frame, { w: fw, h: fh, x: (w - fw) / 2, y: (h - fh) / 2 });
+    // full-bleed; only a viewport narrower than 2:3 (a phone held upright)
+    // gets a print the width of the screen, centred on black, so that the
+    // crop never cuts into him
+    const a = Math.max(w / h, MIN_ASPECT);
+    const fh = Math.min(h, w / a);
+    Object.assign(frame, { w, h: fh, x: 0, y: (h - fh) / 2 });
+    fitView(a);
     freeTargets();
     targets.scene = makeTarget(box.pw, box.ph, false);
     targets.sky = makeTarget(box.pw, box.ph, false);
@@ -573,7 +645,7 @@ export async function createMoment(host, { embedded = false } = {}) {
   let time = 0;
 
   // ---- input: drag across the frame scrubs the half second, 1:1
-  const span = () => Math.max(frame.w * 1.1, 340);
+  const span = () => Math.max(Math.min(frame.w, frame.h) * 0.9, 340);
   stage.on("down", (p) => {
     intro = null;
     drag = { x0: p.x, t0: t };
@@ -619,14 +691,17 @@ export async function createMoment(host, { embedded = false } = {}) {
     const cy = -ORBIT_Y * (1 - c * c) + ORBIT_Y * 0.5 + breathY;
     const C = [cx, cy, 0];
     const f = norm([-cx, -cy, PIVOT]);
-    const r = norm(cross([0, 1, 0], f));
-    const d = cross(f, r);
+    const r0 = norm(cross([0, 1, 0], f));
+    const d0 = cross(f, r0);
+    // the Dutch tilt: roll the camera's own axes about its view direction
+    const r = [cr * r0[0] + sr * d0[0], cr * r0[1] + sr * d0[1], cr * r0[2] + sr * d0[2]];
+    const d = [cr * d0[0] - sr * r0[0], cr * d0[1] - sr * r0[1], cr * d0[2] - sr * r0[2]];
     return { C, r, d, f };
   };
 
   const setProjection = (u, cm, w, h) => {
     gl.uniform2f(u.uSize, PW, PH);
-    gl.uniform4f(u.uView, VIEW[0], VIEW[1], VIEW[2], VIEW[3]);
+    gl.uniform4f(u.uView, view[0], view[1], view[2], view[3]);
     gl.uniform1f(u.uF, scene.f);
     gl.uniform2f(u.uC, scene.c[0], scene.c[1]);
     gl.uniform3fv(u.uRx, cm.r);
@@ -636,7 +711,6 @@ export async function createMoment(host, { embedded = false } = {}) {
     const dpr = box.dpr;
     gl.uniform4f(u.uFrame, frame.x * dpr, frame.y * dpr, frame.w * dpr, frame.h * dpr);
     gl.uniform2f(u.uRes, w, h);
-    gl.uniform1f(u.uZoom, ZOOM);
   };
 
   const render = () => {
@@ -650,12 +724,20 @@ export async function createMoment(host, { embedded = false } = {}) {
     // the screen he can reach is touched (his rect, grown by his flow and
     // the orbit), which keeps the two extra passes cheap.
     const m = scene.subject.flowRange + 90;
-    const toScreen = (px, py) => [
-      frame.x + (((px - VIEW[0]) / VIEW[2] - 0.5) * ZOOM + 0.5) * frame.w,
-      frame.y + (((py - VIEW[1]) / VIEW[3] - 0.5) * ZOOM + 0.5) * frame.h,
+    const toScreen = (px, py) => {
+      const [u, v] = toRolled(px, py);
+      return [frame.x + ((u - view[0]) / view[2]) * frame.w, frame.y + ((v - view[1]) / view[3]) * frame.h];
+    };
+    const corners = [
+      toScreen(rect[0] - m, rect[1] - m),
+      toScreen(rect[2] + m, rect[1] - m),
+      toScreen(rect[0] - m, rect[3] + m),
+      toScreen(rect[2] + m, rect[3] + m),
     ];
-    const [sx0, sy0] = toScreen(rect[0] - m, rect[1] - m);
-    const [sx1, sy1] = toScreen(rect[2] + m, rect[3] + m);
+    const sx0 = Math.min(...corners.map((p) => p[0]));
+    const sx1 = Math.max(...corners.map((p) => p[0]));
+    const sy0 = Math.min(...corners.map((p) => p[1]));
+    const sy1 = Math.max(...corners.map((p) => p[1]));
     const dpr = box.dpr;
     const cx0 = clamp(Math.floor(Math.max(sx0, frame.x) * dpr), 0, pw);
     const cx1 = clamp(Math.ceil(Math.min(sx1, frame.x + frame.w) * dpr), 0, pw);
@@ -773,7 +855,7 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
 
-    // the ground round the print stays clean black
+    // a letterboxed print (a phone held upright) keeps clean black round it
     const fx0 = Math.round(frame.x * dpr);
     const fy0 = Math.round(frame.y * dpr);
     const fx1 = Math.round((frame.x + frame.w) * dpr);
