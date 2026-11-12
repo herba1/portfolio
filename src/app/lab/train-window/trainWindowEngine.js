@@ -8,8 +8,10 @@ import { POLE_GEOM, POLE_REGIONS, poleCells } from "./poleKeys";
 // worm's-eye look-up. The camera is pitched ~32° up, so the horizon sits at
 // the very bottom of the print (bowing up into its lower corners) and the sky
 // fills nearly all of it, through a 110° Panini lens with a stereographic
-// vertical squeeze. The poles, seen from below, converge hard on a vanishing
-// point overhead, their crossarms against the cumulus. Each pixel's ray is
+// vertical squeeze. The line's poles stand right beside the track, so the one
+// passing the window is the picture's hero: its trunk climbs out of the tree
+// line and rushes up to a vanishing point overhead, its crossarms and
+// insulators foreshortened hard against the cumulus near the top of the print. Each pixel's ray is
 // levelled back into a square-out pinhole's image plane (tan of the angle,
 // horizon at y = 0, camera 1.7 m up), where the layers live. Moving along the track by s metres moves
 // everything at distance D by s / D in that plane, so each layer slides at its
@@ -26,20 +28,23 @@ import { POLE_GEOM, POLE_REGIONS, poleCells } from "./poleKeys";
 //  - cumulus at a few kilometres (Poly Haven `kloofendal_48d_partly_cloudy`
 //    pure sky, rotated so its sun agrees with the plate's, baked up to the
 //    zenith by tools/depth/bakes/train-window/sky.py), which barely move;
-//  - distribution poles every 11-19 m, 8 m out, so one nearly always stands
-//    in the window and climbs into the sky from below its bottom edge
-//    (Poly Haven `modular_electricity_poles`, scaled to an 11.5 m pole, lit by
-//    the plate's own HDRI). Each is drawn from the camera's real viewpoint:
-//    the model is rendered from this camera at keys along the track (every
-//    1.6 m for the head, see poleKeys.js), so as a pole slides from the edge
-//    of the window to the middle its crossarms, which run in depth, swing from
-//    long diagonals to stubs over the trunk, and the undersides of the arms,
-//    the pin insulators and the transformer can foreshorten the way they do
-//    from 8 m below. The conductors, and the drop wires that leave some poles
+//  - distribution poles every 24-44 m, 3.4 m out, so one at a time crosses
+//    the window, its head at ~71° up, near the top of the print, and between
+//    them there is open sky crossed by the wires (Poly Haven
+//    `modular_electricity_poles`, scaled to an 11.5 m pole, lit by the plate's
+//    own HDRI). Each is drawn from the camera's real viewpoint: the model is
+//    rendered from this camera at keys along the track (every 4° of view for
+//    the head, see poleKeys.js), so as a pole slides from the edge of the
+//    window to the middle its crossarms, which run in depth and reach to
+//    within 2.3 m of the lens, swing from long diagonals to spikes rushing up
+//    out of the print, and the undersides of the arms, the pin insulators and
+//    the transformer foreshorten the way they do from right beneath them. A
+//    pole is dark against the sky, with a hairline sky rim where its edge is
+//    crisp. The conductors, and the drop wires that leave some poles
 //    for a house across the track or a farm beyond the field, are 3D
 //    catenaries projected exactly.
 //
-// Motion blur is the shutter: every layer is integrated along x over 1/40 s
+// Motion blur is the shutter: every layer is integrated along x over 1/125 s
 // at its own screen velocity, so the near grass streaks, the poles smear into
 // soft bars, the hedge softens and the clouds stay sharp. The pole is the
 // print's one sharp anchor: at a crawl it is opaque and crisp, and the poles
@@ -66,11 +71,11 @@ const D_HEDGE = 120; // hedge and barn
 const HEDGE_SCALE = 0.55; // the plate's hedge, set back to that distance
 const D_DIST = 900; // far tree line
 const D_SKY = 3000; // cumulus
-const D_POLE = POLE_GEOM.D; // pole line, just past the ballast
+const D_POLE = POLE_GEOM.D; // pole line, right beside the ballast
 const POLE_SCALE = POLE_GEOM.scale; // model units -> metres (an 11.5 m pole)
-const POLE_CELL = 15; // mean spacing (m): one is nearly always in the window
-const POLE_JITTER = 8; // spacing varies by this much (m)
-const SHUTTER = 1 / 40;
+const POLE_CELL = 34; // mean spacing (m): one pole in the window at a time, then open sky
+const POLE_JITTER = 10; // spacing varies by this much (m)
+const SHUTTER = 1 / 125; // a sunny-day speed: the pole beside the track smears, but keeps its core
 const V_MAX = 34; // m/s, a fast local
 const V_CRUISE = 2.4; // the crawl it coasts down to
 const HFOV = 110; // degrees across a landscape print
@@ -90,6 +95,12 @@ const HEAD = POLE_REGIONS.head;
 const TRUNK = POLE_REGIONS.trunk;
 const HEAD_L = poleCells(HEAD);
 const TRUNK_L = poleCells(TRUNK);
+// How far from its foot (plane units) any part of a pole can reach: a + b |px|.
+const REACH = (() => {
+  const zm = Math.max(-HEAD.z0, HEAD.z1);
+  const am = Math.max(-HEAD.a0, HEAD.a1);
+  return [(am + 0.05) / (D_POLE - zm), zm / (D_POLE - zm)];
+})();
 // Wires, in the model's pole frame (metres): x along the track, y up, z in
 // depth from the pole line (+ away from the train). The crossarms run in
 // depth; their insulators lie along the track, all to one side of the trunk
@@ -114,12 +125,15 @@ const DROPS = [
   [[PIN_X, ARM_LO, -0.2 * POLE_SCALE], [6.5, 5.6, -14], 0.9],
   [[PIN_X, ARM_HI, 0.45 * POLE_SCALE], [-26, 5.0, 34], 1.2],
 ];
-// The poles are seen from below, against a sky the polariser holds down: the
-// faces toward the lens are mostly shaded undersides. The wood keeps its own
-// radiance up to a knee; above it the sunlit steel and glaze roll off under a
-// ceiling (linear, under the darkest clear blue the poles cross), so a pole is
-// darker than the sky behind it, sharp or smeared, and still has its form.
-const POLE_TONE = { knee: 0.016, ceil: 0.036 };
+// The poles are seen from right beneath, against a sky the polariser holds
+// down: the faces toward the lens are shaded undersides, a stop under what the
+// plate's HDRI gives an open-air model (gain). The wood keeps that radiance up
+// to a knee; above it the sunlit steel and glaze roll off under a ceiling
+// (linear, far under the darkest clear blue the poles cross), so a pole is a
+// dark silhouette against the sky, sharp or smeared, and still has its form;
+// its edge carries a hairline of skylight (POLE_RIM, see the shader).
+const POLE_TONE = { gain: 0.5, knee: 0.008, ceil: 0.019 };
+const POLE_RIM = 2.1;
 // Sky grade (see the shader): cloud highlight push in stops, how much local
 // form and top-lit relief steer it, the warm-neutral shoulder, and the
 // luminance the push eases toward (x the print exposure, just under white).
@@ -144,7 +158,7 @@ uniform sampler2D uGround;  // horizontal box pyramid atlas, premultiplied linea
 uniform sampler2D uHedge;
 uniform highp sampler2D uPoleHead;  // per-row prefix sums, premultiplied linear, one run per key
 uniform highp sampler2D uPoleTrunk;
-uniform vec4 uHeadCell[${HEAD_L.cells.length}];   // per key: run x, first row, width (texels), half width (plane)
+uniform vec4 uHeadCell[${HEAD_L.cells.length}];   // per key: run x + 8192 x band, left edge (plane), width (texels), span (plane)
 uniform vec4 uTrunkCell[${TRUNK_L.cells.length}];
 uniform vec4 uGroundLv[${LEVELS}]; // x offset (texels), width (texels), atlas width, unused
 uniform vec4 uHedgeLv[${LEVELS}];
@@ -168,6 +182,7 @@ uniform vec4 uPole[8];  // per candidate pole: track position (m), mirror (+-1),
 uniform int uPoleN;
 uniform int uDbg;
 uniform vec3 uHalo;     // pole-edge halation, linear
+uniform float uRim;     // a pole's edge glint, x the sky behind it
 
 const float LO = ${LO.toFixed(2)};
 const float HI = ${HI.toFixed(2)};
@@ -226,9 +241,10 @@ vec4 satAt(highp sampler2D T, int base, int w, float X, int row) {
 // cell is clear), linear between rows at Y (rows from the top).
 vec4 keyBox(highp sampler2D T, vec4 c, int rows, float lx, float Y, float lenU) {
   float w = c.z;
-  float X = (lx + c.w) / (2.0 * c.w) * w;
-  float len = max(lenU / (2.0 * c.w) * w, 1.0);
-  int base = int(c.x + 0.5), wi = int(w + 0.5), off = int(c.y + 0.5);
+  float X = (lx - c.y) / c.w * w;
+  float len = max(lenU / c.w * w, 1.0);
+  int ci = int(c.x + 0.5);
+  int base = ci % 8192, wi = int(w + 0.5), off = (ci / 8192) * rows;
   float yy = clamp(Y - 0.5, 0.0, float(rows - 1));
   int r0 = int(floor(yy));
   int r1 = min(r0 + 1, rows - 1);
@@ -238,12 +254,13 @@ vec4 keyBox(highp sampler2D T, vec4 c, int rows, float lx, float Y, float lenU) 
   return max(mix(s0, s1, yy - floor(yy)) / len, vec4(0.0));
 }
 // A pole at key coordinate kx (its image-plane x, mirrored for a mirrored
-// pole), from the two keys either side. The blend is eased so a pole is
-// mostly one crisp key, with a short cross-fade where the next takes over.
-#define REGION(NAME, T, CELLS, N, K0, DK, ROWS, ELT, ELB) \
+// pole), from the two keys either side (spaced evenly in the angle atan(kx)).
+// The blend is eased so a pole is mostly one crisp key, with a short
+// cross-fade where the next takes over.
+#define REGION(NAME, T, CELLS, N, TMAX, ROWS, ELT, ELB) \
 vec4 NAME(float kx, float lx, float y, float lenU, float dY) { \
   float Y = (ELT - atan(y)) / (ELT - ELB) * float(ROWS) + dY; \
-  float f = clamp((kx - (K0)) / (DK), 0.0, float(N - 1)); \
+  float f = clamp((atan(kx) + (TMAX)) / (2.0 * (TMAX)) * float(N - 1), 0.0, float(N - 1)); \
   int i0 = int(floor(f)); \
   int i1 = min(i0 + 1, N - 1); \
   float t = smoothstep(0.2, 0.8, f - floor(f)); \
@@ -251,8 +268,8 @@ vec4 NAME(float kx, float lx, float y, float lenU, float dY) { \
   vec4 b = t > 0.0 ? keyBox(T, CELLS[i1], ROWS, lx, Y, lenU) : vec4(0.0); \
   return mix(a, b, t); \
 }
-REGION(poleHead, uPoleHead, uHeadCell, ${HEAD.n}, ${HEAD.k0.toFixed(3)}, ${HEAD.dk.toFixed(3)}, ${HEAD_L.rows}, ${HEAD_L.elTop.toFixed(6)}, ${HEAD_L.elBot.toFixed(6)})
-REGION(poleTrunk, uPoleTrunk, uTrunkCell, ${TRUNK.n}, ${TRUNK.k0.toFixed(3)}, ${TRUNK.dk.toFixed(3)}, ${TRUNK_L.rows}, ${TRUNK_L.elTop.toFixed(6)}, ${TRUNK_L.elBot.toFixed(6)})
+REGION(poleHead, uPoleHead, uHeadCell, ${HEAD.n}, ${((HEAD.tMax * Math.PI) / 180).toFixed(6)}, ${HEAD_L.rows}, ${HEAD_L.elTop.toFixed(6)}, ${HEAD_L.elBot.toFixed(6)})
+REGION(poleTrunk, uPoleTrunk, uTrunkCell, ${TRUNK.n}, ${((TRUNK.tMax * Math.PI) / 180).toFixed(6)}, ${TRUNK_L.rows}, ${TRUNK_L.elTop.toFixed(6)}, ${TRUNK_L.elBot.toFixed(6)})
 vec4 poleAt(float kx, float lx, float y, float lenU, float dY) {
   float wH = smoothstep(${(HEAD.y0 + 0.005).toFixed(3)}, ${(TRUNK.y1 - 0.005).toFixed(3)}, y);
   vec4 r = vec4(0.0);
@@ -328,6 +345,7 @@ void main() {
   float el = asin(clamp(r.y, -1.0, 1.0)) * DEG;
   // one render pixel, in image-plane units, for the conductors' coverage
   float pxY = max(length(vec2(dFdx(y), dFdy(y))), 1e-6);
+  float pxX = max(length(vec2(dFdx(x), dFdy(x))), 1e-6);
   float aV = abs(uV);
 
   // Sky: cumulus a few km off, rotating past very slowly.
@@ -473,7 +491,7 @@ void main() {
     vec4 pl = uPole[i];
     float px = (pl.x - uS) / ${D_POLE.toFixed(1)};
     float lx = x - px;
-    float reach = ${HEAD.w0.toFixed(3)} + ${HEAD.wk.toFixed(3)} * abs(px) + 0.5 * lenU;
+    float reach = ${REACH[0].toFixed(3)} + ${REACH[1].toFixed(3)} * abs(px) + 0.5 * lenU;
     if (abs(lx) > reach) continue;
     if (y < ${TRUNK.y0.toFixed(3)} || y > ${HEAD.y1.toFixed(3)}) continue;
     // a mirrored pole is its mirror image's key, flipped
@@ -486,10 +504,26 @@ void main() {
       // The edge is where the pole's coverage over a small neighbourhood
       // (along the smear, and a few rows above and below for the arms)
       // falls short of its coverage here.
+      vec3 bg = col;
       float bgL = dot(col, LUMA);
       float hot = smoothstep(0.6, 1.7, bgL);
       col = col * (1.0 - pc.a) + pc.rgb;
       lineA = 1.0 - (1.0 - lineA) * (1.0 - pc.a);
+      // Sky rim: the pole is backlit by the whole sky behind it, so the
+      // grazing skin of the trunk and the arms' edges catch that light and
+      // glint, a pale hairline a little brighter than the sky (and paler: the
+      // polariser does not hold a glint down) around the silhouette. It lives
+      // where the coverage drops to clear within two pixels (either way
+      // across, or two rows up or down), so a crisp pole carries it and a
+      // smeared one, whose edges are long ramps, does not.
+      if (pc.a > 0.02) {
+        float o = 2.0 * pxX;
+        float nb = min(min(poleAt(kx, klx - o, y, lenU, 0.0).a, poleAt(kx, klx + o, y, lenU, 0.0).a),
+                       min(poleAt(kx, klx, y, lenU, -2.0).a, poleAt(kx, klx, y, lenU, 2.0).a));
+        float rim = pc.a * pc.a * smoothstep(0.2, 0.75, pc.a - nb);
+        vec3 glint = mix(bg, vec3(bgL), 0.55) * uRim;
+        col = mix(col, glint, rim);
+      }
       if (hot > 0.0 && pc.a > 0.01) {
         float nA = 0.5 * poleAt(kx, klx, y, lenU + 0.02, 0.0).a
                  + 0.25 * poleAt(kx, klx, y, 0.012, -4.0).a
@@ -679,12 +713,12 @@ function hPyramid(gl, img, { wrap, alpha }) {
 }
 
 // The pole keys as per-row prefix sums (RGBA32F, one run of w + 1 texels per
-// key, each starting at zero) of premultiplied linear radiance, rolled off
-// from 'knee' toward 'ceil' first. Read with texelFetch only: float32 linear
+// key, each starting at zero) of premultiplied linear radiance, scaled by
+// 'gain' and rolled off from 'knee' toward 'ceil' first. Read with texelFetch only: float32 linear
 // filtering is optional in WebGL2, and the shader interpolates itself.
-// Returns the texture and, per key, its run's x, first row, width and half
-// width (plane units), for the shader.
-function rowSAT(gl, img, layout, { knee, ceil }) {
+// Returns the texture and, per key, its run's x (+ 8192 x its band), its
+// left edge, width (texels) and span (plane units), for the shader.
+function rowSAT(gl, img, layout, { gain, knee, ceil }) {
   const w = img.naturalWidth;
   const h = img.naturalHeight;
   const cv = document.createElement("canvas");
@@ -706,13 +740,13 @@ function rowSAT(gl, img, layout, { knee, ceil }) {
       k = 0;
     }
     const sx = c.x + k++;
-    cells.set([sx, c.y, c.w, c.hw], n * 4);
+    cells.set([sx + (c.y / layout.rows) * 8192, c.l, c.w, c.r - c.l], n * 4);
     tw = Math.max(tw, sx + c.w + 1);
   });
   const th = layout.height;
   const out = new Float32Array(tw * th * 4);
   layout.cells.forEach((c, n) => {
-    const sx = cells[n * 4];
+    const sx = cells[n * 4] % 8192;
     for (let y = 0; y < layout.rows; y++) {
       const row = c.y + y;
       let r = 0;
@@ -728,9 +762,9 @@ function rowSAT(gl, img, layout, { knee, ceil }) {
           const R = lut[src[si]];
           const G = lut[src[si + 1]];
           const B = lut[src[si + 2]];
-          const l = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+          const l = gain * (0.2126 * R + 0.7152 * G + 0.0722 * B);
           const o = l - knee;
-          const kk = o > 0 ? (al * (knee + o / (1 + o / (ceil - knee)))) / l : al;
+          const kk = gain * (o > 0 ? (al * (knee + o / (1 + o / (ceil - knee)))) / l : al);
           r += R * kk;
           g += G * kk;
           b += B * kk;
@@ -782,7 +816,7 @@ const freeTarget = (gl, t) => {
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
-// Poles stand on a jittered 15 m grid: spacing 11-19 m, never regular.
+// Poles stand on a jittered 34 m grid: spacing 24-44 m, never regular.
 const hash = (n) => {
   const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return s - Math.floor(s);
@@ -936,7 +970,7 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
 
   // Train state. s in metres along the track, v in m/s (+ = scenery moves
   // left, the train runs to the right of the view).
-  let s = startS != null ? startS : polePos(2) + 3;
+  let s = startS != null ? startS : polePos(2) + 1.2;
   let v = held ? clamp(heldV, -V_MAX, V_MAX) : reduce ? 0 : 13;
   let dir = Math.sign(v) || 1;
   let throttle = null; // { x0, v0 } while dragging
@@ -1054,6 +1088,7 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     gl.uniform1i(u.uPoleN, count);
     gl.uniform1i(u.uDbg, dbg);
     gl.uniform3f(u.uHalo, 0.34, 0.12, 0.035);
+    gl.uniform1f(u.uRim, POLE_RIM);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

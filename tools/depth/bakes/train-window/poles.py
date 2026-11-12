@@ -51,7 +51,7 @@ def pack(src, region):
     p = (y1 - np.tan(el)) / (y1 - y0) * H  # in render rows from the top
     p = np.clip(p, 0, H)
     for c in L["cells"]:
-        f = os.path.join(src, f"{region}_{c['px']:.2f}.f32")
+        f = os.path.join(src, c["file"])
         w = c["w"]
         a = np.fromfile(f, np.float32).reshape(H, w * SS, 4)[::-1]
         a = a.reshape(H, w, SS, 4).mean(2)

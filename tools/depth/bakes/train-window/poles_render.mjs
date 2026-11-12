@@ -26,17 +26,19 @@ const SS = 2;
 const yMin2 = R.y0 < 0 && R.y1 > 0 ? 0 : Math.min(R.y0 * R.y0, R.y1 * R.y1);
 const rowsPerUnit = (R.rowsPerDeg * 180) / Math.PI / (1 + yMin2);
 const H = Math.ceil(SS * rowsPerUnit * (R.y1 - R.y0));
+const fileOf = (c) => `${region}_${c.px.toFixed(3)}.f32`;
 const jobs = layout.cells.slice(+first, +first + +count).map((c) => ({
-  name: `${region}_${c.px.toFixed(2)}.f32`,
+  name: fileOf(c),
   px: c.px,
-  l: -c.hw,
-  r: c.hw,
+  l: c.l,
+  r: c.r,
   t: R.y1,
   b: R.y0,
   W: c.w * SS,
   H,
 }));
-writeFileSync(join(out, `cells-${region}.json`), JSON.stringify({ region: R, ...layout, H, SS }, null, 1));
+const cells = layout.cells.map((c) => ({ ...c, file: fileOf(c) }));
+writeFileSync(join(out, `cells-${region}.json`), JSON.stringify({ region: R, ...layout, cells, H, SS }, null, 1));
 
 const cfg = {
   preset: "preset_01_",
