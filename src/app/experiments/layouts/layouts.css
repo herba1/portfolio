@@ -361,6 +361,13 @@
   :is(.deck, .ol-root, .flyout-panel, .bd-dock__panel, .cf-tracks, .hm-scroll, .pull-vinyl-scroll, .ink-panel__body) {
   overflow-y: hidden !important;
 }
+/* A held-still scroller is still a scroll container, and an
+   `overscroll-behavior: contain` on it (a piece's own page wants that) stops
+   the wheel from chaining past it, so the page never moves. Until the tile is
+   in hand nothing inside it may hold the scroll back. */
+.xl-tile:not([data-engaged], [data-focused]) .piece-box * {
+  overscroll-behavior: auto !important;
+}
 
 /* Focus (ScrollGuard): on a touch screen a tile hands the piece every
    gesture only once its Focus button is pressed. Inside, nothing reaches the
