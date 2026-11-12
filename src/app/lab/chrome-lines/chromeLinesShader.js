@@ -213,6 +213,10 @@ vec4 surface(vec2 p){
     vec2 ab = uTa[j].zw - a;
     float l2 = max(dot(ab, ab), 1e-4);
     float tr = dot(p - a, ab) / l2;
+    // Past either end the kernel is the end's own round cap: t holds still
+    // there, so it carries no gradient along the thread, and the radius,
+    // eased in and out along the thread, has no slope at either end. The
+    // field and its gradient run on across the caps without a seam.
     float t = clamp(tr, 0.0, 1.0);
     vec2 d = p - a - ab * t;
     float tm = uTm[j].x;
@@ -417,24 +421,65 @@ void main(){
   const int NS = 44;
   const float STEP = 2.0;               // css px
   const float TAU = 3.0;                // softness of the max, css px
+  // How deep the chrome must stay along the reach for it to count, in
+  // css px to the edge. From inside the body the reach must stay inside
+  // it: a column that runs out of the body and up a stem into a loose drop
+  // would otherwise carry the drop's lines down into the body as a
+  // straight-sided strip, and the next column over, which just misses the
+  // stem, would not. Close to a rim the reach is let run along the
+  // shallows, so the folds under the rims are still ironed.
+  float deep = clamp(sf.x * 1.2, 12.0, 36.0);
   float c = 1.0 - uK.x;
   vec2 du = vec2(-N0.x, N0.y) * STEP / uSurfRes;   // one step up the screen
   // Online log-sum-exp of X(y - k) - X(y), and of the same for flat chrome.
   // The reach ends, softly, where it leaves the chrome: past the rim there
   // are no lines to follow, and a ray that only grazes a rim must not tear
   // the screen beside one that crosses it.
-  float m = 0.0, acc = 1.0, ref = 1.0, vis = 1.0;
+  // The visibility is kept as its log, and the reach is only cut once that
+  // has discounted any lead the far side could have (D spans ~160 px), so
+  // the cut itself never tears the screen between neighbouring columns.
+  float m = 0.0, acc = 1.0, ref = 1.0, lv = 0.0;
   for (int k = 1; k <= NS; k++){
     float dk = c * STEP * float(k);
     ref += exp(-dk / TAU);
     vec4 s = texture(uSurf, uv + du * float(k));
-    vis *= smoothstep(-2.0, 12.0, s.x);
-    if (vis < 1e-4) break;
-    float v = s.y - sf.y - dk + TAU * log(vis);
+    lv += log(max(smoothstep(-2.0, deep, s.x), 1e-30));
+    if (lv < -70.0) break;
+    float v = s.y - sf.y - dk + TAU * lv;
     if (v > m){ acc = acc * exp((m - v) / TAU) + 1.0; m = v; }
     else acc += exp((v - m) / TAU);
   }
   sf.y += m + TAU * log(acc / ref);
+  o = sf;
+}`;
+
+// The lead the ironing added, eased across the screen. One column's reach
+// can thread something its neighbour's just misses (the flank of a stem up
+// into a drop), and the lead then steps from one column to the next: the
+// screen would tear along a straight edge running up the screen, or crowd
+// finer than the print can hold into a grey wash. So the lead is averaged
+// across the screen, over the chrome only, and the screen bends instead.
+export const FS_EASE = FS_HEAD + `
+uniform sampler2D uSurf;
+uniform sampler2D uMono;
+uniform vec2 uSurfRes;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uSurfRes;
+  vec4 sf = texture(uSurf, uv);
+  vec2 side = vec2(N0.y, N0.x) / uSurfRes;         // one css px across the screen
+  const int NB = 12;
+  const float BSTEP = 2.0;              // css px
+  const float sig = 9.0;                // css px
+  float acc = 0.0, wsum = 0.0;
+  for (int k = -NB; k <= NB; k++){
+    vec2 o = side * BSTEP * float(k);
+    float sx = texture(uSurf, uv + o).x;
+    float w = exp(-0.5 * pow(BSTEP * float(k) / sig, 2.0)) * smoothstep(-2.0, 6.0, sx);
+    acc += w * (texture(uMono, uv + o).y - texture(uSurf, uv + o).y);
+    wsum += w;
+  }
+  float lead = wsum > 1e-4 ? acc / wsum : texture(uMono, uv).y - sf.y;
+  sf.y += lead;
   o = sf;
 }`;
 

@@ -1,5 +1,5 @@
 import { createStage, clamp } from "../_kit/stage";
-import { VS, FS_ONE, FS_SURF, FS_MONO, FS_PRINT, MAXB, MAXT } from "./chromeLinesShader";
+import { VS, FS_ONE, FS_SURF, FS_MONO, FS_EASE, FS_PRINT, MAXB, MAXT } from "./chromeLinesShader";
 
 // A pool of mercury on acid paper, printed as a line engraving.
 //
@@ -137,21 +137,22 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // Two passes where a half-float target is renderable (nearly everywhere),
   // else one pass that does the surface per device pixel.
   const twoPass = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
-  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uG", "uSurfRes", "uSurf"];
+  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uG", "uSurfRes", "uSurf", "uMono"];
   const make = (fs) => {
     const p = program(gl, VS, fs);
     const u = {};
     for (const n of NAMES) u[n] = gl.getUniformLocation(p, n);
     return { p, u };
   };
-  // Surface, then the pass that irons the line phase monotone, then the print.
-  const progs = twoPass ? [make(FS_SURF), make(FS_MONO), make(FS_PRINT)] : [make(FS_ONE)];
-  const surfTex = [null, null];
-  const surfFbo = [null, null];
+  // Surface, then the pass that irons the line phase monotone, the pass
+  // that eases what the ironing added across the screen, then the print.
+  const progs = twoPass ? [make(FS_SURF), make(FS_MONO), make(FS_EASE), make(FS_PRINT)] : [make(FS_ONE)];
+  const surfTex = [null, null, null];
+  const surfFbo = [null, null, null];
   let surfW = 0;
   let surfH = 0;
   const freeSurf = () => {
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       if (surfTex[i]) gl.deleteTexture(surfTex[i]);
       if (surfFbo[i]) gl.deleteFramebuffer(surfFbo[i]);
     }
@@ -161,7 +162,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
     surfW = w;
     surfH = h;
     freeSurf();
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       const t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
@@ -476,6 +477,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       b.y = b.ry;
       b.vx = b.vy = 0;
     }
+    for (const th of threads) Object.assign(th, { on: false, w: 0 });
     step(0, 0, null);
     let start = null;
     const end = pullAt ? [pullAt[0] * W, pullAt[1] * H] : null;
@@ -525,7 +527,9 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       D[i * 4 + 3] = b.ty;
     }
     threads.forEach((th, j) => {
-      const w = th.on ? th.w : 0;
+      // A thread with no live pull is nothing: no dormant slot lingers in
+      // the pool's field.
+      const w = th.on && th.w > 1e-3 ? th.w : 0;
       TA.set([th.ax, th.ay, th.bx, th.by], j * 4);
       TR.set([Math.max(th.ra, 1), Math.max(th.rm, 0.5), Math.max(th.rb, 1), w], j * 4);
       TM.set([th.tm, th.dx, th.dy, 0], j * 4);
@@ -569,10 +573,21 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, surfTex[0]);
       gl.uniform1i(um.uSurf, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      // What the ironing added, eased across the screen.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, surfFbo[2]);
+      const ue = bind(progs[2]);
+      gl.uniform2f(ue.uSurfRes, surfW, surfH);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, surfTex[1]);
+      gl.uniform1i(ue.uMono, 1);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, surfTex[0]);
+      gl.uniform1i(ue.uSurf, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, cw, ch);
-      const u1 = bind(progs[2]);
-      gl.bindTexture(gl.TEXTURE_2D, surfTex[1]);
+      const u1 = bind(progs[3]);
+      gl.bindTexture(gl.TEXTURE_2D, surfTex[2]);
       gl.uniform1i(u1.uSurf, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else {
