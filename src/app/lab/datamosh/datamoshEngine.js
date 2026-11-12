@@ -44,8 +44,8 @@ import { readWebm } from "./webm";
 // read in whole pels, nearest, with no half-pel filter (see mcHeld), so the
 // smear stays hard-edged however long the hold runs. Whatever sits near the
 // centre of that frame's motion is dragged out along its rays again and
-// again into long stepped streaks. One block past the starved ones the
-// edge of the tear repeats the same P-frame but still takes the I-frame,
+// again into long stepped streaks. One block past the end of each starved
+// ray the edge of the tear repeats the same P-frame but still takes the I-frame,
 // so the new shot is torn into the strips there and the strips out across
 // it. Every other block is fed and decodes the true frame, so the mosh is a
 // tear in an intact picture.
@@ -57,8 +57,11 @@ import { readWebm } from "./webm";
 // paper.
 //
 // Press and drag and the hand paints a mask of starved macroblocks, a soft
-// brush a few blocks across dragged along its path, each block tearing at
-// its own level so the edge breaks raggedly on the grid. Under it the
+// brush a few blocks across dragged along its path, read along the rays out
+// of the vanishing point: each ray tears out from the stroke's inner edge
+// to its own random length, so the tear ends in radial strips of different
+// lengths instead of a stepped outline, and no block in a ray decodes true
+// while the block upstream of it is moshed. Under it the
 // next I-frame does not arrive, and after it nothing but one P-frame's
 // vectors. In the first shot they still fit the picture they move, so the
 // tear barely shows. The real event is the cut. Its I-frame (and the loop
@@ -102,6 +105,11 @@ const GROW_MAX = 0.5; // and at most this much of the upstream block's level
 const REFRESH = 14; // frames for the intra refresh to sweep the picture
 const BRUSH = 6; // brush radius, macroblocks (about five torn across)
 const FADE = 1.6; // s: time constant of the starved mask once the hand lifts
+const RAY_PX = 8; // px of frame edge per ray of the starved mask (see starveAlongRays)
+const RAY_STEP = 8; // px between samples along a ray
+const RAY_LIFT = 0.3; // brush level at which a ray enters the stroke
+const RAY_REACH = [0.2, 1.4]; // each ray's random reach (1: the frame edge at full level)
+const RAY_MIN = 64; // px: shortest stretch a ray's distance is normalised over
 // The hero stroke a still paints while its hold runs: a V through the lower
 // third, up from the fence at the left to the winter shot's vanishing point
 // (0.385, 0.33) and down again to the fence at the right, both arms along
@@ -770,13 +778,6 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   const mask = new Float32Array(MW * MH);
   const age = new Uint16Array(MW * MH);
   const dirty = new Uint8Array(MW * MH);
-  // each block starves at its own level, so the edge of a stroke tears
-  // raggedly along the macroblock grid instead of tracing a smooth outline
-  const thresh = new Float32Array(MW * MH);
-  for (let id = 0; id < MW * MH; id++) {
-    const h = Math.sin(id * 12.9898 + 78.233) * 43758.5453;
-    thresh[id] = 0.3 + 0.32 * (h - Math.floor(h));
-  }
   const stamp = (cx, cy) => {
     const r = BRUSH;
     for (let j = Math.max(0, Math.floor(cy - r)); j < Math.min(MH, Math.ceil(cy + r)); j++) {
@@ -886,6 +887,188 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     }
     const c = -pv / pp;
     return c > FOE_C ? { c, x: mx + ux / c, y: my + uy / c } : { c: 0 };
+  };
+  // The starved mask is read along rays, not block by block. Every radial
+  // line out of the vanishing point (the median centre of the clip's zoom
+  // frames, fitted as above) gets one random reach, and a block is starved
+  // only where the brush level times its ray's reach exceeds its distance
+  // along the ray from the stroke's inner edge (the first point, walking out
+  // from the centre, where the level clears RAY_LIFT), normalised so the
+  // frame edge is 1. Walking out, a ray that stops being starved stays fed
+  // until it has left the stroke, so a ray has no holes: no block in it
+  // decodes true while the block upstream of it is moshed. The tear's
+  // boundary is the ends of radial strips of different lengths (ref 2's
+  // strip ends), not a stepped outline, and a ray whose reach is long runs
+  // unbroken to the frame edge. The edge band (the I-frame lands, then the
+  // repeated P-frame) is the one macroblock past each ray's end.
+  const rayC = (() => {
+    const f = new Float32Array(mv.GW * mv.GH * 4);
+    const xs = [];
+    const ys = [];
+    for (let k = 0; k < N; k++) {
+      mv.unpack(k, f);
+      const o = foeOf(f);
+      if (o.c && o.x >= 0 && o.x < W && o.y >= 0 && o.y < H) {
+        xs.push(o.x);
+        ys.push(o.y);
+      }
+    }
+    if (!xs.length) return [STROKE[3][0] * W, STROKE[3][1] * H];
+    xs.sort((p, q) => p - q);
+    ys.sort((p, q) => p - q);
+    return [xs[xs.length >> 1], ys[ys.length >> 1]];
+  })();
+  // one ray per RAY_PX of frame edge, aimed at the middle of its stretch
+  const NR = Math.round((2 * (W + H)) / RAY_PX);
+  const rayUx = new Float32Array(NR);
+  const rayUy = new Float32Array(NR);
+  const rayLen = new Float32Array(NR);
+  const rayReach = new Float32Array(NR);
+  for (let k = 0; k < NR; k++) {
+    let s = (k + 0.5) * RAY_PX;
+    let ex = 0;
+    let ey = 0;
+    if (s < W) ex = s;
+    else if ((s -= W) < H) [ex, ey] = [W, s];
+    else if ((s -= H) < W) [ex, ey] = [W - s, H];
+    else ey = H - (s - W);
+    const dx = ex - rayC[0];
+    const dy = ey - rayC[1];
+    const len = Math.max(1, Math.hypot(dx, dy));
+    rayUx[k] = dx / len;
+    rayUy[k] = dy / len;
+    rayLen[k] = len;
+  }
+  // A ray's reach is random, but not independent of its neighbours': near
+  // the centre a macroblock is crossed by several rays, and since none of it
+  // decodes true while any of them runs on, independent reaches would only
+  // ever end strips out by the frame edge. Two octaves of value noise round
+  // the edge plus a little of the ray's own: strips that end at every
+  // distance, wide ones nearer the centre, ragged single ones further out.
+  const hash = (n) => {
+    const h = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const vnoise = (x, seed) => {
+    const i = Math.floor(x);
+    const f = x - i;
+    const a = hash(((i % NR) + NR) % NR + seed);
+    const b = hash((((i + 1) % NR) + NR) % NR + seed);
+    return a + (b - a) * f * f * (3 - 2 * f);
+  };
+  for (let k = 0; k < NR; k++) {
+    const n = 0.5 * vnoise(k / 24, 0) + 0.3 * vnoise(k / 7, 0.5) + 0.2 * hash(k + 0.25);
+    // stretch the middle-heavy sum back out across the range
+    const u = clamp((n - 0.5) * 1.7 + 0.5, 0, 1);
+    rayReach[k] = RAY_REACH[0] + (RAY_REACH[1] - RAY_REACH[0]) * u;
+  }
+  // each block's upstream neighbour, one macroblock in toward the centre
+  // along its own ray (-1 at the centre), and the blocks in order outward
+  const upOf = new Int32Array(MW * MH);
+  const rOf = new Float32Array(MW * MH);
+  const sideOf = new Int32Array(MW * MH).fill(-1);
+  for (let id = 0; id < MW * MH; id++) {
+    const i = id % MW;
+    const j = (id - i) / MW;
+    const dx = i * 16 + 8 - rayC[0];
+    const dy = j * 16 + 8 - rayC[1];
+    const r = Math.hypot(dx, dy);
+    rOf[id] = r;
+    upOf[id] = -1;
+    if (r < 12) continue;
+    const ui = clamp(Math.floor((i * 16 + 8 - (dx / r) * 16) / 16), 0, MW - 1);
+    const uj = clamp(Math.floor((j * 16 + 8 - (dy / r) * 16) / 16), 0, MH - 1);
+    if (uj * MW + ui === id) continue;
+    upOf[id] = uj * MW + ui;
+    // a diagonal step only touches its upstream block at a corner, so a
+    // strip one block wide would fall apart into a staircase of squares:
+    // it also takes the block between them nearer its ray
+    if (ui !== i && uj !== j) {
+      const h = j * MW + ui; // across
+      const v = uj * MW + i; // up or down
+      const off = (bx, by) => Math.abs((bx * 16 + 8 - rayC[0]) * dy - (by * 16 + 8 - rayC[1]) * dx);
+      sideOf[id] = off(ui, j) <= off(i, uj) ? h : v;
+    }
+  }
+  const outward = Array.from({ length: MW * MH }, (_, id) => id).sort((a, b) => rOf[a] - rOf[b]);
+  const band = new Uint8Array(MW * MH);
+  const wasStarved = new Uint8Array(MW * MH);
+  // each block belongs to the ray through its centre
+  const rayOf = new Int32Array(MW * MH);
+  for (let id = 0; id < MW * MH; id++) {
+    const dx = (id % MW) * 16 + 8 - rayC[0];
+    const dy = Math.floor(id / MW) * 16 + 8 - rayC[1];
+    // where the ray through it leaves the frame, as a distance round the edge
+    const t = Math.min(dx > 0 ? (W - rayC[0]) / dx : dx < 0 ? -rayC[0] / dx : Infinity, dy > 0 ? (H - rayC[1]) / dy : dy < 0 ? -rayC[1] / dy : Infinity);
+    const ex = clamp(rayC[0] + dx * t, 0, W);
+    const ey = clamp(rayC[1] + dy * t, 0, H);
+    let e;
+    if (!Number.isFinite(t)) e = 0;
+    else if (ey <= 0.5) e = ex;
+    else if (ex >= W - 0.5) e = W + ey;
+    else if (ey >= H - 0.5) e = W + H + (W - ex);
+    else e = 2 * W + H + (H - ey);
+    rayOf[id] = clamp(Math.floor(e / RAY_PX), 0, NR - 1);
+  }
+  // each ray's starved stretches, [from, to) in px from the centre
+  const SEGS = 4;
+  const segs = new Float32Array(NR * SEGS * 2);
+  const segN = new Uint8Array(NR);
+  const starveAlongRays = (held) => {
+    // walk every ray outward from the centre
+    for (let k = 0; k < NR; k++) {
+      let armed = true;
+      let rIn = -1;
+      segN[k] = 0;
+      for (let r = 0; r < rayLen[k] + RAY_STEP; r += RAY_STEP) {
+        const rr = Math.min(r, rayLen[k] - 1);
+        const i = clamp(Math.floor((rayC[0] + rayUx[k] * rr) / 16), 0, MW - 1);
+        const j = clamp(Math.floor((rayC[1] + rayUy[k] * rr) / 16), 0, MH - 1);
+        const lvl = mask[j * MW + i];
+        if (rIn < 0) {
+          if (lvl <= RAY_LIFT) armed = true;
+          else if (armed) rIn = r;
+          if (rIn < 0) continue;
+        }
+        const d = (r - rIn) / Math.max(RAY_MIN, rayLen[k] - rIn);
+        const end = r >= rayLen[k];
+        if (lvl * rayReach[k] > d && !end) continue;
+        // the ray's end: fed from here until it has left the stroke
+        if (segN[k] < SEGS) {
+          const o = (k * SEGS + segN[k]++) * 2;
+          segs[o] = rIn;
+          segs[o + 1] = end ? Infinity : r;
+        }
+        rIn = -1;
+        armed = false;
+      }
+    }
+    // a block is starved where its own ray is
+    for (let id = 0; id < MW * MH; id++) {
+      const k = rayOf[id];
+      const r = rOf[id];
+      let s = 0;
+      for (let n = 0; n < segN[k] && !s; n++) {
+        const o = (k * SEGS + n) * 2;
+        if (r >= segs[o] - 12 && r < segs[o + 1]) s = 1;
+      }
+      // while the hand holds, a block that has lost its I-frame stays torn
+      // (fed again, it would drift its mosh as squares into the picture)
+      starved[id] = s || (held && wasStarved[id] && frozen[id]) ? 1 : 0;
+    }
+    // and so is everything upstream of a starved block, back to where the
+    // stroke begins, so no block in a ray decodes true while the ray runs on
+    // past it: the tear is radial strips that end where their own ray does
+    for (let n = outward.length - 1; n >= 0; n--) {
+      const id = outward[n];
+      const up = upOf[id];
+      if (!starved[id] || up < 0 || mask[up] <= RAY_LIFT) continue;
+      starved[up] = 1;
+      if (sideOf[id] >= 0) starved[sideOf[id]] = 1;
+    }
+    // the edge band: one macroblock past the end of each strip
+    for (let id = 0; id < MW * MH; id++) band[id] = !starved[id] && upOf[id] >= 0 && starved[upOf[id]] ? 1 : 0;
+    wasStarved.set(starved);
   };
   // the duplicated P-frame: the first one after the I-frame a held block
   // missed, kept whole, so a block the tear takes over later repeats the
@@ -1040,28 +1223,17 @@ export async function createDatamosh(host, { embedded = false } = {}) {
       if (dupFoe.c) skipToPredicted(dupField);
       dupDue = false;
     }
-    // per macroblock: starved where the mask is over its (ragged) threshold,
-    // and one block past it the edge: stripped and starved the same way
+    // per macroblock: starved where its ray reaches (see starveAlongRays),
+    // and one block past each ray's end the edge: stripped and starved the same way
     // (it repeats the same P-frame from the moshed picture) but still taking
     // the I-frame, so the winter picture lands there and is then dragged
     // across the seam, and the strips read winter back in from it; drifting
     // where it was held and nothing intra has reached it since
-    for (let id = 0; id < MW * MH; id++) starved[id] = mask[id] > thresh[id] ? 1 : 0;
+    starveAlongRays(held);
     let dirtyN = 0;
     for (let id = 0; id < MW * MH; id++) {
       const i = id % MW;
-      const j = (id - i) / MW;
-      let edge = 0;
-      if (!starved[id]) {
-        for (let jj = Math.max(0, j - 1); jj <= Math.min(MH - 1, j + 1) && !edge; jj++) {
-          for (let ii = Math.max(0, i - 1); ii <= Math.min(MW - 1, i + 1); ii++) {
-            if (starved[jj * MW + ii]) {
-              edge = 1;
-              break;
-            }
-          }
-        }
-      }
+      const edge = !starved[id] && band[id] ? 1 : 0;
       const on = starved[id] || edge;
       // a block the spreading tear takes over joins the P-frame its
       // neighbours are repeating, if they are already repeating one
