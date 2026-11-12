@@ -1,6 +1,7 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createSound, db } from "@/lib/sound/engine";
 import { takes } from "./noCoverTakes";
+import { LABEL, rng, handle, fingertip, drag, lift } from "./noCoverHandling";
 
 // After Christian Marclay, Record Without a Cover (1985): a record sold with
 // no sleeve, so the marks of handling become part of what it plays.
@@ -16,21 +17,28 @@ import { takes } from "./noCoverTakes";
 // Band gaps between tracks are smooth vinyl and break the fan into rings.
 // The pressing is a hair off centre and a little warped, so the fan sways.
 //
-// Damage is a height field fixed to the record, 4096 texels across. Every
-// drag is stamped into it as a cut with a profile: a trench in the middle,
-// the displaced vinyl heaped into a broken bead of burr either side, chips
-// bitten out of the walls, all deeper the faster the hand moves. A second
-// target keeps the direction the grit travelled. The shader takes normals
-// from the height and lights the cut with the same lobe as the grooves, with
-// the cut's direction as its tangent, so a scratch flares only when it lies
-// across the light and goes dark as the record or the light turns on. Where
+// Damage is a height field fixed to the record, 4096 texels across. What is
+// in it is not drawn: it comes from a simulation of handling (see
+// noCoverHandling.js). The record is slid out of stacks, covered by others,
+// wiped, held and set on the spindle a few hundred times, each a rigid motion
+// against a patch of grit, and every grain's path through the motion is cut
+// in. A drag goes through the same contact: the pointer is a fingertip with
+// grit under it. Each cut is stamped with a profile: a trench in the middle,
+// the displaced vinyl heaped into a continuous lip of burr either side, the
+// walls chipped where a hard grain ploughed deep. A second target keeps the
+// direction the grit travelled, weighted by how much of a texel the cut
+// covers. The shader reads both prefiltered to the pixel, takes normals from
+// the height and lights each cut with the same lobe as the grooves, along its
+// own direction, so a scratch flares only where it lies across the light, and
+// every family of arcs from one handling lights up as its own small fan. Where
 // a cut runs, the groove is broken and its sheen stops.
 //
 // Spinning is a shutter's worth of rotation integrated per pixel: as many
-// taps as the arc covers pixels, each offset by its own blue-noise jitter,
-// and the paper label is integrated in the same loop, so it smears with the
-// vinyl. Each cut also leaves its angle in a ring of bins; spinning sweeps
-// the stylus through the bins, and every bin with damage in it ticks or pops.
+// taps as the arc covers pixels, each offset by its own blue-noise jitter and
+// weighted by a shutter that opens and closes, and the paper label is
+// integrated in the same loop, so it smears with the vinyl. Each cut also
+// leaves its angle in a ring of bins; spinning sweeps the stylus through the
+// bins, and every bin with damage in it ticks or pops.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -50,7 +58,7 @@ void main(){
   float L = length(d);
   vec2 u = L > 1e-7 ? d / L : vec2(1.0, 0.0);
   vec2 n = vec2(-u.y, u.x);
-  float ext = aCut.x * 4.2 + uTexel * 2.0;
+  float ext = aCut.x * 4.2 + uTexel * 4.0;
   float sx = float(gl_VertexID & 1);
   float sy = float((gl_VertexID >> 1) & 1);
   // Segments abut end to end (a texel of overlap), with no round caps: caps
@@ -66,6 +74,7 @@ in vec2 vP;
 flat in vec4 vSeg;
 flat in vec4 vCut;
 uniform float uSize;
+uniform float uTexel;
 layout(location=0) out vec4 oH;    // trench depth, burr height
 layout(location=1) out vec4 oD;    // direction of travel, doubled angle
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -77,31 +86,37 @@ float vnoise(vec2 p){
 void main(){
   vec2 a = vSeg.xy, ba = vSeg.zw - a, pa = vP - a;
   float h = dot(pa, ba) / max(dot(ba, ba), 1e-12);
-  float hw = vCut.x, depth = vCut.y, burrH = vCut.z, seed = vCut.w;
-  float d = length(pa - ba * h) / hw;
+  float depth = vCut.y, burrH = vCut.z, seed = vCut.w;
+  // Nothing is narrower than the field can hold: a trench at least a texel
+  // and a half across, a burr at least two, so neither breaks into single
+  // texels that light up as grit.
+  float hw = max(vCut.x, 0.75 * uTexel);
+  float dist = length(pa - ba * h);
   float side = ba.x * pa.y - ba.y * pa.x > 0.0 ? 1.0 : -1.0;
   // Noise lives on the record, not on the segment, so a cut stays one
   // continuous thing across every segment it was drawn in.
   vec2 tp = vP * uSize * 0.5;
   float nA = vnoise(tp * 0.035 + seed * 13.1);
   float nB = vnoise(tp * 0.011 + seed * 5.7);
-  // Chips: the wall breaks away to one side in bites.
-  float chip = smoothstep(0.62, 0.92, vnoise(tp * 0.045 + side * 19.3 + seed * 7.0));
+  // Chips: where a hard grain ploughs deep, the wall breaks away in bites.
+  float chip = smoothstep(0.62, 0.92, vnoise(tp * 0.03 + side * 19.3 + seed * 7.0)) * smoothstep(0.35, 0.8, depth);
   float wl = 1.0 + 1.3 * chip;
-  float dd = d / wl;
+  float dd = dist / (hw * wl);
   float trench = depth * (0.5 + 0.5 * nB) * (0.75 + 0.5 * nA) * max(0.0, 1.0 - dd * dd);
-  // Flakes knocked out beside the cut.
-  float pit = smoothstep(0.8, 0.93, vnoise(tp * 0.13 + seed * 3.3)) * exp(-pow((d - 1.9) / 0.8, 2.0)) * depth * 0.7;
-  trench = max(trench, pit);
-  // Burrs: the vinyl the grit pushed aside, heaped in a lip each side and
-  // broken into beads.
-  float bead = smoothstep(0.15, 0.5, vnoise(tp * 0.05 + side * 41.0 + seed * 2.1));
-  float burr = burrH * exp(-pow((d - 1.7 * wl) / (0.5 + 0.3 * wl), 2.0)) * (0.15 + 0.85 * bead) * (0.75 + 0.5 * nA);
-  float alpha = (1.0 - smoothstep(2.6, 3.6, d)) * clamp(0.3 + depth * 1.4, 0.0, 1.0);
+  // Burrs: the vinyl the grit pushed aside, heaped in a continuous lip each
+  // side, swelling and thinning slowly along the cut.
+  float bc = hw * wl * 1.3 + 0.5 * uTexel;
+  float bs = max(0.5 * hw, 1.0 * uTexel);
+  float swell = vnoise(tp * 0.018 + side * 41.0 + seed * 2.1);
+  float burr = burrH * exp(-pow((dist - bc) / bs, 2.0)) * (0.55 + 0.45 * swell) * (0.8 + 0.4 * nA);
+  float alpha = (1.0 - smoothstep(bc + 1.4 * bs, bc + 2.4 * bs, dist)) * clamp(0.3 + depth * 1.4, 0.0, 1.0);
   vec2 u = normalize(ba + vec2(1e-9, 0.0));
   float a2 = 2.0 * atan(u.y, u.x);
   oH = vec4(clamp(trench, 0.0, 1.0), clamp(burr, 0.0, 1.0), 0.0, alpha);
-  oD = vec4(0.5 + 0.5 * cos(a2), 0.5 + 0.5 * sin(a2), 0.0, alpha);
+  // The direction is written only across the cut itself, so that once it is
+  // filtered to a pixel its strength is the share of the pixel that is cut.
+  float cover = 1.0 - smoothstep(0.7, 1.15, dd);
+  oD = vec4(0.5 + 0.5 * cos(a2), 0.5 + 0.5 * sin(a2), 0.0, cover);
 }`;
 
 const FS = `#version 300 es
@@ -109,7 +124,7 @@ precision highp float;
 uniform vec2 uRes; uniform float uDpr; uniform vec2 uC; uniform float uR;
 uniform float uA; uniform float uBlur; uniform vec3 uL; uniform vec2 uEcc;
 uniform sampler2D uDmg; uniform sampler2D uDir; uniform sampler2D uLab;
-uniform float uTex;
+uniform float uTex; uniform float uLod;
 out vec4 o;
 
 const float LABEL = 0.331;   // 50 / 151
@@ -236,53 +251,73 @@ void main(){
     float arc = uBlur * r * uR * uDpr;
     int n = uBlur > 1e-4 ? int(clamp(ceil(arc / 1.4), 1.0, float(TAPS))) : 1;
     float bn = ign(gl_FragCoord.xy);
-    float dspec = 0.0, stress = 0.0, cavity = 0.0;
+    // Taps further apart than a pixel would each find a hairline or miss it:
+    // read the field filtered to the spacing of the taps instead.
+    float spread = max(1.0, arc / float(n));
+    float lod = uLod + log2(spread);
+    float step_ = uTex * spread;
+    float dspec = 0.0, stress = 0.0, cavity = 0.0, scuff = 0.0;
     vec3 paper = vec3(0.0);
+    float wsum = 0.0;
     for (int i = 0; i < TAPS; i++) {
       if (i >= n) break;
       float u = n == 1 ? 0.5 : (float(i) + fract(bn + float(i) * 0.6180339)) / float(n);
       float a = uA - uBlur * (u - 0.5);
       vec2 l = rot(q, -a);                      // record-local
       vec2 uv = l * 0.5 + 0.5;
-      if (labWide > 0.0) paper += texture(uLab, l / LABEL * 0.5 + 0.5).rgb;
+      // The shutter opens and closes rather than snapping: taps near its ends
+      // count for less, so a smeared scratch fades in and out, not a block.
+      float w = n == 1 ? 1.0 : 0.2 + 0.8 * sin(3.14159265 * u);
+      wsum += w;
+      if (labWide > 0.0) paper += w * texture(uLab, l / LABEL * 0.5 + 0.5).rgb;
 
       // The damage: height from trench and burr, normal from its slope.
-      vec2 s0 = texture(uDmg, uv).rg;
+      vec2 s0 = textureLod(uDmg, uv, lod).rg;
+      scuff += w * s0.r;
       if (s0.r + s0.g < 0.002) continue;
-      vec2 sx = texture(uDmg, uv + vec2(uTex, 0.0)).rg;
-      vec2 sy = texture(uDmg, uv + vec2(0.0, uTex)).rg;
-      float h0 = s0.g * HB - s0.r, hx = sx.g * HB - sx.r, hy = sy.g * HB - sy.r;
-      vec2 grad = rot(vec2(hx - h0, hy - h0) * SLOPE, a);
+      // The field is read prefiltered to the pixel (a mip level picked from
+      // the zoom), and its slope by central differences a pixel apart: a
+      // hairline narrower than a pixel dims and widens to one, it does not
+      // break into lit and unlit texels.
+      vec2 e = vec2(step_, 0.0);
+      vec2 sxp = textureLod(uDmg, uv + e.xy, lod).rg, sxm = textureLod(uDmg, uv - e.xy, lod).rg;
+      vec2 syp = textureLod(uDmg, uv + e.yx, lod).rg, sym = textureLod(uDmg, uv - e.yx, lod).rg;
+      float hx = (sxp.g - sxm.g) * HB - (sxp.r - sxm.r);
+      float hy = (syp.g - sym.g) * HB - (syp.r - sym.r);
+      vec2 grad = rot(vec2(hx, hy) * 0.5 * SLOPE, a);
       vec3 N = normalize(vec3(-grad, 1.0));
       float dmg = s0.r + s0.g;
       float brk = smoothstep(0.03, 0.22, dmg);
 
-      // The tangent: the groove's circle, or where the groove is broken, the
-      // line the grit travelled.
-      vec2 de = texture(uDir, uv).rg * 2.0 - 1.0;
-      float dm = smoothstep(0.05, 0.45, length(de));
+      // How much of this pixel is scratch, whatever its depth: the direction
+      // field is written with the cut's coverage, so after the mip filter the
+      // length of the averaged direction is the share of the pixel it covers.
+      vec2 de = textureLod(uDir, uv, lod).rg * 2.0 - 1.0;
+      float cov = smoothstep(0.02, 0.6, length(de));
       float ang = 0.5 * atan(de.y, de.x) + a;
       vec2 D = vec2(cos(ang), sin(ang));
-      D *= dot(D, Tg) < 0.0 ? -1.0 : 1.0;
-      float m = brk * dm;
-      vec2 Tt = normalize(mix(Tg, D, m) + vec2(1e-5, 0.0));
-      vec3 T3 = normalize(vec3(Tt, 0.0) - N * dot(vec3(Tt, 0.0), N));
+      vec3 T3 = normalize(vec3(D, 0.0) - N * dot(vec3(D, 0.0), N));
       vec3 B3 = cross(N, T3);
+      vec3 Tg3 = normalize(vec3(Tg, 0.0) - N * dot(vec3(Tg, 0.0), N));
 
-      // Grooves are fibres: wide across. A cut's walls are facets: narrower
-      // across, so only the wall that faces the light catches it. What this
-      // tap adds is its difference from clean vinyl.
-      float f = aniso(T3, B3, N, Hw, mix(1.0, 1.6, m), mix(2.5, 0.34, brk));
-      float wall = brk * (1.5 + 0.8 * s0.g);
-      dspec += f * (base * (1.0 - brk) + wall) - f0 * base;
+      // Two lobes. The groove's, on the tilted surface, where the groove
+      // survives. And the scratch's own, along the line the grit travelled:
+      // a hairline is a tiny cylinder, lit along its length only where it
+      // crosses the light and free across it, so a family of arcs about one
+      // centre lights up as its own small fan; a deep cut's walls are facets,
+      // narrow across, so only the wall that faces the light catches it.
+      // What this tap adds is its difference from clean vinyl.
+      float fg = aniso(Tg3, cross(N, Tg3), N, Hw, 1.0, 2.5);
+      float fs = aniso(T3, B3, N, Hw, 1.9, mix(2.2, 0.34, brk));
+      dspec += w * (fg * base * (1.0 - max(brk, 0.6 * cov)) + fs * cov * (1.25 + 0.8 * s0.g) - f0 * base);
       // Fresh-cut vinyl stress-whitens a little, and the floor of a deep
       // trench sits in its own shadow.
-      stress += (s0.g * 0.8 + s0.r * 0.35) * (0.4 + 0.6 * max(dot(N, uL), 0.0));
-      cavity += s0.r;
+      stress += w * (s0.g * 0.8 + s0.r * 0.35) * (0.4 + 0.6 * max(dot(N, uL), 0.0));
+      cavity += w * s0.r;
     }
-    float fn = float(n);
+    float fn = wsum;
     float spec = max(0.0, f0 * base + dspec / fn);
-    stress /= fn; cavity /= fn; paper /= fn;
+    stress /= fn; cavity /= fn; paper /= fn; scuff /= fn;
 
     // Black vinyl: almost no diffuse, a faint coherent reflection of the
     // room where it is smooth, a little more scatter where it is grooved.
@@ -308,6 +343,9 @@ void main(){
       vec3 pc = pow(paper, vec3(2.2));
       float light = 0.86 + 0.06 * dot(q, Lxy) / LABEL * 0.3;
       vec3 labc = pc * light;
+      // Spindle marks: where the spindle's tip dragged across the paper
+      // hunting for the hole, it rubbed in a grey trail of grease and fibre.
+      labc *= 1.0 - 0.55 * clamp(scuff * 1.6, 0.0, 1.0);
       // The edge of the paper: a hairline of shadow away from the light.
       float rim = exp(-pow((r - (LABEL - 0.002)) / 0.003, 2.0));
       labc *= 1.0 - 0.35 * rim * max(0.0, -facing);
@@ -353,21 +391,7 @@ function program(gl, vs, fs) {
 const TAU = Math.PI * 2;
 const RPM = 100 / 3;
 const OMEGA = (RPM / 60) * TAU; // rad/s at 33 1/3
-const LABEL = 0.331;
 const BINS = 720;
-const HAIR = 0.0009; // half width of a hairline cut, in record radii
-
-// A deterministic generator for the seeded stills.
-function rng(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 async function drawLabel(size) {
   const c = document.createElement("canvas");
@@ -414,7 +438,7 @@ export async function createNoCover(host, { embedded = false } = {}) {
 
   const prog = program(gl, VS, FS);
   const U = {};
-  for (const n of ["uRes", "uDpr", "uC", "uR", "uA", "uBlur", "uL", "uEcc", "uDmg", "uDir", "uLab", "uTex"]) U[n] = gl.getUniformLocation(prog, n);
+  for (const n of ["uRes", "uDpr", "uC", "uR", "uA", "uBlur", "uL", "uEcc", "uDmg", "uDir", "uLab", "uTex", "uLod"]) U[n] = gl.getUniformLocation(prog, n);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   const buf = gl.createBuffer();
@@ -437,11 +461,12 @@ export async function createNoCover(host, { embedded = false } = {}) {
   // --- the damage field, in record space: height (trench, burr) and the
   // direction each cut travelled, two RG8 targets written together.
   const S = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+  const LEVELS = Math.log2(S) + 1;
   const fieldTex = () => {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG8, S, S);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texStorage2D(gl.TEXTURE_2D, LEVELS, gl.RG8, S, S);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -457,6 +482,13 @@ export async function createNoCover(host, { embedded = false } = {}) {
   gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
   gl.clearBufferfv(gl.COLOR, 1, [0.5, 0.5, 0, 0]);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  const mips = () => {
+    for (const t of [dmgTex, dirTex]) {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.generateMipmap(gl.TEXTURE_2D);
+    }
+  };
+  mips();
 
   const stampProg = program(gl, STAMP_VS, STAMP_FS);
   const uStampTexel = gl.getUniformLocation(stampProg, "uTexel");
@@ -501,6 +533,7 @@ export async function createNoCover(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    mips();
     nInst = 0;
   };
 
@@ -526,7 +559,12 @@ export async function createNoCover(host, { embedded = false } = {}) {
   let downAt = 0;
   let downX = 0;
   let downY = 0;
-  let stroke = null;
+  let tip = null; // the fingertip on the record, with its grit
+  let tipQ = null; // where it last was, on the table
+  let tipA = 0; // and the record's angle then
+  let tipS = 0; // its speed, smoothed
+  let tipPress = 1;
+  let tipMoved = 0;
   let total = 0; // how much damage there is, for the bed
   let C = [0, 0];
   let R = 100;
@@ -539,166 +577,53 @@ export async function createNoCover(host, { embedded = false } = {}) {
     return [c * qx - s * qy, s * qx + c * qy];
   };
 
-  // One cut: a few grains of grit side by side, each its own trench with its
-  // own depth and width. `force` fixes the pressure (for the seeded history);
-  // otherwise it follows the speed of the hand.
-  const newStroke = (rand = Math.random, { force = null, depth = 1, width = 1, grit = 0 } = {}) => {
-    const lines = [];
-    const k = 1 + Math.floor(rand() * (grit || 3));
-    for (let i = 0; i < k; i += 1) {
-      lines.push({
-        off: i === 0 ? 0 : (rand() - 0.5) * 0.014 * width,
-        depth: depth * (i === 0 ? 0.75 + rand() * 0.25 : 0.25 + rand() * 0.45),
-        w: width * (i === 0 ? 1 + rand() * 0.4 : 0.6 + rand() * 0.4),
-        seed: rand() * 100,
-        tail: null,
-      });
-    }
-    return { lines, last: null, len: 0, rand, force, s: null };
-  };
-
-  const lift = (st) => {
-    st.last = null;
-    for (const line of st.lines) line.tail = null;
-  };
-
-  const cut = (st, lx, ly, speed = 700) => {
-    const r = Math.hypot(lx, ly);
-    const onVinyl = r > LABEL + 0.006 && r < 0.992;
-    if (!onVinyl) {
-      lift(st);
-      return;
-    }
-    const p = [lx, ly];
-    if (!st.last) {
-      st.last = p;
-      return;
-    }
-    const dx = p[0] - st.last[0];
-    const dy = p[1] - st.last[1];
-    const len = Math.hypot(dx, dy);
-    if (len < 0.0025) return;
-    const ux = dx / len;
-    const uy = dy / len;
-    // Pressure: a fast drag bites deeper and wider than a slow one.
-    const s = st.force ?? clamp(speed / 1400, 0, 1);
-    st.s = st.s == null ? s : st.s + (s - st.s) * 0.35;
-    const press = st.force ?? 0.4 + 0.85 * st.s;
-    const ramp = Math.min(1, (st.len + len) / 0.05); // a cut starts light
-    for (const line of st.lines) {
-      const ox = -uy * line.off;
-      const oy = ux * line.off;
-      const from = line.tail || [st.last[0] + ox, st.last[1] + oy];
-      const to = [p[0] + ox + (st.rand() - 0.5) * 0.0005, p[1] + oy + (st.rand() - 0.5) * 0.0005];
-      const depth = Math.min(1, line.depth * ramp * press);
-      const hw = HAIR * line.w * (0.75 + 0.5 * Math.min(1, press));
-      pushSeg(from[0], from[1], to[0], to[1], hw, depth, Math.min(1, 0.15 + depth * 0.8), line.seed);
-      line.tail = to;
-    }
-    // Into the bins, by the angle of the middle of the segment.
-    const th0 = Math.atan2(st.last[1] + p[1], st.last[0] + p[0]);
+  // Every segment any grain cuts lands here: into the field, and into the
+  // bins by its angle on the record, for the stylus to find.
+  const cutSeg = (x0, y0, x1, y1, hw, depth, burr, sd) => {
+    pushSeg(x0, y0, x1, y1, hw, depth, burr, sd);
+    const mx = x0 + x1;
+    const my = y0 + y1;
+    if (Math.hypot(mx, my) < LABEL * 2) return; // the spindle on the paper
+    const th0 = Math.atan2(my, mx);
     const th = th0 < 0 ? th0 + TAU : th0;
     const bi = Math.floor((th / TAU) * BINS) % BINS;
-    const lp = len * 512; // in the old 1024-texel units the sound was tuned in
-    bins[bi] = Math.min(2, bins[bi] + lp * 0.035 * st.lines[0].depth * press);
-    total += lp;
-    st.len += len;
-    st.last = p;
+    const lp = Math.hypot(x1 - x0, y1 - y0) * 512; // in the old 1024-texel units the sound was tuned in
+    bins[bi] = Math.min(2, bins[bi] + lp * 0.09 * depth * depth);
+    total += lp * Math.min(1, depth * 2);
   };
 
-  // A walk across the record: a heading that bends and wanders.
-  const walk = (st, x, y, d, L, bend, wob = 0, skip = 0) => {
-    const steps = Math.max(2, Math.ceil(L / 0.004));
-    let cx = x;
-    let cy = y;
-    let dd = d;
-    for (let i = 0; i <= steps; i += 1) {
-      if (skip && st.rand() < skip) lift(st);
-      else cut(st, cx, cy);
-      cx += Math.cos(dd) * (L / steps);
-      cy += Math.sin(dd) * (L / steps);
-      dd += bend / steps + (st.rand() - 0.5) * wob;
-    }
-    lift(st);
-  };
-
-  // The seeded history: a record handled for years with nothing to keep it.
-  // Wiped with a sleeve-less cloth, slid across other records, picked up by
-  // the edge, and once or twice skated by a dropped stylus.
-  const seed = () => {
-    const rand = rng(1985);
-    // Wipes: swirls of fine hairlines round a centre that is not the record's.
-    for (let w = 0; w < 4; w += 1) {
-      const cx = (rand() - 0.5) * 0.7;
-      const cy = (rand() - 0.5) * 0.7;
-      const rho0 = 0.4 + rand() * 0.45;
-      for (let k = 0; k < 30; k += 1) {
-        const st = newStroke(rand, { force: 0.5 + rand() * 0.5, depth: 0.22 + rand() * 0.3, width: 0.8, grit: 1 });
-        const rho = rho0 + (rand() - 0.5) * 0.45;
-        const ph = rand() * TAU;
-        const span = 0.25 + rand() * 0.8;
-        walk(st, cx + Math.cos(ph) * rho, cy + Math.sin(ph) * rho, ph + Math.PI / 2, rho * span, span, 0.004);
-      }
-    }
-    // Slides: bundles of parallel scuffs from lying on other records.
-    for (let b = 0; b < 7; b += 1) {
-      const th = rand() * TAU;
-      const off = (rand() - 0.5) * 1.3;
-      const nx = -Math.sin(th);
-      const ny = Math.cos(th);
-      const count = 3 + Math.floor(rand() * 8);
-      const t0 = -1 + rand() * 0.8;
-      const L = 0.5 + rand() * 1.1;
-      const bend = (rand() - 0.5) * 0.15;
-      let o = off;
-      for (let k = 0; k < count; k += 1) {
-        o += 0.003 + rand() * 0.012;
-        const st = newStroke(rand, { force: 0.6 + rand() * 0.4, depth: 0.35 + rand() * 0.45, width: 0.9, grit: 1 });
-        const s0 = t0 + (rand() - 0.5) * 0.15;
-        walk(st, Math.cos(th) * s0 + nx * o, Math.sin(th) * s0 + ny * o, th, L * (0.7 + rand() * 0.3), bend, 0.002);
-      }
-    }
-    // Handling: short hooks near the rim where fingers hold it.
-    for (let k = 0; k < 70; k += 1) {
-      const ph = rand() * TAU;
-      const r0 = 0.78 + rand() * 0.2;
-      const st = newStroke(rand, { force: 0.6 + rand() * 0.5, depth: 0.5 + rand() * 0.5, width: 1 + rand() * 0.5 });
-      walk(st, Math.cos(ph) * r0, Math.sin(ph) * r0, ph + Math.PI / 2 + (rand() - 0.5) * 1.6, 0.03 + rand() * 0.11, (rand() - 0.5) * 2.4, 0.03);
-    }
-    // Scuffs: short marks anywhere.
-    for (let k = 0; k < 110; k += 1) {
-      const ph = rand() * TAU;
-      const r0 = 0.36 + rand() * 0.6;
-      const st = newStroke(rand, { force: 0.5 + rand() * 0.6, depth: 0.3 + rand() * 0.5, width: 0.8 + rand() * 0.6 });
-      walk(st, Math.cos(ph) * r0, Math.sin(ph) * r0, rand() * TAU, 0.01 + rand() * 0.07, (rand() - 0.5) * 1.5, 0.02);
-    }
-    // Skates: a dropped stylus swings in on the tonearm's arc, bouncing.
-    for (let k = 0; k < 3; k += 1) {
-      const pa = rand() * TAU;
-      const pr = 1.25 + rand() * 0.2;
-      const px = Math.cos(pa) * pr;
-      const py = Math.sin(pa) * pr;
-      const arm = pr - 0.02 + rand() * 0.06;
-      const st = newStroke(rand, { force: 1, depth: 1, width: 1.8 + rand() * 0.6, grit: 1 });
-      st.lines.push({ off: 0.0035, depth: 0.45, w: 0.8, seed: rand() * 100, tail: null });
-      const a0 = pa + Math.PI - 0.55 - rand() * 0.2;
-      const span = 0.45 + rand() * 0.25;
-      const steps = Math.ceil((arm * span) / 0.004);
-      for (let i = 0; i <= steps; i += 1) {
-        const a = a0 + (span * i) / steps;
-        if (rand() < 0.03) lift(st);
-        else cut(st, px + Math.cos(a) * arm, py + Math.sin(a) * arm);
-      }
-      lift(st);
-    }
-  };
-  if (still != null || embedded) seed();
+  // The seeded history: a few hundred handlings, simulated. The deep cuts go
+  // in last, so the hairlines of later wipes do not paper over a gouge.
+  if (still != null || embedded) {
+    handle(1985, cutSeg);
+    const order = Array.from({ length: nInst }, (_, i) => i).sort((i, j) => inst[i * 8 + 5] - inst[j * 8 + 5]);
+    const sorted = new Float32Array(inst.length);
+    order.forEach((i, k) => sorted.set(inst.subarray(i * 8, i * 8 + 8), k * 8));
+    inst = sorted;
+  }
 
   // --- input
   const onRecord = (x, y) => Math.hypot(x - C[0], y - C[1]) < R;
   const speedOf = (p) => Math.hypot(p.vx, p.vy);
 
-  stage.on("down", (p) => {
+  // A drag is a fingertip with grit under it, through the same contact as
+  // the history: each grain's path is the finger's track carried into the
+  // record's frame, which turns under it while it spins. Pressure and speed
+  // set the load.
+  const tableQ = (p) => [(p.x - C[0]) / R, (p.y - C[1]) / R];
+  const advance = (p) => {
+    const q = tableQ(p);
+    const r = Math.hypot(q[0], q[1]);
+    const rel = speedOf(p) + omega * r * R; // finger against vinyl, px/s
+    tipS += (clamp(rel / 1400, 0, 1) - tipS) * 0.35;
+    const load = (0.4 + 0.85 * tipS) * tipPress;
+    drag(tip, tipQ, q, tipA, angle, load, cutSeg);
+    tipQ = q;
+    tipA = angle;
+    tipMoved = performance.now();
+  };
+
+  stage.on("down", (p, e) => {
     if (!woke) {
       woke = true;
       sound.unlock();
@@ -707,21 +632,26 @@ export async function createNoCover(host, { embedded = false } = {}) {
     downAt = performance.now();
     downX = p.x;
     downY = p.y;
-    stroke = newStroke();
-    if (onRecord(p.x, p.y)) cut(stroke, ...toLocal(p.x, p.y), 0);
+    tip = fingertip();
+    tipQ = tableQ(p);
+    tipA = angle;
+    tipS = 0;
+    // A pen says how hard it is pressed; a mouse or a finger cannot.
+    tipPress = e?.pointerType === "pen" && e.pressure > 0 ? 0.5 + e.pressure : 1;
   });
-  stage.on("move", (p) => {
+  stage.on("move", (p, e) => {
     if (!p.down) {
       // The light leans toward the pointer, so the fan turns to meet it.
       if (onRecord(p.x, p.y) || Math.hypot(p.x - C[0], p.y - C[1]) < R * 2.2) lightTarget = Math.atan2(p.y - C[1], p.x - C[0]);
       return;
     }
+    if (e?.pointerType === "pen" && e.pressure > 0) tipPress = 0.5 + e.pressure;
     if (mode === "pending" && Math.hypot(p.x - downX, p.y - downY) > 4) mode = "scratch";
-    if (mode === "scratch" || mode === "hold") cut(stroke, ...toLocal(p.x, p.y), speedOf(p));
+    if (tip && (mode === "scratch" || mode === "hold")) advance(p);
   });
   stage.on("up", () => {
     mode = "idle";
-    stroke = null;
+    tip = null;
   });
 
   // --- sound per frame
@@ -783,6 +713,13 @@ export async function createNoCover(host, { embedded = false } = {}) {
     const H = stage.height;
     const now = performance.now();
     if (mode === "pending" && now - downAt > 170) mode = "hold";
+    // A finger held still while the record spins up is on the platter's
+    // edge, not on the vinyl: it lifts, and touches down again when it moves.
+    if (tip && mode === "hold" && now - tipMoved > 60) {
+      lift(tip);
+      tipQ = tableQ(stage.pointer);
+      tipA = angle;
+    }
 
     // Torque up while held, coast down when let go.
     const target = mode === "hold" ? OMEGA : 0;
@@ -818,7 +755,11 @@ export async function createNoCover(host, { embedded = false } = {}) {
     gl.uniform1f(U.uBlur, blur);
     gl.uniform3f(U.uL, L[0], L[1], L[2]);
     gl.uniform2f(U.uEcc, 0.0035, -0.002);
-    gl.uniform1f(U.uTex, 1 / S);
+    // One pixel of screen, in texels of the field: the mip level to read at,
+    // and the step for the slope.
+    const pxTex = S / (2 * R * stage.dpr);
+    gl.uniform1f(U.uLod, Math.max(0, Math.log2(pxTex)));
+    gl.uniform1f(U.uTex, Math.max(1, pxTex) / S);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, dmgTex);
     gl.uniform1i(U.uDmg, 0);
