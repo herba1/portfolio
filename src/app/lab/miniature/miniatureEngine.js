@@ -10,6 +10,10 @@ import { createStage, clamp } from "../_kit/stage";
 // faster up and down the frame than any lens at this scale would allow: the
 // tilt-shift miniature.
 //
+//   once    the depth map refined against the photograph's luminance with a
+//           guided filter at the photograph's resolution, so a depth edge
+//           sits on the silhouette the photograph draws, not a pixel or two
+//           off it.
 //   pass 1  near CoC at half CSS resolution, max-dilated by its own radius:
 //           every buffer pixel learns the largest foreground disc that
 //           reaches it (Jimenez's near field, as in the tuxedolabs bokeh).
@@ -25,7 +29,8 @@ import { createStage, clamp } from "../_kit/stage";
 //           (it spills over whatever is behind it by its full CoC). Before
 //           the foreground goes over, a depth-masked summer film sky grade
 //           (deep blue at the top to an open haze line, real clouds kept and
-//           toned); then a gentle contrast lift, a print toe that lifts black
+//           toned), with a sharp silhouette's edge pixels unmixed into their
+//           pine and their sky so only the sky share is graded; then a gentle contrast lift, a print toe that lifts black
 //           to 40/255, a thin amber halation ring round the brightest stone
 //           and a print shoulder that stops short of white.
 
@@ -91,6 +96,81 @@ vec3 shoulder(vec3 x) {
   return min(x, vec3(k)) + (top - k) * (1.0 - exp(-over / (top - k)));
 }
 `;
+
+// Depth refine, once at load: a guided filter (He, Sun and Tang) of the depth
+// map against the photograph's luminance, at the photograph's resolution.
+// Depth Anything draws a pine's top at half the photo's resolution and a
+// pixel or two off; inside each 7 x 7 window the filter refits depth as a
+// linear function of luminance, so where the window holds both pine and sky
+// the depth edge is moved onto the luminance edge, and a pixel on the
+// silhouette that is a quarter sky gets a quarter of the way to sky depth.
+// Flat windows keep the map as it was. Pass one fits (a, b) per window and
+// keeps the window's depth range; pass two averages the fits that cover each
+// pixel and clamps to that range, so the refit never overshoots.
+const REFINE_R = 3; // window radius, photograph pixels
+const REFINE_FIT = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outFit;
+uniform sampler2D uColor;
+uniform sampler2D uRaw;
+uniform vec2 uSize;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+void main() {
+  float mI = 0.0, mp = 0.0, mII = 0.0, mIp = 0.0;
+  float lo = 1.0, hi = 0.0;
+  for (int j = -${REFINE_R}; j <= ${REFINE_R}; j++) {
+    for (int i = -${REFINE_R}; i <= ${REFINE_R}; i++) {
+      vec2 uv = vUv + vec2(float(i), float(j)) / uSize;
+      float I = luma(textureLod(uColor, uv, 0.0).rgb);
+      float p = textureLod(uRaw, uv, 0.0).r;
+      mI += I;
+      mp += p;
+      mII += I * I;
+      mIp += I * p;
+      lo = min(lo, p);
+      hi = max(hi, p);
+    }
+  }
+  const float n = float((2 * ${REFINE_R} + 1) * (2 * ${REFINE_R} + 1));
+  mI /= n;
+  mp /= n;
+  // eps: needle texture inside the canopy (luminance variance about 0.003)
+  // must not print into depth; the pine against the sky (0.02 and up) must.
+  float a = (mIp / n - mI * mp) / (mII / n - mI * mI + 0.002);
+  outFit = vec4(a, mp - a * mI, lo, hi);
+}`;
+const REFINE_APPLY = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outDepth;
+uniform sampler2D uColor;
+uniform sampler2D uFit;
+uniform vec2 uSize;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  ivec2 top = ivec2(uSize) - 1;
+  vec2 ab = vec2(0.0);
+  for (int j = -${REFINE_R}; j <= ${REFINE_R}; j++) {
+    for (int i = -${REFINE_R}; i <= ${REFINE_R}; i++) {
+      ab += texelFetch(uFit, clamp(c + ivec2(i, j), ivec2(0), top), 0).rg;
+    }
+  }
+  ab /= float((2 * ${REFINE_R} + 1) * (2 * ${REFINE_R} + 1));
+  vec4 own = texelFetch(uFit, c, 0);
+  float q = ab.x * luma(textureLod(uColor, vUv, 0.0).rgb) + ab.y;
+  outDepth = vec4(clamp(q, own.z, own.w), 0.0, 0.0, 1.0);
+}`;
+// Without float render targets the fit cannot be stored: the raw map is
+// carried over unrefined at the same resolution, so every LOD below still
+// means the same thing.
+const REFINE_COPY = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outDepth;
+uniform sampler2D uRaw;
+void main() { outDepth = vec4(textureLod(uRaw, vUv, 0.0).r, 0.0, 0.0, 1.0); }`;
 
 // Near-field CoC, snapped to the photograph's silhouette. A monocular depth
 // map draws a near object's edge a little inside it: the outermost foliage of
@@ -244,9 +324,12 @@ uniform vec2 uView;     // viewport origin in device px
 uniform vec4 uRect;     // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uGround;
+uniform vec2 uSrc;      // photograph (and refined depth) size in pixels
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+const vec3 HILLS = vec3(0.4, 0.45, 0.51);     // far hills along the horizon
+const vec3 FOLIAGE = vec3(0.25, 0.26, 0.22);  // a typical pine, light and shadow
 float hsvSat(vec3 c) { float m = max(c.r, max(c.g, c.b)); return (m - min(c.r, min(c.g, c.b))) / max(m, 1e-4); }
 
 // The photograph's own clear sky down the frame (print height 0 at the top),
@@ -273,26 +356,25 @@ vec3 skyFilm(float y) {
   return top * (2.0 * (t - 0.5) * (t - 1.0)) + mid * (4.0 * t * (1.0 - t)) + haze * (2.0 * t * (t - 0.5));
 }
 // The grade itself, on one colour. far: the pixel is within a CoC of sky
-// depth. nearness: the pixel itself is nearer than the sky (a pine's rim, or
-// sky the gather filled in behind it). clear: nothing near it, so a pale
-// bright patch may be a cloud. up: how much brighter the image is just below
-// than just above, which marks a cloud's sunlit top.
-vec3 gradeSky(vec3 col, float y, float far, float nearness, float clear, float up) {
+// depth. ref: what else this colour may be besides sky (the far hills, or
+// foliage for the foreground layer). clear: nothing near it, so a pale bright
+// patch may be a cloud. up: how much brighter the image is just below than
+// just above, which marks a cloud's sunlit top.
+vec3 gradeSky(vec3 col, float y, float far, vec3 ref, float clear, float up) {
   vec3 src = skySource(y);
   float ls = luma(src);
   float lum = luma(col);
-  // How much of this pixel is sky, read as a mix of the clear sky at this
-  // height and whatever else is in it: its colour projected from that other
-  // tone onto the source sky, so a pixel that is half sky takes half the
-  // grade and lands halfway between the new sky and the other thing, with no
-  // dark or pale rim. At sky depth the other thing is the dull blue-grey of
-  // the far hills along the horizon (as far as the sky, much darker), which
-  // keep their own tone; nearer it is a typical foliage-and-shadow tone.
-  vec3 ref = mix(vec3(0.4, 0.45, 0.51), vec3(0.25, 0.26, 0.22), nearness);
-  float share = clamp(dot(col - ref, src - ref) / dot(src - ref, src - ref) / 0.9, 0.0, 1.0);
-  float sky = far                             // farthest depth
-    * share * smoothstep(0.3, 0.45, lum)      // bright
-    * smoothstep(-0.01, 0.05, col.b - col.r); // and blue: warm stone stays out
+  // How much of this colour is sky, read as a mix of the clear sky at this
+  // height and ref: its colour projected from ref onto the source sky, so a
+  // colour that is half sky takes half the grade. In the blurred background
+  // ref is the dull blue-grey of the far hills along the horizon (as far as
+  // the sky, much darker), which keep their own tone. A sharp silhouette
+  // against the sky is unmixed against its real neighbours instead (main).
+  vec3 e = src - ref;
+  float share = clamp(dot(col - ref, e) / dot(e, e) / 0.9, 0.0, 1.0);
+  // Only bright, blue sky: warm stone stays out.
+  float gate = smoothstep(0.3, 0.45, lum) * smoothstep(-0.01, 0.05, col.b - col.r);
+  float sky = far * share * gate;
   // Shift, not replace: the photograph's own luminance detail rides on the
   // new gradient, so the real clouds and the haze keep their shape.
   vec3 graded = col + (skyFilm(y) - src) * sky;
@@ -371,7 +453,7 @@ void main() {
     t = clamp(t, vec2(0.0), uBuf - 1.0);
     vec2 tuv = (t + 0.5) / uBuf;
     float g = exp(-dot(dv, dv) * 0.7);
-    float d = textureLod(uDepth, tuv, 1.0).r;
+    float d = textureLod(uDepth, tuv, 2.0).r;
     float w = g * (exp(-abs(d - d0) * sharpness) + 0.002);
     big += texture(uBlur, tuv) * w;
     wb += w;
@@ -393,24 +475,79 @@ void main() {
   // Depth: the nearest-to-infinity value within one CoC cap, so the sky the
   // gather filled in behind a defocused pine counts as sky.
   vec2 cssUv = uDpr / uOut;
-  float dOwn = textureLod(uDepth, uv, 1.0).r;
-  float dFar = textureLod(uDepth, uv, 2.0).r;
+  float dFar = textureLod(uDepth, uv, 3.0).r;
   float dNear = dFar;
   for (int i = 0; i < 8; i++) {
     float a = float(i) * 0.785398 + 0.39;
-    float dt = textureLod(uDepth, uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv, 2.0).r;
+    float dt = textureLod(uDepth, uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv, 3.0).r;
     dFar = min(dFar, dt);
     dNear = max(dNear, dt);
   }
   float far = smoothstep(0.675, 0.645, dFar);
+  // A sharp silhouette against the sky. Its edge pixels are a mix of the
+  // pine and the sky behind it, and grading them as one colour (part sky,
+  // part not) leaves a band darker than both. So they are unmixed. In a ring
+  // a few photograph pixels out: fg, the nearest non-sky neighbours, read off
+  // the refined depth and the photograph, counted only while they are drawn
+  // sharp (a defocused pine is in the foreground layer, not in col) and
+  // weighted hard towards the least sky-like of them, since the silhouette's
+  // own pale fringe is already part sky; bg, the background beside it as the
+  // lens drew it (the blur buffer at sky depth), which in clear sky is the
+  // source sky at that height and at the horizon is the haze.
+  vec3 fg = vec3(0.0);
+  float fgSum = 0.0;
+  float fw = 0.0;
+  vec3 bg = vec3(0.0);
+  float bw = 0.0;
+  if (far > 0.0) {
+    vec3 srcSky = skySource(uv.y);
+    vec3 e = srcSky - FOLIAGE;
+    for (int i = 0; i < 24; i++) {
+      float fi = float(i);
+      float ring = float(i / 12);
+      float a = fi * 0.5235988 + ring * 0.2618;
+      vec2 dir = vec2(cos(a), sin(a)) / uSrc;
+      vec2 q = uv + dir * (4.0 + 4.0 * ring);
+      float dq = textureLod(uDepth, q, 0.0).r;
+      float sq = min(max(abs(dq - planeAt(q)) - uDof, 0.0) * uK, uMax);
+      vec3 cq = textureLod(uColor, q, 0.0).rgb;
+      float w = smoothstep(0.67, 0.71, dq) * (1.0 - smoothstep(2.2, 5.0, sq));
+      float notSky = 1.0 - clamp(dot(cq - FOLIAGE, e) / dot(e, e), 0.0, 1.0);
+      notSky *= notSky;
+      fw += w;
+      fg += cq * w * notSky * notSky;
+      fgSum += w * notSky * notSky;
+      // The background a little further out, clear of the silhouette.
+      vec2 qb = uv + dir * (6.0 + 6.0 * ring);
+      float wb = smoothstep(0.67, 0.65, textureLod(uDepth, qb, 0.0).r);
+      bg += textureLod(uBlur, qb, 0.0).rgb * wb;
+      bw += wb;
+    }
+  }
+  float fgW = smoothstep(0.5, 3.0, fw) * smoothstep(0.0, 0.05, fgSum);
+  fg /= max(fgSum, 1e-5);
+  bg = bw > 0.5 ? bg / bw : skySource(uv.y);
   vec2 dy = vec2(0.0, 0.014);
   float up = luma(textureLod(uColor, uv + dy, 4.0).rgb) - luma(textureLod(uColor, uv - dy, 4.0).rgb);
-  col = gradeSky(col, uv.y, far, smoothstep(0.66, 0.7, dOwn), smoothstep(0.69, 0.655, dNear), up);
-  // The foreground layer gets the same grade, as all-near and never cloud:
-  // its silhouette is snapped a little outward, so a blurred pine against
-  // the sky carries some source sky in its rim, which would otherwise come
-  // back as a pale baby-blue halo round the pine.
-  if (near.a > 1e-3) near.rgb = gradeSky(near.rgb / near.a, uv.y, far, 1.0, 0.0, 0.0) * near.a;
+  float clear = smoothstep(0.69, 0.655, dNear);
+  vec3 alone = gradeSky(col, uv.y, far, HILLS, clear, up);
+  if (fgW > 0.0) {
+    // The pixel's background share: its colour projected onto the line from
+    // the pine to the background. It takes exactly that share of the grade
+    // the background beside it gets, so pine plus source sky becomes pine
+    // plus film sky, and pine plus haze stays pine plus haze.
+    vec3 e = bg - fg;
+    float share = clamp(dot(col - fg, e) / max(dot(e, e), 1e-4), 0.0, 1.0);
+    vec3 unmixed = col + (gradeSky(bg, uv.y, far, HILLS, clear, up) - bg) * share;
+    col = mix(alone, unmixed, fgW);
+  } else {
+    col = alone;
+  }
+  // The foreground layer gets the same grade, against foliage and never as
+  // cloud: its silhouette is snapped a little outward, so a blurred pine
+  // against the sky carries some source sky in its rim, which would
+  // otherwise come back as a pale baby-blue halo round the pine.
+  if (near.a > 1e-3) near.rgb = gradeSky(near.rgb / near.a, uv.y, far, FOLIAGE, 0.0, 0.0) * near.a;
 
   col = col * (1.0 - near.a) + near.rgb;
 
@@ -488,6 +625,73 @@ function texture(gl, img, format, mip) {
   return t;
 }
 
+function target(gl, w, h, internal, format, type) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+
+// The guided refine (REFINE_FIT, REFINE_APPLY) into an R8 depth texture at
+// the photograph's size, mipmapped like the raw map was.
+function refineDepth(gl, colorTex, rawTex, w, h, float, vao) {
+  // Targets first: creating one binds it, and none may stay bound to a unit
+  // a pass reads from while it is attached.
+  const out = target(gl, w, h, gl.R8, gl.RED, gl.UNSIGNED_BYTE);
+  const fitTex = float ? target(gl, w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT) : null;
+  const fbo = gl.createFramebuffer();
+  gl.bindVertexArray(vao);
+  gl.disable(gl.BLEND);
+  gl.viewport(0, 0, w, h);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, colorTex);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, rawTex);
+  const programs = [];
+  if (float) {
+    const fit = compile(gl, VERT, REFINE_FIT);
+    const apply = compile(gl, VERT, REFINE_APPLY);
+    programs.push(fit, apply);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fitTex, 0);
+    gl.useProgram(fit.p);
+    gl.uniform1i(fit.u.uColor, 0);
+    gl.uniform1i(fit.u.uRaw, 1);
+    gl.uniform2f(fit.u.uSize, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out, 0);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, fitTex);
+    gl.useProgram(apply.p);
+    gl.uniform1i(apply.u.uColor, 0);
+    gl.uniform1i(apply.u.uFit, 2);
+    gl.uniform2f(apply.u.uSize, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.deleteTexture(fitTex);
+  } else {
+    const copy = compile(gl, VERT, REFINE_COPY);
+    programs.push(copy);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out, 0);
+    gl.useProgram(copy.p);
+    gl.uniform1i(copy.u.uRaw, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  for (const { p } of programs) gl.deleteProgram(p);
+  gl.bindTexture(gl.TEXTURE_2D, out);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return out;
+}
+
 // Depth as a CPU array too, so the pointer can ask "how far is this?"
 function depthField(img) {
   const c = document.createElement("canvas");
@@ -538,7 +742,7 @@ export async function createMiniature(host) {
   const depthAt = depthField(depthImg);
 
   const colorTex = texture(gl, colorImg, "rgba", true);
-  const depthTex = texture(gl, depthImg, "r", true);
+  const rawDepthTex = texture(gl, depthImg, "r", false);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -548,14 +752,20 @@ export async function createMiniature(host) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
+  // Half-float keeps the soft gradients of a deep defocus free of banding;
+  // RGBA8 is the fallback.
+  const float = !!gl.getExtension("EXT_color_buffer_float");
+
+  // The depth map, refined against the photograph at its full resolution,
+  // once. Everything after reads this texture, never the raw map.
+  const depthTex = refineDepth(gl, colorTex, rawDepthTex, colorImg.naturalWidth, colorImg.naturalHeight, float, vao);
+  gl.deleteTexture(rawDepthTex);
+
   const snap = compile(gl, VERT, SNAP_PASS);
   const dilate = compile(gl, VERT, DILATE);
   const gather = compile(gl, VERT, GATHER);
   const composite = compile(gl, VERT, COMPOSITE);
 
-  // Half-float keeps the soft gradients of a deep defocus free of banding;
-  // RGBA8 is the fallback.
-  const float = !!gl.getExtension("EXT_color_buffer_float");
   const blurTex = gl.createTexture();
   const nearTex = gl.createTexture();
   const cocTex = gl.createTexture();
@@ -721,6 +931,7 @@ export async function createMiniature(host) {
     gl.uniform4f(cu.uRect, rect.x * dpr, rect.y * dpr, rect.w * dpr, rect.h * dpr);
     gl.uniform2f(cu.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.uniform3f(cu.uGround, GROUND[0], GROUND[1], GROUND[2]);
+    gl.uniform2f(cu.uSrc, colorImg.naturalWidth, colorImg.naturalHeight);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 
