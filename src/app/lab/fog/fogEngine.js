@@ -19,10 +19,11 @@ import { createStage, clamp } from "../_kit/stage";
 // tools/depth/bakes/fog/ builds both (auxmap.py the distance and matte).
 //
 //   visibility V   the control (Koschmieder: beta = 3.912 / V at 550 nm)
-//   haze layer     density falls off with height, scale height HS, so the air
-//                  along a ray climbing at elevation e to distance d is
-//                  L = HS / sin e * (1 - exp(-d sin e / HS)): low rays to the
-//                  far towers cross the most air, the zenith the least
+//   haze layer     the street's haze lies in layers by how far down the street
+//                  a ray reaches (x = d cos e): swept clear near the eye, the
+//                  canyon's air beyond, a bank past it, and thinning with
+//                  height (scale HS_STREET), so the near glass stays crisp,
+//                  the mid towers go half blue and the far tower to cobalt
 //   extinction     per channel, Rayleigh-leaning (blue goes first):
 //                  T = exp(-beta * K_RGB * L)
 //   in-scatter     the air is lit by the sky, so its colour is the sky's own
@@ -53,7 +54,6 @@ const ASPECT = 3 / 2;
 const PLATE_W = 3840; // plate.webp width; the forward-scatter blur is tuned in its levels
 const D_MIN = 10;
 const D_MAX = 4000;
-const HS = 500; // haze scale height, metres
 // Everything along the line of sight is veiled, the sky and its cumulus too.
 // A ray that leaves the towers behind crosses the haze by airmass: the column
 // overhead is this deep in full haze, and a ray at elevation e crosses 1 / sin e
@@ -79,18 +79,19 @@ const CANYON = 0.82;
 // open blue overhead, not by the long horizon column, so low down it sits this
 // far from the horizon haze toward the open sky's own blue at its elevation,
 // and a far tower the haze has taken goes cobalt on cobalt, not pale.
-const TOWER_BLUE = 0.55;
+const TOWER_BLUE = 0.75;
 const V_CLEAR = 50000; // visibility at fog 0, metres
 const V_THICK = 150; // visibility at fog 1
 // The hand moves log V so that what you see changes evenly along the drag. In a
-// frame whose far tower is 400 m off (~230 m of haze along its ray, the pocket
-// open), the clear day's kilometres change nothing, so the first tenth of the
+// frame whose far tower is 400 m off (~400 m of full haze along its ray, the
+// street's layers summed), the clear day's kilometres change nothing, so the first tenth of the
 // drag spends them: 50 km at 0, 2 km at 0.1 (the far tower's air over a third
 // of its light), 1.1 km at 0.2 (past half blue), 600 m at 0.35 (four fifths
 // blue, the low sky starting to veil), 330 m at 0.5 (a cobalt silhouette that
 // keeps its floors), 230 m at 0.6.
-// Past that the visibility barely moves; what the last stretch takes is the
-// clear pocket around the viewer (below), so the near towers go last. Knots in
+// Past that the visibility barely moves; the last stretch takes the mid
+// towers, then closes the clear pocket around the viewer (below), so the near
+// glass goes last. Knots in
 // log V, joined by a monotone cubic (Fritsch-Carlson), so the rate never jumps.
 const V_KNOTS = [
   [0, V_CLEAR],
@@ -134,22 +135,35 @@ const visibility = (() => {
     return Math.exp(ly);
   };
 })();
-// The street is swept: the air in the canyon around the viewer is clearer, the
-// haze lying out along the street. Density rises from nothing at the eye to
-// full beyond about this distance, quadratically (rho = s^2 / (s^2 + d0^2), so
-// a ray to d crosses d - d0 atan(d / d0) of full haze): the glass corner 30 m
-// off sees a fifteenth of its straight-line air, the back-right slab at 140 m
-// half, the far tower at 350 m three quarters. So the layers part: at fog 0.5
-// the far tower is under 5% transmittance, the slab about a quarter, the
-// glass corner over 95%. The pocket holds until the far towers are gone and
-// closes over the second half of the drag, which is when the near towers fade.
-const D_CLEAR = 60;
-// The canyon's air is denser than the open column's (the street's haze, not
-// the sky's), so a tower's ray takes this much more extinction per metre.
-const TOWER_GAIN = 1.6;
-const clearPocket = (f) => {
-  const t = clamp((f - 0.5) / 0.5, 0, 1);
-  return D_CLEAR * (1 - t * t * (3 - 2 * t));
+// The haze lies out along the street, so what a tower's ray crosses is set by
+// how far down the street it reaches: its horizontal distance x = d cos e, not
+// its slant distance (Depth Anything ramps a face that recedes upward, like
+// the left Canada Square block's, out to the far tower's distance; its top is
+// high and only ~170 m down the street). Three layers, by x: the street
+// around the viewer is swept clear out to ~30 m; the canyon's own air fills in
+// over the next 30 m and holds; and past ~150 m, where the street opens onto
+// the docks, a bank of haze thickens over 100 m. Each is a density ramp, so a
+// ray to x crosses a closed form of it (rampIn below); slant by 1 / cos e, and
+// thinned with height (scale HS_STREET: the street's haze lies low, so a ray
+// that climbs to a tower's crown leaves most of it under it). So the layers
+// part along the whole middle of the drag: at fog 0.4 (~450 m) the glass
+// corner and the right tower overhead (x < 50 m) keep over 95% of their
+// light, the right slab tower and the Canada Square block (x 60-170 m) keep
+// about three fifths and a half, blue-shifted, and the back-right slab
+// (215 m) and the far tower (~290 m) are down to an eighth and a
+// twenty-fifth: a ladder of blue values from the near glass back to the
+// cobalt silhouette. At fog 0.8 the far layer is gone, the mid towers are
+// down to a tenth or a fifth, and the glass corner, in its clear pocket,
+// keeps over 90% and its black point.
+const STREET_MID = [2.3, 30, 60]; // density (x the column's), and its ramp in x, metres
+const STREET_BANK = [3.2, 150, 250]; // the bank down the street, past the canyon
+const HS_STREET = 70;
+// Only the last stretch of the drag, the arrival's white-blue field, closes
+// the clear pocket: full haze from the eye, so the near glass goes last.
+const CLOSE = [0.82, 1];
+const closing = (f) => {
+  const t = clamp((f - CLOSE[0]) / (CLOSE[1] - CLOSE[0]), 0, 1);
+  return t * t * (3 - 2 * t);
 };
 const K_RGB = [0.82, 1.0, 1.24];
 const K_SKY = [1.04, 1.0, 0.98];
@@ -249,7 +263,7 @@ void main() {
 const COMMON = `
 uniform sampler2D uAux;
 uniform float uBeta;      // extinction at 550 nm, per metre (3.912 / V)
-uniform float uClear;     // the clear pocket around the viewer, metres (d0)
+uniform float uClose;     // 0..1: the clear pocket closing (the drag's last stretch)
 uniform vec3 uBreath;     // xy in print uv, z strength
 uniform float uAspect;    // print w / h
 uniform float uTime;
@@ -282,16 +296,27 @@ float betaAt(vec2 uv, float z, float w) {
   vec2 p = (uv - uBreath.xy) * vec2(uAspect, 1.0);
   return b * (1.0 + uBreath.z * w * exp(-dot(p, p) / 0.06));
 }
+// Air crossed by a ray reaching x along a density ramp from 0 at a to 1 at b.
+float rampIn(float x, float a, float b) {
+  float t = clamp(x - a, 0.0, b - a);
+  return t * t / (2.0 * (b - a)) + max(x - b, 0.0);
+}
 // Optical depth, per channel, along the ray to the tower this pixel is (or,
 // in the band along a silhouette, the tower it partly is: aux.r carries the
 // tower's distance out across its edge).
 vec3 tauTower(vec2 uv, vec4 aux) {
   float d = distAt(aux);
-  float s = max(sin(radians(aux.b * 90.0)), 0.06);
-  // Air in a haze layer that thins with height, along the ray to a tower.
-  float L = ${HS.toFixed(1)} / s * (1.0 - exp(-d * s / ${HS.toFixed(1)}));
-  // Less of it near the eye: the swept street, d - d0 atan(d / d0) of d.
-  L *= ${TOWER_GAIN.toFixed(2)} * (1.0 - uClear / d * atan(d / max(uClear, 1e-3)));
+  float e = radians(aux.b * 90.0);
+  // How far down the street the ray reaches, and how high.
+  float x = d * cos(e);
+  float h = d * max(sin(e), 0.06);
+  // The street's layers: swept clear, the canyon's air, the bank past it;
+  // and, at the end of the drag, the pocket closing.
+  float L = ${STREET_MID[0].toFixed(2)} * rampIn(x, ${STREET_MID[1].toFixed(1)}, ${STREET_MID[2].toFixed(1)})
+    + ${STREET_BANK[0].toFixed(2)} * rampIn(x, ${STREET_BANK[1].toFixed(1)}, ${STREET_BANK[2].toFixed(1)})
+    + uClose * x;
+  // Along the slant, thinning with height (the mean of exp(-z / HS_STREET) up to h).
+  L *= ${HS_STREET.toFixed(1)} / max(h, 1e-3) * (1.0 - exp(-h / ${HS_STREET.toFixed(1)})) / max(cos(e), 0.25);
   // Blue goes first along the street.
   return betaAt(uv, log(d), 1.0) * L * vec3(${K_RGB.map((k) => k.toFixed(2)).join(", ")});
 }
@@ -1130,7 +1155,7 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.uniform1i(cu.uAir, 2);
     gl.uniform1i(cu.uDetail, 3);
     gl.uniform1f(cu.uBeta, 3.912 / vis);
-    gl.uniform1f(cu.uClear, clearPocket(fog.x));
+    gl.uniform1f(cu.uClose, closing(fog.x));
     gl.uniform3f(cu.uBreath, bx.x, by.x, breath.x * 0.9);
     gl.uniform1f(cu.uAspect, ASPECT);
     gl.uniform1f(cu.uTime, time);
