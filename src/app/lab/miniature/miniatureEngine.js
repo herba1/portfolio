@@ -27,7 +27,7 @@ import { createStage, clamp } from "../_kit/stage";
 //           background buffer through a depth-aware joint upsample for the
 //           rest, the foreground layer composited over it with no depth test
 //           (it spills over whatever is behind it by its full CoC). Before
-//           the foreground goes over, a depth-masked summer film sky grade
+//           the foreground goes over, a sky-masked summer film sky grade
 //           (deep blue at the top to an open haze line, real clouds kept and
 //           toned), with a sharp silhouette's edge pixels unmixed into their
 //           pine and their sky so only the sky share is graded; then a
@@ -68,6 +68,11 @@ const DILATE_TAPS = 40;
 const HERO = { f: 0.76, y: 0.6 };
 
 const FAR = { f: 0.634, y: 0.3 }; // St Peter's dome on the horizon
+// Depth steps (of 255) above the map's farthest value that still count as the
+// horizon, for the sky mask and for the pointer over the sky. The map clamps
+// the sky and the far hills to one value; one step nearer is already the far
+// end of the Corso.
+const SKY_TOL = 0;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -370,6 +375,7 @@ uniform vec4 uRect;     // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uGround;
 uniform vec2 uSrc;      // photograph (and refined depth) size in pixels
+uniform sampler2D uSky; // the sky mask (depthField), photograph uv, mipmapped
 
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 const vec3 HILLS = vec3(0.4, 0.45, 0.51);     // far hills along the horizon
@@ -503,25 +509,27 @@ void main() {
   float t = smoothstep(2.2, 5.0, max(s0, spill));
   vec3 col = mix(small, big.rgb, t);
 
-  // Summer film sky, graded on the background layer before the foreground
-  // goes over it, so a blurred pine's rim stays pine. The mask is the
-  // farthest depth AND bright AND blue, all read off the image as the lens
-  // already drew it, so it is feathered by the same blur as the sky itself.
-  // Depth: the nearest-to-infinity value within one CoC cap, so the sky the
-  // gather filled in behind a defocused pine counts as sky.
+  // Summer film sky, graded on the background layer after the gather and
+  // before the foreground goes over it, so a blurred pine's rim stays pine.
+  // The mask is the sky (depthField: the top-connected run of horizon depth
+  // in each column) AND bright AND blue, the last two read off the image as
+  // the lens already drew it. The sky mask itself is blurred as far as the
+  // lens has blurred this pixel: read at the mip whose texel spans the disc,
+  // so wherever a defocused cloud or the sky has spread, the grade has spread
+  // with it, and a cloud's bloom is graded as cloud all the way out instead of
+  // falling back to the raw photograph's grey at its rim.
   vec2 cssUv = uDpr / uOut;
   // Height in the photograph: the sky's source and film gradients are
   // measured down the photograph, not down the cropped print.
   float sy = photo(uv).y;
-  float dFar = textureLod(uDepth, photo(uv), 3.0).r;
-  float dNear = dFar;
+  float dNear = textureLod(uDepth, photo(uv), 3.0).r;
   for (int i = 0; i < 8; i++) {
     float a = float(i) * 0.785398 + 0.39;
-    float dt = textureLod(uDepth, photo(uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv), 3.0).r;
-    dFar = min(dFar, dt);
-    dNear = max(dNear, dt);
+    dNear = max(dNear, textureLod(uDepth, photo(uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv), 3.0).r);
   }
-  float far = smoothstep(0.675, 0.645, dFar);
+  float disc = 2.0 * max(s0, spill) * float(textureSize(uSky, 0).y) * uCrop.w * uDpr / uOut.y;
+  float skyIn = textureLod(uSky, photo(uv), max(log2(max(disc, 1.0)), 2.0)).r;
+  float far = smoothstep(0.02, 0.3, skyIn);
   // A sharp silhouette against the sky. Its edge pixels are a mix of the
   // pine and the sky behind it, and grading them as one colour (part sky,
   // part not) leaves a band darker than both. So they are unmixed. In a ring
@@ -557,7 +565,7 @@ void main() {
       fgSum += w * notSky * notSky;
       // The background a little further out, clear of the silhouette.
       vec2 qb = uv + dir * (6.0 + 6.0 * ring);
-      float wb = smoothstep(0.67, 0.65, textureLod(uDepth, photo(qb), 0.0).r);
+      float wb = textureLod(uSky, photo(qb), 0.0).r;
       bg += textureLod(uBlur, qb, 0.0).rgb * wb;
       bw += wb;
     }
@@ -900,7 +908,13 @@ function refineDepth(gl, colorTex, rawTex, w, h, float, vao) {
   return out;
 }
 
-// Depth as a CPU array too, so the pointer can ask "how far is this?"
+// Depth as a CPU array too, so the pointer can ask "how far is this?", and
+// the sky as a mask: in each column, the unbroken run of horizon depth from
+// the top of the photograph down. Depth alone cannot tell the sky: Via del
+// Corso runs straight away from the square to the horizon and the map gives
+// its far end the sky's own depth, so a depth-keyed grade turned the street
+// beside the obelisk into a pale blue ghost of it. The run stops at the first
+// thing in front of the horizon in every column, so the street is never in it.
 function depthField(img) {
   const c = document.createElement("canvas");
   c.width = img.naturalWidth;
@@ -910,7 +924,13 @@ function depthField(img) {
   const data = g.getImageData(0, 0, c.width, c.height).data;
   const w = c.width;
   const h = c.height;
-  return (u, v) => {
+  let far = 255;
+  for (let i = 0; i < w * h; i++) far = Math.min(far, data[i * 4]);
+  const sky = new Uint8Array(w * h);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h && data[(y * w + x) * 4] <= far + SKY_TOL; y++) sky[y * w + x] = 255;
+  }
+  const at = (u, v) => {
     // Median of a small neighbourhood: a pointer resting on an edge picks a
     // side instead of focusing on the halfway distance between them.
     const cx = Math.round(clamp(u, 0, 1) * (w - 1));
@@ -926,6 +946,7 @@ function depthField(img) {
     vals.sort((a, b) => a - b);
     return vals[vals.length >> 1] / 255;
   };
+  return { at, sky, w, h, horizon: far / 255 };
 }
 
 // A focus ring: a critically damped spring with a little extra mass, so a
@@ -947,7 +968,8 @@ export async function createMiniature(host) {
   if (!gl) throw new Error("webgl2 unavailable");
 
   const [colorImg, depthImg] = await Promise.all([loadImage(COLOR_SRC), loadImage(DEPTH_SRC)]);
-  const depthAt = depthField(depthImg);
+  const field = depthField(depthImg);
+  const depthAt = field.at;
 
   const colorTex = texture(gl, colorImg, "rgba", true);
   const rawDepthTex = texture(gl, depthImg, "r", false);
@@ -968,6 +990,19 @@ export async function createMiniature(host) {
   // once. Everything after reads this texture, never the raw map.
   const depthTex = refineDepth(gl, colorTex, rawDepthTex, colorImg.naturalWidth, colorImg.naturalHeight, float, vao);
   gl.deleteTexture(rawDepthTex);
+
+  // The sky mask, mipmapped: the composite reads it as blurred as the lens
+  // has blurred the sky at each pixel.
+  const skyTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, skyTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, field.w, field.h, 0, gl.RED, gl.UNSIGNED_BYTE, field.sky);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   const snap = compile(gl, VERT, SNAP_PASS);
   const dilate = compile(gl, VERT, DILATE);
@@ -1014,7 +1049,10 @@ export async function createMiniature(host) {
   const qf = params.get("f");
   const qy = params.get("y");
   const held = qf != null && Number.isFinite(+qf);
-  const start = held ? { f: clamp(+qf, 0, 1), y: qy != null ? clamp(+qy, 0, 1) : HERO.y } : FAR;
+  // Nothing in the photograph is farther than the horizon, so a plane past it
+  // is a plane through nothing: the whole frame defocused at once, the sky
+  // and its clouds in the near field. A held focus past it is the dome.
+  const start = held ? (+qf < FAR.f ? FAR : { f: clamp(+qf, 0, 1), y: qy != null ? clamp(+qy, 0, 1) : HERO.y }) : FAR;
   const focus = ring(start.f);
   const focusY = ring(start.y);
   let locked = held;
@@ -1072,8 +1110,16 @@ export async function createMiniature(host) {
     const u = CROP[0] + ((p.x - rect.x) / rect.w) * CROP[2];
     const v = CROP[1] + clamp((p.y - rect.y) / rect.h, 0, 1) * CROP[3];
     // Off the print, the pointer still racks by height alone.
-    focus.target = depthAt(clamp(u, 0.02, 0.98), v);
-    focusY.target = v;
+    const d = depthAt(clamp(u, 0.02, 0.98), v);
+    if (d <= field.horizon + (SKY_TOL + 0.5) / 255) {
+      // The sky, or the far hills along it: the horizon, focused where the
+      // horizon is. The dome holds sharp; the lens never racks past it.
+      focus.target = FAR.f;
+      focusY.target = FAR.y;
+    } else {
+      focus.target = Math.max(d, FAR.f);
+      focusY.target = v;
+    }
   };
 
   stage.on("move", (p) => {
@@ -1163,7 +1209,10 @@ export async function createMiniature(host) {
     gl.bindTexture(gl.TEXTURE_2D, blurTex);
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, nearTex);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, skyTex);
     const cu = composite.u;
+    gl.uniform1i(cu.uSky, 4);
     gl.uniform1i(cu.uColor, 0);
     gl.uniform1i(cu.uDepth, 1);
     gl.uniform1i(cu.uBlur, 2);
