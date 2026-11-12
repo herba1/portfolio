@@ -22,6 +22,7 @@ for (const [width, height] of SIZES) {
   const result = await page.waitForFunction(() => window.__glyphMorphCheck, null, { timeout: 60000 }).then((h) => h.jsonValue());
   console.log(`${width}x${height} size ${result.size}px: ${result.ok ? "ok" : `${result.flags.length} flags`}`);
   for (const f of result.flags.slice(0, 40)) console.log(`  ${f.pair} t=${f.t} ${f.kind}: ${f.msg}`);
+  if (process.env.VERBOSE) for (const line of result.spacing || []) console.log(`  ${line}`);
   if (process.env.VERBOSE) for (const s of result.timing) console.log(`  ${s.pair.padEnd(20)} whole at ${s.whole}s, at rest ${s.rest}s, ${s.cut} steps with a cut glyph`);
   if (!result.ok) bad += 1;
   await page.close();

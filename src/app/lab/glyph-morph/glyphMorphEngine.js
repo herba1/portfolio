@@ -7,6 +7,13 @@
 //
 // Each word is laid out once by the browser (real kerning, tracking from the
 // house law), and every glyph is then set alone at the x the browser gave it.
+// At display size and in semibold the law's tracking plus the font's kerning
+// leaves some pairs touching (the arm of an r into the bar of a t), so the
+// engine spaces the word itself: every glyph's ink is rasterised once, row by
+// row, and a neighbour that would come nearer than SPACE ink to ink, in any
+// direction, is set out to that distance, the rest of the word with it; then
+// the word is centred on its ink. The same distance is held every frame while
+// the word moves, so a sliding glyph never grazes the one beside it.
 // A glyph two words share is the same element in both: its spring chases the
 // place the scrub puts it, a lerp from its place in one word to its place in
 // the other, so it lags the hand a touch and lands with a hair of overshoot.
@@ -65,6 +72,8 @@ const GUTTER = 0.04; // em of ground kept between any two visible glyphs
 const MIN_PIECE = 0.25; // em: no glyph is shown as a piece narrower than this
 const PAD = 0.03; // em of slack around a glyph's ink, so clip edges stay clean
 const SLACK = 0.006; // em two ink boxes may brush while a spring settles home
+const SPACE = 0.04; // em: the least ink-to-ink distance between two whole neighbours
+const RASTER_PX = 480; // a glyph's ink profile is rasterised at least this many px to the em
 // Where on the scrub the kept glyphs travel. Before it the letters that go
 // have gone; after it the word is set and the last new letters drop in, so
 // the hand can hold each phase: leaving, sliding, arriving.
@@ -117,6 +126,7 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
   let originY = 0;
   let inkCtx = null;
   let inkCache = new Map();
+  let reqCache = new Map();
 
   // The scrub: s is a place on the chain of words, base the word the current
   // pair starts from. P = s - base runs 0..1 from WORDS[base] to the next.
@@ -183,8 +193,22 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       const n = w.length - 1;
       fit = Math.min(fit, (room - 0.516 * n) / (end / 100 - 0.043 * n));
     }
-    size = Math.round(clamp(Math.min(fit, H * 0.42, 340), 24, 340));
-    const track = setMeter(size);
+    const first = Math.round(clamp(Math.min(fit, H * 0.42, 340), 24, 340));
+    setSize(first);
+    // The spacing the engine adds can widen a word past the room the line
+    // was fitted to; if it does, set everything again a touch smaller.
+    const widest = Math.max(...layouts.map((l) => l.ink[1] - l.ink[0]));
+    if (widest > room + 0.5) setSize(Math.max(24, Math.floor((first * room) / widest)));
+    meter.textContent = "";
+    wordEl.style.transformOrigin = `${W / 2}px ${originY}px`;
+    return true;
+  };
+
+  // Set the word at one size: the glyph box's top for the baseline, the ink
+  // measures, and every word's glyph positions.
+  const setSize = (sz) => {
+    size = sz;
+    setMeter(size);
     // Baseline: a zero-size inline-block sits on it.
     meter.textContent = "H";
     const probe = document.createElement("span");
@@ -194,20 +218,29 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     inkCtx = document.createElement("canvas").getContext("2d");
     inkCtx.font = `600 ${size}px ${getComputedStyle(meter).fontFamily}`;
     inkCache = new Map();
+    reqCache = new Map();
     const cap = inkCtx.measureText("H").actualBoundingBoxAscent || size * 0.71;
     // Centre the cap band, nudged a touch above true centre.
     const baseline = Math.round(H / 2 + cap / 2 - H * 0.015);
     baseTop = baseline - baseOff;
     originY = baseline - cap / 2;
     layouts = WORDS.map((w) => {
-      const { lefts, end } = measureWord(w);
-      const width = end - track; // drop the trailing tracking after the last glyph
-      const x0 = (W - width) / 2;
-      return { x: lefts.map((l) => x0 + l) };
+      const { lefts } = measureWord(w);
+      // Space it: a pair the line sets nearer than SPACE ink to ink is set
+      // out to it, and everything after moves with the right-hand glyph.
+      const xs = [...lefts];
+      const nudges = [];
+      for (let i = 1; i < xs.length; i += 1) {
+        const short = reqOf(w[i - 1], w[i]) - (xs[i] - xs[i - 1]);
+        if (short <= 0) continue;
+        nudges.push(`${w[i - 1]}${w[i]} +${(short / size).toFixed(3)}em`);
+        for (let j = i; j < xs.length; j += 1) xs[j] += short;
+      }
+      // Centre it on its ink, not on its advances.
+      const ink = [xs[0] + inkOf(w[0]).l, xs[xs.length - 1] + inkOf(w[w.length - 1]).r];
+      const x0 = (W - ink[0] - ink[1]) / 2;
+      return { x: xs.map((l) => x0 + l), ink, nudges };
     });
-    meter.textContent = "";
-    wordEl.style.transformOrigin = `${W / 2}px ${originY}px`;
-    return true;
   };
 
   // Where a glyph's upright strokes are: runs of columns, from its ink's
@@ -255,10 +288,77 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       const t = inkCtx ? inkCtx.measureText(ch) : null;
       const l = t ? -(t.actualBoundingBoxLeft || 0) : 0;
       const r = t ? t.actualBoundingBoxRight || t.width : size * 0.6;
-      m = { l, r, w: r - l, runs: strokeRuns(ch, l, r) };
+      m = { l, r, w: r - l, runs: strokeRuns(ch, l, r), rows: profile(ch, l, r) };
       inkCache.set(ch, m);
     }
     return m;
+  };
+
+  // A glyph's ink row by row, oversampled: for each row of the raster, its
+  // leftmost and rightmost inked edge in px from the glyph box's left edge
+  // (NaN where the row is empty). Rows share the baseline across glyphs, so
+  // two glyphs' rows line up. A pixel counts as ink from half coverage, where
+  // the eye puts the edge.
+  const profile = (ch, l, r) => {
+    const R = Math.max(1, Math.ceil(RASTER_PX / size));
+    const pad = 2;
+    const w = Math.ceil((r - l + pad * 2) * R);
+    const h = Math.ceil(size * 1.5 * R);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    const left = new Float32Array(h).fill(NaN);
+    const right = new Float32Array(h).fill(NaN);
+    if (!ctx || !inkCtx) return { R, left, right };
+    ctx.font = inkCtx.font.replace(/\d+(\.\d+)?px/, `${size * R}px`);
+    const ox = (pad - l) * R;
+    ctx.fillText(ch, ox, Math.round(size * 1.1 * R));
+    const data = ctx.getImageData(0, 0, w, h).data;
+    for (let y = 0; y < h; y += 1) {
+      let a = -1;
+      let b = -1;
+      for (let x = 0; x < w; x += 1) {
+        if (data[(y * w + x) * 4 + 3] < 128) continue;
+        if (a < 0) a = x;
+        b = x;
+      }
+      if (a < 0) continue;
+      left[y] = (a - ox) / R;
+      right[y] = (b + 1 - ox) / R;
+    }
+    return { R, left, right };
+  };
+
+  // The least distance, pen to pen, glyph b may sit right of glyph a with
+  // their ink still SPACE apart in every direction: each row of b's left edge
+  // against a's right edge in the rows within SPACE of it, the vertical step
+  // taken off the room it needs, so corners that only meet on the diagonal
+  // are held to the same distance as edges that face each other.
+  const reqOf = (a, b) => {
+    const key = a + b;
+    let d = reqCache.get(key);
+    if (d === undefined) {
+      const pa = inkOf(a).rows;
+      const pb = inkOf(b).rows;
+      const R = pa.R;
+      const gap = SPACE * size;
+      const reach = Math.floor(gap * R);
+      d = -Infinity;
+      for (let y = 0; y < pb.left.length; y += 1) {
+        const bl = pb.left[y];
+        if (Number.isNaN(bl)) continue;
+        for (let k = -reach; k <= reach; k += 1) {
+          const ar = pa.right[y + k];
+          if (ar === undefined || Number.isNaN(ar)) continue;
+          const dy = k / R;
+          const want = ar - bl + Math.sqrt(Math.max(0, gap * gap - dy * dy));
+          if (want > d) d = want;
+        }
+      }
+      reqCache.set(key, d);
+    }
+    return d;
   };
 
   const styleGlyph = (g) => {
@@ -278,7 +378,7 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     el.setAttribute("aria-hidden", "true");
     el.textContent = ch;
     wordEl.append(el);
-    const g = { ch, el, x, v: 0, xa: null, xb: null, ai: -1, bi: -1, role: "kept", anchor: null, err: 0, w: 0, edge: -1, pIn: 0, pOut: 1, vis: null, drawn: "" };
+    const g = { ch, el, x, dx: 0, v: 0, xa: null, xb: null, ai: -1, bi: -1, role: "kept", anchor: null, err: 0, w: 0, edge: -1, pIn: 0, pOut: 1, vis: null, drawn: "" };
     styleGlyph(g);
     return g;
   };
@@ -509,13 +609,20 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     // They are settled one at a time, out from the kept glyph each grows
     // from, so the first to fit drops in first and the last waits for the
     // ground the others leave it.
+    // Its ground (and the page edge) counts as clear with SLACK to spare, so
+    // a spring still settling in when the hand stops there does not hold it
+    // back. (A neighbour it is set against in the next word needs only the
+    // room that word leaves it.)
+    const firm = SLACK * size;
+    const tight = (e, h, P) => roomAt(e, h, P) < Math.min(firm, roomAt(e, h, 1) - 0.25);
+    const edgy = (e, P) => inkL(e, target(e, P)) < field[0] + firm || inkR(e, target(e, P)) > field[1] - firm;
     const order = [...bOnly].sort((p, q) => (p.rank || 1) - (q.rank || 1) || p.bi - q.bi);
     const settledIn = [];
     for (const e of order) {
       let open = 0;
       for (let k = SAMPLES; k >= 0; k -= 1) {
         const P = Ps[k];
-        if (outside(e, target(e, P)) || kept.some((h) => roomAt(e, h, P) < -0.25) || settledIn.some((h) => P >= h.pIn && roomAt(e, h, P) < -0.25)) {
+        if (edgy(e, P) || kept.some((h) => tight(e, h, P)) || settledIn.some((h) => P >= h.pIn && tight(e, h, P))) {
           open = Math.min(1, (k + 1) / SAMPLES);
           break;
         }
@@ -626,6 +733,39 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     }
   };
 
+  // Hold every two neighbours on screen to their spacing while the word
+  // moves: a shared glyph sliding (or overshooting home) toward a neighbour
+  // closer than SPACE ink to ink pushes it, half each way, so neither grazes
+  // the other. It is a set-off on top of where the springs have them, not a
+  // change to the springs; at rest every word already holds its spacing, so
+  // it is zero. A glyph mid-wipe counts as much as it shows, so the push
+  // eases in and out with it instead of jumping.
+  const space = () => {
+    const all = [...glyphs, ...leftovers];
+    for (const g of all) g.dx = 0;
+    const list = all.filter((g) => g.w > 0).sort((p, q) => mid(p) - mid(q));
+    if (list.length < 2) return;
+    const wt = list.map((g) => smooth(clamp(g.w, 0, 1)));
+    const want = [];
+    for (let i = 0; i + 1 < list.length; i += 1) {
+      const [g, h] = [list[i], list[i + 1]];
+      const at = h.x - g.x;
+      want.push(at + Math.min(wt[i], wt[i + 1]) * Math.max(0, reqOf(g.ch, h.ch) - at));
+    }
+    for (let it = 0; it < 40; it += 1) {
+      let moved = false;
+      for (let i = 0; i + 1 < list.length; i += 1) {
+        const [g, h] = [list[i], list[i + 1]];
+        const d = want[i] - (h.x + h.dx - g.x - g.dx);
+        if (d <= 0.02) continue;
+        g.dx -= d / 2;
+        h.dx += d / 2;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+  };
+
   // Hold the scrub at P with every spring caught up and every wipe done.
   const settleVis = (P) => {
     for (let i = 0; i < 120; i += 1) visibility(STEP * 4, P);
@@ -634,6 +774,7 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       g.el.remove();
       return false;
     });
+    space();
     for (const g of [...glyphs, ...leftovers]) g.vis = visOf(g);
   };
 
@@ -723,6 +864,7 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       g.el.remove();
       return false;
     });
+    space();
     for (const g of [...glyphs, ...leftovers]) g.vis = visOf(g);
     if (leftovers.length || glyphs.some((g) => g.w > 0 && g.w < 1)) busy = true;
     pressV += (-K_PRESS * (press - pressT) - C_PRESS * pressV) * dt;
@@ -744,7 +886,8 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       a = v[0] <= inkL(g) + 0.01 ? g.ink.l - PAD * size : v[0] - g.x;
       b = v[1] >= inkR(g) - 0.01 ? g.ink.r + PAD * size : v[1] - g.x;
     }
-    const str = !v ? "hidden" : full ? `${g.x.toFixed(2)}|full` : `${g.x.toFixed(2)}|${a.toFixed(1)}|${b.toFixed(1)}`;
+    const x = g.x + g.dx;
+    const str = !v ? "hidden" : full ? `${x.toFixed(2)}|full` : `${x.toFixed(2)}|${a.toFixed(1)}|${b.toFixed(1)}`;
     if (str === g.drawn) return;
     g.drawn = str;
     if (!v) {
@@ -752,7 +895,7 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       return;
     }
     g.el.style.visibility = "";
-    g.el.style.transform = `translate3d(${g.x.toFixed(2)}px,0,0)`;
+    g.el.style.transform = `translate3d(${x.toFixed(2)}px,0,0)`;
     if (full) g.el.style.clipPath = "none";
     else {
       const t = (-0.4 * size).toFixed(1);
@@ -943,6 +1086,13 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     };
     const audit = ({ held = false } = {}) => {
       const all = [...glyphs, ...leftovers].filter((g) => g.vis);
+      // Two whole neighbours on screen, nearer than SPACE ink to ink.
+      const whole = all.filter((g) => g.w >= 1).sort((p, q) => mid(p, p.x + p.dx) - mid(q, q.x + q.dx));
+      for (let i = 0; i + 1 < whole.length; i += 1) {
+        const [g, h] = [whole[i], whole[i + 1]];
+        const short = reqOf(g.ch, h.ch) - (h.x + h.dx - g.x - g.dx);
+        if (short > 0.25) flag("graze", `${g.ch}${h.ch} ${((SPACE * size - short) / size).toFixed(3)}em ink to ink`);
+      }
       for (const g of all) {
         const wv = g.vis[1] - g.vis[0];
         const whole = g.vis[0] <= inkL(g) + 0.01 && g.vis[1] >= inkR(g) - 0.01;
@@ -953,9 +1103,9 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       for (let i = 0; i < all.length; i += 1) {
         for (let j = i + 1; j < all.length; j += 1) {
           const [g, h] = mid(all[i]) <= mid(all[j]) ? [all[i], all[j]] : [all[j], all[i]];
-          const over = g.vis[1] - h.vis[0];
+          const over = g.vis[1] + g.dx - h.vis[0] - h.dx;
           const kern = Math.max(0, -need(g, h));
-          if (over > kern + tol && h.vis[1] > g.vis[0]) flag("overlap", `${g.ch}(${g.role})|${h.ch}(${h.role}) ${(over / size).toFixed(3)}em at P=${(s - base).toFixed(2)}`);
+          if (over > kern + tol && h.vis[1] + h.dx > g.vis[0] + g.dx) flag("overlap", `${g.ch}(${g.role})|${h.ch}(${h.role}) ${(over / size).toFixed(3)}em at P=${(s - base).toFixed(2)}`);
         }
       }
     };
@@ -1019,7 +1169,8 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       restWhole(end);
     }
     jump(startAt);
-    const result = { ok: flags.length === 0, size, pairs: N * 2, flags, timing };
+    const spacing = WORDS.map((w, k) => `${w}: ${layouts[k].nudges.join(", ") || "as set"}`);
+    const result = { ok: flags.length === 0, size, pairs: N * 2, flags, timing, spacing };
     window.__glyphMorphCheck = result;
     console.log(`glyph-morph check: ${result.ok ? "ok" : `${flags.length} flags`} ${JSON.stringify(result)}`);
     surface.dataset.check = result.ok ? "ok" : "fail";
