@@ -99,6 +99,7 @@ const keepFor = (T, N) => {
 const HOLD_CONTRAST = 3; // s
 const gainFor = (T, N) => Math.sqrt(Math.max(1, T / framesFor(HOLD_CONTRAST, N)));
 const MEAN_FRAC = 1 / 8; // the local mean's scale, a fraction of the plate's width
+const DETAIL_FRAC = 1 / 32; // the finer mean's (the crests' striations, keepSky)
 const DEEP = 1; // the gaps' fall to the clear sky's depth, at full keep
 const CREST = 1; // the crests' rise toward a cloud's white, at full keep
 // The cloud's light (cloudTone): toward the sun is up and a little left in
@@ -225,6 +226,8 @@ uniform sampler2D uSky;    // sRGB time-mean of the clear sky alone
 uniform float uKeep;       // how much of the clear sky's colour comes back
 uniform float uGain;       // the eased ND: streak contrast held past ~3 s
 uniform vec2 uLodM;        // local-mean lods: live mean, blocks
+uniform vec3 uLodD;        // finer-mean lods (the crests' striations): live mean, blocks, still
+uniform vec4 uDim;         // live mean, blocks: width, height in px
 uniform float uDeep;       // how far the gaps between the streaks fall to the clear sky
 uniform float uCrest;      // how far the streaks' crests are printed up toward white
 uniform vec2 uSun;         // one tap toward the sun, in plate uv (y down)
@@ -234,6 +237,10 @@ uniform float uEdge;       // the lightness step across the taps that reads as a
 out vec4 o;
 ${COMMON}
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float CREST_PUSH = 0.6;  // the crests' spread stretch about the local mean
+const float CREST_LIFT = 0.55; // the shoulder's rise toward white at a full crest
+const float CREST_ROLL = 0.88; // where the dodged crests start rolling into white
+const float CREST_DETAIL = 4.0; // the striations' stretch about the finer mean
 // The long exposure's colour. The integral averages cloud into sky, and
 // normalised by its length that is a pale lavender haze with no zenith ramp.
 // But between the streaks the sky was the same cobalt at every instant, so
@@ -242,7 +249,7 @@ const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // streaks keep their own pale chroma. The hue is the clear sky's throughout:
 // blue and white averaged in linear light drift violet in OKLab, which a
 // scan reads as a lavender cast on the silk.
-vec3 keepSky(vec3 sl, vec3 ml, vec2 iuv){
+vec3 keepSky(vec3 sl, vec3 ml, vec3 md, vec2 iuv){
   vec3 p = toLab(sl);
   vec3 m = toLab(ml);
   vec3 s = toLab(lin(texture(uSky, iuv).rgb));
@@ -260,17 +267,37 @@ vec3 keepSky(vec3 sl, vec3 ml, vec2 iuv){
   float cm = clamp((Lm - s.x) / span, 0.0, 1.0);
   float w = clamp(c + (c - cm) * 1.75, 0.0, 1.0);
   // The streaks' crests, where the cloud kept passing, are printed up
-  // toward a cloud's white and out of the haze's blue (a dodge, as the gaps
-  // below are a burn), so the silk still reads as cumulus dragged along the
-  // wind, not as a blue veil.
-  float crest = smoothstep(0.25, 0.8, w) * uCrest;
-  L = mix(L, 1.0, 0.85 * crest);
+  // toward a cloud's white (a dodge, as the gaps below are a burn), so the
+  // silk still reads as cumulus dragged along the wind, not as a blue veil.
+  // The dodge is a shoulder, not a mix to white: the crest's spread about
+  // its local mean is stretched first, as the eased ND stretches it, and the
+  // shoulder then keeps (1 - CREST_LIFT) of it, so a persistently cloudy
+  // region still carries its striations along the wind instead of printing
+  // as one flat cream value. Under a crest that persisted the whole hold the
+  // broad mean is the cloud itself, so the striations are also stretched
+  // about a finer mean (md, a few % of the plate): the wisps the cloud's
+  // passage drew along the wind. The ramp is wide, so few pixels reach a
+  // full crest.
+  float crest = smoothstep(0.3, 1.0, w) * uCrest;
+  // The finer mean straddles the tower wherever it is near: no striations
+  // are read off its edge.
+  float clear = 1.0 - smoothstep(0.02, 0.2, textureLod(uStill, iuv, uLodD.z).a);
+  L = Lm + (L - Lm) * (1.0 + CREST_PUSH * crest) + (p.x - toLab(md).x) * uGain * CREST_DETAIL * crest * clear;
+  L = 1.0 - (1.0 - L) * (1.0 - CREST_LIFT * crest);
+  L = max(L, 0.0);
+  // Whatever the push carries past the roll is rolled into white, never
+  // clamped: a clamp is a plateau.
+  float over = max(L - CREST_ROLL, 0.0);
+  L = min(L, CREST_ROLL) + (1.0 - CREST_ROLL) * (1.0 - exp(-over / (1.0 - CREST_ROLL)));
   // Between the streaks the sky was the same clear cobalt whenever the
   // cloud was elsewhere, so the gaps keep its depth, not the mean's lift.
   L = mix(L, min(L, s.x), (1.0 - w) * uDeep);
   float Ci = length(p.yz);
   float Cs = length(s.yz);
-  float C = mix(mix(max(Ci, Cs), Ci * 0.85, w), 0.012, 0.8 * crest);
+  // A dodged crest keeps a floor of the clear sky's chroma (its hue is the
+  // sky's below), so it stays a cool skylit white that cloudTone can still
+  // warm on its sun side, not a colourless cream lozenge.
+  float C = mix(mix(max(Ci, Cs), Ci * 0.85, w), max(0.25 * Cs, 0.02), 0.6 * crest);
   vec2 ab = s.yz / max(Cs, 1e-4) * C;
   return max(fromLab(vec3(L, mix(p.yz, ab, uKeep))), 0.0);
 }
@@ -331,7 +358,18 @@ void main(){
   vec3 sl = mix(f, e, uWB);
   if (uKeep > 0.0) {
     vec3 ml = mix(textureLod(uFrame, iuv, uLodM.x).rgb, textureLod(uExp, uv, uLodM.y).rgb, uWB);
-    sl = keepSky(sl, ml, iuv);
+    // The finer mean: four taps half a cell apart, so the mip's cells
+    // never print as a grid.
+    vec3 md = vec3(0.0);
+    vec2 hf = exp2(uLodD.x) * 0.5 / uDim.xy;
+    vec2 he = exp2(uLodD.y) * 0.5 / uDim.zw;
+    for (int i = 0; i < 4; i++) {
+      vec2 d = vec2(i == 0 || i == 3 ? -1.0 : 1.0, i < 2 ? -1.0 : 1.0);
+      vec3 fd = textureLod(uFrame, iuv + d * hf, uLodD.x).rgb;
+      vec3 ed = textureLod(uExp, uv + d * he, uLodD.y).rgb;
+      md += mix(fd, ed, uWB) * 0.25;
+    }
+    sl = keepSky(sl, ml, md, iuv);
   }
   if (uTone.x > 0.0) sl = cloudTone(sl, iuv);
   vec3 sky = enc(sl);
@@ -786,6 +824,8 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1f(u.uKeep, keep);
     gl.uniform1f(u.uGain, keep > 0 ? gainFor(T, N) : 1);
     gl.uniform2f(u.uLodM, Math.log2(VW * MEAN_FRAC), Math.log2(BW * MEAN_FRAC));
+    gl.uniform3f(u.uLodD, Math.log2(VW * DETAIL_FRAC), Math.log2(BW * DETAIL_FRAC), Math.log2(SW * DETAIL_FRAC));
+    gl.uniform4f(u.uDim, VW, VH, BW, BH);
     gl.uniform1f(u.uDeep, DEEP * keep);
     gl.uniform1f(u.uCrest, CREST * keep);
     gl.uniform2f(u.uSun, SUN[0] * SUN_TAP, SUN[1] * SUN_TAP * (SW / SH));
