@@ -15,7 +15,11 @@ export const ACTIVE_W = 754;
 export const FIRST_ACTIVE = 21; // first active line of a field
 export const ACTIVE_LINES = 240;
 export const SWITCH_LINE = 256; // head switch, ~6.5 lines before vsync
-export const PARAM_COLS = 5;
+export const PARAM_COLS = 6;
+// the camcorder's AFM ("hi-fi") audio carriers, MHz: recorded deep in the
+// oxide by their own heads, under the video tracks
+export const AFM_L = 1.3;
+export const AFM_R = 1.7;
 
 const TAU = Math.PI * 2;
 const wrapPi = (a) => a - TAU * Math.floor((a + Math.PI) / TAU);
@@ -66,7 +70,19 @@ export function createModel(seed = 7) {
     // persistent tape damage (field line of each longitudinal scratch)
     scratches: [],
     scratchSeedWear: -1,
+    // AFM audio carrier phases (cycles), running on through the whole tape
+    afmL: 0,
+    afmR: 0.37,
   };
+
+  // The AFM carriers are frequency-modulated by the park's sound: wind in
+  // the mic and a low rumble, a few kHz of deviation. Over a line that is a
+  // fraction of a cycle, so the line-to-line phase step of each carrier
+  // wanders slowly down the field.
+  const afmDev = (t) => [
+    9000 * Math.sin(TAU * 41 * t) + 5000 * Math.sin(TAU * 97 * t + 1.3) + 2500 * Math.sin(TAU * 233 * t + 2.1),
+    8000 * Math.sin(TAU * 53 * t + 0.7) + 5500 * Math.sin(TAU * 89 * t + 2.4) + 2000 * Math.sin(TAU * 211 * t + 0.4),
+  ];
 
   // A longitudinal scratch crosses every track at the same place along it,
   // so it lands on the same field line every field.
@@ -219,6 +235,12 @@ export function createModel(seed = 7) {
         }
         s.tvPhase = wrapPi(s.tvPhase);
 
+        // AFM carriers: phase at the line's first tape sample and frequency
+        // (cycles per sample) for this line
+        const [dl0, dr0] = afmDev(tf + l / 15734);
+        const fl = (AFM_L + dl0 * 1e-6) / FS;
+        const fr = (AFM_R + dr0 * 1e-6) / FS;
+
         const o = row * PARAM_COLS * 4;
         out[o + 0] = eLine;
         out[o + 1] = A;
@@ -242,6 +264,12 @@ export function createModel(seed = 7) {
         out[o + 17] = s.killer;
         out[o + 18] = adj;
         out[o + 19] = d1 ? d1[2] : 1;
+        out[o + 20] = s.afmL;
+        out[o + 21] = s.afmR;
+        out[o + 22] = fl;
+        out[o + 23] = fr;
+        s.afmL = (s.afmL + fl * LINE) % 1;
+        s.afmR = (s.afmR + fr * LINE) % 1;
       }
 
       // vertical: the TV's oscillator only takes a vsync inside its window

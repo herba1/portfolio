@@ -12,15 +12,18 @@
 //      (3.4 MHz sync tip to 4.4 MHz white), phase run on from line to line
 //   -> tape: RF from the head's own track and the same-azimuth track two over,
 //      head-amp noise, spacing flutter, the channel's spacing loss and steep
-//      top edge, dropouts, head switch, timebase error per line; limiter and
-//      pulse-count discriminator; de-emphasis
+//      top edge, dropouts, head switch, timebase error per line, the AFM
+//      audio carriers' beat under the video; limiter and pulse-count
+//      discriminator; de-emphasis
 //
 // Noise is kept to its mechanisms: in track the picture is nearly clean. A
 // carrier driven toward the top of the channel (super-white, pre-emphasis
-// overshoot) sinks toward the limiter's slicing level, and only where a
-// flutter, an asperity or crosstalk pushes it the rest of the way does the
-// discriminator fail: crossings bunch, go missing, and white turns into
-// short black comets that de-emphasis drags out to the right.
+// overshoot) sinks toward the limiter's slicing level, and the slicing level
+// itself wanders with the beat of the AFM audio carriers recorded under the
+// video. Where the two meet the discriminator fails in step with that beat:
+// crossings go missing in bursts that line up from line to line into the
+// wavy black zebra of a blown highlight, each burst dragged out to the right
+// by de-emphasis. A flutter, an asperity or crosstalk adds stray comets.
 //   -> VCR playback: dropout compensator (1H substitution), 1H chroma comb,
 //      chroma re-modulated with the AFC/APC phase error
 //   -> TV: sync from the flywheel PLL, luma notch, chroma demod against the
@@ -351,8 +354,9 @@ void main(){
 const FS_TAPE = `${HEAD}
 uniform sampler2D uPhi; uniform sampler2D uP; uniform sampler2D uOff;
 uniform float uHR; uniform float uCNoise; uniform float uCDelay; uniform float uHead;
-uniform vec2 uEdge; uniform float uLim; uniform float uFlutter; uniform float uAsp;
+uniform vec2 uEdge; uniform float uLim; uniform float uFlutter; uniform float uAsp; uniform float uAfm;
 vec4 par(int c, int row){ return texelFetch(uP, ivec2(c, row), 0); }
+
 float dropMul(float x, vec4 d, float dep0, float dep1){
   float m = 1.0;
   if (d.x >= 0.0 && x >= d.x && x < d.x + d.y) m = min(m, dep0);
@@ -376,7 +380,7 @@ float hrf(float f){ float r = max(f - 3.4, 0.0) / (uEdge.x - 3.4); return exp(-u
 void main(){
   int x = int(gl_FragCoord.x); int row = int(gl_FragCoord.y);
   int f = row / FHL; int l = row - f * FHL;
-  vec4 p0 = par(0, row), p1 = par(1, row), p2 = par(2, row), p3 = par(3, row), p4 = par(4, row);
+  vec4 p0 = par(0, row), p1 = par(1, row), p2 = par(2, row), p3 = par(3, row), p4 = par(4, row), p5 = par(5, row);
   float e = p0.x, A = p0.y, B = p0.z, dFar = p0.w;
   float sigma = p3.x, xs = p3.y, jump = p3.z;
   // the far track is another recording: its own field-start phase
@@ -385,12 +389,15 @@ void main(){
   // field lines away at this point of the scan
   int rowF = clamp(row + 3, f * FHL, f * FHL + FHL - 1);
   vec2 rf[3];
+  vec2 ha[3];
   for (int q = 0; q < 3; q++) {
     float xp = float(x - 1 + q);
     float ee = (xs >= 0.0 && xp >= xs) ? e + jump : e;
     float xr = xp - ee;
     float phO = phaseC(row, xr);
     float phF = phaseC(rowF, xr - dFar) + phFar;
+    // the AFM audio carriers ride the same tape, so they keep its timebase
+    ha[q] = p5.xy + p5.zw * xr;
     float dm = dropMul(xp, p2, p3.w, p4.w);
     float a = A * hrf(fAvg(row, xr)) * dm;
     float b = B * hrf(fAvg(rowF, xr - dFar)) * dm;
@@ -421,6 +428,21 @@ void main(){
   // the output falls toward zero frequency: white goes black. Just above it
   // the crossings bunch into pairs and the carrier itself leaks through.
   float lim = uLim * (A + B) * exp(-uHR * 0.6);
+  // The AFM audio carriers sit under the video (1.3 and 1.7 MHz, recorded
+  // deep by their own heads). The head preamp is not quite linear, and its
+  // square law beats the two: a 400 kHz difference tone, rectified, that the
+  // limiter's input coupling turns into a slow one-sided wander of its
+  // slicing level, up to several times its resting height. A healthy
+  // carrier clears even the top of it and never notices. A super-white
+  // carrier pushed up against the top of the channel has sunk to within that
+  // wander: it clears the level where the beat swings down and goes under
+  // where it swings up, so the discriminator drops crossings in bursts set by
+  // the audio's phase more than by noise. That phase runs on from line to
+  // line and field to field, and the sound's FM keeps nudging the step from
+  // one line to the next, so the bursts line up into wavy black zebra that
+  // bends into chevrons wherever the step passes a whole cycle, interlaced
+  // into herringbone.
+  float slice = lim * (1.0 + uAfm * (0.5 + 0.5 * cos(TAU * (ha[1].x - ha[1].y))));
   // The limiter's state is read off each sample's own value, so the two
   // intervals that share a sample always agree on it; between samples the
   // carrier is followed in quarter steps (a pair of crossings closer than
@@ -432,10 +454,10 @@ void main(){
     float t0 = atan(z0.y, z0.x);
     float dth = atan(z1.y, z1.x) - t0;
     dth -= TAU * floor(dth / TAU + 0.5);
-    float v = z0.x - lim;
+    float v = z0.x - slice;
     for (int j = 1; j <= 4; j++) {
       float u = float(j) * 0.25;
-      float v1 = j == 4 ? z1.x - lim : mix(a0, a1, u) * cos(t0 + dth * u) - lim;
+      float v1 = (j == 4 ? z1.x : mix(a0, a1, u) * cos(t0 + dth * u)) - slice;
       if ((v > 0.0) != (v1 > 0.0)) {
         float uc = (float(j - 1) + v / (v - v1)) * 0.25;
         n += iv == 0 ? uc : 1.0 - uc;
@@ -599,20 +621,23 @@ export async function createSignal(host, { embedded = false } = {}) {
   const raw = query.has("raw");
   const glare = parseFloat(query.get("glare") || "0.08");
   // The over-white failure, as numbers. The camcorder's knee leans toward a
-  // 110% clip (super-white) and only the sun's core gets near it; the record
-  // side clips the pre-emphasised luma again at 120 IRE, as real decks do, so
-  // no carrier is ever driven far past the top of the channel; the camera's
-  // colour-difference gain at a blown edge; the top of the playback channel (MHz) and how steeply it closes; and the limiter's
-  // slicing level against the RF the AGC expects. Together they keep the
-  // sun's super-white carrier about five times clear of the slicing level,
-  // close to plain white, so the disc plays back as blown light, not a hole.
-  // Only the clipped overshoot at its rim, and the moments where an asperity,
-  // flutter or crosstalk dips the carrier, take it under: short black comets
-  // that de-emphasis drags off to the right. 100 IRE white stays six times
-  // clear. The camera's false colour is kept near the matrix's own gain: a
-  // thin seam at the blown edge that only the colour-under path spreads.
+  // 110% clip (super-white) and only the sun's core and the blown sky get
+  // near it; the record side clips the pre-emphasised luma again at 126 IRE,
+  // a cheap deck's loose clip, so the overshoot at a rising edge into white
+  // rides well up the channel's skirt; the camera's colour-difference gain at
+  // a blown edge; the top of the playback channel (MHz), how far a worn head
+  // pulls it down, and how steeply it closes; the limiter's slicing level
+  // against the RF the AGC expects; and how far the AFM beat swings that
+  // level (a multiple of it, see FS_TAPE). The super-white carrier sits on
+  // the skirt, inside the swing: on a fresh tape only its crests reach it,
+  // and as wear adds spacing loss and drags the edge down the carrier sinks
+  // further in, so the black zebra spreads through the flare and out into
+  // the sky. 100 IRE white keeps clear of the swing until the tape is nearly
+  // gone; grass and leaves never come close. The camera's false colour is
+  // kept near the matrix's own gain: a thin seam at the blown edge that only
+  // the colour-under path spreads.
   const WHITE = 1.1;
-  const REC_WHITE = 120;
+  const REC_WHITE = 126;
   const FALSE_C = 2;
   // colour-under: the deck's input headroom (IRE of luma plus chroma swing),
   // how hard the torn-off share kicks the playback tank, and the tank's pole
@@ -631,9 +656,11 @@ export async function createSignal(host, { embedded = false } = {}) {
     const m = re * re + im * im;
     return [re / m, -im / m];
   })();
-  const EDGE_F = 4.46;
-  const EDGE_N = 16;
-  const LIM = 0.12;
+  const EDGE_F = 4.42;
+  const EDGE_WEAR = 0.06;
+  const EDGE_N = 6;
+  const LIM = 0.053;
+  const AFM = 6;
 
   // ---- GL helpers
   const compile = (type, src) => {
@@ -983,9 +1010,10 @@ export async function createSignal(host, { embedded = false } = {}) {
       a.t("uPhi", S[4]);
       a.t("uP", paramTex);
       a.t("uOff", offTex);
-      a.f("uEdge", EDGE_F, EDGE_N);
+      a.f("uEdge", EDGE_F - EDGE_WEAR * wearS, EDGE_N);
       a.f("uLim", LIM);
-      a.f("uFlutter", 0.45 + 0.3 * wearS);
+      a.f("uAfm", AFM);
+      a.f("uFlutter", 0.15 + 0.15 * wearS);
       a.f("uAsp", 0.012 + 0.03 * wearS);
       a.f("uHR", 0.3 + 0.85 * wearS);
       a.f("uCNoise", 1.2 * g);
