@@ -31,8 +31,18 @@ For every plane, far to near:
              (EXT px) where it is what lies behind.
   colour     the photo where the plane is seen; edge pixels un-mixed from what
              is behind them (no sky fringe on a wire); hidden parts inpainted.
+  edges      (edges.py) where the plane is seen, its matte re-pulled against
+             the photo with a guided filter and held to a soft edge of a px or
+             two, and its own colour carried outward under that edge and into
+             the clear pixels round it, so the premultiplied blend in the
+             viewer picks up no sky-blue or white rim.
 
-Writes p0.webp (RGB), p1..pK.webp (RGBA, cropped), depth.png, t.webp (a
+Before any of it, each wire goes onto one plane (wires.one_plane_wires): the
+swipe moves the planes rigidly, and a wire split between two of them parts
+at the joint.
+
+Writes p0.webp (RGB), p1..pK.webp (RGBA, cropped; all lossless, for grade.py
+to encode), depth.png, t.webp (a
 48px thumbnail for the first frame) and scene.json.
 """
 import sys
@@ -47,7 +57,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import guided, dilate, erode, pushpull, smoothstep  # noqa: E402
 from shiftfill import shiftfill  # noqa: E402
 from skyfill import skyfill, local_mean  # noqa: E402
-from wires import bridge_wires  # noqa: E402
+from wires import bridge_wires, one_plane_wires  # noqa: E402
+from edges import refine_edges, bleed  # noqa: E402
 
 # Sky fill: "soft" (default; skyfill.py, no model) or "lama" (tools/depth/
 # fill.py). LaMa continues a cloud edge better, but the whole occluded sky of
@@ -67,6 +78,9 @@ lab, img, dep, sky = z["lab"], z["img"], z["dep"], z["sky"]
 H, W = lab.shape
 K = int(lab.max()) + 1
 L = max(W, H)
+# one wire, one plane (wires.one_plane_wires): a wire whose near run and far
+# run sit on two planes parts at the clamp as soon as the planes move
+lab = one_plane_wires(lab, L)
 EXT = int(0.09 * L)  # how far a plane continues behind nearer ones
 LW = np.array([0.2126, 0.7152, 0.0722], np.float32)
 print("planes", K, "size", W, H)
@@ -288,6 +302,11 @@ for k in range(K):
     if k == 0:
         wdec = wdec * 0.0
     col = col * (1 - wdec) + dec * wdec
+    if k > 0:
+        # a clean edge (edges.py): the matte re-pulled against the photo and
+        # held to a px or two, and the plane's own colour carried out under
+        # it, so no sky gets premultiplied into the rim
+        a, col = refine_edges(img, a, col, behind, vis, own & thin_all, log=print)
     behind = a[..., None] * col + (1 - a[..., None]) * behind
     layers.append((col, a))
     # depth: smooth inside the plane, trusted only away from its edges
@@ -318,18 +337,24 @@ for k, (col, a) in enumerate(layers):
     y0, y1 = max(0, ys.min() - pad), min(H, ys.max() + 1 + pad)
     if k == 0:
         x0, y0, x1, y1 = 0, 0, W, H
+    if k > 0:
+        # the clear pixels round the plane carry its edge colour, never black:
+        # a colour channel with no edge where the alpha has one gives the
+        # encode nothing to ring against
+        col = bleed(col, a)
     rgba = np.dstack([col, a])[y0:y1, x0:x1].copy()
     rng = np.random.default_rng(k)
     dith = (rng.random(rgba.shape[:2] + (3,)) - rng.random(rgba.shape[:2] + (3,))) / 255
     rgba[..., :3] += dith
     q = np.clip(np.round(rgba * 255), 0, 255).astype(np.uint8)
     path = os.path.join(OUT, f"p{k}.webp")
+    # lossless: grade.py re-encodes every plane for the web, and a lossy
+    # alpha here (quantised, the old alpha_quality=90) is what it keeps bit
+    # for bit
     if k == 0:
-        Image.fromarray(q[..., :3], "RGB").save(path, quality=84, method=6)
+        Image.fromarray(q[..., :3], "RGB").save(path, lossless=True, method=4)
     else:
-        # colour where alpha is zero is free: flatten it so it costs nothing
-        q[..., :3][q[..., 3] == 0] = 0
-        Image.fromarray(q, "RGBA").save(path, quality=86, alpha_quality=90, method=6, exact=False)
+        Image.fromarray(q, "RGBA").save(path, lossless=True, method=4, exact=True)
     meta[k]["rect"] = [round(x0 / W, 5), round(y0 / H, 5), round(x1 / W, 5), round(y1 / H, 5)]
     meta[k]["px"] = [int(x1 - x0), int(y1 - y0)]
     print("wrote", path, os.path.getsize(path) // 1024, "KB", meta[k]["px"])

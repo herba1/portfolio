@@ -54,6 +54,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import guided, pushpull, smoothstep  # noqa: E402
 
 GRADE = "sky-v3"
+# KEEP_SKY=1: leave the graded sky plane (p0) already in <outdir> as it is
+KEEP_SKY = os.environ.get("KEEP_SKY", "") not in ("", "0")
 
 # The set's sky, in HSV of the sRGB colour, from the top of the frame (t=0)
 # to the bottom (t=1). Measured off signal-cumulonimbus's clear sky (h 203,
@@ -448,12 +450,21 @@ def main():
         dith = (rng.random(c.shape) - rng.random(c.shape)) / 255
         q = np.clip(np.round((c + dith) * 255), 0, 255).astype(np.uint8)
         path = os.path.join(OUT, f"p{k}.webp")
+        if k == 0 and KEEP_SKY and os.path.exists(path):
+            # the sky plane already in <outdir> stays: a re-bake of the
+            # object planes' edges (edges.py, wires.one_plane_wires) leaves
+            # the sky label, and so the sky fill, as it was
+            print("kept", path)
+            continue
         if k == 0:
             Image.fromarray(q, "RGB").save(path, quality=86, method=6)
         else:
             qa = np.clip(np.round(a * 255), 0, 255).astype(np.uint8)
-            q[qa == 0] = 0
-            Image.fromarray(np.dstack([q, qa]), "RGBA").save(path, quality=86, alpha_quality=100, method=6, exact=False)
+            # the colour under a clear pixel is the edge colour bake.py
+            # carried out (edges.bleed), kept as it is (exact): flattened to
+            # black, the encode rings and subsamples chroma against that black
+            # right where the alpha is partial, a dotted dark or pale rim
+            Image.fromarray(np.dstack([q, qa]), "RGBA").save(path, quality=86, alpha_quality=100, method=6, exact=True)
         print("wrote", path, os.path.getsize(path) // 1024, "KB")
     # thumbnail from the graded composite
     comp = np.zeros((H, W, 3), np.float32)

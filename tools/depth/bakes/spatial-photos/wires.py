@@ -268,3 +268,112 @@ def hangers(img, struct, L):
     # own tone
     a = cv2.GaussianBlur(lines.astype(np.float32), (0, 0), 0.7)
     return lines > 0, np.where(lines > 0, np.clip(a * 1.4, 0, 1), 0).astype(np.float32)
+
+
+def one_plane_wires(lab, L, body_r=None, log=print):
+    """Each wire on one plane. labels.py gives a wire, run by straight run,
+    the plane of the solid it passes closest to, and keeps a thick insulator
+    with the post it is fixed to: so one catenary wire comes out as a near
+    run (by the signal) and a far run (over the cloud), meeting at a clamp.
+    The swipe moves planes rigidly by their depth, and the two runs part by
+    tens of px at the clamp: a dashed gap in the wire, which no overlap of a
+    few px can cover.
+
+    Here a wire is every straight run that continues another one: the
+    linear parts of the object planes (anything narrower than a post,
+    insulators included) found as Hough segments, joined end to end when
+    they lie on one line. A chain that spans planes goes whole to the plane
+    most of its length is on; a small linear piece hanging off it (a clamp,
+    a dropper's eye) goes with it. Bodies (posts, boxes, signs) never move.
+    lab HxW uint8, 0 the sky. Returns the new labels."""
+    H, W = lab.shape
+    lab = lab.copy()
+    obj = lab > 0
+    body_r = body_r or max(3, int(round(0.006 * L)))
+    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * body_r + 1, 2 * body_r + 1))
+    body = cv2.morphologyEx(obj.astype(np.uint8), cv2.MORPH_OPEN, ker) > 0
+    lin = obj & ~body
+    if not lin.any():
+        return lab
+    segs = cv2.HoughLinesP(lin.astype(np.uint8) * 255, 1, np.pi / 720, threshold=50, minLineLength=int(0.03 * L), maxLineGap=int(0.006 * L))
+    if segs is None:
+        return lab
+    segs = segs.reshape(-1, 4).astype(np.float32)
+    n = len(segs)
+    width = cv2.distanceTransform(lin.astype(np.uint8), cv2.DIST_L2, 5) * 2
+    P0, P1 = segs[:, :2], segs[:, 2:]
+    D = P1 - P0
+    ln = np.maximum(np.hypot(D[:, 0], D[:, 1]), 1)
+    D = D / ln[:, None]
+    wd = np.zeros(n, np.float32)
+    for i in range(n):
+        t = np.linspace(0, 1, 16)[:, None]
+        pts = np.round(P0[i] + (P1[i] - P0[i]) * t).astype(int)
+        wd[i] = float(np.median(width[np.clip(pts[:, 1], 0, H - 1), np.clip(pts[:, 0], 0, W - 1)]))
+    wd = np.clip(wd, 1.5, 2 * body_r + 1)
+
+    # union-find over segments on one line, end to end or overlapping
+    par = np.arange(n)
+
+    def find(i):
+        while par[i] != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+
+    gap = 0.12 * L  # a wire passes behind a post this wide and goes on
+    for i in range(n):
+        d = D[i]
+        nrm = np.array([-d[1], d[0]], np.float32)
+        # the other segment's ends: across the line, and along it
+        e0, e1 = P0 - P0[i], P1 - P0[i]
+        perp = np.maximum(np.abs(e0 @ nrm), np.abs(e1 @ nrm))
+        a0, a1 = e0 @ d, e1 @ d
+        lo, hi = np.minimum(a0, a1), np.maximum(a0, a1)
+        sep = np.maximum(lo - ln[i], -hi)  # >0: the gap between them along the line
+        par_ = np.abs(D @ d) > np.cos(np.radians(2.0))
+        tol = 0.5 * np.maximum(wd, wd[i]) + 2 + 0.003 * np.maximum(sep, 0)
+        ok = par_ & (perp < tol) & (sep < gap)
+        ok[i] = False
+        for j in np.nonzero(ok)[0]:
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                par[rj] = ri
+    roots = np.array([find(i) for i in range(n)])
+    K = int(lab.max()) + 1
+    moved = 0
+    for r in np.unique(roots):
+        idx = np.nonzero(roots == r)[0]
+        m = np.zeros((H, W), np.uint8)
+        for i in idx:
+            cv2.line(m, tuple(int(v) for v in P0[i]), tuple(int(v) for v in P1[i]), 1, int(np.ceil(wd[i])) + 4, cv2.LINE_8)
+        on = (m > 0) & lin
+        if on.sum() < 50:
+            continue
+        hist = np.bincount(lab[on], minlength=K)
+        if (hist[1:] > 0).sum() < 2:
+            continue
+        k = int(hist[1:].argmax()) + 1
+        # no plane holds most of it: a short run tangled in a bracket and
+        # the post it is fixed to, not one wire (left to its labels)
+        if hist[k] <= 0.5 * hist[1:].sum():
+            continue
+        # a stray px or two of another plane along a wire is labelling noise,
+        # not a second run: only a real run of another plane is a split wire
+        if hist.sum() - hist[k] < 30:
+            lab[on] = k
+            continue
+        chg = on & (lab != k)
+        # pieces hanging off the chain (a clamp, an eye, the stub of an
+        # insulator beyond the last segment) go with it
+        nc, cc, st, _ = cv2.connectedComponentsWithStats((lin & (lab > 0) & (lab != k)).astype(np.uint8), 8)
+        hit = np.unique(cc[cv2.dilate(chg.astype(np.uint8) | on.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0])
+        hit = hit[hit > 0]
+        small = hit[st[hit, cv2.CC_STAT_AREA] < 0.0004 * H * W]
+        if len(small):
+            chg |= np.isin(cc, small)
+        moved += int(chg.sum())
+        lab[chg] = k
+        log("  wire chain", len(idx), "segments", "planes", hist[1:].tolist(), "-> plane", k)
+    log("one plane per wire:", moved, "px moved")
+    return lab
