@@ -5,27 +5,30 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 
 // Kaze: lying in the long grass in July, looking up, and the wind is yours.
 //
-// You lie in the grass and look up: a wide stereographic lens 4 cm off the
-// ground, the zenith just past the top of the frame, so every stalk grows up
-// from below the bottom edge and runs in toward it, the nearest long, the
-// field behind a low fringe (grass.js). Brush across it and the stroke becomes
-// a gust: a small stable-fluids velocity field (wind.js) carries it on through
-// the stalks, each one a damped spring that lies over under it and swings back
-// with a little overshoot. The grass is geometry, drawn opaque with 4x MSAA:
-// one tall culm with a seed head at your shoulder stands sharp and near-black
-// against the cloud, and the rest sits a touch diffused behind it, backlit:
-// dark cores, a warm yellow-green rim toward the sun, paler and bluer with
-// distance; where a blade crosses the sun, a thin halation ring.
+// You lie in the grass and look straight up: a wide stereographic lens 4 cm
+// off the ground, aimed at the zenith with its frame shifted down so the
+// zenith sits just past the top centre, so every stalk grows up from below
+// the bottom edge and runs straight in toward it, splaying out from the
+// bottom and converging overhead (grass.js). Brush across it and the stroke
+// becomes a gust: a small stable-fluids velocity field (wind.js) carries it
+// on through the stalks, each one a damped spring that lies over under it
+// and swings back with a little overshoot. The grass is geometry, drawn
+// opaque with 4x MSAA: one tall culm with a seed head at your shoulder
+// stands sharp and near-black against the cloud, and the rest sits a touch
+// diffused behind it, backlit: dark cores, a warm yellow-green rim toward the
+// sun, paler and bluer with distance; where a blade crosses the sun, a thin
+// halation ring.
 //
-// The sky behind (sky.webp) is a real towering cumulus cut from an HDRI
-// looking up (tools/depth/bakes/kaze/sky_hdri.py): a cauliflower cumulus
-// stands up from the grass behind the culms, warm white on its sunlit domes
-// and pale skylight blue in its shaded flanks and base, the open sky deepens
-// from pale cyan low in the frame to cobalt at the top, and the sun is a
-// tight warm white bloom in the frame's top left corner with the cobalt
-// running saturated nearly up to it. It drifts with a two-phase flow map
-// (Vlachos 2010), faster toward the zenith, and the clouds lean after your
-// gusts.
+// The sky behind (sky.webp) is laid out for that lens
+// (tools/depth/bakes/kaze/sky_tower.py, from the HDRI print of
+// sky_hdri.py): deepest cobalt round the zenith at the top centre, paler
+// cyan toward the frame's bottom corners, and a real cauliflower cumulus,
+// cut from an HDRI, stood up as a tower rising diagonally into frame from
+// the lower right corner toward the zenith, warm white on its sunlit domes
+// and pale skylight blue in its shade. The sun is a tight warm white bloom in
+// the frame's top left corner with the cobalt running saturated nearly up to
+// it. The sky drifts with a two-phase flow map (Vlachos 2010), faster toward
+// the zenith, and the clouds lean after your gusts.
 //
 // Query: ?gust=demo throws a scripted gust; ?t=seconds runs the wind that long
 // at a fixed step and holds it (a still); ?breeze=0..2 scales the idle air;
@@ -33,15 +36,18 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 
 const SKY = "/lab/kaze/sky.webp";
 const ASPECT = 1.5;
-// The sky's frame, in the image uv it and the wind grid share: from just under
-// its top edge down through about two thirds of it, toward the left where the
-// sun is. OVER is the margin kept all round for the drifting sky to be pulled
-// in from; the crop window is cover-fitted to the box, held to its top edge.
+// The sky's frame, in the image uv it and the wind grid share: the plate is
+// laid out for the lens (sky_tower.py), a 16:10 box showing all of it inside
+// a margin. OVER is the margin kept all round for the drifting sky to be
+// pulled in from; the crop window is cover-fitted to the box, held to its
+// top edge (the zenith side) and, on a tall screen, placed across it at ax.
 const OVER = 0.02;
-const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.68, ax: 0.05 };
-// The sun (image uv): where sky_hdri.py lays the sun's bloom, in the frame's
-// top left corner (keep the two SUNs equal).
-const SUN = [0.09, 0.1];
+const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.9, ax: 0.6 };
+// The sun (image uv): where sky_tower.py lays the sun's bloom, in the frame's
+// top left corner (keep the two SUNs equal); and the zenith, just past the
+// top centre of the frame (CAM.vp in grass.js, in image uv).
+const SUN = [0.09, 0.12];
+const ZEN = [0.5, OVER - (0.05 * CROP.h) / 2];
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -65,6 +71,7 @@ uniform vec2 uSkyLod;      // the sky's own: x its sharp level, y uLod at its si
 uniform vec4 uView;        // the part of the image on screen: x0, y0, w, h (uv)
 
 const vec2 SUN = vec2(${SUN[0].toFixed(4)}, ${SUN[1].toFixed(4)});
+const vec2 ZEN = vec2(${ZEN[0].toFixed(4)}, ${ZEN[1].toFixed(4)});
 const float DOME = 0.7;     // the sunlit domes' lift into the print's warm white
 
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
@@ -73,9 +80,10 @@ void main() {
   vec2 uv = uView.xy + vec2(vUv.x, 1.0 - vUv.y) * uView.zw;
 
   // ---- the sky ----
-  // Toward the zenith (the top of the frame) cloud is nearer overhead and
-  // crosses faster; near the grass it barely moves.
-  float k = 0.35 + 0.65 * pow(clamp(1.0 - uv.y, 0.0, 1.0), 1.2);
+  // Toward the zenith (just past the top centre) cloud is nearer overhead
+  // and crosses faster; low in the frame's corners it barely moves.
+  float zd = length((uv - ZEN) * vec2(${ASPECT.toFixed(2)}, 1.0));
+  float k = 0.35 + 0.65 * pow(clamp(1.0 - zd, 0.0, 1.0), 1.2);
   vec2 v = uCloudV * k;
   // Each phase is weighted by a triangle peaking mid-cycle, so it is out of
   // sight when its offset wraps, and the triangle is sharpened so each phase
@@ -94,7 +102,7 @@ void main() {
   // clouds drift past it, so round it the sky is read where it was shot.
   vec2 sd = (uv - SUN) * vec2(${ASPECT.toFixed(2)}, 1.0);
   float r = length(sd);
-  // Right at the sun the HDRI's core is held (sky_hdri.py holds it softly,
+  // Right at the sun the bloom's core is held (sky_tower.py lays it softly,
   // above the silver-lit cloud round it); within a radius or two it is read softened, so the
   // clipped core melts into a smooth mound for the glow below to sit on,
   // and the cloud round it keeps its own texture.
@@ -128,14 +136,14 @@ void main() {
   float cb = (sky.b - sky.r) / max(sky.b, 1e-4);
   float shade = (1.0 - blue) * smoothstep(0.08, 0.2, Y) * (1.0 - smoothstep(0.4, 0.6, Y));
   shade *= 1.0 - smoothstep(0.72, 0.84, cb);
-  sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.9 * shade), vec3(0.0));
+  sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.6 * shade), vec3(0.0));
   const vec3 SKYSH = vec3(0.80, 0.95, 1.18);
-  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.7 * shade);
+  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.5 * shade);
   // The zenith: straight up the sky is deepest. The HDRI already falls off
   // toward it; this only leans the top of the frame a little further, toward
   // a clean film blue rather than slate. Multiplied, so the sky's own
   // gradient runs on through it.
-  float zen = 1.0 - smoothstep(0.02, 0.58, uv.y);
+  float zen = 1.0 - smoothstep(0.02, 0.62, zd);
   zen *= zen;
   sky *= mix(vec3(1.0), vec3(0.72, 0.9, 1.0), 0.7 * zen * blue);
   // A print's white is not the sun's: the near-white of the lit cloud rolls
@@ -164,7 +172,7 @@ void main() {
   // exponential roll-off, three widths summed, warm white (the print's own
   // #F5F0E1 rather than an orange), added over the sky with no edge
   // anywhere for a ring to form on. Tight: the bake lays only a narrow
-  // diffusion into the sky round it (sky_hdri.py, BLOOMR), and the lobes
+  // diffusion into the sky round it (sky_tower.py, BLOOM), and the lobes
   // here are a third of the old reach, so the cobalt runs saturated almost
   // up to the sun instead of a milky veil over the corner. The shoulder
   // below carries the core the rest of the way, under the clip.
@@ -563,6 +571,7 @@ export async function createKaze(host) {
     gl.uniform3fv(u.uU, cam.u);
     gl.uniform3fv(u.uF, cam.f);
     gl.uniform2fv(u.uK, cam.k);
+    gl.uniform2fv(u.uO, cam.o);
     gl.uniform2f(u.uRes, T.w, T.h);
     const v = view();
     gl.uniform4f(u.uView, v[0], v[1], v[2], v[3]);

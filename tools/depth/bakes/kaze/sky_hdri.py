@@ -50,6 +50,10 @@ Then the grade, toward summer film (grade()):
 
   python tools/depth/bakes/kaze/sky_hdri.py path/to/skidpan_16k.hdr [out_dir]
 
+The print it writes is no longer the piece's sky.webp itself: kept beside
+this script as sky_print.webp, it is laid out for the worm's-eye lens by
+sky_tower.py, which writes public/lab/kaze/sky.webp.
+
 (16k: the 8k magnifies the 43 degree crop about 3.7x; the 16k about 1.8x.)
 """
 import os

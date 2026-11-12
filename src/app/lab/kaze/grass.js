@@ -1,11 +1,15 @@
 // The grass, as geometry: the stalks seen from where you lie, worm's-eye.
 //
-// The camera sits 4 cm off the ground and looks up through a wide (116 deg)
-// stereographic lens, pitched so the zenith, where every upright stalk points,
-// lands just above the top of the frame. Every blade is rooted on the ground
-// below the bottom edge and runs up toward that vanishing point: the ones at
-// your shoulder run long and nearly the full height of the frame, the field
-// behind only reaches in as a low fringe. Built once, here, as world-space
+// The camera sits 4 cm off the ground and looks straight up through a wide
+// stereographic lens centred on the zenith, its frame shifted down so the
+// zenith, where every upright stalk points, lands just above the top centre
+// of the frame and the frame's centre looks up about 67 deg. Every blade is
+// rooted on the ground well below the bottom edge and runs up toward that
+// vanishing point: an upright stalk draws as a dead straight line into it,
+// at its own azimuth, so the culms at your shoulder splay out from the bottom
+// edge and converge overhead, as the towers in a street do looking up. Only
+// the stalks within a pace or so are tall enough to reach into frame; the
+// field behind stays under the bottom edge. Built once, here, as world-space
 // ribbons (a blade, a culm, a pedicel, a spikelet), each a centreline with its
 // half-width turned to face the lens; the vertex shader projects them, bends
 // them about their roots under the wind and keeps any sliver at least a
@@ -18,15 +22,22 @@
 // slightly diffused behind it), lit against the light: a dark core, a warm
 // yellow-green rim on the side toward the sun, and the sky's value let in,
 // more with distance, so the field falls back paler and bluer behind the one
-// silhouette. The low leaves across the middle are thinned, so the
-// cumulus base stands clear behind the anchor.
+// silhouette.
 
 const DEG = Math.PI / 180;
 
-// The lens. FOV is across the longer side of the frame; VP is where the
-// zenith sits, in NDC of the shorter side's axis, just past the top edge;
-// ROLL turns it a little to the right of centre.
-export const CAM = { h: 0.04, fov: 116, vp: 1.12, roll: 7 };
+// The lens: aimed straight up, at the zenith, with the frame shifted down
+// off its axis (a rising front, as an architect shoots a tower), so the
+// zenith, where every upright stalk points, sits just past the top centre of
+// the frame and the frame itself looks up about 67 deg (its centre) through
+// the stalks. Stereographic about the zenith: every vertical line through the
+// lens is a great circle through the projection's centre, so every upright
+// culm draws as a dead straight line converging on that point, at its own
+// azimuth, and a stalk at the edge is never stretched (the projection is
+// conformal). FOV is the image circle that just takes in the frame's far
+// (bottom) corners; VP is where the zenith lands in NDC (x, y); ROLL turns
+// the field about it.
+export const CAM = { h: 0.04, fov: 110, vp: [0.0, 1.05], roll: 0 };
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -35,34 +46,31 @@ const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const norm = (a) => mul(a, 1 / Math.max(1e-9, Math.hypot(a[0], a[1], a[2])));
 
-// The camera for a W x H frame: position, basis (right, up, forward) and the
-// stereographic scale to NDC.
+// The camera for a W x H frame: position, basis (right, up, forward: the
+// zenith), the stereographic scale to NDC and the shift (where the zenith
+// lands). The bottom corners take the image circle's rim whatever the
+// screen's shape: a tall screen looks a little further down, a wide one
+// keeps the same reach across its bottom edge.
 export function camera(W, H) {
-  const R = 2 * Math.tan((CAM.fov * DEG) / 4);
+  const A = W / H;
   // Stereographic: a direction at angle t from the axis lands at 2 tan(t/2).
-  // A tall screen keeps the wide frame's vertical reach (about 40 deg either
-  // side of the axis) and gives up width, so it never looks down past the
-  // grass to the horizon.
-  const ky = W >= H ? W / H / R : Math.max(1 / R, 1 / (2 * Math.tan(20 * DEG)));
-  const k = [(ky * H) / W, ky];
-  const half = 2 * Math.atan(1 / ky / 2);
-  const tz = 2 * Math.atan(CAM.vp / k[1] / Math.cos(CAM.roll * DEG) / 2);
-  const el = Math.max(Math.PI / 2 - tz, half + 9 * DEG);
-  const f = [0, Math.cos(el), Math.sin(el)];
-  const r0 = [1, 0, 0];
-  const u0 = cross(r0, f);
+  const R = 2 * Math.tan((CAM.fov * DEG) / 4);
+  const s = R / Math.hypot(A + Math.abs(CAM.vp[0]) * A, 1 + CAM.vp[1]);
+  const k = [1 / (A * s), 1 / s];
   const c = Math.cos(CAM.roll * DEG);
-  const s = Math.sin(CAM.roll * DEG);
-  const r = add(mul(r0, c), mul(u0, s));
-  const u = sub(mul(u0, c), mul(r0, s));
-  return { pos: [0, 0, CAM.h], r, u, f, k };
+  const sn = Math.sin(CAM.roll * DEG);
+  // screen right is +x (east), screen up is -y: the ground ahead of you (+y)
+  // lies below the bottom edge, the ground behind your head beyond the top
+  const r = [c, -sn, 0];
+  const u = [-sn, -c, 0];
+  return { pos: [0, 0, CAM.h], r, u, f: [0, 0, 1], k, o: CAM.vp };
 }
 
 export function project(cam, P) {
   const d = norm(sub(P, cam.pos));
   const z = dot(d, cam.f);
   const q = 2 / Math.max(1e-3, 1 + z);
-  return [dot(d, cam.r) * q * cam.k[0], dot(d, cam.u) * q * cam.k[1]];
+  return [dot(d, cam.r) * q * cam.k[0] + cam.o[0], dot(d, cam.u) * q * cam.k[1] + cam.o[1]];
 }
 
 function rng(seed) {
@@ -84,21 +92,25 @@ const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a
 
 // A centreline: from p0, heading az (horizontal) at a0 from vertical, the
 // angle growing by bend * s^bp along it (gravity on a leaf comes on toward
-// its tip); n segments over length L. Returns points and unit tangents.
-function curve(p0, az, a0, bend, bp, L, n, h) {
+// its tip); n segments over length L. The bend may turn another way than the
+// lean (bendAz): a culm stood straight out along its own line of sight from
+// the lens and its head nodding across it. Returns points and unit tangents.
+function curve(p0, az, a0, bend, bp, L, n, h, bendAz) {
   const hz = h || [Math.sin(az), Math.cos(az), 0];
+  const hb = bendAz == null ? hz : [Math.sin(bendAz), Math.cos(bendAz), 0];
+  const dirAt = (s) => {
+    const k = bend * Math.pow(s, bp);
+    const t = add(mul(hz, a0), mul(hb, k));
+    const a = Math.hypot(t[0], t[1]);
+    return a < 1e-9 ? [0, 0, 1] : add(mul(t, Math.sin(a) / a), [0, 0, Math.cos(a)]);
+  };
   const pts = [p0];
   const tan = [];
   let p = p0;
   for (let i = 0; i <= n; i++) {
-    const s = i / n;
-    const a = a0 + bend * Math.pow(s, bp);
-    const d = add(mul(hz, Math.sin(a)), [0, 0, Math.cos(a)]);
-    tan.push(d);
+    tan.push(dirAt(i / n));
     if (i < n) {
-      const sm = (i + 0.5) / n;
-      const am = a0 + bend * Math.pow(sm, bp);
-      p = add(p, mul(add(mul(hz, Math.sin(am)), [0, 0, Math.cos(am)]), L / n));
+      p = add(p, mul(dirAt((i + 0.5) / n), L / n));
       pts.push(p);
     }
   }
@@ -186,7 +198,7 @@ function culmWithHead(b, R, o) {
   const { root, az, lean, L, w0, cStem, cTip, cHead, trans, segs, leaves = 1 } = o;
   const phase = R() * 6.283;
   const seed = seedOf(phase);
-  const stem = curve(root, az, lean, o.nod ?? 0.75, 5, L, segs);
+  const stem = curve(root, az, lean, o.nod ?? 0.75, 5, L, segs, null, o.nodAz);
   const tip = stem.pts[stem.pts.length - 1];
   const lever = (s) => AMP * L * s * s;
   b.ribbon(stem, (s) => w0 * PROFILE.culm(s), tip, lever, cStem, cTip, trans * 0.5, phase, seed);
@@ -263,27 +275,32 @@ export function buildGrass() {
   const at = (D, phi) => [D * Math.sin(phi * DEG), D * Math.cos(phi * DEG), 0];
 
   // ---- one anchor, and two culms beside it ----
-  // All three nod downwind (the breeze runs to +x, az 70-120), at staggered
-  // lengths, so their heads hang at three heights and fan one way, never
-  // meeting. Only the tall right one is the anchor: full resolution, sharp,
-  // near-black against the cumulus. The other two are grass against the
-  // light like the field: a dark core, a warm yellow-green rim on the side
-  // toward the sun, and the sky's value let in, half resolution, so there is
-  // one silhouette against one cloud and the rest frames it.
+  // The lens looks straight up, so a stalk stood upright, or leaning
+  // straight out away from you along its own azimuth, draws as a straight
+  // line into the zenith: all three do, and only their heads nod across
+  // that line, downwind (the breeze runs to +x), at staggered lengths, so
+  // the heads hang at three heights and fan one way, never meeting. Only the
+  // tall right one is the anchor: full resolution, sharp, near-black against
+  // the cumulus, a dead straight stem from the bottom edge up toward the top
+  // centre. The other two are grass against the light like the field: a dark
+  // core, a warm yellow-green rim on the side toward the sun, and the sky's
+  // value let in, half resolution, so there is one silhouette against one
+  // cloud and the rest frames it.
   const ink = lin(0x1c2414);
   const inkTip = lin(0x232d18);
   const anchors = [
-    { D: 0.17, phi: -40, L: 0.92, az: 70, lean: 0.07, nod: 1.1, leaves: 0 },
-    { D: 0.22, phi: -16, L: 0.68, az: 80, lean: 0.05, nod: 0.7, leaves: 0 },
-    { D: 0.2, phi: 30, L: 1.0, az: 120, lean: 0.06, nod: 1.2, leaves: 0, hero: 1 },
+    { D: 0.2, phi: -44, L: 0.78, lean: 0.03, nod: 0.9, nodAz: 70, leaves: 0 },
+    { D: 0.24, phi: -14, L: 0.6, lean: 0.02, nod: 0.6, nodAz: 85, leaves: 0 },
+    { D: 0.2, phi: 21, L: 1.0, lean: 0.0, nod: 0.75, nodAz: 105, leaves: 0, hero: 1 },
   ];
   for (const a of anchors) {
     const lit = !a.hero;
     culmWithHead(lit ? shoulder : near, R, {
       root: at(a.D, a.phi),
-      az: a.az * DEG,
+      az: a.phi * DEG,
       lean: a.lean,
       nod: a.nod,
+      nodAz: a.nodAz * DEG,
       L: a.L,
       w0: lit ? 0.0015 : 0.0017,
       cStem: lit ? lin(0x2c3a1a) : ink,
@@ -309,7 +326,7 @@ export function buildGrass() {
   const items = [];
   // culms with heads
   for (let i = 0; i < 60; i++) {
-    const D = 0.45 + 2.2 * Math.pow(R(), 1.15);
+    const D = 0.32 + 1.9 * Math.pow(R(), 1.3);
     const phi = (R() - 0.5) * 230;
     const L = 0.55 + 0.6 * R();
     items.push({ kind: "culm", D, phi, L });
@@ -336,7 +353,8 @@ export function buildGrass() {
     for (let j = 0; j < 3; j++) items.push({ kind: "leaf", D: D + (R() - 0.5) * 0.04, phi: phi + (R() - 0.5) * 5, L: 0.16 + 0.2 * R(), j, mat: 1 });
   }
   // one that crosses the sun, in from the left edge, for the halation to catch
-  items.push({ kind: "culm", D: 0.32, phi: -60.5, L: 0.95, lean: 0.0 });
+  // (its azimuth is the sun's, seen from the zenith)
+  items.push({ kind: "culm", D: 0.34, phi: -79, L: 0.9, lean: 0.0, nodAz: 150 });
   items.forEach((it, i) => (it.n = i));
   items.sort((p, q) => q.D - p.D);
   for (const it of items) {
@@ -356,11 +374,15 @@ export function buildGrass() {
     const tipC = mix3(mix3(lin(0x3c4b20), lin(0x67763c), far), lin(0x7a7434), dry).map((c) => c * vary);
     const segs = Math.round(14 + 26 * (1 - far));
     if (it.kind === "culm") {
+      // stood up and leaning out, away from you, more or less along its own
+      // line of sight, so it runs straight in toward the zenith with the
+      // rest; its head nods across that line, downwind
       culmWithHead(b, R, {
         root,
-        az: R() * 6.283,
-        lean: it.lean ?? 0.04 + 0.12 * R(),
+        az: (it.phi + (R() - 0.5) * 30) * DEG,
+        lean: it.lean ?? 0.02 + 0.08 * R(),
         nod: 0.5 + 0.6 * R(),
+        nodAz: (it.nodAz ?? 90 + (R() - 0.5) * 80) * DEG,
         L: it.L,
         w0: it.D < 0.4 ? 0.0016 : 0.0011 + 0.0006 * R(),
         cStem: base,
@@ -372,9 +394,11 @@ export function buildGrass() {
         whorls: 3 + Math.floor(R() * 2),
       });
     } else {
+      // a leaf arcs outward, away from you, so the tufts splay from the
+      // bottom edge like the stalks
       leaf(b, R, {
         root,
-        az: R() * 6.283,
+        az: (it.phi + (R() - 0.5) * 50) * DEG,
         lean: it.lean ?? 0.05 + 0.3 * R(),
         bend: it.bend ?? 0.15 + 0.7 * R(),
         L: it.L,
@@ -402,6 +426,7 @@ uniform vec3 uR;
 uniform vec3 uU;
 uniform vec3 uF;
 uniform vec2 uK;
+uniform vec2 uO;           // where the zenith lands, NDC (the lens's shift)
 uniform vec2 uRes;         // target size, px
 uniform vec4 uView;        // image uv on screen (for the wind grid)
 uniform sampler2D uWind;
@@ -420,7 +445,7 @@ out float vDepth;
 vec2 proj(vec3 P) {
   vec3 d = normalize(P - uCam);
   vec3 c = vec3(dot(d, uR), dot(d, uU), dot(d, uF));
-  return 2.0 * c.xy / max(1.0 + c.z, 1e-3) * uK;
+  return 2.0 * c.xy / max(1.0 + c.z, 1e-3) * uK + uO;
 }
 
 // A hue turn about the grey axis (Rodrigues), radians.
@@ -437,9 +462,10 @@ void main() {
   vec4 W = textureLod(uWind, iuv, 0.0);
   vec2 b = W.xy;          // bend: across (+ right), and away (+)
   float ws = length(W.zw);
-  // across is the lens's right, laid level; away is level, ahead
+  // across is the lens's right, laid level; away is level, ahead (screen
+  // down: the lens looks straight up, so ahead is its down)
   vec3 rx = normalize(vec3(uR.xy, 0.0));
-  vec3 fz = normalize(vec3(uF.xy, 0.0));
+  vec3 fz = normalize(vec3(-uU.xy, 0.0));
   float lv = aK.x;
   // flutter: the thin leaves and seed heads quiver in the stronger air
   float fl = sin(uTime * (4.0 + 1.3 * sin(aK.z)) + aK.z * 3.0) * smoothstep(1.5, 9.0, ws);
