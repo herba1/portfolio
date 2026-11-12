@@ -171,9 +171,12 @@ const ROLL = 0.12; // it clears to here (~2.2 km: the far towers turning blue)
 const LEVELS = 6;
 // The sky's light at the scale of a cumulus' forms (a normalised blur of the
 // sky pixels, levels 3 and 4 of the pyramid, ~100-200 plate px): the plate minus
-// this is the cloud's local detail, which the veil keeps.
+// this is the cloud's local detail, which the veil keeps, at full strength: the
+// air shifts and pales a cumulus' light, it never airbrushes its lobes (the
+// plate lays the capture's own folds on at full strength, clouds.py, and a
+// veil that kept only part of them read as a blurrier plate behind the glass).
 const DETAIL_W = [0, 0, 0, 1];
-const DETAIL_K = 0.65;
+const DETAIL_K = 1.0;
 // A tower the haze takes keeps its build the same way: its floors and mullions
 // (the plate less a normalised blur of the tower pixels alone, at the scale of
 // its floors, ~30 plate px on the far tower) come back over the in-scatter at
@@ -547,8 +550,8 @@ void main() {
   vec3 sky = scene * Ts + (air + sunSky) * (1.0 - Ts);
   // The veil over the sky keeps the cumulus' forms: their local detail (the
   // plate less its blur at the scale of a cloud's forms) comes back over the
-  // in-scatter, so at least ${Math.round(DETAIL_K * 100)}% of it survives any depth of haze and
-  // the low cloud reads as cloud through the air, not as a flat wash.
+  // in-scatter, so ${Math.round(DETAIL_K * 100)}% of it survives any depth of haze and the
+  // low cloud reads as cloud through the air, not as a flat wash.
   vec3 kept = ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene - forms) * smoothstep(0.05, 0.3, dtl.a);
   sky += kept;
   // How much of the sky's light is still the cloud's own: what the air lets
