@@ -1,10 +1,10 @@
 {
   "title": "Spatial scene",
-  "description": "A night photo of Times Square, with herb standing in the street, that turns out to have depth. Move across it and the city shifts behind him: herb, the pedicab and the taxis slide over street and storefronts that were hidden behind them a moment ago. The photo was split offline into four layers at its depth edges, each one inpainted behind the layers in front, and each drawn as a mesh displaced by its own depth, so the reveal is real street rather than a smear.",
+  "description": "A worm's-eye photo of a wooden pole under summer cumulus that turns out to have depth, and room above it. Look up and the camera pitches about the foot of the pole: the pole stays put while the sky swings down past it, its verticals converge harder on the zenith as the lens eases from rectilinear to stereographic, and the frame opens into deep cobalt the photo never showed. Look sideways and the camera turns round the pole, so the wires and the cloud behind them slide apart. The sky was baked offline as its own layer at infinity, inpainted behind the pole and wires and continued past the frame; the pole is a mesh displaced by its own depth.",
   "tags": ["WebGL", "Photo", "Depth"],
   "status": "draft",
   "createdAt": "2026-11-06T17:00:00.000Z",
   "intent": "Apple's Spatial Scenes (iOS 26 lock screen and Photos, https://support.apple.com/guide/iphone/spatial-scenes) and Facebook 3D Photos (2018, https://ai.meta.com/blog/powered-by-ai-turning-any-2d-photo-into-3d-using-convolutional-neural-nets/): a flat photo you know suddenly has depth that behaves correctly, foreground sliding over background that was hidden behind it.",
   "tile": { "shape": "wide" },
-  "sources": ["https://support.apple.com/guide/iphone/spatial-scenes", "https://ai.meta.com/blog/powered-by-ai-turning-any-2d-photo-into-3d-using-convolutional-neural-nets/"]
+  "sources": ["https://support.apple.com/guide/iphone/spatial-scenes", "https://ai.meta.com/blog/powered-by-ai-turning-any-2d-photo-into-3d-using-convolutional-neural-nets/", "https://unsplash.com/photos/dpn8hEVRwqo"]
 }

@@ -1,54 +1,82 @@
 import { createStage, clamp } from "../_kit/stage";
 
-// herb's Times Square photo as a spatial scene. bake.py split it offline into
-// four layers at the depth discontinuities (far street, taxis and billboards,
-// pedicab, herb), each with its own depth and with its colour and depth
-// continued behind the layers in front of it. Here every layer is a grid mesh
-// displaced by its own depth, so a small camera move parallaxes each vertex by
-// inverse depth (which is exactly what the depth map is) and the nearer
-// layers slide over street that was really hidden, not stretched.
+// A worm's-eye photo of a wooden pole under summer cumulus, as a spatial
+// scene you can look up through. bake.py split it offline into two layers:
+// the sky, inpainted behind the pole and continued past the frame towards the
+// zenith, at infinity; and the pole with its wires and insulators, a mesh
+// displaced by its own depth.
+//
+// Both are drawn through one camera. Vertical movement pitches it, horizontal
+// movement yaws it, and either way it orbits a point low on the pole, so the
+// pole stays anchored while the sky swings past behind it (the sky rotates by
+// the full angle, the wires and the pole's top by less, in proportion to their
+// distance). Pitching up also swings the lens from rectilinear towards
+// stereographic, r = f/s tan(s theta), s from 1 to 1/2: the pole's verticals
+// converge harder on the zenith and the edges of the frame open into sky the
+// photo never framed.
 
 const BASE = "/lab/spatial-scene/";
 const GROUND = [0.949, 0.941, 0.922]; // #f2f0eb
-const PHOTO_ASPECT = 3 / 4; // w / h
-const FOCUS = 0.5; // the depth that stays put
-const AMP = 0.068; // parallax at |cam| = 1, in print widths per unit of depth
-const ZOOM = 1 / (1 - 2 * AMP * 0.55); // overscan so no layer edge ever shows
+const ZOOM = 1.2; // the print shows the middle 1/ZOOM of the photo at rest
+const YAW = 6; // degrees at |x| = 1
+const PITCH_UP = 16; // degrees at y = 1
+const PITCH_DOWN = 8; // degrees at y = -1
 const GRID_X = 120;
 const GRID_Y = 160;
 
-const LAYER_VS = `#version 300 es
-layout(location=0) in vec2 aUv;
-uniform sampler2D uDepth; uniform vec4 uChan;
-uniform vec2 uCam;        // camera offset, print widths per unit depth (y already scaled to heights)
-uniform vec4 uRect;       // print rect in clip space: x0, y0, x1, y1
-out vec2 vUv; out float vD;
-void main(){
-  float d = dot(texture(uDepth, aUv), uChan);
-  vec2 p = (aUv - 0.5) * ${ZOOM.toFixed(5)} + 0.5;
-  // Inverse depth is parallax: shift is proportional to it, relative to the focus plane.
-  p -= uCam * (d - ${FOCUS.toFixed(3)});
-  vec2 c = mix(uRect.xy, uRect.zw, vec2(p.x, 1.0 - p.y));
-  gl_Position = vec4(c, 0.0, 1.0);
-  vUv = aUv; vD = d;
+const smooth = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+// s = 1 is rectilinear, 1/2 stereographic; looking down stays rectilinear.
+const lensFor = (y) => 1 - 0.5 * smooth(-0.5, 1, y);
+
+const LENS = `
+uniform float uF; uniform float uS; uniform vec2 uOff; uniform mat3 uM;
+const float ASPECT = 0.75;
+const float ZOOM = ${ZOOM.toFixed(4)};
+vec2 project(vec3 d){
+  float l = length(d.xy);
+  float th = atan(l, d.z);
+  return l > 1e-6 ? d.xy / l * (uF / uS * tan(uS * th)) : vec2(0.0);
+}
+vec3 unproject(vec2 X){
+  float r = length(X);
+  float th = atan(r * uS / uF) / uS;
+  return r > 1e-6 ? vec3(X / r * sin(th), cos(th)) : vec3(0.0, 0.0, 1.0);
+}
+// Film-like: blacks lifted a hair, highlights rolled off under paper white.
+vec3 grade(vec3 rgb){
+  rgb = mix(vec3(0.035, 0.03, 0.04), vec3(1.0), rgb);
+  vec3 o = max(rgb - 0.85, 0.0);
+  return min(rgb, 0.85 + o / (1.0 + o / 0.13));
 }`;
 
-const LAYER_FS = `#version 300 es
+const NEAR_VS = `#version 300 es
+layout(location=0) in vec2 aUv;
+uniform sampler2D uDepth; uniform vec3 uA; uniform vec4 uRect;
+${LENS}
+out vec2 vUv;
+void main(){
+  float d = texture(uDepth, aUv).r;
+  // Inverse depth to distance along z, in the units the anchor uses.
+  float z = 1.0 / max(d, 0.08);
+  vec3 P = vec3((aUv.x - 0.5) * ASPECT, 0.5 - aUv.y, uF) * (z / uF);
+  vec3 P1 = transpose(uM) * (P - uA) + uA; // orbit about the anchor
+  vec2 X = (project(P1) - uOff) * ZOOM;
+  gl_Position = vec4(mix(uRect.xy, uRect.zw, vec2(X.x / ASPECT, X.y) + 0.5), 0.0, 1.0);
+  vUv = aUv;
+}`;
+
+const NEAR_FS = `#version 300 es
 precision highp float;
-in vec2 vUv; in float vD;
-uniform sampler2D uCol; uniform sampler2D uSoft; uniform float uDof; uniform float uOpaque;
+in vec2 vUv; uniform sampler2D uCol;
+${LENS}
 out vec4 o;
 void main(){
-  vec4 c = texture(uCol, vUv);           // premultiplied on upload
-  // A hint of depth of field: only the far city, and only a little.
-  float blur = uDof * smoothstep(0.24, 0.02, vD);
-  c.rgb = mix(c.rgb, texture(uSoft, vUv).rgb, blur * 0.85);
-  if (uOpaque > 0.5) c.a = 1.0;
-  // Film-like: blacks lifted a hair toward warm violet, highlights eased.
+  vec4 c = texture(uCol, vUv); // premultiplied on upload
   vec3 rgb = c.a > 0.0 ? c.rgb / c.a : vec3(0.0);
-  rgb = mix(vec3(0.035, 0.028, 0.04), vec3(1.0), rgb);
-  rgb = rgb / (1.0 + 0.08 * rgb) * 1.08;
-  o = vec4(rgb * c.a, c.a);
+  o = vec4(grade(rgb) * c.a, c.a);
 }`;
 
 const QUAD_VS = `#version 300 es
@@ -56,16 +84,18 @@ layout(location=0) in vec2 aPos;
 uniform vec4 uRect; out vec2 vUv;
 void main(){ vUv = aPos; gl_Position = vec4(mix(uRect.xy, uRect.zw, aPos), 0.0, 1.0); }`;
 
-// The city's lights bloom very slightly, riding with the far-middle depth.
-const BLOOM_FS = `#version 300 es
+// The sky at infinity: rotation only, looked up per pixel through the lens.
+const SKY_FS = `#version 300 es
 precision highp float;
-in vec2 vUv; uniform sampler2D uBloom; uniform vec2 uCam; uniform float uGain;
+in vec2 vUv; uniform sampler2D uSky; uniform vec4 uCanvas;
+${LENS}
 out vec4 o;
 void main(){
-  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
-  uv = (uv + uCam * (0.3 - ${FOCUS.toFixed(3)}) - 0.5) / ${ZOOM.toFixed(5)} + 0.5;
-  vec3 b = texture(uBloom, uv).rgb;
-  o = vec4(b * b * uGain + b * uGain * 0.4, 0.0);
+  vec2 X = vec2((vUv.x - 0.5) * ASPECT, vUv.y - 0.5) / ZOOM + uOff;
+  vec3 d = uM * unproject(X);
+  vec2 p = uF * d.xy / max(d.z, 0.05);
+  vec2 uv = vec2((p.x - uCanvas.x) / (uCanvas.z - uCanvas.x), (uCanvas.w - p.y) / (uCanvas.w - uCanvas.y));
+  o = vec4(grade(texture(uSky, uv).rgb), 1.0);
 }`;
 
 // A print lying on the ground: a soft, faint contact shadow, nothing more.
@@ -114,18 +144,54 @@ const loadImage = (src) =>
     im.src = src;
   });
 
+// --- camera maths, in the photo's camera frame (x right, y up, z forward)
+const rotation = (axis, a) => {
+  const [x, y, z] = axis;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const t = 1 - c;
+  // row-major
+  return [t * x * x + c, t * x * y - s * z, t * x * z + s * y, t * x * y + s * z, t * y * y + c, t * y * z - s * x, t * x * z - s * y, t * y * z + s * x, t * z * z + c];
+};
+const mul = (a, b) => {
+  const o = new Array(9);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+  return o;
+};
+const columnMajor = (m) => new Float32Array([m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]);
+const projectJS = (d, f, s) => {
+  const l = Math.hypot(d[0], d[1]);
+  if (l < 1e-9) return [0, 0];
+  const r = (f / s) * Math.tan(s * Math.atan2(l, d[2]));
+  return [(d[0] / l) * r, (d[1] / l) * r];
+};
+
 export async function createSpatial(host) {
   const stage = createStage(host, { dpr: 2, webgl: true, alpha: false });
   const gl = stage.ctx;
-  const names = ["far.webp", "far-soft.webp", "mid.webp", "near.webp", "herb.webp", "depth.png", "depth-herb.png", "bloom.webp"];
   let images;
+  let scene;
   try {
-    images = await Promise.all(names.map((n) => loadImage(BASE + n)));
+    [scene, ...images] = await Promise.all([
+      fetch(BASE + "scene.json").then((r) => {
+        if (!r.ok) throw new Error("could not load scene.json");
+        return r.json();
+      }),
+      ...["sky.webp", "near.webp", "depth.png"].map((n) => loadImage(BASE + n)),
+    ]);
   } catch (e) {
     stage.destroy();
     throw e;
   }
-  const [farIm, softIm, midIm, nearIm, herbIm, depthIm, depthHerbIm, bloomIm] = images;
+  const [skyIm, nearIm, depthIm] = images;
+  const ASPECT = scene.aspect;
+  const F = 0.5 / Math.tan(((scene.fovY / 2) * Math.PI) / 180);
+  const p0 = (scene.pitch0 * Math.PI) / 180;
+  const UP = [0, Math.cos(p0), Math.sin(p0)]; // world up, seen from the photo's camera
+  const [au, av, ad] = scene.anchor;
+  const az = 1 / Math.max(ad, 0.08);
+  const A = [(au - 0.5) * ASPECT * (az / F), (0.5 - av) * (az / F), az];
+  const restA = projectJS(A, F, 1);
 
   const texture = (im, { premultiply = false, mips = false } = {}) => {
     const t = gl.createTexture();
@@ -141,21 +207,16 @@ export async function createSpatial(host) {
     return t;
   };
   const tex = {
-    far: texture(farIm, { mips: true }),
-    soft: texture(softIm),
-    mid: texture(midIm, { premultiply: true, mips: true }),
+    sky: texture(skyIm, { mips: true }),
     near: texture(nearIm, { premultiply: true, mips: true }),
-    herb: texture(herbIm, { premultiply: true, mips: true }),
     depth: texture(depthIm),
-    depthHerb: texture(depthHerbIm),
-    bloom: texture(bloomIm),
   };
 
-  const layerProg = compile(gl, LAYER_VS, LAYER_FS);
-  const bloomProg = compile(gl, QUAD_VS, BLOOM_FS);
+  const nearProg = compile(gl, NEAR_VS, NEAR_FS);
+  const skyProg = compile(gl, QUAD_VS, SKY_FS);
   const shadowProg = compile(gl, QUAD_VS, SHADOW_FS);
 
-  // One grid shared by every layer; each displaces it by its own depth.
+  // The near layer's grid; each vertex is displaced by the layer's depth.
   const verts = new Float32Array((GRID_X + 1) * (GRID_Y + 1) * 2);
   for (let y = 0, i = 0; y <= GRID_Y; y++) for (let x = 0; x <= GRID_X; x++) {
     verts[i++] = x / GRID_X;
@@ -184,14 +245,8 @@ export async function createSpatial(host) {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.bindVertexArray(null);
 
-  const layers = [
-    { col: tex.far, depth: tex.depth, chan: [1, 0, 0, 0], opaque: 1, dof: 1 },
-    { col: tex.mid, depth: tex.depth, chan: [0, 1, 0, 0], opaque: 0, dof: 0 },
-    { col: tex.near, depth: tex.depth, chan: [0, 0, 1, 0], opaque: 0, dof: 0 },
-    { col: tex.herb, depth: tex.depthHerb, chan: [1, 0, 0, 0], opaque: 0, dof: 0 },
-  ];
-
-  // --- camera: spring-follow the pointer, settle when it leaves, drift when idle
+  // --- camera: x yaws and y pitches (up is +); spring-follow the pointer,
+  // settle when it leaves, drift when idle. ?x=&y= hold a view.
   const params = new URLSearchParams(location.search);
   const held = params.has("x") || params.has("y");
   const cam = { x: held ? clamp(+params.get("x") || 0, -1, 1) : 0, y: held ? clamp(+params.get("y") || 0, -1, 1) : 0, vx: 0, vy: 0 };
@@ -206,10 +261,10 @@ export async function createSpatial(host) {
   const orientable = typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission !== "function";
   if (orientable && matchMedia("(pointer: coarse)").matches) window.addEventListener("deviceorientation", onOrient);
 
-  let print = { x0: 0, y0: 0, x1: 1, y1: 1, w: 1, h: 1 };
+  let print = { x: 0, y: 0, w: 1, h: 1 };
   const layout = (w, h) => {
-    const ph = Math.min(h * 0.84, (w - 32) / PHOTO_ASPECT);
-    const pw = ph * PHOTO_ASPECT;
+    const ph = Math.min(h * 0.84, (w - 32) / ASPECT);
+    const pw = ph * ASPECT;
     const x = Math.round((w - pw) / 2);
     const y = Math.round((h - ph) / 2);
     print = { x, y, w: Math.round(pw), h: Math.round(ph) };
@@ -247,41 +302,50 @@ export async function createSpatial(host) {
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
+    // the camera: yaw about the pole's (world-vertical) axis, pitch about
+    // the horizontal, both through the anchor
+    const yaw = (cam.x * YAW * Math.PI) / 180;
+    const pitch = ((cam.y > 0 ? cam.y * PITCH_UP : cam.y * PITCH_DOWN) * Math.PI) / 180;
+    const M = mul(rotation(UP, yaw), rotation([1, 0, 0], -pitch));
+    const s = lensFor(cam.y);
+    // The lens change moves the anchor radially; a principal-point shift puts it back.
+    const pa = projectJS(A, F, s);
+    const off = [pa[0] - restA[0], pa[1] - restA[1]];
+    const Mc = columnMajor(M);
+    const setLens = (prog) => {
+      gl.uniform1f(prog.u.uF, F);
+      gl.uniform1f(prog.u.uS, s);
+      gl.uniform2f(prog.u.uOff, off[0], off[1]);
+      gl.uniformMatrix3fv(prog.u.uM, false, Mc);
+      gl.uniform4f(prog.u.uRect, ...rect);
+    };
+
     // the scene, clipped to the print
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(Math.round(print.x * dpr), Math.round((H - print.y - print.h) * dpr), Math.round(print.w * dpr), Math.round(print.h * dpr));
-    const cx = cam.x * AMP;
-    const cy = cam.y * AMP * 0.7 * PHOTO_ASPECT; // in print heights
-    gl.useProgram(layerProg.p);
-    gl.uniform4f(layerProg.u.uRect, ...rect);
-    gl.uniform2f(layerProg.u.uCam, cx, cy);
-    gl.uniform1i(layerProg.u.uDepth, 0);
-    gl.uniform1i(layerProg.u.uCol, 1);
-    gl.uniform1i(layerProg.u.uSoft, 2);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, tex.soft);
-    gl.bindVertexArray(gridVao);
-    for (const L of layers) {
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, L.depth);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, L.col);
-      gl.uniform4f(layerProg.u.uChan, ...L.chan);
-      gl.uniform1f(layerProg.u.uOpaque, L.opaque);
-      gl.uniform1f(layerProg.u.uDof, L.dof);
-      gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
-    }
 
-    gl.blendFunc(gl.ONE, gl.ONE);
-    gl.useProgram(bloomProg.p);
-    gl.uniform4f(bloomProg.u.uRect, ...rect);
-    gl.uniform2f(bloomProg.u.uCam, cx, cy);
-    gl.uniform1f(bloomProg.u.uGain, 0.2);
+    gl.disable(gl.BLEND);
+    gl.useProgram(skyProg.p);
+    setLens(skyProg);
+    gl.uniform4f(skyProg.u.uCanvas, ...scene.canvas);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex.bloom);
-    gl.uniform1i(bloomProg.u.uBloom, 0);
+    gl.bindTexture(gl.TEXTURE_2D, tex.sky);
+    gl.uniform1i(skyProg.u.uSky, 0);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.enable(gl.BLEND);
+    gl.useProgram(nearProg.p);
+    setLens(nearProg);
+    gl.uniform3f(nearProg.u.uA, A[0], A[1], A[2]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex.depth);
+    gl.uniform1i(nearProg.u.uDepth, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tex.near);
+    gl.uniform1i(nearProg.u.uCol, 1);
+    gl.bindVertexArray(gridVao);
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(null);
   };
 
@@ -294,17 +358,17 @@ export async function createSpatial(host) {
       let ty = 0;
       if (tilt) {
         tx = tilt.x;
-        ty = tilt.y;
+        ty = -tilt.y;
       } else if (p.inside) {
         tx = clamp(((p.x / stage.width) * 2 - 1) * 1.15, -1, 1);
-        ty = clamp(((p.y / stage.height) * 2 - 1) * 1.15, -1, 1);
+        ty = clamp((1 - (p.y / stage.height) * 2) * 1.15, -1, 1);
       }
-      // Idle drift: on load, and again after a while untouched. It fades in
-      // and out rather than taking over.
+      // Idle drift: on load, and again after a while untouched. It leans
+      // towards looking up, and fades in and out rather than taking over.
       const wantDrift = !tilt && !p.inside && idle > 3500 ? 1 : 0;
       drift += (wantDrift - drift) * (1 - Math.exp(-dt * (wantDrift ? 0.6 : 4)));
-      tx += Math.sin(time * 0.42) * 0.85 * drift;
-      ty += Math.sin(time * 0.29 + 0.8) * 0.4 * drift;
+      tx += Math.sin(time * 0.42) * 0.8 * drift;
+      ty += (0.25 + Math.sin(time * 0.29 + 0.8) * 0.6) * drift;
       const m = Math.hypot(tx, ty);
       if (m > 1) {
         tx /= m;
