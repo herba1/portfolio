@@ -113,18 +113,169 @@ function integrate(wh, goal, k, z, dt) {
 // Detent: the drag is sticky around each title, as if a pawl rides in a notch.
 const notch = (x) => x - (Math.sin(2 * Math.PI * x) / (2 * Math.PI)) * 0.78;
 
-export async function createDrum(host, { embedded = false, family = "sans-serif" } = {}) {
-  // The face at the narrow end of its width axis and the top of its weight.
-  // The canvas `font` shorthand drops font-stretch, so width goes through
-  // fontStretch (where it is missing the face is squeezed further instead).
-  const face = (px) => `${WEIGHT} ${px}px ${family}`;
-  const setFace = (ctx, px) => {
-    ctx.font = face(px);
-    if ("fontStretch" in ctx) ctx.fontStretch = "ultra-condensed";
+// The face's own file, so it can be registered again at any one width.
+function faceSource(family) {
+  const name = family.split(",")[0].trim().replace(/^["']|["']$/g, "");
+  const covers = (range, cp) =>
+    (range || "U+0-10FFFF").split(",").some((r) => {
+      const m = r.trim().match(/^U\+([0-9a-f?]+)(?:-([0-9a-f]+))?$/i);
+      if (!m) return false;
+      const lo = parseInt(m[1].replace(/\?/g, "0"), 16);
+      const hi = m[2] ? parseInt(m[2], 16) : parseInt(m[1].replace(/\?/g, "f"), 16);
+      return cp >= lo && cp <= hi;
+    });
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    for (const r of rules) {
+      if (!(r instanceof CSSFontFaceRule)) continue;
+      if (r.style.getPropertyValue("font-family").replace(/["']/g, "").trim() !== name) continue;
+      if (!covers(r.style.getPropertyValue("unicode-range"), 0x48)) continue;
+      const url = r.style.getPropertyValue("src").match(/url\(\s*["']?([^"')]+)["']?\s*\)/);
+      if (url) return new URL(url[1], sheet.href || location.href).href;
+    }
+  }
+  return null;
+}
+
+// Fit the type instead of monospacing it. Every wheel is the same width, so
+// each letter is set at the point on Anybody's width axis where its ink
+// comes out at one shared width: E and L open out, H, O and S sit a hair
+// off the narrow end, and all of them stand the same distance from the
+// seam, the way a Druk cover line is fitted by hand. Canvas only takes
+// font-stretch as a keyword, so each width the fit asks for is registered
+// as its own face from the same file, declared at that one stretch; the
+// browser drives the wdth axis from it. Ink is measured off a raster, not
+// from measureText, whose boxes are rounded too coarsely to fit by.
+async function fitLetters(letters, family) {
+  const MP = 400; // measuring size, px
+  const mcv = document.createElement("canvas");
+  mcv.width = 1200;
+  mcv.height = 480;
+  const mx = mcv.getContext("2d", { willReadFrequently: true });
+  const X0 = 200;
+  const BASE = 400;
+  // Ink extent of a letter set by `font`, in cap heights from its origin.
+  const ink = (font, L) => {
+    mx.clearRect(0, 0, mcv.width, mcv.height);
+    font(mx);
+    mx.fillStyle = "#000";
+    mx.textBaseline = "alphabetic";
+    mx.fillText(L, X0, BASE);
+    const d = mx.getImageData(0, 0, mcv.width, mcv.height).data;
+    let l = mcv.width;
+    let r = -1;
+    let top = mcv.height;
+    for (let y = 0; y < mcv.height; y++)
+      for (let x = 0; x < mcv.width; x++)
+        if (d[(y * mcv.width + x) * 4 + 3] > 127) {
+          if (x < l) l = x;
+          if (x > r) r = x;
+          if (y < top) top = y;
+        }
+    return { l: l - X0, r: r + 1 - X0, top: BASE - top };
   };
+
+  let buf = null;
   try {
-    await document.fonts.load(`ultra-condensed ${face(200)}`, "HORSEBLNDCVPA");
+    const src = faceSource(family);
+    if (src) buf = await (await fetch(src)).arrayBuffer();
+  } catch {
+    buf = null;
+  }
+  const tag = Math.random().toString(36).slice(2, 8);
+  const faces = new Map();
+  const faceAt = async (w) => {
+    const key = Math.round(w * 4) / 4;
+    if (!faces.has(key)) {
+      const f = new FontFace(`drum-${tag}-${String(key).replace(".", "_")}`, buf, { weight: String(WEIGHT), stretch: `${key}%` });
+      await f.load();
+      document.fonts.add(f);
+      faces.set(key, f);
+    }
+    const fam = faces.get(key).family;
+    return { stretch: key, set: (ctx, px) => (ctx.font = `${WEIGHT} ${px}px "${fam}"`) };
+  };
+
+  let lo;
+  let hi;
+  try {
+    if (!buf) throw new Error("no face file");
+    lo = await faceAt(50);
+    hi = await faceAt(150);
+  } catch {
+    // No file to register widths from: the narrow end for every letter,
+    // and the fit falls back to squeezing each one to the common width.
+    const set = (ctx, px) => {
+      ctx.font = `${WEIGHT} ${px}px ${family}`;
+      if ("fontStretch" in ctx) ctx.fontStretch = "ultra-condensed";
+    };
+    lo = hi = { stretch: 50, set };
+    buf = null;
+  }
+  const capPx = ink((c) => lo.set(c, MP), "H").top;
+  const widthAt = (face, L) => {
+    const e = ink((c) => face.set(c, MP), L);
+    return { w: (e.r - e.l) / capPx, c: (e.r + e.l) / 2 / capPx };
+  };
+  const narrow = letters.map((L) => widthAt(lo, L));
+  // The common width: what the broad letters (the rounds, R, A) need at the
+  // narrow end. A letter that cannot come in that far (N) stays at the
+  // narrow end and takes the last few percent as a squeeze.
+  const sorted = narrow.map((n) => n.w).sort((a, b) => a - b);
+  const T = sorted[Math.floor(sorted.length * 0.8)];
+
+  const fit = [];
+  for (let i = 0; i < letters.length; i++) {
+    const L = letters[i];
+    let a = { s: 50, ...narrow[i], face: lo };
+    if (a.w >= T || !buf) {
+      fit.push({ set: lo.set, stretch: 50, squeeze: T / a.w, c: a.c, w: a.w });
+      continue;
+    }
+    let b = { s: 150, ...widthAt(hi, L), face: hi };
+    if (b.w <= T) {
+      fit.push({ set: hi.set, stretch: 150, squeeze: T / b.w, c: b.c, w: b.w });
+      continue;
+    }
+    // Regula falsi on the width axis: the ink grows a little less than
+    // linearly with wdth, so a straight line between the ends is close and
+    // two corrections land it within a pixel.
+    let best = Math.abs(a.w - T) < Math.abs(b.w - T) ? a : b;
+    for (let it = 0; it < 3 && Math.abs(best.w - T) / T > 0.003; it++) {
+      const s = a.s + ((T - a.w) / (b.w - a.w)) * (b.s - a.s);
+      const face = await faceAt(s);
+      const m = { s: face.stretch, ...widthAt(face, L), face };
+      if (m.w < T) a = m;
+      else b = m;
+      if (Math.abs(m.w - T) < Math.abs(best.w - T)) best = m;
+    }
+    fit.push({ set: best.face.set, stretch: best.s, squeeze: T / best.w, c: best.c, w: best.w });
+  }
+  // Drop the trial widths nothing ended up set in.
+  const kept = new Set(fit.map((f) => f.stretch));
+  for (const [k, f] of faces) if (!kept.has(k)) document.fonts.delete(f);
+  return {
+    T,
+    capRatio: capPx / MP,
+    glyphs: fit,
+    destroy: () => {
+      for (const f of faces.values()) document.fonts.delete(f);
+    },
+  };
+}
+
+export async function createDrum(host, { embedded = false, family = "sans-serif" } = {}) {
+  try {
+    await document.fonts.load(`${WEIGHT} 200px ${family}`, "HORSEBLNDCVPA");
   } catch {}
+
+  const letters = [...new Set(TITLES.join(""))];
+  const fitted = await fitLetters(letters, family);
 
   const stage = createStage(host, { dpr: 2, webgl: true });
   const gl = stage.ctx;
@@ -146,7 +297,6 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   const tex = gl.createTexture();
   const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
 
-  const letters = [...new Set(TITLES.join(""))];
   const glyphOf = new Int32Array(K * N);
   TITLES.forEach((t, i) => [...t].forEach((ch, w) => (glyphOf[i * K + w] = letters.indexOf(ch))));
 
@@ -154,27 +304,22 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   // The window opens wide, ±72° of each drum, so a letter visibly curves
   // away over the top: by the lip the surface is two-thirds edge-on and a
   // rolling letter squashes to a sliver. A letter covers ±66° of its wheel,
-  // which at rest fills all but the last few degrees of the window, and
-  // the titles are printed tight round the drum, a hair apart, so the next
-  // word follows right behind the last instead of after a stretch of bare
-  // paper. At rest only the very edge of each neighbour peeks under the
-  // lips, edge-on.
+  // which at rest fills all but the last few degrees of the window. The
+  // titles are printed tight round the drum, so the next word follows close
+  // behind the last instead of after a stretch of bare paper, but just far
+  // enough apart that at rest every neighbour sits wholly past the lip: a
+  // still shows one title and clean paper at both lips, on every wheel, and
+  // the next title shows only once a wheel starts to turn.
   const THETA = 1.25;
   const ALPHA = 1.15;
-  const SLOT = 2 * ALPHA + 0.04;
+  const SLOT = ALPHA + THETA + 0.035;
   let geo = null;
 
-  const mc = document.createElement("canvas").getContext("2d");
-  setFace(mc, 1000);
-  const capRatio = mc.measureText("H").actualBoundingBoxAscent / 1000;
-  const widthOf = (ch) => {
-    const m = mc.measureText(ch);
-    return (m.actualBoundingBoxLeft + m.actualBoundingBoxRight) / 1000 / capRatio; // in cap heights
-  };
-  // Set the squeeze by the face's common width (the rounds, R, A), not by
-  // its one wide letter: N alone takes a little extra so it still fits.
-  const widths = letters.map(widthOf).sort((a, b) => a - b);
-  const maxW = widths[Math.floor(widths.length * 0.8)];
+  // One sidebearing for every letter, so the ink stands the same distance
+  // from every seam and the gaps down the line come out even.
+  const SIDE = 0.055;
+  const T = fitted.T;
+  const capRatio = fitted.capRatio;
 
   const build = (W, H, dpr) => {
     const pad = Math.round(Math.min(W, H) * 0.035);
@@ -188,7 +333,7 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
       const bandH = (H - 2 * pad - (r - 1) * gapY) / r;
       const R = bandH / 2 / Math.sin(THETA);
       const cap = 2 * ALPHA * R * 0.98;
-      const s = (cellW * 0.92) / (cap * maxW);
+      const s = (cellW * (1 - 2 * SIDE)) / (cap * T);
       const score = Math.abs(Math.log(Math.min(s, 1.15) / 0.62)) + (s > 1 ? 1 : 0);
       if (!best || score < best.score) best = { r, c, cellW, bandH, R, s: Math.min(s, 1), score };
     }
@@ -201,7 +346,6 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
     const gh = Math.round(2 * ALPHA * R * dpr);
     const capPx = gh * 0.98;
     const fontPx = capPx / capRatio;
-    const dil = 0;
     const inset = 6;
     const cw = gw + inset * 2;
     const ch = gh + inset * 2;
@@ -214,22 +358,23 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
     x.fillStyle = "#000";
     x.fillRect(0, 0, cv.width, cv.height);
     x.fillStyle = "#fff";
-    setFace(x, fontPx);
-    x.textAlign = "center";
+    x.textAlign = "left";
     x.textBaseline = "alphabetic";
+    // Each letter at its own fitted width, its ink centred on the wheel.
+    // `s` is the one condensation the whole line shares (Druk is narrower
+    // than the face's narrow end), the same for every letter; only N, which
+    // cannot come in to the common width on the axis, takes a little more.
     letters.forEach((L, i) => {
+      const g = fitted.glyphs[i];
       const ox = (i % ac) * cw + inset;
       const oy = Math.floor(i / ac) * ch + inset;
-      const m = x.measureText(L);
-      const mid = (m.actualBoundingBoxLeft - m.actualBoundingBoxRight) / 2;
       const base = oy + gh / 2 + capPx / 2;
-      for (let d = -dil; d <= dil + 1e-3; d += 0.5) {
-        x.save();
-        x.translate(ox + gw / 2 + d, base);
-        x.scale(Math.min(s, (gw * 0.97) / (m.actualBoundingBoxLeft + m.actualBoundingBoxRight)), 1);
-        x.fillText(L, mid, 0);
-        x.restore();
-      }
+      g.set(x, fontPx);
+      x.save();
+      x.translate(ox + gw / 2, base);
+      x.scale(s * g.squeeze, 1);
+      x.fillText(L, -g.c * capPx, 0);
+      x.restore();
     });
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -402,6 +547,7 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   return {
     destroy() {
       window.removeEventListener("keydown", onKey);
+      fitted.destroy();
       sound.destroy();
       stage.destroy();
     },
