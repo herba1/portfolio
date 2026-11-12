@@ -12,6 +12,13 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // smooth union, drawn in a shader with derivative-width anti-aliasing at
 // device resolution.
 //
+// Counters stay paper. Each glyph is closed by a disc of 1.5 periods; the
+// paper that closing encloses is counter. A counter that opens through an
+// aperture (the c, the e's mouth, the h's arch) is cleared, and so is any
+// part of an enclosed one too tight for a ring, so the e's eye is paper while
+// the o keeps a whole ring. Outside the letters the rings follow the closed
+// glyph, so a line crosses a mouth instead of diving into it as a slit.
+//
 // The pointer is a second source: a dot whose own distance field is smoothly
 // unioned with the word's, so its rings and the letters' rings meet in one
 // continuous crease. A press sends a pulse outward: a front that carries every
@@ -25,6 +32,11 @@ const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const INK = [0x14 / 255, 0x13 / 255, 0x12 / 255];
 const MAX_PULSES = 4;
 const PULSE_MS = 2600;
+// Inradius, in periods, a counter needs to keep its rings.
+const RING_ROOM = 1.5;
+// Radius, in periods, of the closing the rings outside a letter follow: wide
+// enough that a line crossing a mouth runs nearly straight.
+const BRIDGE = 3;
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -33,6 +45,7 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 const FS = `#version 300 es
 precision highp float;
 uniform highp sampler2D uSdf;
+uniform highp sampler2D uEdge;   // counter paper, exact letter union
 uniform ivec2 uTexSize;
 uniform float uGrid;       // field texels per css px
 uniform vec2 uRes;         // device px
@@ -71,11 +84,29 @@ float field(vec2 p){
   return smin(smin(smin(g.x, g.y, uKg), g.z, uKg), g.w, uKg);
 }
 
+// x: signed distance into the counter paper no ring may cross; y: the
+// letters' own exact field, which draws their edges. Both css px.
+vec2 edgeField(vec2 p){
+  vec2 u = p * uGrid - 0.5;
+  vec2 f = fract(u);
+  ivec2 i = ivec2(floor(u));
+  ivec2 m = uTexSize - 1;
+  vec2 a = texelFetch(uEdge, clamp(i, ivec2(0), m), 0).rg;
+  vec2 b = texelFetch(uEdge, clamp(i + ivec2(1, 0), ivec2(0), m), 0).rg;
+  vec2 c = texelFetch(uEdge, clamp(i + ivec2(0, 1), ivec2(0), m), 0).rg;
+  vec2 d = texelFetch(uEdge, clamp(i + ivec2(1, 1), ivec2(0), m), 0).rg;
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 void main(){
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uDpr;
   float d = field(p);
+  vec2 e = edgeField(p);
+  float cz = e.x;
   float dc = length(p - uDot.xy) - uDot.z;
+  // f carries the rings; fl draws the solid shapes, letters and dot.
   float f = smin(d, dc, uK);
+  float fl = smin(e.y, dc, uK);
 
   // Pulses: behind each front the field is shifted by one whole period, so
   // the rings it passes move one line outward and land where they began.
@@ -88,9 +119,9 @@ void main(){
   }
 
   float fw = max(fwidth(g), 1e-4);
-  float fe = max(fwidth(f), 1e-4);
+  float fe = max(fwidth(fl), 1e-4);
   float ink;
-  if (f <= 0.0) {
+  if (fl <= 0.0) {
     ink = 1.0;
   } else {
     // Ring n occupies g in [nP + P/2, nP + P); during the intro each ring
@@ -100,6 +131,9 @@ void main(){
     grow = 1.0 - pow(1.0 - grow, 3.0);
     float half_ = uP * 0.25 * grow;
     float dist = abs(g - (n + 0.75) * uP);
+    // A counter too tight for a ring stays paper: a line running into one
+    // ends at its edge in a round cap instead of being sliced off.
+    dist = length(vec2(dist, max(cz + half_, 0.0)));
     // Box-filtered coverage; a line thinner than a pixel covers only its own
     // width, so an unborn ring is nothing rather than a grey hairline.
     ink = min(clamp((half_ - dist) / fw + 0.5, 0.0, 1.0), 2.0 * half_ / fw);
@@ -108,7 +142,7 @@ void main(){
     if (n < 0.0) ink *= clamp((f - uP * 0.5) / fe + 0.5, 0.0, 1.0);
   }
   // Letter edge, anti-aliased on the unshifted field.
-  ink = max(ink, clamp(0.5 - f / fe, 0.0, 1.0));
+  ink = max(ink, clamp(0.5 - fl / fe, 0.0, 1.0));
   o = vec4(mix(uPaper, uInk, ink), 1.0);
 }`;
 
@@ -170,6 +204,135 @@ function blur(a, tmp, w, h, r) {
     boxPass(a, tmp, w, 1, h, w, r);
     boxPass(tmp, a, h, w, w, 1, r);
   }
+}
+
+// Distance in texels from every texel of an lw x lh box to the nearest texel
+// where `seed` holds (1e10 when none does).
+function distTo(seed, lw, lh, f, v, z) {
+  const g = new Float32Array(lw * lh);
+  for (let i = 0; i < g.length; i++) g[i] = seed(i) ? 0 : INF;
+  edt(g, lw, lh, f, v, z);
+  for (let i = 0; i < g.length; i++) g[i] = Math.sqrt(g[i]);
+  return g;
+}
+
+// Distance in texels from a shape given as per-texel coverage: to its edge
+// from outside (side 1) or from inside (side -1), 0 on the other side. Seeded
+// from partial coverage as TinySDF does, so the edge keeps its sub-texel
+// position.
+function edgeDist(cov, side, lw, lh, f, v, z) {
+  const g = new Float32Array(lw * lh);
+  for (let i = 0; i < g.length; i++) {
+    const a = side > 0 ? cov[i] : 1 - cov[i];
+    const o = Math.max(0, 0.5 - a);
+    g[i] = a >= 1 ? 0 : a <= 0 ? INF : o * o;
+  }
+  edt(g, lw, lh, f, v, z);
+  for (let i = 0; i < g.length; i++) g[i] = Math.sqrt(g[i]);
+  return g;
+}
+
+// Morphological closing of a glyph by a disc of radius r texels: dilate the
+// ink by r, then erode the dilation by r. `d` is the glyph's field in
+// texels; the result is the closed shape's coverage.
+function closing(d, lw, lh, r, f, v, z) {
+  const n = lw * lh;
+  const cov = new Float32Array(n);
+  for (let i = 0; i < n; i++) cov[i] = clamp(r - d[i] + 0.5, 0, 1);
+  const inDil = edgeDist(cov, -1, lw, lh, f, v, z);
+  for (let i = 0; i < n; i++) cov[i] = clamp(inDil[i] - r + 0.5, 0, 1);
+  return cov;
+}
+
+// A glyph's counters, kept as paper. `d` is the glyph's signed distance (css
+// px) over the box. Returns `clear`, the signed distance (css px, positive
+// inside) of the counter paper too narrow to hold a ring, or null when there
+// is none, and `ring`, the field the rings follow: outside the letter, the
+// distance to the glyph closed by a disc of radius rb, so a line passes
+// across a mouth instead of diving into it.
+//
+// Counters are the paper the glyph encloses once its ink is closed by a disc
+// of radius rc: the e's eye and aperture, the c's aperture and bowl, the
+// inside of the o, the h's arch. A counter that opens through an aperture is
+// cleared whole. Of an enclosed one, whatever a disc of radius rt cannot
+// reach is cleared; a counter roomy enough for that disc keeps whole
+// white-black-white rings.
+function counterClear(d, lw, lh, grid, period, rc, rb, rt, f, v, z) {
+  const n = lw * lh;
+  const dt = new Float32Array(n);
+  for (let i = 0; i < n; i++) dt[i] = d[i] * grid;
+  const closedC = closing(dt, lw, lh, rc * grid, f, v, z);
+  const toBridged = edgeDist(rb === rc ? closedC : closing(dt, lw, lh, rb * grid, f, v, z), 1, lw, lh, f, v, z);
+  // Flood the paper from the box's border, once past the closed glyph and
+  // once past the ink alone. Paper the first cannot reach is counter; counter
+  // the second does reach opens through an aperture.
+  const stack = new Int32Array(n);
+  const flood = (wall) => {
+    const reach = new Uint8Array(n);
+    let sp = 0;
+    const push = (i) => {
+      if (!reach[i] && !wall(i)) {
+        reach[i] = 1;
+        stack[sp++] = i;
+      }
+    };
+    for (let x = 0; x < lw; x++) {
+      push(x);
+      push((lh - 1) * lw + x);
+    }
+    for (let y = 0; y < lh; y++) {
+      push(y * lw);
+      push(y * lw + lw - 1);
+    }
+    while (sp > 0) {
+      const i = stack[--sp];
+      const y = (i / lw) | 0;
+      const x = i - y * lw;
+      if (x > 0) push(i - 1);
+      if (x < lw - 1) push(i + 1);
+      if (y > 0) push(i - lw);
+      if (y < lh - 1) push(i + lw);
+    }
+    return reach;
+  };
+  const outside = flood((i) => closedC[i] >= 0.5);
+  const open = flood((i) => d[i] <= 0);
+  const counter = new Uint8Array(n);
+  const enclosed = new Uint8Array(n);
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    counter[i] = d[i] > 0 && !outside[i] ? 1 : 0;
+    enclosed[i] = counter[i] && !open[i] ? 1 : 0;
+    any ||= counter[i] === 1;
+  }
+  // Rings: the closed glyph's field outside it, the letter's own inside an
+  // enclosed counter. Where the two agree to within a texel, the letter's is
+  // kept outright, and from 2.5 to 3.5 periods out the bridge lets go, so
+  // the field meets the letter's own again before the box's edge.
+  const ring = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (d[i] <= 0 || enclosed[i]) {
+      ring[i] = d[i];
+      continue;
+    }
+    const t = clamp(dt[i] - toBridged[i] - 0.5, 0, 1);
+    const u = clamp(3.5 - d[i] / period, 0, 1);
+    ring[i] = d[i] - ((dt[i] - toBridged[i]) / grid) * t * t * (3 - 2 * t) * u * u * (3 - 2 * u);
+  }
+  if (!any) return { clear: null, ring };
+  // An open counter (the c's bowl, the e's aperture, the h's arch) is
+  // cleared whole: a ring that ran into it could only leave again through
+  // the aperture, so it would never close and reads as a slit or needle.
+  // An enclosed one keeps the texels a disc of radius rt fits over.
+  const inr = distTo((i) => !enclosed[i], lw, lh, f, v, z);
+  const fits = distTo((i) => inr[i] > rt * grid, lw, lh, f, v, z);
+  const clear = new Uint8Array(n);
+  for (let i = 0; i < n; i++) clear[i] = counter[i] && !(enclosed[i] && fits[i] <= rt * grid) ? 1 : 0;
+  const toIn = distTo((i) => clear[i], lw, lh, f, v, z);
+  const toEdge = distTo((i) => !clear[i], lw, lh, f, v, z);
+  const sd = new Float32Array(n);
+  for (let i = 0; i < n; i++) sd[i] = (clear[i] ? toEdge[i] - 0.5 : 0.5 - toIn[i]) / grid;
+  return { clear: sd, ring };
 }
 
 function layout(w, h) {
@@ -293,6 +456,18 @@ function buildField(w, h, grid, family) {
   const soft = new Float32Array(n);
   const tmp = new Float32Array(n);
   const blurR = Math.max(1, Math.round(period * grid * 0.45));
+  // Counter clearing: closing radius, and the inradius a counter needs to
+  // keep its rings.
+  const rc = period * 1.5;
+  const rb = period * BRIDGE;
+  const rt = period * RING_ROOM;
+  // Second texture: counter paper's signed distance, and the glyphs' exact
+  // union, which draws the letter edges while the rings follow `out`.
+  const edge = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    edge[i * 2] = -1e5;
+    edge[i * 2 + 1] = 1e5;
+  }
   glyphs.forEach((g, gi) => {
     const ch = gi % 4;
     ctx.clearRect(0, 0, W, H);
@@ -338,6 +513,24 @@ function buildField(w, h, grid, family) {
     // sharp ridges in its field, and a ring crossing one tapers to a needle.
     // Away from the letter, the rings follow a blurred copy of the field, so
     // ridges round off; at the letter the exact field holds the edge.
+    // Counters, in a box padded past the closing's reach.
+    const pad = Math.ceil((Math.max(rc, rb) + period) * grid) + 2;
+    const lx0 = Math.max(0, bx0 - pad);
+    const ly0 = Math.max(0, by0 - pad);
+    const lw = Math.min(W, bx1 + pad) - lx0;
+    const lh = Math.min(H, by1 + pad) - ly0;
+    const local = new Float32Array(lw * lh);
+    for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) local[y * lw + x] = outer[(y + ly0) * W + x + lx0];
+    for (let i = 0; i < n; i++) edge[i * 2 + 1] = Math.min(edge[i * 2 + 1], outer[i]);
+    const { clear, ring } = counterClear(local, lw, lh, grid, period, rc, rb, rt, f, v, z);
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        const i = (y + ly0) * W + x + lx0;
+        const j = y * lw + x;
+        outer[i] = ring[j];
+        if (clear) edge[i * 2] = Math.max(edge[i * 2], clear[j]);
+      }
+    }
     soft.set(outer);
     blur(soft, tmp, W, H, blurR);
     for (let i = 0; i < n; i++) {
@@ -347,7 +540,7 @@ function buildField(w, h, grid, family) {
       out[k] = Math.min(out[k], d + (soft[i] - d) * t * t * (3 - 2 * t));
     }
   });
-  return { data: out, W, H };
+  return { data: out, edge, W, H };
 }
 
 async function loadFamily() {
@@ -394,7 +587,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   const U = {};
-  for (const name of ["uSdf", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uKg", "uPulse", "uFront", "uReveal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
+  for (const name of ["uSdf", "uEdge", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uKg", "uPulse", "uFront", "uReveal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -404,12 +597,17 @@ export async function createRadiating(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const makeTex = () => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+  const tex = makeTex();
+  const edgeTex = makeTex();
 
   let sdf = null;
   let grid = 1;
@@ -435,6 +633,8 @@ export async function createRadiating(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, sdf.W, sdf.H, 0, gl.RGBA, gl.FLOAT, sdf.data);
+    gl.bindTexture(gl.TEXTURE_2D, edgeTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, sdf.W, sdf.H, 0, gl.RG, gl.FLOAT, sdf.edge);
     if (held) {
       dot.x = dot.tx = (hold.x ?? 0.72) * w;
       dot.y = dot.ty = (hold.y ?? 0.7) * h;
@@ -529,6 +729,9 @@ export async function createRadiating(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(U.uSdf, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, edgeTex);
+    gl.uniform1i(U.uEdge, 1);
     gl.uniform2i(U.uTexSize, sdf.W, sdf.H);
     gl.uniform1f(U.uGrid, grid);
     gl.uniform2f(U.uRes, stage.canvas.width, stage.canvas.height);
@@ -549,6 +752,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
   return {
     destroy() {
       gl.deleteTexture(tex);
+      gl.deleteTexture(edgeTex);
       gl.deleteBuffer(buf);
       gl.deleteProgram(prog);
       stage.destroy();
