@@ -95,9 +95,13 @@ uniform float uExpo;        // camera exposure
 uniform vec3 uWB;           // skylight colour on the facades
 uniform vec3 uZen; uniform vec3 uMid; uniform vec3 uHorSun; uniform vec3 uHorAnti;
 uniform float uSkyLum;
-uniform float uCloudK;
-uniform vec3 uCloudTint;
-uniform float uCloudW;
+uniform float uSkySat;      // midtone saturation of the smooth sky
+uniform float uCloudGain;   // stops of lift per unit of cloud log-ratio
+uniform vec3 uCloudWhite;   // sunlit cloud, luminance 1 (warm neutral)
+uniform vec3 uCloudPeach;   // afterglow on the undersides, luminance 1
+uniform float uAfter;       // afterglow left, 1 at sunset, 0 by mid-span
+uniform float uFgGain;      // building layer: linear gain (0.42, about 1.25 stops down)
+uniform float uFgGamma;     // and its log contrast about the plate's mid
 uniform float uGlow;        // sun-side brightening
 uniform float uZenDeep;     // stops the zenith sits below the low sky
 uniform float uLod;         // mip level: sharp, only as soft as the print needs
@@ -105,6 +109,19 @@ uniform float uB[${MAX_LIGHTS}];
 uniform vec3 uTint[${MAX_LIGHTS}];
 out vec4 o;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float FG_MID = 0.06;  // the plate's median facade luminance
+float lrAt(vec2 t){ return (texture(uAux, t).g - 0.5) / 0.3; }
+// World view direction of a plate uv.
+vec3 dirAt(vec2 t){
+  vec2 q = t * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
+  float r = length(q) + 1e-6;
+  float th = uK * atan(r / (uK * uF));
+  return uRot * vec3(q / r * sin(th), cos(th));
+}
+float facingAt(vec2 t){
+  vec3 d = dirAt(t);
+  return dot(normalize(vec2(d.x, d.z) + 1e-5), uSun);
+}
 
 void main(){
   vec2 p = gl_FragCoord.xy / uSize;
@@ -126,6 +143,7 @@ void main(){
   float e = clamp(elev / 1.5708, 0.0, 1.0);
   vec2 hz = normalize(vec2(d.x, d.z) + 1e-5);
   float facing = 0.5 + 0.5 * dot(hz, uSun);
+  float zA = degrees(acos(clamp(-d.y, -1.0, 1.0))); // from the zenith
 
   // Twilight sky: deepest at the zenith, paler and warmer towards the sun's
   // side of the horizon. Colours are linear, luminance 1.
@@ -133,20 +151,58 @@ void main(){
   vec3 hor = mix(uHorAnti, uHorSun, smoothstep(0.2, 1.0, facing));
   vec3 col = mix(uZen, uMid, smoothstep(0.0, 0.5, g));
   col = mix(col, hor, smoothstep(0.3, 0.8, g));
+  // Blue-hour skylight is a clean, saturated blue all the way down, not a
+  // grey haze: push the gradient's chroma out (colours are luminance 1).
+  col = max(mix(vec3(1.0), col, uSkySat), 0.0);
   float lum = uSkyLum * (1.0 + uGlow * g * g * facing);
   // Looking almost straight up the gradient is the picture: the zenith is
   // the deepest, most saturated blue and the sky pales towards the roofs.
   float ze = smoothstep(0.4, 1.0, e);
   lum *= exp2(uZenDeep * (0.45 - ze));
-  // Cloud: a luminance ratio over the smooth sky; the denser parts catch the
-  // last warm light, later the city's glow. Overhead it is not the plate's:
-  // its pole-pinched zenith was swapped offline for a clean sky's, so the
-  // vanishing point is the clearest, deepest part of the shaft.
-  float w = smoothstep(-0.1, 0.5, lr);
-  vec3 sky = col * lum * exp2(lr * uCloudK);
-  sky = mix(sky, vec3(dot(sky, LUMA)) * uCloudTint, w * uCloudW);
+  // Cloud: a log-luminance ratio over the smooth sky. Overhead it is not the
+  // plate's: its pole-pinched zenith was swapped offline for a clean sky's.
+  // The swap's seam and the pinch's dark radial lanes (an X through the
+  // vanishing point) both live in the ratio's negative half, so towards the
+  // zenith that half is eased out over a wide feather: the gaps between
+  // puffs go to clean sky instead of drawing spokes.
+  float spoke = 1.0 - smoothstep(35.0, 80.0, zA);
+  float lrc = lr < 0.0 ? lr * (1.0 - max(0.5, 0.92 * spoke)) : lr * (1.0 - 0.25 * spoke * (1.0 - smoothstep(0.1, 0.4, lr)));
+  // Sun side on screen: the gradient of the bearing term, in plate uv
+  // (analytic per pixel, so it does not step in 2x2 blocks).
+  vec2 tx = 4.0 / uTexSize;
+  vec2 fd = vec2(facingAt(uv + vec2(tx.x, 0.0)) - facingAt(uv - vec2(tx.x, 0.0)),
+                 facingAt(uv + vec2(0.0, tx.y)) - facingAt(uv - vec2(0.0, tx.y)));
+  vec2 sd = fd / (length(fd) + 1e-6) / uTexSize;
+  // A puff's sun-facing flank (density falling towards the sun) is lit;
+  // its lee is in skylight.
+  // Read at two scales, so a puff shades as a form, not as its texture.
+  float side = 0.5 * (lrAt(uv - sd * 8.0) - lrAt(uv + sd * 8.0) + lrAt(uv - sd * 20.0) - lrAt(uv + sd * 20.0));
+  float lit = smoothstep(-0.12, 0.12, side);
+  float cw = smoothstep(0.06, 0.45, lrc);            // cover
+  float core = smoothstep(0.25, 0.6, lrc);          // dense, sunlit tops
+  // Clouds are the brightest thing in the sky after the lamp: a real lift
+  // over the sky in stops, more on the lit side, less in the lee.
+  float lift = max(lrc, 0.0) * uCloudGain * (0.7 + 0.45 * lit + 0.15 * core) + min(lrc, 0.0) * 0.6;
+  // Their colour: sunlit tops roll to a warm neutral white, the lee keeps
+  // the skylight's blue, and while the afterglow lasts the undersides (the
+  // thin flanks, strongest towards the sun's side) catch it in peach.
+  // The brighter a cloud is lifted, the less sky colour it may keep, or a
+  // dense lee core would go to a glowing cyan instead of white.
+  float wk = clamp(mix(0.25, 0.8, lit) + core * 0.85, 0.0, 1.0);
+  vec3 ccol = mix(col, uCloudWhite, wk);
+  float under = uAfter * (1.0 - 0.6 * core) * (0.35 + 0.65 * facing);
+  ccol = mix(ccol, uCloudPeach, clamp(under, 0.0, 1.0) * 0.85);
+  vec3 sky = mix(col, ccol, cw) * lum * exp2(lift);
 
-  vec3 fg = amb * uAmbK * uWB;
+  // The city is the frame, not the subject: about a stop down and a harder
+  // log contrast about the plate's mid, so towers, crane and brick read as
+  // near-black silhouettes against the shaft; glass highlights roll off
+  // before they can compete with the cloud.
+  vec3 fa = amb * uWB;
+  float fy = dot(fa, LUMA) + 1e-6;
+  float ny = FG_MID * pow(fy / FG_MID, uFgGamma) * uFgGain;
+  ny = ny / (1.0 + ny / 0.06);
+  vec3 fg = fa * (ny / fy) * uAmbK;
   if (id > 0) {
     int k = id - 1;
     fg += em * uB[k] * uTint[k];
@@ -261,8 +317,10 @@ const smooth = (a, b, x) => {
 
 // The sky at sunset (pale peach at the horizon under a cyan zenith) and at
 // +20 minutes (cobalt overhead, a cleaner, lighter blue low down).
-const SKY0 = { zen: lin("#a2c6dc"), mid: lin("#d0d7d4"), horSun: lin("#f0caa0"), horAnti: lin("#d6d3c4"), lum: 0.92, cloudK: 1.0, cloudTint: [1.22, 0.97, 0.82], cloudW: 0.55, glow: 0.55, zenDeep: 0.6 };
-const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, cloudK: 0.8, cloudTint: [1.02, 1.0, 0.98], cloudW: 0.3, glow: 1.4, zenDeep: 1.5 };
+const SKY0 = { zen: lin("#5b9ddc"), mid: lin("#8bbae6"), horSun: lin("#f0caa0"), horAnti: lin("#b7d0e6"), lum: 0.72, sat: 1.25, cloudGain: 2.0, glow: 0.55, zenDeep: 0.6 };
+const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, sat: 0.95, cloudGain: 3.6, glow: 1.4, zenDeep: 1.5 };
+const CLOUD_WHITE = lin("#f4ede4");
+const CLOUD_PEACH = lin("#ffb98f");
 
 function lerpParams(a, b, k) {
   const out = {};
@@ -522,6 +580,7 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     const ambK = 2 ** (-AMB_STOPS * t);
     const expo = 0.62 * 2 ** (EXPO_STOPS * t + exposureLift);
     const wb = mix3([1.07, 1.0, 0.92], [0.82, 0.95, 1.22], s);
+    const skyLevel = sky.lum * 1.25 * ambK * expo;
 
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
@@ -554,9 +613,13 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uHorSun, sky.horSun);
     gl.uniform3fv(u.uHorAnti, sky.horAnti);
     gl.uniform1f(u.uSkyLum, sky.lum * 1.25);
-    gl.uniform1f(u.uCloudK, sky.cloudK);
-    gl.uniform3fv(u.uCloudTint, sky.cloudTint);
-    gl.uniform1f(u.uCloudW, sky.cloudW);
+    gl.uniform1f(u.uSkySat, sky.sat);
+    gl.uniform1f(u.uCloudGain, sky.cloudGain);
+    gl.uniform3fv(u.uCloudWhite, CLOUD_WHITE);
+    gl.uniform3fv(u.uCloudPeach, CLOUD_PEACH);
+    gl.uniform1f(u.uAfter, 1 - smooth(0, 0.5, t));
+    gl.uniform1f(u.uFgGain, 0.42);
+    gl.uniform1f(u.uFgGamma, 1.7);
     gl.uniform1f(u.uGlow, sky.glow);
     gl.uniform1f(u.uZenDeep, sky.zenDeep);
     gl.uniform1f(u.uLod, Math.max(0, Math.log2(texH / sceneT.h) - 0.7));
@@ -572,9 +635,17 @@ export async function createBlueHour(host, { embedded = false } = {}) {
         grainSeed: seed,
         grain: fp.grain * 0.55,
         vignette: fp.vignette * 0.7,
-        softness: 0.32,
-        bloom: fp.bloom * 0.55,
+        softness: 0.2,
+        // only what stands above the sky (cloud tops, the lamp) diffuses, so
+        // the shaft does not veil the towers grey
+        bloomThreshold: skyLevel * 2.2,
+        bloom: fp.bloom * 0.8,
+        toe: fp.toe * 0.4,
+        warmth: fp.warmth * 0.35,
         halation: fp.halation * 0.38,
+        // the lamp is the one warm accent: cloud tops glow, but stay under
+        // the threshold where a red halo would fringe them
+        halationThreshold: Math.max(fp.halationThreshold, skyLevel * 9),
       },
       filmT.fbo,
     );
