@@ -90,9 +90,24 @@
   text-wrap: balance;
 }
 
-/* Level 0: the title, far away and large. */
+/* Level 0: the title, far away and large. The name sits at the foot of
+   the plane so the chapters can hang across it. */
 .ls-title {
-  width: 860px;
+  display: flex;
+  flex-direction: column;
+  width: 1240px;
+}
+
+.ls-kicker {
+  order: -2;
+}
+
+.ls-sub {
+  order: -1;
+}
+
+.ls-title .ls-title-h {
+  margin-top: 12px;
 }
 
 .ls-kicker {
@@ -104,9 +119,9 @@
 
 .ls-title-h {
   margin-top: 4px;
-  font-size: 128px;
-  line-height: 128px;
-  letter-spacing: -0.039em;
+  font-size: 192px;
+  line-height: 192px;
+  letter-spacing: -0.0403em;
   font-weight: var(--font-weight-semibold);
   color: var(--ls-tint);
 }
@@ -196,4 +211,31 @@
   letter-spacing: 0px;
   font-weight: var(--font-weight-medium);
   font-variant-numeric: tabular-nums;
+}
+
+/* The projected-size cull: a line too small to read on screen is swapped
+   for a solid bar of its own ink, the length of the line. */
+.ls-bars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ls-bar-g {
+  opacity: 0;
+}
+
+.ls-bar-g i {
+  position: absolute;
+  background: currentColor;
+}
+
+.ls-title .ls-bar-g:nth-child(2) i {
+  background: var(--ls-tint);
+}
+
+.ls-mark {
+  display: inline-block;
+  width: 0;
+  height: 0;
 }
