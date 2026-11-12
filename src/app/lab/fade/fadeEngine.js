@@ -183,6 +183,15 @@ const SUN_DIR = [-0.8, -0.6];
 const PAPER_WHITE = [250, 242, 226];
 const SKY_LIFT = [0.18, 0.25, 0.42];
 const CLOUD_SPAN = 0.7;
+// What stands in the sky without being in MoGe-2's matte (the balcony's
+// bars, the cables, an aerial) is read off the plate as anything darker than
+// SKY_HOLD of the sky's own soft level around it (a ramp, in that ratio): the
+// clouds never fall that far below the clear sky beside them. The fine
+// cloud/clear split and the clouds' lit term are held off a band of about
+// two SKY_EDGE (plate px) inside every edge of that matte, so no pixel beside
+// a roof, a railing or a wall is lifted toward cloud.
+const SKY_HOLD = [0.76, 0.88];
+const SKY_EDGE = 4;
 // Chalk is a matte powder, not a highlight. The lime blend flattens a coat's
 // lightness toward one value, so the plate's own fine texture (the render's
 // grain, its cracks, the drip lines, the cables' shadows) is put back on top
@@ -462,6 +471,7 @@ uniform sampler2D uPlate;
 uniform sampler2D uMat;
 uniform sampler2D uLight;
 uniform sampler2D uSkyPlate;
+uniform sampler2D uSkyEdge;
 uniform sampler2D uLocal;
 uniform float uYears;
 uniform vec3 uKInk;
@@ -485,6 +495,7 @@ uniform vec2 uSunDir;
 uniform float uCloudSpan;
 uniform vec3 uPaperWhite;
 uniform vec3 uSkyLift;
+uniform vec2 uSkyHold;
 uniform vec4 uCrop;
 uniform vec2 uPlateSize;
 uniform vec2 uVanish;
@@ -542,7 +553,12 @@ float mottleAt(vec2 P) {
 // itself is drawn from luminance, which the plate keeps sharp to the pixel:
 // how much brighter a pixel is than the soft clear-or-cloud guess around it.
 // The soft reads are of the sky alone (uSkyPlate is the plate premultiplied
-// by the sky mask), so a wall beside it never bleeds in as a pale rim.
+// by the hard sky matte, which leaves out the bars and cables too), so a wall
+// or a railing beside it never pulls a surround down, and the full-resolution
+// luminance is read off that same masked plate. Within a band of about ten
+// px of the matte's edge (uSkyEdge, the matte eroded and feathered) the fine
+// terms are held off: there the sky takes only the soft share of cloud, so
+// nothing beside a roof, a bar or a wall is lifted toward white.
 // The cloud then gets its own light instead of the photo's dull grey: a lit
 // term from the plate's cloud luminance against its wide blurred surround
 // (the heaped, brighter parts face the sun) plus a gradient toward the frame
@@ -559,19 +575,26 @@ vec3 polarise(vec3 lin, vec2 uv) {
   vec3 vast = sv.a > 0.02 ? toLin(sv.rgb / sv.a) : wide;
   float cc = max(uClear.b - uClear.r, 1e-3);
   float yc = dot(uClear, LUMA);
-  float Y = dot(lin, LUMA);
   float ys = dot(soft, LUMA);
-  // the coarse share of cloud, from the soft chroma
+  vec4 s0 = textureLod(uSkyPlate, uv, 0.0);
+  float Y = s0.a > 0.02 ? dot(toLin(s0.rgb / s0.a), LUMA) : ys;
+  // the matte eroded: 0 within about six px of an edge, 1 past about ten
+  float fine = smoothstep(0.9, 0.99, texture(uSkyEdge, uv).r);
+  // the coarse share of cloud, from the soft chroma; the plate's chroma is
+  // in 8x8 blocks, so beside a dark bar or eave it is dulled toward grey and
+  // would read as cloud: within the edge band the wider reads may only lower it
   float c0 = 1.0 - clamp((soft.b - soft.r) / cc, 0.0, 1.0);
+  float c0w = 1.0 - clamp((max(wide.b - wide.r, vast.b - vast.r)) / cc, 0.0, 1.0);
+  c0 = mix(min(c0, c0w), c0, fine);
   // and the fine split, from full-resolution luminance: a full cloud stands
   // about uCloudSpan (log luminance) above the clear sky, so a filament that
   // much brighter than the soft guess around it is that much more cloud
-  float dl = log(Y + 0.01) - log(ys + 0.01);
+  float dl = (log(Y + 0.01) - log(ys + 0.01)) * fine;
   float cloud = clamp(c0 + dl / uCloudSpan, 0.0, 1.0);
   // the plate's own clear sky luminance at this pixel's soft read: what a
   // cloud has to stand above to be seen at all
   float yClear = mix(ys, yc, c0);
-  float lift = log(Y + 0.01) - log(min(yClear, yc) + 0.01);
+  float lift = (log(Y + 0.01) - log(min(yClear, yc) + 0.01)) * fine;
   cloud = max(cloud, clamp(lift / uCloudSpan, 0.0, 1.0) * c0);
   // the photo's haze reads as a tenth of a cloud everywhere: the polariser
   // cuts it, and a gentle S on the rest gives the wisps a drawn edge
@@ -587,7 +610,7 @@ vec3 polarise(vec3 lin, vec2 uv) {
   // surround (a few tens of px, for the knots, and a few hundred, for a whole
   // bank), plus the gradient toward the frame edge that faces the sun
   float ly = log(Y + 0.01);
-  float relief = 0.6 * (ly - log(dot(wide, LUMA) + 0.01)) + 0.4 * (ly - log(dot(vast, LUMA) + 0.01));
+  float relief = (0.6 * (ly - log(dot(wide, LUMA) + 0.01)) + 0.4 * (ly - log(dot(vast, LUMA) + 0.01))) * fine;
   float sunward = dot(d / (0.5 * length(vec2(aspect, 1.0))), uSunDir);
   float lit = clamp(0.5 + 2.4 * relief + 0.32 * sunward, 0.0, 1.0);
   // only body takes the sun: a thin veil is lit through, by the sky
@@ -753,8 +776,27 @@ void main() {
   dt = uDetailClip * tanh(dt / uDetailClip);
   outLin *= exp(uDetailGain * c * dt);
   // the sky is inert to the clock (A = 0), so its grade is the same every year
-  float sky = skyMask(m, lin) * uPolar;
-  if (sky > 0.001) outLin = mix(outLin, polarise(lin, uv), sky);
+  // what stands in the sky outside the matte (the bars, the cables) keeps its
+  // own dark, its edge pixels shared with the sky by how far they fall below
+  // the sky's soft level around them
+  vec4 sh = textureLod(uSkyPlate, uv, 3.5);
+  float yHold = sh.a > 0.02 ? dot(toLin(sh.rgb / sh.a), LUMA) : 1.0;
+  // MoGe-2's matte ramps over two or three px, and the plate's own sharpening
+  // leaves a pale overshoot on its sky side: the matte is read steeper and
+  // a shade wider, so that overshoot goes to the polarised sky with the rest
+  // and the rim's dark pixels keep their own dark (below)
+  float sky = smoothstep(0.15, 0.6, skyMask(m, lin)) * uPolar;
+  if (sky > 0.001) {
+    vec3 pol = polarise(lin, uv);
+    // a pixel darker than the sky around it is part sky, part a bar or wire
+    // or eave: its sky share (about its level over the sky's) is swapped for
+    // the polarised sky and the rest keeps its own dark, so a thin bar stays
+    // a dark line on the cobalt instead of a pale one
+    float f = clamp(dot(lin, LUMA) / max(yHold, 1e-3), 0.0, 1.0);
+    vec3 skyRef = sh.a > 0.02 ? toLin(sh.rgb / sh.a) : lin;
+    vec3 parted = max(outLin - f * skyRef, 0.0) + f * pol;
+    outLin = mix(outLin, mix(parted, pol, smoothstep(uSkyHold.x, uSkyHold.y, f)), sky);
+  }
   if (uDebug > 4.5) {
     // R: the share of cloud, G: its lit term, B: the sky mask
     outColor = vec4(gCloud * sky, sky, 1.0);
@@ -769,20 +811,60 @@ void main() {
 }`;
 
 // The plate premultiplied by the sky mask, mipmapped once at load, so the
-// polariser can read the sky's own soft colour beside the eaves.
+// polariser can read the sky's own soft colour beside the eaves. Twice: the
+// MoGe-2 matte, soft, then a hard one that also leaves out what stands in
+// the sky without being in the matte (the balcony's bars, the cables, an
+// aerial): anything darker than SKY_HOLD of the sky's own soft level around
+// it. Every blur the polariser reads is of that hard matte, normalised by
+// it, so no dark bar or roof edge pulls a surround down and lifts the sky
+// beside it into a white rim.
 const SKY_PREMUL = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uPlate;
 uniform sampler2D uMat;
+uniform sampler2D uSoft;
+uniform float uHard;
+uniform vec2 uHold;
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 void main() {
   vec3 c = texture(uPlate, vUv).rgb;
   vec3 lin = toLin(c);
   vec4 m = texture(uMat, vUv);
   float w = clamp(1.0 - (2.0 * m.r - m.b / 0.85), 0.0, 1.0) * smoothstep(-0.03, 0.01, (lin.b - lin.r) / max(lin.b, 1e-3));
+  if (uHard > 0.5) {
+    vec4 sp = textureLod(uSoft, vUv, 3.5);
+    float yl = sp.a > 0.02 ? dot(toLin(sp.rgb / sp.a), LUMA) : 1.0;
+    // binary, so no texel holds a sliver of weight that the 8-bit store
+    // would round into a wrong colour when the blur is normalised by it
+    w = step(0.75, w) * step(mix(uHold.x, uHold.y, 0.5), dot(lin, LUMA) / max(yl, 1e-3));
+  }
   outColor = vec4(c * w, w);
+}`;
+
+// The hard sky matte, eroded: a Gaussian of it (sigma SKY_EDGE plate px,
+// across, then down), read through a steep shoulder, is 1 only where no roof,
+// railing, cable or wall stands within a couple of sigma.
+const SKY_ERODE = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+uniform float uFromAlpha;
+uniform float uSigma;
+void main() {
+  float sum = 0.0;
+  float wsum = 0.0;
+  for (int i = -14; i <= 14; i++) {
+    vec4 t = textureLod(uSrc, vUv + uDir * float(i), 0.0);
+    float w = exp(-float(i * i) / (2.0 * uSigma * uSigma));
+    sum += w * (uFromAlpha > 0.5 ? t.a : t.r);
+    wsum += w;
+  }
+  outColor = vec4(vec3(sum / wsum), 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -925,23 +1007,33 @@ export async function createFade(host, { embedded = false } = {}) {
     age: program(gl, VERT, AGE),
     blit: program(gl, VERT, BLIT),
     premul: program(gl, VERT, SKY_PREMUL),
+    erode: program(gl, VERT, SKY_ERODE),
     seed: program(gl, VERT, SEED),
     local: program(gl, VERT, LOCAL),
     detail: program(gl, VERT, DETAIL),
   };
 
-  // the sky-only plate, once: render, then mipmap
-  const skyPlate = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, skyPlate);
-  gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(PW, PH))) + 1, gl.RGBA8, PW, PH);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  {
+  // the sky-only plate, once: render, then mipmap; first on the soft matte,
+  // then on the hard one that the soft plate's own level picks the bars out of
+  const mipTex = () => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(PW, PH))) + 1, gl.RGBA8, PW, PH);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+  const skySoft = mipTex();
+  const skyPlate = mipTex();
+  for (const [dst, hard] of [
+    [skySoft, false],
+    [skyPlate, true],
+  ]) {
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, skyPlate, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
     gl.viewport(0, 0, PW, PH);
     gl.disable(gl.BLEND);
     gl.useProgram(P.premul.p);
@@ -951,12 +1043,19 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, mat);
     gl.uniform1i(P.premul.u.uMat, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    // (the soft pass reads nothing here: never its own target)
+    gl.bindTexture(gl.TEXTURE_2D, hard ? skySoft : plate);
+    gl.uniform1i(P.premul.u.uSoft, 2);
+    gl.uniform1f(P.premul.u.uHard, hard ? 1 : 0);
+    gl.uniform2f(P.premul.u.uHold, SKY_HOLD[0], SKY_HOLD[1]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.deleteFramebuffer(fbo);
-    gl.bindTexture(gl.TEXTURE_2D, skyPlate);
+    gl.bindTexture(gl.TEXTURE_2D, dst);
     gl.generateMipmap(gl.TEXTURE_2D);
   }
+  gl.deleteTexture(skySoft);
 
   // The ledge-scale dose, once: the runoff seeds (mipmapped, so a tail can
   // read them wider as it runs down), then shelter, tails and drips.
@@ -1025,6 +1124,20 @@ export async function createFade(host, { embedded = false } = {}) {
   detailPass(detailTex, 0, 1, false, detailA, detailRef);
   gl.deleteTexture(detailA);
   gl.deleteTexture(detailRef);
+  // the hard sky matte, eroded and feathered (across, then down)
+  const skyEdgeA = plateTarget(false);
+  const skyEdge = plateTarget(false);
+  for (const [dst, src, dx, dy] of [
+    [skyEdgeA, skyPlate, 1, 0],
+    [skyEdge, skyEdgeA, 0, 1],
+  ]) {
+    gl.useProgram(P.erode.p);
+    gl.uniform2f(P.erode.u.uDir, dx / PW, dy / PH);
+    gl.uniform1f(P.erode.u.uFromAlpha, src === skyPlate ? 1 : 0);
+    gl.uniform1f(P.erode.u.uSigma, SKY_EDGE);
+    bake(P.erode, dst, [["uSrc", src]]);
+  }
+  gl.deleteTexture(skyEdgeA);
   const film = createFilm(gl, { width: 2, height: 2 });
 
   // The view fills the box: looking up from the cobbles reads at full size,
@@ -1155,6 +1268,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uRunoff, RUNOFF);
     gl.uniform1f(u.uMottle, MOTTLE);
     bindTex(5, detailTex, u.uDetail);
+    bindTex(6, skyEdge, u.uSkyEdge);
     gl.uniform1f(u.uDetailGain, DETAIL_GAIN);
     gl.uniform1f(u.uDetailClip, DETAIL_CLIP);
     gl.uniform1f(u.uChalkCap, CHALK_CAP);
@@ -1167,6 +1281,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uCloudSpan, CLOUD_SPAN);
     gl.uniform3fv(u.uPaperWhite, paperWhite);
     gl.uniform3fv(u.uSkyLift, SKY_LIFT);
+    gl.uniform2f(u.uSkyHold, SKY_HOLD[0], SKY_HOLD[1]);
     gl.uniform4f(u.uCrop, L.u0, L.v0, L.us, L.vs);
     gl.bindFramebuffer(gl.FRAMEBUFFER, T.scene.fbo);
     gl.viewport(0, 0, T.scene.w, T.scene.h);
@@ -1296,7 +1411,7 @@ export async function createFade(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [plate, mat, light, skyPlate, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
+      [plate, mat, light, skyPlate, skyEdge, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
