@@ -21,7 +21,12 @@ const STIFF = 210;
 const ZETA = 0.82;
 const HIT = 10; // px reach beyond a gutter's own width
 const INK = "#000";
-const RULE = "#e2e2de";
+// A gutter in hand draws no rule. The Ws on either side of it step one
+// weight heavier instead, quickly, and settle back when it is let go.
+const HEAVY = 1.2;
+const GRAB_MS = 120;
+const LET_GO_MS = 200;
+const outQuint = (t) => 1 - (1 - t) ** 5;
 
 // Solve the slope for a frame W wide and D tall with stroke weight w.
 function solveSlope(W, D, w) {
@@ -131,11 +136,12 @@ export function createZigzag(host) {
   const still = params.has("t") ? clamp(+params.get("t") || 0, 0, 1) : null;
 
   // Build live nodes from the layout. Each split keeps its rest share, its
-  // current share, a target it settles on, a velocity, and its rule's ink.
+  // current share, a target it settles on, a velocity, and how heavy it has
+  // made the Ws beside it.
   const gutters = [];
   const build = (n) => {
     if (typeof n === "string") return { leaf: n };
-    const node = { dir: n.dir, rest: n.k, pull: n.pull, k: n.k, target: n.k, v: 0, ink: 0, a: build(n.a), b: build(n.b), box: null };
+    const node = { dir: n.dir, rest: n.k, pull: n.pull, k: n.k, target: n.k, v: 0, heat: null, a: build(n.a), b: build(n.b), box: null };
     gutters.push(node);
     return node;
   };
@@ -194,8 +200,8 @@ export function createZigzag(host) {
   let BW = 1;
   let BH = 1;
   let portrait = false;
-  let G = 16; // gutter
-  let M = 32; // margin
+  let G = 16; // gutter: half a stroke
+  let M = 32; // margin: one stroke
   let weight = 10;
   let drag = null; // { node, off }
   let hover = null; // node
@@ -209,9 +215,12 @@ export function createZigzag(host) {
     BH = h;
     portrait = h > w * 1.1;
     const short = Math.min(w, h);
-    G = clamp(Math.round((short * 0.02) / 4) * 4, 8, 20);
-    M = clamp(Math.round((short * 0.04) / 4) * 4, 12, 40);
+    // One unit sets marks and spacing alike. The frames are parted by white
+    // alone, half a stroke wide, and the margin is a whole stroke; both snap
+    // to the 4px grid so the frames land on it too.
     weight = Math.max(5, Math.round(short * 0.038));
+    G = Math.max(4, Math.round(weight / 2 / 4) * 4);
+    M = Math.max(12, Math.round(weight / 4) * 4);
     measure();
   });
 
@@ -249,8 +258,12 @@ export function createZigzag(host) {
   // shared weight: tall enough for the mitres, wide enough for the crotches.
   // The type frame is fillable while its words fit unbroken and its lines,
   // at the smallest title step, still clear its depth.
-  const fits = ({ kind, box: [, , w, h] }) =>
-    kind === "type" ? w >= minTypeW && h >= typeDepth(w) : h >= weight * 2.6 && w >= minWidth(h, weight) * 1.08;
+  // A W is held to its heavier weight, since that is what a drag shows.
+  const fits = ({ kind, box: [, , w, h] }) => {
+    if (kind === "type") return w >= minTypeW && h >= typeDepth(w);
+    const wt = weight * HEAVY;
+    return h >= wt * 2.6 && w >= minWidth(h, wt) * 1.08;
+  };
   const leavesOf = (node, side) => {
     const out = [];
     const [x, y, w, h] = node.box;
@@ -308,6 +321,31 @@ export function createZigzag(host) {
     return base + node.k * span + G / 2;
   };
 
+  // Whether a frame has this gutter as one of its own sides.
+  const borders = (node, [lx, ly, lw, lh]) => {
+    const [x, y, w, h] = node.box;
+    const c = centre(node);
+    const near = (e, f) => Math.abs(e - f) < 0.5;
+    return axis(node) === "x"
+      ? (near(lx + lw, c - G / 2) || near(lx, c + G / 2)) && ly >= y - 0.5 && ly + lh <= y + h + 0.5
+      : (near(ly + lh, c - G / 2) || near(ly, c + G / 2)) && lx >= x - 0.5 && lx + lw <= x + w + 0.5;
+  };
+
+  // Take a gutter in hand (on = true) or let it go: its heat eases from
+  // wherever it is now toward 1 or 0, out-quint.
+  const heatOf = (node, ms) => {
+    const h = node.heat;
+    if (!h) return 0;
+    const e = outQuint(clamp((ms - h.t0) / h.dur, 0, 1));
+    return mix(h.from, h.to, e);
+  };
+  const grip = (node, on) => {
+    const ms = performance.now();
+    const to = on ? 1 : 0;
+    if (node.heat && node.heat.to === to) return;
+    node.heat = { from: heatOf(node, ms), to, t0: ms, dur: on ? GRAB_MS : LET_GO_MS };
+  };
+
   const pick = (px, py) => {
     const leaves = layout();
     // On a gutter: the one under the pointer, within reach.
@@ -328,17 +366,10 @@ export function createZigzag(host) {
     // Inside a frame: the nearest of its own sides that is a gutter.
     const leaf = leaves.find(({ box: [x, y, w, h] }) => px >= x && px <= x + w && py >= y && py <= y + h);
     if (!leaf) return null;
-    const [lx, ly, lw, lh] = leaf.box;
     bestD = Infinity;
     for (const node of gutters) {
-      const [x, y, w, h] = node.box;
+      if (!borders(node, leaf.box)) continue;
       const c = centre(node);
-      const near = (e, f) => Math.abs(e - f) < 0.5;
-      const borders =
-        axis(node) === "x"
-          ? (near(lx + lw, c - G / 2) || near(lx, c + G / 2)) && ly >= y - 0.5 && ly + lh <= y + h + 0.5
-          : (near(ly + lh, c - G / 2) || near(ly, c + G / 2)) && lx >= x - 0.5 && lx + lw <= x + w + 0.5;
-      if (!borders) continue;
       const d = Math.abs((axis(node) === "x" ? px : py) - c);
       if (d < bestD) {
         bestD = d;
@@ -360,6 +391,7 @@ export function createZigzag(host) {
 
   stage.on("down", (p) => {
     if (still != null) return;
+    if (demo) for (const n of pulled) grip(n, false);
     demo = null;
     hinted = true;
     const node = pick(p.x, p.y);
@@ -367,6 +399,7 @@ export function createZigzag(host) {
     const pos = axis(node) === "x" ? p.x : p.y;
     drag = { node, off: centre(node) - pos };
     node.v = 0;
+    grip(node, true);
     canvas.style.cursor = cursorFor(node);
   });
   stage.on("move", (p) => {
@@ -389,6 +422,7 @@ export function createZigzag(host) {
     node.target = clamp(node.k, lo, hi);
     const { span } = frameOf(node);
     node.v = clamp(axis(node) === "x" ? p.vx : p.vy, -3000, 3000) / Math.max(1, span);
+    grip(node, false);
     drag = null;
   });
 
@@ -427,24 +461,11 @@ export function createZigzag(host) {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, BW, BH);
     const leaves = layout();
+    const ms = performance.now();
+    const hot = gutters.map((node) => [node, heatOf(node, ms)]).filter(([, h]) => h > 0.001);
 
-    // Gutter rules: a pale hairline at rest, full ink when in hand.
-    for (const node of gutters) {
-      const [x, y, w, h] = node.box;
-      const c = centre(node);
-      const rule = (lw) => (axis(node) === "x" ? ctx.fillRect(c - lw / 2, y, lw, h) : ctx.fillRect(x, c - lw / 2, w, lw));
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = RULE;
-      rule(1 / dpr);
-      if (node.ink > 0.01) {
-        ctx.globalAlpha = node.ink;
-        ctx.fillStyle = INK;
-        rule(2);
-      }
-    }
-    ctx.globalAlpha = 1;
-
-    // The W's, one per frame, at one weight.
+    // No rules: the frames are parted by the gutter's white alone. The W's,
+    // one per frame, at one weight, except beside a gutter in hand.
     ctx.fillStyle = INK;
     ctx.beginPath();
     for (const { kind, box } of leaves) {
@@ -453,7 +474,9 @@ export function createZigzag(host) {
         continue;
       }
       const [x, y, w, h] = box;
-      const pts = outline(x, y, x + w, y + h, weight);
+      let heat = 0;
+      for (const [node, hv] of hot) if (hv > heat && borders(node, box)) heat = hv;
+      const pts = outline(x, y, x + w, y + h, weight * mix(1, HEAVY, heat));
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.closePath();
@@ -468,7 +491,7 @@ export function createZigzag(host) {
       // stand beside a column that has re-ragged for the same pull.
       for (const node of gutters) {
         node.k = node.pull != null ? mix(node.rest, node.pull, still) : node.rest;
-        node.ink = still > 0 && node.pull != null ? 1 : 0;
+        node.heat = null;
       }
       draw();
       return;
@@ -479,11 +502,13 @@ export function createZigzag(host) {
     if (!hinted && !drag && ms - t0 > 1400) {
       hinted = true;
       demo = { t0: ms, dur: 1300 };
+      for (const node of pulled) grip(node, true);
     }
     if (demo && !drag) {
       const k = (ms - demo.t0) / demo.dur;
       if (k >= 0.75) {
         demo = null;
+        for (const node of pulled) grip(node, false);
       } else {
         const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, k / 0.6));
         for (const node of pulled) {
@@ -494,11 +519,6 @@ export function createZigzag(host) {
       }
     }
     if (!demo) spring(dt);
-    const act = drag ? drag.node : stage.pointer.inside ? hover : null;
-    for (const node of gutters) {
-      const on = demo ? node.pull != null : node === act;
-      node.ink = mix(node.ink, on ? 1 : 0, 1 - Math.exp(-dt * (on ? 18 : 6)));
-    }
     draw();
   });
 
