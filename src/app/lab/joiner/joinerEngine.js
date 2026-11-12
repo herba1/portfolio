@@ -18,14 +18,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //   - its clouds are where they were at the moment it was taken: the sky is
 //     advected on a cloud deck by a gentle wind (and a little shear), so the
 //     cumulus disagree across the borders while walls and lamp posts do not.
-// Each frame is developed through the shared film kit (summer preset, graded
-// for a June sky: a polariser deepens the open blue to cobalt, sunlit cumulus
-// sit just under paper white on a warm shoulder, blacks barely lifted).
+// Each frame is developed through the shared film kit (summer preset, a
+// polariser deepening the open blue, blacks barely lifted), then its sky is
+// re-graded from the plate's dull overcast to a June sky: sunlit cumulus on a
+// warm shoulder just under paper white, skylight-blue cloud shadow, and a
+// clear sky that deepens to cobalt towards the zenith (see SKY_GRADE).
 //
 // Drag to shoot prints where you point. Long-press to sweep the table.
 // Query: ?prints=N&seed=S lays down a pre-built joiner of N prints;
 // ?t=seconds freezes the newest print that long into its fall; ?sweep=seconds
-// holds a long-press sweep; ?ev= and any film parameter override the grade.
+// holds a long-press sweep; ?ev= and any film parameter override the film;
+// ?grade=0..1 and the other SKY_GRADE keys override the sky grade.
 
 const ASSET = "/lab/joiner/";
 const THMAX = (120 * Math.PI) / 180; // disk rim, from the zenith
@@ -118,6 +121,7 @@ void main() {
   float m = texture(uMask, uv).r;
 
   vec3 col = base;
+  float key = 0.0;
   if (m > 0.002 && d.z > 0.01) {
     // The same sky a moment earlier or later: move the cloud deck under the
     // wind, with a little shear so the shapes have evolved too.
@@ -134,10 +138,138 @@ void main() {
     col = mix(base, sky, m);
     float blue = smoothstep(0.4, 0.85, (col.b - col.r) / (col.b + 1e-4));
     col *= mix(vec3(1.0), POL, blue * m);
+    key = m * smoothstep(0.01, 0.06, d.z);
   }
   col *= uGain;
   if (uSrgb > 0.5) col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
-  outColor = vec4(col, 1.0);
+  // the sky matte rides along in alpha for the sky grade after the film
+  outColor = vec4(col, key);
+}`;
+
+// The sky grade, the last step of each print's develop. The Docklands plate
+// was shot under a dull, broken overcast; a June print of it should be sunlit
+// cumulus on cobalt. That is a matter of cloud tonality, not exposure (more
+// exposure only pales the blue while the cloud stays grey), so the grade works
+// on the developed print, keyed on the sky matte (carried in the view's alpha)
+// and on how blue the scene light is there:
+//   - cloud: its luminance goes through a filmic shoulder with a toe, so the
+//     sunlit tops climb to a warm-neutral paper white (#F4F1EA, never past it)
+//     while the undersides keep their depth; the mids and shadows are split
+//     toned towards skylight blue (hue 205, sat 0.25), the colour of shade
+//     under an open sky;
+//   - clear sky: recoloured along a zenith gradient, deep cobalt (#0E5FB0)
+//     straight up, opening towards the rim, carrying the print's own exposure,
+//     vignette and grain as a ratio so every print still meters for itself.
+const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
+const SKY_GRADE = {
+  cloudGain: 4.6, // gain on cloud luminance (linear) into the shoulder
+  cloudToe: 2.8, // power on cloud luminance before the shoulder: deepens the undersides
+  splitTone: 1, // 0 leaves cloud neutral, 1 is the full skylight split
+  keep: 0.5, // share of the print's own dye cast kept in the cloud
+  skyKeep: 0.7, // power of the print's own exposure ratio kept in the clear sky
+  grade: 1, // overall strength
+};
+const CLOUD_HI = srgbHex("#F4F1EA");
+const CLOUD_SHADE = [0.75, 0.896, 1.0]; // HSV(205, 0.25, 1)
+const SKY_ZENITH = srgbHex("#0E5FB0");
+const SKY_RIM = srgbHex("#3F8AD0");
+const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at the zenith
+const vec3 = (v) => `vec3(${v.map((x) => x.toFixed(4)).join(", ")})`;
+
+const GRADE = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uDev;  // the developed print (sRGB)
+uniform sampler2D uRaw;  // the camera's view, scene light; alpha = sky matte
+uniform float uRawSrgb;
+uniform vec3 uC;
+uniform vec3 uR;
+uniform vec3 uD;
+uniform float uF;
+uniform float uHalf;
+uniform vec4 uCloud;     // gain, toe, split, keep
+uniform vec2 uSky;       // keep, strength
+uniform float uSeed;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const vec3 HI = ${vec3(CLOUD_HI)};
+const vec3 SHADE = ${vec3(CLOUD_SHADE)};
+const vec3 ZEN = ${vec3(SKY_ZENITH)};
+const vec3 RIM = ${vec3(SKY_RIM)};
+const float VREF = ${SKY_VREF.toFixed(4)};
+
+vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
+vec3 toSrgb(vec3 c) { return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+  vec4 dev = texture(uDev, vUv);
+  vec4 raw = texture(uRaw, vUv);
+
+  // how blue the scene light is: open sky against cloud. Read over a few
+  // pixels, so the plate's compressed chroma blocks never reach the key. The
+  // same ring dilates the matte by those few pixels (light pixels only), so
+  // its soft rim and any hairline left in it are graded with the sky around
+  // them instead of standing out as an ungraded fringe.
+  vec2 rt = 3.0 / vec2(textureSize(uRaw, 0));
+  vec3 sc = raw.rgb * 0.2;
+  float ring = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.785398 + 0.39;
+    vec4 t = texture(uRaw, vUv + rt * vec2(cos(a), sin(a)));
+    sc += t.rgb * 0.1;
+    ring = max(ring, t.a);
+  }
+  float Y0 = dot(toLin(dev.rgb), LUMA);
+  float m = max(raw.a, ring * smoothstep(0.08, 0.3, Y0));
+  m = smoothstep(0.0, 0.6, m) * uSky.y;
+  if (m < 0.002) { outColor = dev; return; }
+  if (uRawSrgb > 0.5) sc = pow(sc, vec3(2.2));
+  float clear = smoothstep(0.28, 0.62, (sc.b - sc.r) / (sc.b + 1e-4));
+
+  vec3 lin = toLin(dev.rgb);
+  float Y = dot(lin, LUMA);
+
+  // cloud: toe, then an exponential shoulder that lands on HI and stays there.
+  // The curve is steep in the mids, so it reads a grain-free luminance (a
+  // little blur of the print) and the grain rides back on as a plain ratio
+  // instead of being stretched with the cloud.
+  vec2 tx = 1.5 / vec2(textureSize(uDev, 0));
+  float Yb = 0.5 * Y + 0.125 * (dot(toLin(texture(uDev, vUv + vec2(tx.x, 0.0)).rgb), LUMA)
+    + dot(toLin(texture(uDev, vUv - vec2(tx.x, 0.0)).rgb), LUMA)
+    + dot(toLin(texture(uDev, vUv + vec2(0.0, tx.y)).rgb), LUMA)
+    + dot(toLin(texture(uDev, vUv - vec2(0.0, tx.y)).rgb), LUMA));
+  vec3 hiL = toLin(HI);
+  float W = dot(hiL, LUMA);
+  float x = pow(max(Yb, 0.0), uCloud.y) * uCloud.x;
+  float Yc = W * (1.0 - exp(-x / W)) * pow(clamp((Y + 0.004) / (Yb + 0.004), 0.8, 1.25), 0.75);
+  vec3 shadeL = toLin(SHADE);
+  shadeL /= dot(shadeL, LUMA);
+  float zone = smoothstep(0.3, 0.95, Yc / W);
+  vec3 tint = mix(mix(vec3(1.0), shadeL, uCloud.z), hiL / W, zone);
+  vec3 own = mix(vec3(1.0), (lin + 0.002) / (Y + 0.002), uCloud.w);
+  vec3 cloud = min(tint * Yc * own, hiL);
+
+  // clear sky: a zenith gradient carrying the print's own exposure
+  vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;
+  vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
+  float th = acos(clamp(d.z, -1.0, 1.0));
+  vec3 tgt = toLin(mix(ZEN, RIM, smoothstep(0.0, 1.35, th)));
+  float V = max(lin.r, max(lin.g, lin.b));
+  vec3 sky = tgt * pow(clamp(V / VREF, 0.55, 1.25), uSky.x);
+
+  vec3 g = mix(cloud, sky, clear);
+  // Low over the roofs the plate is haze and push-pull fill round every
+  // structure, which a full grade would outline; ease it off towards the
+  // horizon, where a real sky pales anyway.
+  m *= mix(1.0, 0.4, smoothstep(0.9, 1.45, th));
+  vec3 outc = toSrgb(mix(lin, g, m));
+  outc += (hash12(gl_FragCoord.xy + uSeed) + hash12(gl_FragCoord.yx + 5.3 + uSeed) - 1.0) / 255.0;
+  outColor = vec4(clamp(outc, 0.0, 1.0), 1.0);
 }`;
 
 // A print on the table: paper, image, and its shadow, drawn in one quad.
@@ -317,6 +449,11 @@ export async function createJoiner(host, { embedded = false } = {}) {
     const v = q.get(key);
     if (typeof FILM_BASE[key] === "number" && v != null && v !== "" && Number.isFinite(+v)) film0[key] = +v;
   }
+  const grade0 = { ...SKY_GRADE };
+  for (const key of Object.keys(SKY_GRADE)) {
+    const v = q.get(key);
+    if (v != null && v !== "" && Number.isFinite(+v)) grade0[key] = +v;
+  }
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   host.style.background = "#f2f0eb";
@@ -407,6 +544,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const view = compile(gl, VERT, VIEW);
   const printP = compile(gl, PRINT_VS, PRINT_FS);
+  const gradeP = compile(gl, VERT, GRADE);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
@@ -428,6 +566,8 @@ export async function createJoiner(host, { embedded = false } = {}) {
   let rawTex = null;
   let rawFbo = null;
   let rawLinear = true;
+  let devTex = null; // the film's output, before the sky grade
+  let devFbo = null;
 
   const allocRaw = () => {
     if (rawTex) gl.deleteTexture(rawTex);
@@ -448,6 +588,16 @@ export async function createJoiner(host, { embedded = false } = {}) {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rawTex, 0);
     }
     rawLinear = ok;
+    if (devTex) gl.deleteTexture(devTex);
+    if (devFbo) gl.deleteFramebuffer(devFbo);
+    devTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, devTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, cell, cell, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+    devFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, devFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, devTex, 0);
+    gl.bindTexture(gl.TEXTURE_2D, rawTex);
     for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -584,8 +734,34 @@ export async function createJoiner(host, { embedded = false } = {}) {
         grainSize: 1100 / cell,
         grainSeed: p.grain,
       },
-      p.fbo,
+      devFbo,
     );
+
+    // the sky grade, into the print
+    gl.bindFramebuffer(gl.FRAMEBUFFER, p.fbo);
+    gl.viewport(0, 0, cell, cell);
+    gl.disable(gl.BLEND);
+    gl.useProgram(gradeP.p);
+    gl.bindVertexArray(vao);
+    const g = gradeP.u;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, devTex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, rawTex);
+    gl.uniform1i(g.uDev, 0);
+    gl.uniform1i(g.uRaw, 1);
+    gl.uniform1f(g.uRawSrgb, rawLinear ? 0 : 1);
+    gl.uniform3fv(g.uC, c);
+    gl.uniform3fv(g.uR, R);
+    gl.uniform3fv(g.uD, D);
+    gl.uniform1f(g.uF, F);
+    gl.uniform1f(g.uHalf, (0.5 * img) / f);
+    gl.uniform4f(g.uCloud, grade0.cloudGain, grade0.cloudToe, grade0.splitTone, grade0.keep);
+    gl.uniform2f(g.uSky, grade0.skyKeep, grade0.grade);
+    gl.uniform1f(g.uSeed, p.grain);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(null);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   };
 
@@ -923,7 +1099,10 @@ export async function createJoiner(host, { embedded = false } = {}) {
       gl.deleteTexture(texSky);
       if (rawTex) gl.deleteTexture(rawTex);
       if (rawFbo) gl.deleteFramebuffer(rawFbo);
+      if (devTex) gl.deleteTexture(devTex);
+      if (devFbo) gl.deleteFramebuffer(devFbo);
       gl.deleteProgram(view.p);
+      gl.deleteProgram(gradeP.p);
       gl.deleteProgram(printP.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
