@@ -17,13 +17,13 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 // warm in it is the thin halation ring where a blade crosses the sun.
 //
 // The sky behind (sky.webp) is a real summer cumulus sky cut from an HDRI
-// looking up into the dome, aimed so its sun sits on the photograph's
-// (tools/depth/bakes/kaze/sky_hdri.py) and turned so the big cumulus lies
-// along the top: the sun burns through its sunlit edge at the top left, the
-// lit rim runs through the upper third under a skylight-blue shaded
-// underside, the middle is open deep cobalt, and a lit dome rises behind the
-// grass. The bake prints the lit cloud locally, so its billows keep their
-// modelling up to a warm cream white just under the print's white. It drifts with a two-phase flow map
+// looking up into the dome, aimed so its sun sits in the frame's top left
+// corner (tools/depth/bakes/kaze/sky_hdri.py) and turned so the big cumulus
+// lies along the top: the sun is a warm white diffusion bloom in the corner,
+// burning through the cloud's edge, the cumulus runs off to the right with
+// warm white domes and pale skylight-blue shade, the open sky deepens from
+// pale cyan low in the frame to cobalt at the top, and a lit dome rises
+// behind the grass. It drifts with a two-phase flow map
 // (Vlachos 2010), faster toward the zenith, and the clouds lean after your
 // gusts.
 //
@@ -39,9 +39,9 @@ const ASPECT = 1.5;
 // in from; the crop window is cover-fitted to the box, held to its top edge.
 const OVER = 0.02;
 const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.68, ax: 0.05 };
-// The sun's disc in the photograph (image uv): the centroid of its clipped
-// pixels in sky.webp, about 0.031 image heights across in radius.
-const SUN = [0.145, 0.2318];
+// The sun (image uv): where sky_hdri.py aims the HDRI's sun, in the frame's
+// top left corner (keep the two SUNs equal).
+const SUN = [0.09, 0.1];
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -146,13 +146,16 @@ void main() {
   const vec3 CREAM = vec3(1.0, 0.86, 0.66);
   float Yh = dot(sky, vec3(0.2126, 0.7152, 0.0722));
   sky = mix(sky, Yh * CREAM / dot(CREAM, vec3(0.2126, 0.7152, 0.0722)), 0.35 * hl * hl);
-  // The sun: a small hot core and a smooth exponential roll-off, two
-  // widths summed (no wide lobe: it lifted the whole sunward cloud past the
-  // knee), warm white, added over the sky so the cloud texture runs
-  // on through it, with no edge anywhere for a ring to form on. Kept low:
-  // the shoulder below carries it the rest of the way to white.
-  vec3 sunC = vec3(1.0, 0.86, 0.66);
-  sky += sunC * (0.7 * exp(-r / 0.012) + 0.25 * exp(-r / 0.06));
+  // The sun, in the frame's top left corner: a small hot core and a smooth
+  // exponential roll-off, three widths summed, warm white (the print's own
+  // #F5F0E1 rather than an orange), added over the sky so the cloud texture
+  // runs on through it, with no edge anywhere for a ring to form on. The
+  // bake already lays the sun's wide diffusion into the sky round it; the
+  // wide lobe here only lets the core fall away through it, so the corner
+  // reads as a bloom with a heart and not a flat pale plate. The shoulder
+  // below carries it the rest of the way, under the clip.
+  vec3 sunC = vec3(1.0, 0.94, 0.8);
+  sky += sunC * (0.32 * exp(-r / 0.012) + 0.2 * exp(-r / 0.05) + 0.1 * exp(-r / 0.16));
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:
@@ -623,6 +626,12 @@ export async function createKaze(host) {
         toe: 0.022,
         blueDepth: 0.25,
         saturation: 1.1,
+        // The sun sits in the corner now: the stock's cos^4 falloff greyed it
+        // and the cool highlight split tone turned the cloud's warm dome
+        // white to a neutral grey, so the corners fall off less and the
+        // highlights are held just warm of neutral.
+        vignette: 0.12,
+        highlightTint: [1.0, 1.0, 0.98],
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         grainSeed,
       },
