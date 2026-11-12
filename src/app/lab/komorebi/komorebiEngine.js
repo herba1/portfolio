@@ -33,13 +33,16 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // rolls through; the pointer is a breath of wind, a puff that travels with
 // the hand and fades. Branches bend from their trunks, so trunks hold still.
 //
-// The sun is drawn behind all of it with its measured radiance (about a
-// million times the blue sky beside it), about four degrees left of where it
+// The sun is drawn behind all of it, about four degrees left of where it
 // stood in the capture so it sits on a cypress's ragged edge: a gust bends
-// the needles across it but never buries it. What
-// leaks through the gaps is the only bright thing in the scene, and the
-// shared film look turns it into bloom and a warm halation ring; as the
-// gaps open and close it flickers.
+// the needles across it but never buries it. What leaks through the gaps is
+// the only bright thing in the scene. Round it sits a steep glare, a white
+// core and a thin warm ring within 2% of the frame, scaled by how much of
+// the disc the needles leave open, so it flickers as the gaps open and
+// close. The film only diffuses what is past its thresholds and adds a
+// narrow halation fringe where the light meets the cypress edge; its
+// pyramid has long wings, so the disc goes in heavily filtered, or it fogs
+// the whole lower canopy maroon.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..1 a breath of that strength sets off at t = 0.5 s.
@@ -60,7 +63,15 @@ const CLOUD_LOG = [-9, 6];
 const SUN = { x: 0.4094, y: 0.89429, r: 0.0028631, L: 194211, color: [1.0375, 1.006, 0.83] };
 // Scene light is written at 1/16 so the sun fits a half float; film adds it back.
 const GAIN = 1 / 16;
-const SUN_ND = 0.042; // taste: how much of the sun's energy the frame gets
+// Share of the measured radiance the disc keeps. Still ~100x past the clip,
+// so it reads white; much more and the film's wide diffusion lifts the
+// cypresses 100 px (DPR 2) away.
+const SUN_ND = 0.001;
+// Glare round the disc, in scene light (before GAIN): core peak and colour at
+// the sun's centre, e-folding width in frame heights; the warm ring is a
+// band 3.6 widths out. The film clips near 2.8, so the white core is ~2.4
+// widths across and the ring is gone by ~6 (about 2% of the frame).
+const GLARE = { peak: 28, color: [1, 0.9, 0.74], width: 0.004, ring: 0.7, ringColor: [1, 0.5, 0.24] };
 
 // Per layer: deflection per unit wind (asset widths), natural frequency,
 // damping. The branch centres the wind is sampled at come with the
@@ -90,9 +101,15 @@ const FILM = {
   whitePoint: 3.6,
   contrast: 1.2,
   shoulder: 0.95,
-  halation: 0.34,
+  // Halation only off the sun, judged from the surround: a narrow red-orange
+  // fringe where the glare meets the cypress, not a red veil on every twig.
+  halation: 0.15,
   halationThreshold: 2.5 * GAIN,
-  bloom: 0.2,
+  halationLocal: 0.6,
+  // Pro-Mist only past the clip: the sky, cloud and shadows keep their own
+  // drawing and are not lifted by the veil.
+  bloom: 0.15,
+  bloomThreshold: 1.25 * GAIN,
   softness: 0.42,
   saturation: 1.12,
   blueDepth: 0.7,
@@ -148,6 +165,8 @@ uniform vec2 uSun;
 uniform float uSunR;
 uniform vec3 uSunL;
 uniform float uGain;
+uniform vec4 uGlare;         // rgb peak, a: width (frame heights)
+uniform vec3 uGlareRing;     // the warm band round the core
 uniform vec2 uLog;
 uniform sampler2D uCloudsBlur; // same texture, mipmapped sampler
 uniform vec3 uSkyHor;
@@ -241,6 +260,30 @@ void main() {
   col = mix(col, canopy(u0), a0);
   col = mix(col, canopy(u1), a1);
   col = mix(col, canopy(u2), a2);
+
+  // Glare: the light that scatters inside the lens and off the emulsion
+  // right next to the disc. Steep, a ring of a few percent of the frame, in
+  // front of everything; it tracks how much of the disc the needles leave
+  // open, so it flickers with them. (The film's own scatter is far wider:
+  // fed the full disc it fogs the whole lower canopy.)
+  float rh = length(dv) / px / uRes.y;
+  float x = rh / uGlare.a;
+  if (x < 12.0) {
+    float open = 0.0;
+    for (int i = 0; i < 5; i++) {
+      vec2 o = i == 0 ? vec2(0.0) : 1.6 * r * vec2(i == 1 ? 1.0 : i == 2 ? -1.0 : 0.0, i == 3 ? ASPECT : i == 4 ? -ASPECT : 0.0);
+      vec2 s = uSun + o;
+      float c = 1.0 - texture(uClouds, s).a * 0.6;
+      c *= 1.0 - texture(uLayers, s - disp(0, s)).r;
+      c *= 1.0 - texture(uLayers, s - disp(1, s)).g;
+      c *= 1.0 - texture(uLayers, s - disp(2, s)).b;
+      open += c * (i == 0 ? 0.4 : 0.15);
+    }
+    // A white-hot core that clips, then a narrow warm band just outside it.
+    float ring = (x - 3.6) / 1.4;
+    vec3 g = uGlare.rgb * exp(-x) + uGlareRing * exp(-ring * ring);
+    col += g * open;
+  }
 
   outColor = vec4(col * uGain, 1.0);
 }`;
@@ -700,6 +743,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSunR, SUN.r);
     gl.uniform3f(u.uSunL, SUN.L * SUN_ND * SUN.color[0], SUN.L * SUN_ND * SUN.color[1], SUN.L * SUN_ND * SUN.color[2]);
     gl.uniform1f(u.uGain, sceneT.ok ? GAIN : GAIN / 64);
+    gl.uniform4f(u.uGlare, GLARE.peak * GLARE.color[0], GLARE.peak * GLARE.color[1], GLARE.peak * GLARE.color[2], GLARE.width);
+    gl.uniform3f(u.uGlareRing, GLARE.ring * GLARE.ringColor[0], GLARE.ring * GLARE.ringColor[1], GLARE.ring * GLARE.ringColor[2]);
     gl.uniform2f(u.uLog, LOG[0], LOG[1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.pw, L.ph);
