@@ -28,7 +28,7 @@ const R_FIRST = 0.966; // first music groove
 const R_LAST = 0.4; // last music groove
 const R_LOCK = 0.352; // the locked groove
 const LEAD_TURNS = 2;
-const BAND_PITCH = 0.0105; // a turn of the band between tracks, in radii
+const BAND_PITCH = 0.017; // a turn of the band between tracks, in radii
 const RUNOUT_PITCH = 0.021;
 const THIN = 0.0007; // half width of an unmodulated groove
 
@@ -164,7 +164,9 @@ export function cutLacquer(x) {
     const b = Math.min(nb - 1, Math.floor(t * bps));
     radius.push(r);
     if (silent[b]) {
-      width.push(THIN);
+      // Between tracks the lathe barely cuts: a shallower, thinner groove
+      // than the lead-in's, so the band is flat vinyl and stays dark.
+      width.push(THIN * 0.55);
       r -= (BAND_PITCH * dtS) / TURN;
     } else {
       const p = scale * rel(b);

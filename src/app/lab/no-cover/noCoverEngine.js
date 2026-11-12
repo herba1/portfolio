@@ -1,7 +1,7 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createSound, db } from "@/lib/sound/engine";
 import { takes } from "./noCoverTakes";
-import { LABEL, rng, handle, fingertip, drag, lift } from "./noCoverHandling";
+import { LABEL, rng, history, fingertip, drag, lift } from "./noCoverHandling";
 import { decodeProgramme, cutLacquer, SR, SPT, TURN, WR, WAVE_W } from "./noCoverLathe";
 
 // After Christian Marclay, Record Without a Cover (1985): a record sold with
@@ -24,17 +24,19 @@ import { decodeProgramme, cutLacquer, SR, SPT, TURN, WR, WAVE_W } from "./noCove
 // the groove, Ward across it): a groove lights only where it runs across the
 // half vector, a narrow fan through the centre that turns with the light. Where
 // the music is quiet the groove barely wanders and the fan is a hard, clean
-// streak; where it is loud the groove swings, the lobe tilts and spreads with
+// streak (its core pushed past white, its wings held low, so the fan carries
+// the frame and the scratches sit under it); where it is loud the groove swings, the lobe tilts and spreads with
 // it, and the fan breaks into a scattered shimmer; the band between the tracks
 // is near-flat vinyl and stays dark. The pressing is a hair off centre and a
 // little warped, so the fan sways.
 //
 // Damage is a height field fixed to the record, 4096 texels across. What is
 // in it is not drawn: it comes from a simulation of handling (see
-// noCoverHandling.js). The record is slid out of stacks, covered by others,
-// wiped, held and set on the spindle a few hundred times, each a rigid motion
-// against a patch of grit, and every grain's path through the motion is cut
-// in. A drag goes through the same contact: the pointer is a fingertip with
+// noCoverHandling.js). The record is slid out of a stack, covered by
+// another, wiped, held and set on the spindle a handful of times, each a
+// rigid motion against a patch of grit, and every grain's path through the
+// motion is cut in, so the wear lies in a few separate families and most of
+// the face is clean groove. A drag goes through the same contact: the pointer is a fingertip with
 // grit under it. Each cut is stamped with a profile: a trench in the middle,
 // the displaced vinyl heaped into a continuous lip of burr either side, the
 // walls chipped where a hard grain ploughed deep. A second target keeps the
@@ -231,9 +233,14 @@ const float LABEL = 0.331;   // 50 / 151
 const float HOLE = 0.0238;   // 3.6 / 151
 const int TAPS = 48;
 const float WALL = 0.22;     // how far a groove wall's share tilts the normal
-const float SIG = 0.05;      // groove slope spread that doubles the lobe
+const float SIG = 0.12;      // groove slope spread that doubles the lobe
 const float HB = 0.55;       // burr height, relative to trench depth
 const float SLOPE = 1.25;    // height per texel to surface slope
+const float SCATTER = 1.6;   // how far the swing's mean tilt scatters the lobe
+const float GLOD = 1.0;      // the rings are read this far up the mips: a
+                             // quiet passage packs them closer than three
+                             // pixels, and resolving each would beat with
+                             // the pixel grid into dashed moire
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 p){
@@ -257,6 +264,20 @@ float aniso(vec3 T, vec3 B, vec3 N, vec3 H, float wT, float wB){
   return 0.8 * exp(-(ht * ht / (w1 * w1) + across) * k)
        + 0.13 * exp(-(ht * ht / (w2 * w2) + across) * k)
        + 0.012 * exp(-(ht * ht / (w3 * w3) + across) * k);
+}
+// The groove's own lobe, the same shape with its core pushed and its wings
+// held low: the fan carries the frame as a hard streak, and off it the
+// grooves go dark, so the flat band between the tracks has something to be
+// dark against.
+float sheen(vec3 T, vec3 B, vec3 N, vec3 H, float wT){
+  float ht = dot(T, H), hb = dot(B, H);
+  float hn = max(dot(N, H), 0.08);
+  float across = hb * hb / 6.25;
+  float k = 1.0 / (hn * hn);
+  float w1 = 0.026 * wT, w2 = 0.085 * wT, w3 = 0.3 * wT;
+  return 1.9 * exp(-(ht * ht / (w1 * w1) + across) * k)
+       + 0.08 * exp(-(ht * ht / (w2 * w2) + across) * k)
+       + 0.01 * exp(-(ht * ht / (w3 * w3) + across) * k);
 }
 
 void main(){
@@ -329,19 +350,21 @@ void main(){
       // The groove, as the lathe cut it: its share of the pixel, the way its
       // walls lean, and how far the music swings it off its circle, as a mean
       // tilt of its direction and a spread around it.
-      vec4 gf = textureLod(uGroove, uv, lod);
+      vec4 gf = textureLod(uGroove, uv, lod + GLOD);
       float gcov = gf.r;
       // The swing is read a level coarser than the rings: what the eye takes
       // from it is the tilt of a few waves together and their spread, not the
       // sign of each one, which would tile the groove into cells.
-      vec4 gw = textureLod(uGroove, uv, lod + 1.25);
+      vec4 gw = textureLod(uGroove, uv, lod + GLOD + 0.5);
       float ic = 1.0 / max(gw.r, 0.04);
       float gs = (gw.g * 2.0 - 1.0) * uSmax * ic;
       float grms = gw.b * uSmax * ic;
       float gvar = max(grms * grms - gs * gs, 0.0);
       float wT = sqrt(1.0 + gvar / (SIG * SIG));
       vec3 Ng = normalize(vec3(radial * (gf.a * 2.0 - 1.0) * WALL, 1.0));
-      vec3 Tm = vec3(normalize(Tg + radial * gs), 0.0);
+      // The mean swing is pushed a little past what the coarse read holds, so
+      // a loud passage scatters the lobe in points rather than smearing it.
+      vec3 Tm = vec3(normalize(Tg + radial * gs * SCATTER), 0.0);
       grooved += w * gcov;
 
       // The damage: height from trench and burr, normal from its slope.
@@ -350,7 +373,7 @@ void main(){
       if (s0.r + s0.g < 0.002) {
         vec3 T1 = normalize(Tm - Ng * dot(Tm, Ng));
         // A lobe spread wider is dimmer for it: the same light, scattered.
-        spec += w * gcov * aniso(T1, cross(Ng, T1), Ng, Hw, wT, 2.5) / wT;
+        spec += w * gcov * sheen(T1, cross(Ng, T1), Ng, Hw, wT) / wT;
         continue;
       }
       // The field is read prefiltered to the pixel (a mip level picked from
@@ -387,9 +410,11 @@ void main(){
       // crosses the light and free across it, so a family of arcs about one
       // centre lights up as its own small fan; a deep cut's walls are facets,
       // narrow across, so only the wall that faces the light catches it.
-      float fg = aniso(Tg3, cross(N, Tg3), N, Hw, wT, 2.5) / wT;
-      float fs = aniso(T3, B3, Nd, Hw, 1.9, mix(2.2, 0.34, brk));
-      spec += w * (fg * gcov * (1.0 - max(brk, 0.6 * cov)) + fs * cov * (1.25 + 0.8 * s0.g));
+      float fg = sheen(Tg3, cross(N, Tg3), N, Hw, wT) / wT;
+      float fs = aniso(T3, B3, Nd, Hw, 1.9, mix(2.2, 0.9, brk));
+      // The wear stays under the sheen: a hairline peaks well below a lit
+      // groove, so it reads as a mark on the record, not light on top of it.
+      spec += w * (fg * gcov * (1.0 - max(brk, 0.6 * cov)) + fs * cov * (0.3 + 0.2 * s0.g));
       // Fresh-cut vinyl stress-whitens a little, and the floor of a deep
       // trench sits in its own shadow.
       stress += w * (s0.g * 0.8 + s0.r * 0.35) * (0.4 + 0.6 * max(dot(Nd, uL), 0.0));
@@ -475,6 +500,7 @@ const BINS = 720;
 const RINGS = 40; // the bins again by radius, so the stylus hears its own ring
 const LAT = 0.0004; // full-scale sideways swing of the cut: 0.06 mm, under a texel
 const SMAX = 0.35; // the steepest groove slope the field holds
+const DEFAULT_AZ = (-160 * Math.PI) / 180; // from the left, a little above
 
 // Should the programme not load, a stand-in the lathe can still cut: two
 // short tracks of soft partials with a gap between.
@@ -537,6 +563,13 @@ export async function createNoCover(host, { embedded = false } = {}) {
 
   const params = new URLSearchParams(location.search);
   const still = params.has("t") ? clamp(parseFloat(params.get("t")) || 0, 0, 1) : null;
+  // Still params: ?az= the light's azimuth in degrees (screen angle, 0 from
+  // the right, 90 from below), ?seed= the handling history. The default sits
+  // the fan across the frame's long axis, through the loudest turns.
+  const azDeg = parseFloat(params.get("az"));
+  const azFixed = Number.isFinite(azDeg) ? (azDeg * Math.PI) / 180 : null;
+  const seedP = parseInt(params.get("seed"), 10);
+  const seed = Number.isFinite(seedP) ? seedP : 1985;
   // The programme the grooves are cut from: fetched and decoded while the
   // rest is set up.
   const decoding = decodeProgramme("/lab/no-cover/gymnopedie.mp3").catch((err) => {
@@ -711,7 +744,7 @@ export async function createNoCover(host, { embedded = false } = {}) {
   // --- state
   let angle = 0.6; // record angle, clockwise on screen
   let omega = 0;
-  let lightAz = -2.2; // toward upper left
+  let lightAz = azFixed ?? DEFAULT_AZ;
   let lightTarget = lightAz;
   let mode = "idle"; // idle | pending | scratch | hold
   let downAt = 0;
@@ -752,10 +785,11 @@ export async function createNoCover(host, { embedded = false } = {}) {
     total += lp * Math.min(1, depth * 2);
   };
 
-  // The seeded history: a few hundred handlings, simulated. The deep cuts go
-  // in last, so the hairlines of later wipes do not paper over a gouge.
-  if (still != null || embedded) {
-    handle(1985, cutSeg);
+  // The seeded history: a few handlings, simulated, each a family of arcs.
+  // The deep cuts go in last, so the hairlines of later wipes do not paper
+  // over a gouge.
+  if (still != null || embedded || params.has("seed")) {
+    history(seed, cutSeg);
     const order = Array.from({ length: nInst }, (_, i) => i).sort((i, j) => inst[i * 8 + 5] - inst[j * 8 + 5]);
     const sorted = new Float32Array(inst.length);
     order.forEach((i, k) => sorted.set(inst.subarray(i * 8, i * 8 + 8), k * 8));
@@ -802,7 +836,7 @@ export async function createNoCover(host, { embedded = false } = {}) {
   stage.on("move", (p, e) => {
     if (!p.down) {
       // The light leans toward the pointer, so the fan turns to meet it.
-      if (onRecord(p.x, p.y) || Math.hypot(p.x - C[0], p.y - C[1]) < R * 2.2) lightTarget = Math.atan2(p.y - C[1], p.x - C[0]);
+      if (azFixed == null && (onRecord(p.x, p.y) || Math.hypot(p.x - C[0], p.y - C[1]) < R * 2.2)) lightTarget = Math.atan2(p.y - C[1], p.x - C[0]);
       return;
     }
     if (e?.pointerType === "pen" && e.pressure > 0) tipPress = 0.5 + e.pressure;
@@ -963,7 +997,7 @@ export async function createNoCover(host, { embedded = false } = {}) {
     let dl = lightTarget - lightAz;
     dl = Math.atan2(Math.sin(dl), Math.cos(dl));
     lightAz = damp(lightAz, lightAz + dl, 3.2, dt);
-    if (!stage.pointer.down && stage.idleFor() > 5000) lightTarget += dt * 0.05;
+    if (!stage.pointer.down && stage.idleFor() > 5000 && azFixed == null && still == null) lightTarget += dt * 0.05;
 
     listen(dt);
     flush();

@@ -165,7 +165,7 @@ const inDisc = (rand, cx, cy, rad) => {
 
 // Pulled out of a stack: held at the rim, lifted on that side, slid off the
 // record beneath. The far rim drags, turning about the hand as it comes.
-function pulled(rand, dusty) {
+function pulled(rand, dusty, n, life = 1) {
   const ga = rand() * TAU;
   const gx = Math.cos(ga) * 0.97;
   const gy = Math.sin(ga) * 0.97;
@@ -178,8 +178,9 @@ function pulled(rand, dusty) {
   const ux = Math.cos(ga);
   const uy = Math.sin(ga);
   const grains = [];
-  const ng = Math.round((3 + rand() * 10) * dusty);
-  for (const at of drifts(rand, ng, 0, 0, 1)) grains.push({ g: grain(rand, { life: 0.12 + rand() * 0.25 }), at, from: 0, to: 1 });
+  const ng = n ?? Math.round((3 + rand() * 10) * dusty);
+  const hard = n ? 0.1 : 0.06;
+  for (const at of drifts(rand, ng, 0, 0, 1)) grains.push({ g: grain(rand, { hard, life: (0.12 + rand() * 0.25) * life }), at, from: 0, to: 1 });
   return {
     steps: steps(D + Math.abs(phi) * 2),
     rec: (s) => about(phi * s, gx, gy, Math.cos(da) * D * s, Math.sin(da) * D * s),
@@ -194,7 +195,7 @@ function pulled(rand, dusty) {
 
 // Covered: another record slid onto this one, its leading rim dragging grit
 // across the face until it comes to rest a little off true.
-function covered(rand, dusty) {
+function covered(rand, dusty, n, life = 1) {
   const da = rand() * TAU;
   const D = 1.9 + rand() * 0.4;
   const phi = (rand() < 0.5 ? -1 : 1) * (0.5 + rand() * 0.9);
@@ -206,11 +207,11 @@ function covered(rand, dusty) {
   const lx0 = Math.cos(da);
   const ly0 = Math.sin(da);
   const grains = [];
-  const ng = Math.round((6 + rand() * 16) * dusty);
+  const ng = n ?? Math.round((6 + rand() * 16) * dusty);
   for (const at of drifts(rand, ng, 0, 0, 1)) {
     // Only grit near the leading rim of the record that is set down rides it.
     if ((1 + at[0] * lx0 + at[1] * ly0) / 2 < 1 - span * 1.4) continue;
-    grains.push({ g: grain(rand, { life: 0.2 + rand() * 0.5 }), at, from: 0, to: 1 });
+    grains.push({ g: grain(rand, { hard: n ? 0.1 : 0.06, life: (0.2 + rand() * 0.5) * life }), at, from: 0, to: 1 });
   }
   const px = -lx0 * 0.97;
   const py = -ly0 * 0.97;
@@ -235,7 +236,7 @@ function covered(rand, dusty) {
 // Wiped: a cloth pressed on with the flat of the fingers, the record turned
 // against it in the other hand, round a wrist that is never quite on the
 // spindle. Sometimes a straight scrub instead, back and forth.
-function wiped(rand) {
+function wiped(rand, { n, rotary, off } = {}) {
   const ca = rand() * TAU;
   const cr = 0.5 + rand() * 0.38;
   const cx = Math.cos(ca) * cr;
@@ -243,7 +244,7 @@ function wiped(rand) {
   const sig = 0.1 + rand() * 0.16;
   const press = 0.5 + 0.6 * rand();
   const grains = [];
-  const ng = 6 + Math.floor(rand() * 26);
+  const ng = n ?? 6 + Math.floor(rand() * 26);
   for (let k = 0; k < ng; k += 1) {
     const a = rand() * TAU;
     const rr = sig * Math.sqrt(-Math.log(1 - rand() * 0.98)) * 0.9;
@@ -255,9 +256,12 @@ function wiped(rand) {
     const dy = gr.at[1] - cy;
     return press * Math.exp(-(dx * dx + dy * dy) / (sig * sig)) * shield(Math.hypot(lx, ly));
   };
-  if (rand() < 0.72) {
-    const pa = rand() * TAU;
-    const pr = rand() ** 1.5 * 0.35;
+  if (rotary ?? rand() < 0.72) {
+    // The wrist: near the spindle, or for a family the eye can tell from the
+    // grooves, well off it toward the far side from the cloth, so the arcs
+    // are wide and cross the grooves.
+    const pa = off ? ca + Math.PI + gauss(rand) * 0.5 : rand() * TAU;
+    const pr = off ? off[0] + rand() * (off[1] - off[0]) : rand() ** 1.5 * 0.35;
     const px = Math.cos(pa) * pr;
     const py = Math.sin(pa) * pr;
     const phi = (rand() < 0.5 ? -1 : 1) * (0.5 + rand() * 2.6);
@@ -375,6 +379,28 @@ export function handle(seed, cut, { events = 1 } = {}) {
   }
   for (let i = 0; i < 6; i += 1) list.push(spindled(rand));
   for (let i = 0; i < 2; i += 1) list.push(skated(rand));
+  for (const ev of list) run(ev, cut);
+}
+
+// The record as it is shown: not years of it, a handful of handlings, each
+// one a family. One pull from a stack, one record slid on top, a cloth
+// turned against it round a wrist well off the spindle, a few grips at the
+// edge, the spindle hunting on the label. About a fifth of the wear `handle`
+// lays down, and none of it spread evenly: each event lands where its load
+// fell, so most of the face is clean groove and the families lie apart, each
+// a set of nested arcs about its own centre, mostly hairlines with a gouge
+// or two among them.
+export function history(seed, cut) {
+  const rand = rng(seed);
+  const list = [];
+  list.push(pulled(rand, 1, 100 + Math.floor(rand() * 40), 1.6));
+  list.push(covered(rand, 1, 180 + Math.floor(rand() * 60), 1.3));
+  list.push(wiped(rand, { n: 50 + Math.floor(rand() * 20), rotary: true, off: [0.15, 0.45] }));
+  if (rand() < 0.5) list.push(pulled(rand, 1, 36 + Math.floor(rand() * 16), 1.3));
+  else list.push(wiped(rand, { n: 22 + Math.floor(rand() * 10), rotary: true, off: [0.1, 0.35] }));
+  for (let i = 0; i < 5; i += 1) list.push(held(rand));
+  for (let i = 0; i < 6; i += 1) list.push(spindled(rand));
+  list.push(skated(rand));
   for (const ev of list) run(ev, cut);
 }
 
