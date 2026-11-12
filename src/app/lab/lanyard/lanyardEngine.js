@@ -170,9 +170,13 @@ export async function createLanyard(host, { embedded = false } = {}) {
   const cardTex = new THREE.CanvasTexture(art.canvas);
   cardTex.colorSpace = THREE.SRGBColorSpace;
   cardTex.anisotropy = aniso;
+  // The pouch's waviness, stretched to one long tile over the whole card and
+  // kept faint: the softbox lands as a single straight-edged sheet of light
+  // that slides across the print on a turn. A tight repeat crinkles it into
+  // blotches over the type.
   const peelTex = new THREE.CanvasTexture(peel);
   peelTex.wrapS = peelTex.wrapT = THREE.RepeatWrapping;
-  peelTex.repeat.set(7, 5);
+  peelTex.repeat.set(1, 1.4);
 
   const face = new THREE.MeshPhysicalMaterial({
     map: cardTex,
@@ -180,7 +184,7 @@ export async function createLanyard(host, { embedded = false } = {}) {
     clearcoat: 1,
     clearcoatRoughness: 0.04,
     clearcoatNormalMap: peelTex,
-    clearcoatNormalScale: new THREE.Vector2(0.004, 0.004),
+    clearcoatNormalScale: new THREE.Vector2(0.0012, 0.0012),
     specularIntensity: 0.12,
   });
   const edge = new THREE.MeshPhysicalMaterial({ color: "#f3efe4", roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1 });
