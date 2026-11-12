@@ -46,6 +46,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //  - mat.webp: how each pixel ages: the render fades per pigment and its
 //    lime binder chalks, the one bare stone wall barely moves, the sky and
 //    its cloud are inert.
+//  - render.webp (render.py): which of those painted pixels are the render
+//    itself. The walls carry iron hooks and brackets, drying lines, shutter
+//    and window frames, glass and the hard shadows they all cast; none is
+//    lime render, so chalk and ink fade act only on what matches its wall's
+//    own paint (R), and a shadow on that paint (G, its depth) ages as the
+//    paint under it and stays a shadow on the chalked wall.
 //
 // Live, per pixel, with e = years x dose x susceptibility, where the dose is
 // the baked one on a cubic curve: paint holds below a threshold and fails
@@ -103,7 +109,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // shows the aged frame before the film; ?debug=dose shows the dose map;
 // ?debug=local shows the dose with its ledge shelter, tails and drips;
 // ?debug=runoff shows the bake (R shelter, G runoff tails, B drips);
-// ?debug=cloud shows the sky's split (R cloud, G its lit term); ?sky=0
+// ?debug=cloud shows the sky's split (R cloud, G its lit term); ?debug=render
+// shows what chalks (R render, G shade, B dose); ?sky=0
 // shows the sky as shot.
 
 const BASE = "/lab/fade/";
@@ -209,6 +216,11 @@ const DETAIL_CLIP = 0.45;
 // chalked top floors stay below the clouds' tops. A coat already lighter than
 // that in the photo (the white trim) keeps its own.
 const CHALK_CAP = 0.74;
+// The dose map is half the plate; it is brought up to it by a joint-bilateral
+// filter guided by the plate, so a texel of the wall's dose never lands on a
+// hook or a frame beside it. JBU_RANGE: the plate colour difference (sRGB)
+// at which a neighbour's dose counts for a little over half.
+const JBU_RANGE = 0.08;
 // The scan's lifted black (the film's toe x toe colour), removed over the sky.
 const FILM_TOE = 0.035;
 const FILM_TOE_COLOR = [0.75, 1, 1.2];
@@ -463,6 +475,53 @@ void main() {
   outColor = vec4(packLog(b.x), packLog(b.y));
 }`;
 
+// Bake 4, once at load, at plate resolution: the dose map brought up to the
+// plate by a joint-bilateral filter guided by the plate itself. light.webp
+// is half the plate (its dose marched at a quarter), so a plain bilinear read
+// smears the wall's dose a few px onto a hook, a frame or a pane and theirs
+// onto the wall. Each pixel takes the 5x5 light texels around it, weighted
+// by distance (sigma about a texel, which also rounds the tan lines' texel
+// steps away) and by how like its own plate colour the plate is at that
+// texel (read at the texel's own footprint, mip 1), so the dose stays on its
+// side of every edge the plate draws. The dose goes out packed in two bytes
+// (RG, as the wall's level is), so its power curve never bands; B is the
+// tan lines. The photo's light and the sign are read off light.webp as
+// they are.
+const JBU = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uPlate;
+uniform sampler2D uLight;
+uniform float uRangeSigma;
+vec2 pack16(float v) {
+  v = clamp(v, 0.0, 1.0) * 255.0;
+  float h = floor(v);
+  return vec2(h / 255.0, v - h);
+}
+void main() {
+  vec2 ls = vec2(textureSize(uLight, 0));
+  vec2 g = vUv * ls - 0.5;
+  vec2 b = floor(g);
+  vec3 c0 = textureLod(uPlate, vUv, 0.0).rgb;
+  vec2 sum = vec2(0.0);
+  float wsum = 0.0;
+  for (int j = -2; j <= 2; j++) {
+    for (int i = -2; i <= 2; i++) {
+      vec2 k = b + vec2(float(i), float(j));
+      vec2 tu = (k + 0.5) / ls;
+      vec2 dd = k - g;
+      float ws = exp(-dot(dd, dd) / 2.0);
+      vec3 dc = textureLod(uPlate, tu, 1.0).rgb - c0;
+      float w = ws * (exp(-dot(dc, dc) / (2.0 * uRangeSigma * uRangeSigma)) + 1e-3);
+      sum += w * textureLod(uLight, tu, 0.0).rb;
+      wsum += w;
+    }
+  }
+  vec2 rb = sum / wsum;
+  outColor = vec4(pack16(rb.x), rb.y, 1.0);
+}`;
+
 const AGE = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -507,6 +566,8 @@ uniform sampler2D uDetail;
 uniform float uDetailGain;
 uniform float uDetailClip;
 uniform float uChalkCap;
+uniform sampler2D uRender;
+uniform sampler2D uDose;
 ${NOISE}
 ${DETAIL_PACK}
 vec3 toSrgb(vec3 c) {
@@ -531,6 +592,13 @@ float capHue(vec2 ab, float h0) {
   float d = atan(ab.y, ab.x) - h0;
   d = mod(d + 3.14159265, 6.2831853) - 3.14159265;
   return h0 + clamp(d, -uHueCap, uHueCap);
+}
+// how much of a pixel is surface (painted render or bare stone), off mat.webp
+// (B is 0.85 x paint, A is paint + 0.35 x stone)
+float surfaceAt(vec2 uv) {
+  vec4 m = textureLod(uMat, uv, 0.0);
+  float paint = m.b / 0.85;
+  return clamp(paint + max(m.a - paint, 0.0) / 0.35, 0.0, 1.0);
 }
 float skyMask(vec4 m, vec3 lin) {
   return clamp(1.0 - (2.0 * m.r - m.b / 0.85), 0.0, 1.0) * smoothstep(-0.03, 0.01, (lin.b - lin.r) / max(lin.b, 1e-3));
@@ -633,18 +701,11 @@ void main() {
   vec2 uv = uCrop.xy + uCrop.zw * vec2(vUv.x, 1.0 - vUv.y);
   vec3 lin = toLin(texture(uPlate, uv).rgb);
   vec4 m = texture(uMat, uv);
+  // the dose and its tan lines, brought up to the plate along its edges
+  // (the joint-bilateral bake), so the wall's dose stops at a frame or a hook
   vec4 L = texture(uLight, uv);
-  // the dose map's tan lines are baked crisp at half the plate, one texel
-  // in or out of a shadow; the dose curve and the chalk make that edge a
-  // hard one, so eight taps (a diagonal ring 1.5 plate px off, a straight one
-  // 3 px off) round the texel steps of a slanting line away, and the ghost
-  // still stays sharp beside the soft drips and tails
-  vec2 lt = 0.75 / vec2(textureSize(uLight, 0));
-  vec2 lw = 1.5 / vec2(textureSize(uLight, 0));
-  vec2 tl = 0.15 * (texture(uLight, uv + lt).rb + texture(uLight, uv - lt).rb
-    + texture(uLight, uv + vec2(lt.x, -lt.y)).rb + texture(uLight, uv + vec2(-lt.x, lt.y)).rb)
-    + 0.1 * (texture(uLight, uv + vec2(lw.x, 0.0)).rb + texture(uLight, uv - vec2(lw.x, 0.0)).rb
-    + texture(uLight, uv + vec2(0.0, lw.y)).rb + texture(uLight, uv - vec2(0.0, lw.y)).rb);
+  vec4 J = texture(uDose, uv);
+  vec2 tl = vec2(J.r + J.g / 255.0, J.b);
   float dose = tl.x * 2.0;
   // the share of the dose a thin occluder took: its tan line
   float tanLine = tl.y;
@@ -654,6 +715,32 @@ void main() {
   // the lane: no ledge sheds water down it, so it fades evenly
   float sign = clamp(2.0 - 2.0 * L.a, 0.0, 1.0);
   float S = max(L.g * L.g * 1.5, 0.02);
+  // Only painted render chalks and loses its ink. mat.webp knows the walls,
+  // not what hangs on them, so the render bake (render.webp R) takes out
+  // every pixel that is not its wall's own paint: iron, glass, frames, the
+  // drying lines' hardware, near-black voids, hard edges; read with a px of
+  // feather. And the surface itself (paint or stone, off mat.webp) is shrunk
+  // by 2.5 plate px, so no eave, gutter or rim against the sky takes it.
+  vec2 px = 1.0 / uPlateSize;
+  vec4 rd = texture(uRender, uv);
+  float rObj = 0.4 * rd.r + 0.15 * (texture(uRender, uv + 0.7 * px).r + texture(uRender, uv - 0.7 * px).r
+    + texture(uRender, uv + vec2(0.7, -0.7) * px).r + texture(uRender, uv + vec2(-0.7, 0.7) * px).r);
+  float surf = 1.0;
+  for (int i = 0; i < 8; i++) {
+    float an = float(i) * 0.785398;
+    surf = min(surf, surfaceAt(uv + 2.5 * px * vec2(cos(an), sin(an))));
+  }
+  float render = rObj * smoothstep(0.35, 0.85, min(surf, surfaceAt(uv)));
+  // and where the wall's own paint lies in a cast shadow (render.webp G: its
+  // luminance over its wall's level), the photo's light is that much less,
+  // so the shadow ages as the paint under it and stays a shadow on the
+  // chalked wall instead of being read as a darker paint and lifted out
+  float shade = max(rd.g, 0.1);
+  S = max(S * shade, 0.02);
+  if (uDebug > 5.5) {
+    outColor = vec4(render, shade, dose * 0.5, 1.0);
+    return;
+  }
   if (uDebug > 0.5 && uDebug < 1.5) {
     outColor = vec4(toSrgb(vec3(dose * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
     return;
@@ -729,7 +816,7 @@ void main() {
   vec3 silver = vec3(y * 1.15 + 0.045) * vec3(1.01, 1.0, 0.97);
   vec3 aWood = mix(a, silver, 0.8 * (1.0 - exp(-uKWood * e)));
 
-  vec3 aged = a + m.r * (aInk - a) + m.g * (aWood - a);
+  vec3 aged = a + m.r * render * (aInk - a) + m.g * render * (aWood - a);
   // chalk: the binder erodes and the white pigment powders the surface
   // with a soft knee (softplus, a few dose-years wide): the bloom comes in
   // with the dose, never at a contour
@@ -738,7 +825,7 @@ void main() {
   // dark in the photo is mostly not render at all (a window's void, the
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
   float ya = dot(a, LUMA);
-  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.92) * smoothstep(0.02, 0.2, ya);
+  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.92) * smoothstep(0.02, 0.2, ya) * render;
   if (uDebug > 3.5 && uDebug < 4.5) {
     // R: how worn the coat is, G: the chalk, B: the ink's clock
     outColor = vec4(0.5 + 0.5 * wear, c, 1.0 - exp(-0.1 * e), 1.0);
@@ -773,6 +860,9 @@ void main() {
   vec4 lv = texture(uDetail, uv);
   float ly = logY(P, 0.0);
   float dt = min(ly - unpackLog(lv.rg), ly - unpackLog(lv.ba));
+  // (a shadow's own dark is already kept by the shaded light above: only
+  // what is left of it counts, and nothing beside it is lifted)
+  dt = min(dt - log(shade), max(dt, 0.0));
   dt = uDetailClip * tanh(dt / uDetailClip);
   outLin *= exp(uDetailGain * c * dt);
   // the sky is inert to the clock (A = 0), so its grade is the same every year
@@ -977,7 +1067,7 @@ export async function createFade(host, { embedded = false } = {}) {
   const still = held || q.get("still") === "1";
   const raw = q.get("film") === "0";
   const debugQ = q.get("debug");
-  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear" || debugQ === "cloud";
+  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear" || debugQ === "cloud" || debugQ === "render";
   const polar = q.get("sky") === "0" ? 0 : 1;
   const zenith = hsvLin(SKY_ZENITH);
   const rim = hsvLin(SKY_RIM);
@@ -990,10 +1080,11 @@ export async function createFade(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("webgl2 unavailable");
 
-  const [plateImg, matImg, lightImg] = await Promise.all(["plate.webp", "mat.webp", "light.webp"].map((f) => loadImage(BASE + f)));
+  const [plateImg, matImg, lightImg, renderImg] = await Promise.all(["plate.webp", "mat.webp", "light.webp", "render.webp"].map((f) => loadImage(BASE + f)));
   const plate = imageTexture(gl, plateImg, true);
   const mat = imageTexture(gl, matImg, true);
   const light = imageTexture(gl, lightImg, false);
+  const renderMask = imageTexture(gl, renderImg, false);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -1011,6 +1102,7 @@ export async function createFade(host, { embedded = false } = {}) {
     seed: program(gl, VERT, SEED),
     local: program(gl, VERT, LOCAL),
     detail: program(gl, VERT, DETAIL),
+    jbu: program(gl, VERT, JBU),
   };
 
   // the sky-only plate, once: render, then mipmap; first on the soft matte,
@@ -1086,6 +1178,14 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.deleteFramebuffer(fbo);
   };
+  // the dose brought up to the plate along the plate's own edges
+  const doseTex = plateTarget(false);
+  gl.useProgram(P.jbu.p);
+  gl.uniform1f(P.jbu.u.uRangeSigma, JBU_RANGE);
+  bake(P.jbu, doseTex, [
+    ["uPlate", plate],
+    ["uLight", light],
+  ]);
   const seedTex = plateTarget(true);
   bake(P.seed, seedTex, [
     ["uPlate", plate],
@@ -1269,10 +1369,12 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uMottle, MOTTLE);
     bindTex(5, detailTex, u.uDetail);
     bindTex(6, skyEdge, u.uSkyEdge);
+    bindTex(7, renderMask, u.uRender);
+    bindTex(8, doseTex, u.uDose);
     gl.uniform1f(u.uDetailGain, DETAIL_GAIN);
     gl.uniform1f(u.uDetailClip, DETAIL_CLIP);
     gl.uniform1f(u.uChalkCap, CHALK_CAP);
-    gl.uniform1f(u.uDebug, debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
+    gl.uniform1f(u.uDebug, debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
     gl.uniform3fv(u.uRim, rim);
@@ -1411,7 +1513,7 @@ export async function createFade(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [plate, mat, light, skyPlate, skyEdge, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
+      [plate, mat, light, doseTex, renderMask, skyPlate, skyEdge, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
