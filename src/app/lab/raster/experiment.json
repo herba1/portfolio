@@ -1,17 +1,19 @@
 {
   "title": "Raster",
-  "description": "A song title set in letters drawn only from horizontal and vertical strokes with 45-degree corners on a 5 x 9 design grid, and rendered only by a dot raster: each cell measures how much of its area the letters cover, at 8 x 8 samples, and prints one dot of that size, from a pinpoint to a full square. Drag up or down and the pitch slides continuously from five cells across a letter to twenty. Where it divides the design grid the letters lock clean, with half-tone dots on every cut; between, stems and cuts land on every phase of the screen and beat bands travel through the word as you drag. Type to change the title.",
+  "description": "A song title set in letters drawn only from horizontal and vertical strokes with 45-degree corners on a 5 x 9 design grid, and rendered only by a halftone screen: a square raster turned to its own angle, each cell measuring how much of its area the letters cover at 8 x 8 samples in the screen's own frame and printing a Euclidean spot of that size, a round dot that grows to a corner-to-corner checkerboard at half and closes to round white holes toward solid. Drag up or down for the pitch, five to twenty cells across a letter; drag sideways to turn the screen from 0 to 45 degrees. At 45 the cuts lock to the screen; between, the 0 and 90-degree strokes cross it at an angle and moire bands sweep along every stem. Type to change the title.",
   "tags": ["Type", "Grid", "Canvas"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
   "intent": "After Wim Crouwel's New Alphabet (1967), https://en.wikipedia.org/wiki/New_Alphabet, and his Vormgevers poster grid: accept the raster completely and let the letterforms come from it. Own glyphs, not the font.",
   "tile": { "shape": "wide" },
-  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.7], "to": [0.5, 0.3] },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.75, 0.7], "to": [0.35, 0.35] },
   "probe": [
     { "idle": 1200 },
-    { "drag": [[0.5, 0.7], [0.5, 0.3]], "ms": 2400 },
-    { "idle": 1200 },
-    { "drag": [[0.5, 0.3], [0.5, 0.8]], "ms": 2000 },
+    { "drag": [[0.75, 0.7], [0.75, 0.3]], "ms": 2400 },
+    { "idle": 1000 },
+    { "drag": [[0.8, 0.5], [0.25, 0.5]], "ms": 2600 },
+    { "idle": 1000 },
+    { "drag": [[0.3, 0.3], [0.6, 0.8]], "ms": 2000 },
     { "idle": 1400 }
   ],
   "sources": ["https://en.wikipedia.org/wiki/New_Alphabet", "https://www.stedelijk.nl/en/collection/14788-wim-crouwel-vormgevers"]

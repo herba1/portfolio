@@ -7,16 +7,23 @@ import { createStage, clamp } from "../_kit/stage";
 // full stroke. The design grid is fixed on the page; the letters never move
 // when the raster changes.
 //
-// The outline is never drawn. Every frame it is filled into an offscreen
-// canvas at 8 x 8 samples per raster cell, and each cell takes the fraction
-// of its area the letter covers, 0 to 1. That fraction is the dot: a pinpoint
-// circle at the edge of a stroke, a round dot at half, a square that closes
-// up to the full cell at one. The raster is pinned at the centre of the box
-// and its pitch is continuous: drag and it slides between five and twenty
-// cells across a letter. Where the pitch is a whole multiple of the design
-// grid (5, 10, 15, 20) the two lock and the letters come out clean; anywhere
-// between, stems and cuts land on every phase of the screen and the word
-// fills with graded dots and beat bands that travel as the pitch moves.
+// The outline is never drawn. It is a print screen: a square raster pinned
+// at the centre of the box, turned to its own angle. Every time the ink or
+// the screen moves, the outline is filled into an offscreen canvas in the
+// screen's own rotated frame at 8 x 8 samples per screen cell, and each cell
+// takes the fraction of its area the letter covers, 0 to 1. That fraction is
+// printed with a Euclidean spot: a round dot that grows until, at 50%, it is
+// a square standing on its corner, touching its four neighbours point to
+// point in a checkerboard; past half the paper is what is left, round white
+// holes on the cell corners that close up to solid at 100%. One shape all
+// the way, no seam between a dot and a slab.
+//
+// Drag up or down and the pitch slides between five and twenty cells
+// across a letter; drag sideways and the screen turns from 0 to 45 degrees.
+// Square to the strokes and at a pitch that divides the design grid, the two
+// lock and the letters come out clean. Anywhere else the 0, 90 and 45-degree
+// strokes cross the screen at an angle and beat against it, and moire bands
+// sweep through the word; at exactly 45 the cuts lock to the screen.
 
 const GLYPHS = {
   a: [5, "0,2 4,2 4,6 0,6 0,4 4,4"],
@@ -92,6 +99,8 @@ for (const [ch, [cols, ...strokes]] of Object.entries(GLYPHS)) DEFS[ch] = { cols
 
 const W_MIN = 5;
 const W_MAX = 20;
+const A_MAX = 45;
+const A_DEFAULT = 45;
 const INK = "#0b0b0b";
 const ACCENT = "#e3311d";
 const DOT = "#c4c4c0";
@@ -150,32 +159,98 @@ const stepSpring = (s, dt, k, d) => {
   s.v += s.vel * dt;
 };
 
-// One halftone dot of coverage `a` in a cell of side `cell`, centred on
-// (cx, cy), with area a x cell^2: a circle up to pi/4, where it touches the
-// cell walls, then a square whose corner radius closes to zero at one.
-const ROUND = Math.PI / 4;
-const dot = (path, cx, cy, cell, a) => {
-  const half = cell / 2;
-  if (a >= 0.998) {
-    path.rect(cx - half, cy - half, cell, cell);
-  } else if (a <= ROUND) {
-    const r = cell * Math.sqrt(a / Math.PI);
-    path.moveTo(cx + r, cy);
-    path.arc(cx, cy, r, 0, Math.PI * 2);
-  } else {
-    path.roundRect(cx - half, cy - half, cell, cell, half * Math.sqrt((1 - a) / (1 - ROUND)));
+// The Euclidean spot, in a cell of half-side 1 centred on the dot. Below
+// half, the ink is the disc of radius r cut by the diamond |x| + |y| <= 1:
+// a pure circle up to r = 1/sqrt(2), where it first touches the diamond,
+// then a circle with four flats on the diagonals, which at r = 1 is the
+// diamond itself. Above half it is the same shape in white, centred on the
+// cell corners. `area(r)` is the share of the cell it covers; RHO inverts
+// it for coverage 0 to 0.5.
+const H2 = Math.SQRT1_2;
+const spotArea = (r) => {
+  if (r <= H2) return (Math.PI * r * r) / 4;
+  const d = Math.acos(H2 / r);
+  return (Math.PI * r * r - 4 * r * r * (d - Math.sin(d) * Math.cos(d))) / 4;
+};
+const RHO_N = 1024;
+const RHO = new Float32Array(RHO_N + 1);
+for (let n = 0; n <= RHO_N; n++) {
+  const a = (n / RHO_N) * 0.5;
+  let lo = 0;
+  let hi = 1;
+  for (let k = 0; k < 40; k++) {
+    const mid = (lo + hi) / 2;
+    if (spotArea(mid) < a) lo = mid;
+    else hi = mid;
   }
+  RHO[n] = (lo + hi) / 2;
+}
+const rhoOf = (a) => {
+  const t = clamp(a * 2, 0, 1) * RHO_N;
+  const n = Math.min(RHO_N - 1, t | 0);
+  return RHO[n] + (RHO[n + 1] - RHO[n]) * (t - n);
+};
+const Q = Math.PI / 4;
+// Corners of the cell in path order, each with the angle that looks from
+// the corner back into the cell.
+const CORNERS = [
+  [1, -1, (3 * Math.PI) / 4],
+  [1, 1, (-3 * Math.PI) / 4],
+  [-1, 1, -Math.PI / 4],
+  [-1, -1, Math.PI / 4],
+];
+
+// One screen cell of coverage `a`, centred on (cx, cy), half-side `h`, in
+// the screen's own frame.
+const dot = (path, cx, cy, h, a) => {
+  if (a < 0.5) {
+    const rho = rhoOf(a);
+    const r = rho * h;
+    if (rho <= H2) {
+      path.moveTo(cx + r, cy);
+      path.arc(cx, cy, r, 0, Math.PI * 2);
+      return;
+    }
+    // Arcs across the axes, flats on the diagonals.
+    const e = Q - Math.acos(H2 / rho);
+    path.moveTo(cx + r * Math.cos(e), cy - r * Math.sin(e));
+    for (let k = 0; k < 4; k++) path.arc(cx, cy, r, k * 2 * Q - e, k * 2 * Q + e);
+    path.closePath();
+    return;
+  }
+  const sig = rhoOf(1 - a);
+  const s = sig * h;
+  if (s < 0.01) {
+    path.rect(cx - h, cy - h, 2 * h, 2 * h);
+    return;
+  }
+  // The cell walked clockwise, stepping round a white hole at each corner.
+  const d = sig > H2 ? Math.acos(H2 / sig) : 0;
+  path.moveTo(cx + h - s, cy - h);
+  for (const [sx, sy, psi] of CORNERS) {
+    const px = cx + sx * h;
+    const py = cy + sy * h;
+    if (d) {
+      path.arc(px, py, s, psi + Q, psi + d, true);
+      path.arc(px, py, s, psi - d, psi - Q, true);
+    } else {
+      path.arc(px, py, s, psi + Q, psi - Q, true);
+    }
+  }
+  path.closePath();
 };
 
 export async function createRaster(host, { embedded = false } = {}) {
   const stage = createStage(host, { dpr: 2 });
   const { canvas, ctx } = stage;
-  canvas.style.cursor = "ns-resize";
+  canvas.style.cursor = "move";
 
   const q = new URLSearchParams(location.search);
   let text = (q.get("text") || "computer love").toLowerCase();
   // Raster cells across a full-width letter. Continuous.
   let Wf = clamp(+(q.get("w") || 7), W_MIN, W_MAX);
+  // Screen angle in degrees, 0 to 45. Continuous.
+  let Af = clamp(+(q.get("a") ?? A_DEFAULT), 0, A_MAX);
   const freezeFrom = q.has("from") ? clamp(+q.get("from"), W_MIN, W_MAX) : null;
   const freezeAt = q.has("at") ? +q.get("at") / 1000 : null;
 
@@ -191,10 +266,13 @@ export async function createRaster(host, { embedded = false } = {}) {
   let glyphs = []; // { ch, strokes: [{ def, pts:[{x,y}springs], h, c:[] , wait }] }
   let dying = [];
   let lines = [[]];
-  // The raster is pinned to one point, the middle of the box; only its
-  // pitch changes. The design grid `g` is pinned to the same point, so the
-  // two lock wherever the pitch divides it.
-  const raster = { cell: 0, g: 0 };
+  // The raster is pinned to one point, the middle of the box, and turns
+  // about it; its pitch and angle change. The design grid `g` is pinned to
+  // the same point, so square to the letters the two lock wherever the
+  // pitch divides it. `cos`/`sin` turn the screen frame into the page.
+  const raster = { cell: 0, g: 0, theta: 0, cos: 1, sin: 0 };
+  // Page point -> screen frame, relative to the anchor.
+  const toScreen = (x, y) => [raster.cos * (x - anchor.x) + raster.sin * (y - anchor.y), -raster.sin * (x - anchor.x) + raster.cos * (y - anchor.y)];
   const anchor = { x: 0, y: 0 };
   const caret = { x: spring(0), y: spring(0), w: spring(0), h: spring(0) };
   let lastKey = -10;
@@ -251,12 +329,15 @@ export async function createRaster(host, { embedded = false } = {}) {
     let g = Math.min((bw * 0.82) / widest, (bh * 0.62) / tall, (bh * 0.34) / M.H);
     g = Math.max(1 / dpr, Math.floor(g * dpr) / dpr);
     const snap = (v) => Math.round(v * dpr) / dpr;
-    const was = { cell: raster.cell, x: anchor.x, y: anchor.y };
+    const was = { cell: raster.cell, x: anchor.x, y: anchor.y, cos: raster.cos, sin: raster.sin, theta: raster.theta };
     anchor.x = snap(bw / 2);
     anchor.y = snap(bh / 2);
     raster.g = g;
     raster.cell = (g * 5) / Wf;
-    if (was.cell && (was.cell !== raster.cell || was.x !== anchor.x || was.y !== anchor.y)) {
+    raster.theta = (Af * Math.PI) / 180;
+    raster.cos = Math.cos(raster.theta);
+    raster.sin = Math.sin(raster.theta);
+    if (was.cell && (was.cell !== raster.cell || was.theta !== raster.theta || was.x !== anchor.x || was.y !== anchor.y)) {
       if (mode === "drag") snapCells = true;
       else resample(was);
     }
@@ -316,12 +397,15 @@ export async function createRaster(host, { embedded = false } = {}) {
   };
 
   // `mode` "drag" for a continuous change, "grid" for a jump.
-  const setW = (next, mode) => {
-    next = clamp(next, W_MIN, W_MAX);
-    if (Math.abs(next - Wf) < 1e-4) return;
-    Wf = next;
+  const setScreen = (w, a, mode) => {
+    w = clamp(w, W_MIN, W_MAX);
+    a = clamp(a, 0, A_MAX);
+    if (Math.abs(w - Wf) < 1e-4 && Math.abs(a - Af) < 1e-3) return;
+    Wf = w;
+    Af = a;
     relayout(mode);
   };
+  const setW = (next, mode) => setScreen(next, Af, mode);
   const setText = (next) => {
     text = next.slice(0, 32);
     syncGlyphs();
@@ -331,14 +415,18 @@ export async function createRaster(host, { embedded = false } = {}) {
 
   // ---- input
   let drag = null;
+  // Up and down is the pitch, sideways the angle: 45 degrees across about
+  // two fifths of the box.
   stage.on("down", (p) => {
-    drag = { y: p.y, x: p.x, w: Wf, moved: false };
+    drag = { y: p.y, x: p.x, w: Wf, a: Af, moved: false };
   });
   stage.on("move", (p) => {
     if (!drag) return;
     const dy = p.y - drag.y;
-    if (Math.abs(dy) > 4 || Math.abs(p.x - drag.x) > 4) drag.moved = true;
-    setW(drag.w - dy / 24, "drag");
+    const dx = p.x - drag.x;
+    if (Math.abs(dy) > 4 || Math.abs(dx) > 4) drag.moved = true;
+    const span = Math.max(240, stage.width * 0.4);
+    setScreen(drag.w - dy / 24, drag.a + (dx / span) * A_MAX, "drag");
   });
   stage.on("up", () => {
     if (drag && !drag.moved) input.focus({ preventScroll: true });
@@ -346,7 +434,7 @@ export async function createRaster(host, { embedded = false } = {}) {
   });
   const onWheel = (e) => {
     e.preventDefault();
-    setW(Wf - e.deltaY / 240, "drag");
+    setScreen(Wf - e.deltaY / 240, Af + e.deltaX / 16, "drag");
   };
   canvas.addEventListener("wheel", onWheel, { passive: false });
   const onKey = (e) => {
@@ -357,6 +445,9 @@ export async function createRaster(host, { embedded = false } = {}) {
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.preventDefault();
       setW(Math.round(Wf) + (e.key === "ArrowUp" ? 1 : -1), "grid");
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      setScreen(Wf, (Math.round(Af / 7.5) + (e.key === "ArrowRight" ? 1 : -1)) * 7.5, "grid");
     } else if (e.key.length === 1) {
       const ch = e.key.toLowerCase();
       if (!DEFS[ch]) return;
@@ -394,8 +485,10 @@ export async function createRaster(host, { embedded = false } = {}) {
       tileKey = key;
       pat = ctx.createPattern(tile(DOT, size, r), "repeat");
     }
+    // Turned with the screen, so the paper shows the screen's angle too.
     const k = (cell * dpr) / size;
-    pat.setTransform(new DOMMatrix([k, 0, 0, k, ox * dpr, oy * dpr]));
+    const { cos, sin } = raster;
+    pat.setTransform(new DOMMatrix([k * cos, k * sin, -k * sin, k * cos, ox * dpr, oy * dpr]));
   };
 
   // ---- cells
@@ -437,10 +530,27 @@ export async function createRaster(host, { embedded = false } = {}) {
       }
     }
     if (!strokes.length) return { i0: 0, j0: 0, cols: 0, rows: 0, a: new Float32Array(0) };
-    const i0 = Math.floor((x0 - anchor.x) / cell) - 1;
-    const j0 = Math.floor((y0 - anchor.y) / cell) - 1;
-    const cols = Math.ceil((x1 - anchor.x) / cell) + 1 - i0;
-    const rows = Math.ceil((y1 - anchor.y) / cell) + 1 - j0;
+    // The ink's box, turned into the screen frame.
+    let s0 = Infinity;
+    let t0 = Infinity;
+    let s1 = -Infinity;
+    let t1 = -Infinity;
+    for (const [x, y] of [
+      [x0, y0],
+      [x1, y0],
+      [x0, y1],
+      [x1, y1],
+    ]) {
+      const [s, t] = toScreen(x, y);
+      s0 = Math.min(s0, s);
+      t0 = Math.min(t0, t);
+      s1 = Math.max(s1, s);
+      t1 = Math.max(t1, t);
+    }
+    const i0 = Math.floor(s0 / cell) - 1;
+    const j0 = Math.floor(t0 / cell) - 1;
+    const cols = Math.ceil(s1 / cell) + 1 - i0;
+    const rows = Math.ceil(t1 / cell) + 1 - j0;
     // Fewer samples only if the fine raster would make a huge buffer.
     const ss = Math.max(4, Math.min(SS, Math.floor(Math.sqrt(3.2e6 / (cols * rows)))));
     const pw = cols * ss;
@@ -452,8 +562,14 @@ export async function createRaster(host, { embedded = false } = {}) {
       cctx.setTransform(1, 0, 0, 1, 0, 0);
       cctx.clearRect(0, 0, pw, ph);
     }
+    // Page -> cover pixels: into the screen frame, then ss pixels a cell,
+    // so every SS x SS block of the cover is one turned screen cell.
     const k = ss / cell;
-    cctx.setTransform(k, 0, 0, k, -anchor.x * k - i0 * ss, -anchor.y * k - j0 * ss);
+    const a = k * raster.cos;
+    const b = -k * raster.sin;
+    const c = k * raster.sin;
+    const d = k * raster.cos;
+    cctx.setTransform(a, b, c, d, -(a * anchor.x + c * anchor.y) - i0 * ss, -(b * anchor.x + d * anchor.y) - j0 * ss);
     cctx.fillStyle = "#000";
     for (const path of strokes) cctx.fill(path);
     const px = new Uint32Array(cctx.getImageData(0, 0, pw, ph).data.buffer);
@@ -537,8 +653,13 @@ export async function createRaster(host, { embedded = false } = {}) {
     const acc = new Map();
     for (const cl of cells.values()) {
       if (cl.v < 0.02) continue;
-      const x0 = was.x + cl.i * oc;
-      const y0 = was.y + cl.j * oc;
+      // The old cell's centre on the page, then in the new screen frame;
+      // if the angle changed, it lands as a square of its own size there.
+      const u = (cl.i + 0.5) * oc;
+      const w = (cl.j + 0.5) * oc;
+      const [cs, ct] = toScreen(was.x + was.cos * u - was.sin * w, was.y + was.sin * u + was.cos * w);
+      const x0 = anchor.x + cs - oc / 2;
+      const y0 = anchor.y + ct - oc / 2;
       const ia = Math.floor((x0 - anchor.x) / nc);
       const ib = Math.floor((x0 + oc - anchor.x - 1e-6) / nc);
       const ja = Math.floor((y0 - anchor.y) / nc);
@@ -696,40 +817,66 @@ export async function createRaster(host, { embedded = false } = {}) {
     dotPatterns(dpr, cell, anchor.x, anchor.y);
     ctx.fillStyle = pat;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Everything below is drawn in the screen's own frame, origin on the
+    // anchor, turned to the screen angle.
+    const { cos, sin } = raster;
+    ctx.setTransform(dpr * cos, dpr * sin, -dpr * sin, dpr * cos, dpr * anchor.x, dpr * anchor.y);
+    const half = cell / 2;
+    const reach = cell;
 
-    // Every lit cell is one dot of solid ink; its size is the tone.
+    // Every lit cell is one Euclidean spot of solid ink; its size is the tone.
     const ink = new Path2D();
     for (const cl of cells.values()) {
       const a = clamp(cl.v, 0, 1);
       if (a < 0.004) continue;
-      const x0 = anchor.x + cl.i * cell;
-      const y0 = anchor.y + cl.j * cell;
-      if (x0 > w || y0 > h || x0 + cell < 0 || y0 + cell < 0) continue;
-      dot(ink, x0 + cell / 2, y0 + cell / 2, cell, a);
+      const u = cl.i * cell + half;
+      const v = cl.j * cell + half;
+      const px = anchor.x + cos * u - sin * v;
+      const py = anchor.y + sin * u + cos * v;
+      if (px > w + reach || py > h + reach || px < -reach || py < -reach) continue;
+      dot(ink, u, v, half, a);
     }
     ctx.fillStyle = INK;
     ctx.fill(ink);
 
     // Caret: the one accent, a bar on the baseline where the next letter
-    // goes, screened by the same raster.
+    // goes, screened by the same turned raster at the same 8 x 8 samples.
     if (caretOn() && caret.w.v > 0.5) {
       const cx0 = caret.x.v;
       const cy0 = caret.y.v;
       const cx1 = cx0 + caret.w.v;
       const cy1 = cy0 + caret.h.v;
+      let s0 = Infinity;
+      let t0 = Infinity;
+      let s1 = -Infinity;
+      let t1 = -Infinity;
+      for (const [x, y] of [
+        [cx0, cy0],
+        [cx1, cy0],
+        [cx0, cy1],
+        [cx1, cy1],
+      ]) {
+        const [s, t] = toScreen(x, y);
+        s0 = Math.min(s0, s);
+        t0 = Math.min(t0, t);
+        s1 = Math.max(s1, s);
+        t1 = Math.max(t1, t);
+      }
       const bar = new Path2D();
-      const ia = Math.floor((cx0 - anchor.x) / cell);
-      const ib = Math.ceil((cx1 - anchor.x) / cell);
-      const ja = Math.floor((cy0 - anchor.y) / cell);
-      const jb = Math.ceil((cy1 - anchor.y) / cell);
-      for (let j = ja; j < jb; j++) {
-        const y0 = anchor.y + j * cell;
-        const oy = Math.min(cy1, y0 + cell) - Math.max(cy0, y0);
-        for (let i = ia; i < ib; i++) {
-          const x0 = anchor.x + i * cell;
-          const a = (oy * (Math.min(cx1, x0 + cell) - Math.max(cx0, x0))) / (cell * cell);
-          if (a > 0.004) dot(bar, x0 + cell / 2, y0 + cell / 2, cell, Math.min(1, a));
+      const step = cell / SS;
+      for (let j = Math.floor(t0 / cell); j < Math.ceil(t1 / cell); j++) {
+        for (let i = Math.floor(s0 / cell); i < Math.ceil(s1 / cell); i++) {
+          let n = 0;
+          for (let y = 0; y < SS; y++) {
+            const v = j * cell + (y + 0.5) * step;
+            for (let x = 0; x < SS; x++) {
+              const u = i * cell + (x + 0.5) * step;
+              const px = anchor.x + cos * u - sin * v;
+              const py = anchor.y + sin * u + cos * v;
+              if (px >= cx0 && px < cx1 && py >= cy0 && py < cy1) n++;
+            }
+          }
+          if (n) dot(bar, (i + 0.5) * cell, (j + 0.5) * cell, half, n / (SS * SS));
         }
       }
       ctx.fillStyle = ACCENT;
@@ -773,15 +920,15 @@ export async function createRaster(host, { embedded = false } = {}) {
     });
   }
 
-  // Idle tile: glide the pitch slowly coarse and fine, through the lock
-  // points and the beats between them.
+  // Idle tile: glide the pitch slowly coarse and fine and turn the screen
+  // back and forth, out of step, through the locks and the moire between.
   let demoT = 0;
   stage.onFrame((dt) => {
     clock += dt;
     if (frozen) return;
     if (embedded && stage.idleFor() > 2500 && !drag) {
       demoT += dt;
-      setW(9.5 - 4.5 * Math.cos(demoT * 0.45), "drag");
+      setScreen(9.5 - 4.5 * Math.cos(demoT * 0.45), 22.5 - 22.5 * Math.cos(demoT * 0.29), "drag");
     }
     const moving = simulate(dt);
     const on = caretOn();
