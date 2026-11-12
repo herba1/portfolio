@@ -4,9 +4,10 @@
 // studio is reflected in it. The result is never shown as tone:
 // it is printed as one line screen whose phase is displaced by the surface,
 // so every line bends over the forms and crowds where the surface turns, and
-// whose width carries the tone over the whole duty cycle, from paper
-// white to solid black. A lavender plate printed a hair out of
-// register on the highlights, and a thin-film tint, are the iridescence.
+// whose width carries the tone from a violet hairline to strokes just short
+// of merging, never to bare paper or solid black. Peach and lilac plates
+// printed out of register with the key, and a thin-film tint, are the
+// iridescence.
 
 export const MAXB = 56;
 // Threads: the neck a pulled drop draws out of the pool.
@@ -101,12 +102,11 @@ vec3 relief(vec2 q){
 // lying in the floor, a broad one overhead), and one black window bar
 // standing in the sky's grey. Every edge is a step uG.w wide (plus what one
 // sample spans), so the chrome carries big black shapes and paper-white
-// flares with clean edges that wrap and pinch with the surface; the print,
-// whose stroke runs over the whole duty cycle, closes the blacks solid and
-// thins the whites to nothing, and the grey between is the only place
-// lines show as lines. soft widens every edge (the displacement reads a
+// flares with clean edges that wrap and pinch with the surface; the print
+// crowds its strokes in the blacks and thins them to hairlines in the
+// whites, so every edge reads as strokes swelling, never as a cut. soft widens every edge (the displacement reads a
 // softer copy). The floor runs on past the quarter turn all round, so the
-// rims go black.
+// rims go black (the print lifts that rim back to a grey and a hairline).
 float cut(float d, float ew){ return smoothstep(ew, -ew, d); }
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
@@ -167,24 +167,21 @@ vec3 tilt(vec3 r, vec2 t){
   return r * cos(th) + cross(ax, r) * sin(th) + ax * dot(ax, r) * (1.0 - cos(th));
 }
 
-// Coverage of one plate's screen at phase ph and tone t, for a screen
-// running at fpx cycles per device pixel. The tone is a threshold the
-// screen's phase is cut against: u runs from 0 on a line's spine to 0.5
-// midway between two lines, and ink goes down wherever u sits under the
-// threshold. The threshold runs from half a pixel below zero (no line at
-// all: paper white) to half a pixel past one half (the gaps closed: solid
-// black), so tone sets the stroke over the whole duty cycle, with no
-// least hairline kept on the whites and no least gap kept in the blacks.
-float screen(float ph, float t, float fpx){
+// Coverage of one plate's screen at phase ph and stroke width w (a
+// fraction of the pitch), for a screen running at fpx cycles per device
+// pixel. u runs from 0 on a line's spine to 0.5 midway between two lines,
+// and ink goes down wherever u sits under half the width, its edge eased
+// over one device pixel, so a stroke's width moves smoothly with the tone
+// and never steps.
+float screen(float ph, float w, float fpx){
   float u = abs(fract(ph + 0.5) - 0.5);
   float a = 0.5 * fpx;
-  float th = mix(-a, 0.5 + a, t);
-  float c = smoothstep(-a, a, th - u);
+  float c = smoothstep(-a, a, 0.5 * w - u);
   // Finer than the pixel can hold: print the average. The fine screen
-  // runs near a third of a cycle a pixel already, so lines are held right
+  // runs near a fifth of a cycle a pixel already, so lines are held right
   // up to the pixel grid's limit and only past it fade to the average:
   // a bunched ridge beats as moire, it does not wash out to grey.
-  return mix(c, t, smoothstep(0.42, 0.7, fpx));
+  return mix(c, w, smoothstep(0.42, 0.7, fpx));
 }
 
 // The surface at a point: signed distance to the edge (css px), the line
@@ -394,38 +391,52 @@ vec3 printAt(vec2 p, vec4 sf){
   float fpx = max(length(gp), 1e-4);
 
   // Tone is the only thing the print carries, and it carries it as the
-  // stroke's width over the whole duty cycle: where the studio reflects
-  // black the strokes swell until the paper between them closes and the
-  // chrome prints as a solid black shape; where it reflects a softbox they
-  // thin to a hairline and then to nothing, and the paper flares through.
-  // The tone is eased a little toward the softer copy of the reflection
-  // (in surface()), so a cut swells the strokes over a few lines.
+  // stroke's width, but never over the whole duty cycle: the stroke runs
+  // from a hairline (W0 of the pitch) to lines just short of merging (W1),
+  // so the deepest reflections print as crowded strokes with paper still
+  // threading between them and the brightest softbox keeps a violet
+  // hairline. The sheet is one continuous engraving: no solid black shape,
+  // no dead-white hole, and no hard edge where the tone crosses a step in
+  // the studio, only strokes swelling over a few lines.
+  // The transfer leans toward the light, so the chrome reads as silver
+  // hairlines with black kept for the deep reflections.
   float T = 1.0 - L;
-  float tone = smoothstep(0.03, 0.97, T);
+  float tone = smoothstep(0.02, 0.98, T);
+  tone = tone * tone * (1.35 - 0.35 * tone);
+  // The meniscus lays the normal flat, so the studio's floor and vault fill
+  // every silhouette with black, a thick outline round each form. Lift it:
+  // over the last few px to the edge the tone eases toward a mid grey, and
+  // only a hairline contour stays dark where the metal meets the stock.
+  float rim = smoothstep(14.0, 2.5, sd);
+  tone = mix(tone, min(tone, 0.42), rim);
+  tone = max(tone, 0.7 * smoothstep(1.8, 0.7, sd));
+  const float W0 = 0.14, W1 = 0.85;
+  float wK = mix(W0, W1, tone);
 
-  // The key, and three colour plates printed out of register with it:
-  // pink one way, cyan the other, violet half a line off. A plate shifted
-  // by a vector moves each line by its projection on the screen's gradient,
-  // so the fringe opens where the lines bunch and turn and closes where they
-  // run calm; and the plates are stretched a little unevenly over the
-  // sheet, so the split drifts across the forms.
-  float cK = screen(phi, tone, fpx);
+  // The key, and two colour plates printed out of register with it, peach
+  // one way and lilac the other, and a violet one half a line off. A plate
+  // shifted by a vector moves each line by its projection on the screen's
+  // gradient, so the fringe opens where the lines bunch and turn and closes
+  // where they run calm; and the plates are stretched a little unevenly
+  // over the sheet, so the split drifts across the forms.
+  float cK = screen(phi, wK, fpx);
   float lit = smoothstep(0.3, 0.9, L);
-  float mis = uE.x * (0.75 + 0.5 * vnoise(p / 160.0 + 3.1));
+  float mis = uE.x * (0.7 + 0.6 * vnoise(p / 160.0 + 3.1));
   vec2 vM = vec2(0.8, 0.45), vC = vec2(-0.7, -0.55);
   float pM = mis + dot(vM, gp) * uDpr * uE.x * 2.0;
   float pC = -mis + dot(vC, gp) * uDpr * uE.x * 2.0;
-  // The colour plates carry the key's own tone, so they show only where
-  // they slip out from under it: a fringe along every stroke's edge, widest
-  // where a black shape breaks up into lines and where the lines bunch.
-  float cM = screen(phi + pM, tone, fpx);
-  float cC = screen(phi + pC, tone, fpx);
+  // The colour plates carry the key's own width, so they show only where
+  // they slip out from under it: a fringe along every stroke's edge. They
+  // print strongest in the mid-tones, where paper and stroke share the
+  // pitch and the slip has room to show, and fade toward either end.
+  float cM = screen(phi + pM, wK, fpx);
+  float cC = screen(phi + pC, wK, fpx);
   // The violet plate rides half a line off, in the gaps of the light
-  // greys only: gone in the blacks (no gap) and gone on the softboxes.
-  float cV = screen(phi + 0.5, 0.16 * smoothstep(0.02, 0.2, tone) * smoothstep(0.6, 0.25, tone), fpx);
-  float pk = mix(0.6, 1.0, lit);
-  // The key's hairlines print lighter and bluer than its solids.
-  vec3 ink = mix(vec3(0.025, 0.025, 0.05), vec3(0.36, 0.3, 0.6), smoothstep(0.32, 0.04, tone));
+  // greys only.
+  float cV = screen(phi + 0.5, 0.16 * smoothstep(0.0, 0.15, tone) * smoothstep(0.6, 0.25, tone), fpx);
+  float pk = 0.55 + 0.45 * smoothstep(0.05, 0.3, tone) * smoothstep(0.95, 0.6, tone);
+  // The key's hairlines print lighter and bluer than its full strokes.
+  vec3 ink = mix(vec3(0.03, 0.025, 0.06), vec3(0.42, 0.35, 0.68), smoothstep(0.4, 0.0, tone));
 
   // Thin film on the white: a faint interference tint from the height.
   vec3 lam = vec3(650.0, 540.0, 450.0);
@@ -436,8 +447,8 @@ vec3 printAt(vec2 p, vec4 sf){
   // ...but not on a softbox: there the paper flares through untouched.
   vec3 paper = mix(vec3(0.995, 0.99, 0.98), tint, 0.35 * lit * smoothstep(0.97, 0.72, L));
   vec3 chrome = paper;
-  chrome *= mix(vec3(1.0), vec3(1.0, 0.56, 0.86), cM * pk);
-  chrome *= mix(vec3(1.0), vec3(0.5, 0.9, 1.0), cC * pk);
+  chrome *= mix(vec3(1.0), vec3(1.0, 0.68, 0.5), cM * pk);
+  chrome *= mix(vec3(1.0), vec3(0.7, 0.6, 1.0), cC * pk);
   chrome *= mix(vec3(1.0), vec3(0.82, 0.74, 1.0), cV * 0.7);
   chrome = mix(chrome, ink, cK);
 

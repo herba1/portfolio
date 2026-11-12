@@ -139,7 +139,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // of the pitch), the ripples' slope, a retired slot (the screen no longer
   // turns with the reflected ray: it keeps one cutting angle), and the
   // ripples' scale. K's third slot (displacement by tone) is retired too.
-  const E = [num("mis", 0.2), num("rip", 0.05), num("kx", 7), num("rk", 56)];
+  const E = [num("mis", 0.34), num("rip", 0.05), num("kx", 7), num("rk", 56)];
   // The studio: how far every normal leans out from the pool's middle (one
   // dome under the whole body), the horizon's tilt (radians) and offset,
   // and the width of every edge in it: a step, not a falloff.
