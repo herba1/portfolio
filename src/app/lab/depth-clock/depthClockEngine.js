@@ -8,11 +8,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // from the frame's edge on a straight line to the zenith, the crowns ring the
 // frame, and the open well of sky between them is where the time sits. It is
 // taken back to scene-linear light (plate.py, beside this file), split
-// offline (bake.py) into planes, and the sky behind them is replaced with
-// fair-weather cumulus from a Poly Haven capture (bake_clouds.py):
-//   clouds.webp the sky: a 16k pure-sky HDRI reprojected through the trees'
-//               own camera, turned so its sun sits on the conifers' sun, the
-//               clear blue matched to their cobalt and the cloud never clipped
+// offline (bake.py) into planes, and the sky behind them is replaced with one
+// towering cumulus from a Poly Haven capture (bake_clouds.py):
+//   clouds.webp the sky: the cumulus congestus of Delta 2 (16k HDRI),
+//               reprojected through the trees' own camera so it stands in the
+//               well under the figures, its sunlit crown rising behind their
+//               lower half; the rest of its sky drawn new from the conifers'
+//               cobalt, pale beside the cloud and deepening away from it, and
+//               the cloud never clipped
 //   fg.webp     the trees, colour unmixed from their sky: P = a F + (1 - a) S,
 //               so a is an exact matte down to single needles and F carries
 //               no blue fringe when it passes over something brighter
@@ -22,7 +25,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // The time is set in Geist on a plane between them: in front of the cloud,
 // behind every needle. A camera translation moves each plane by its
 // disparity (sky barely, the time a little, the crowns most), and the cloud
-// drifts slowly on its own, so cumulus passes behind the figures while the
+// drifts slowly on its own, so the cumulus passes behind the figures while the
 // crowns cross in front. The figures are lit by the sky around them, pale and
 // never white, and bleed a broad, faint veil of their own light into the air.
 // The frame is then developed by the shared film kit (summer preset) with
