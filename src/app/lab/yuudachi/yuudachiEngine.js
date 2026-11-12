@@ -21,8 +21,11 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // Each material wets by its own physics. Porous surfaces (asphalt, concrete,
 // brick) darken and deepen in colour as water replaces the air in their
 // pores, evenly across a face, with only a slow unevenness over metres; walls
-// take only wind-driven rain. Asphalt's film turns its micro-
-// roughness to a sheen that reflects the street. Metal, paint and glass hardly
+// take only wind-driven rain. Asphalt's film turns its micro-roughness to a
+// sheen, a rough mirror of the street weighted by Fresnel, so the road goes to
+// glass toward its grazing far end. The scene is lit by the storm deck alone:
+// lower, cooler, but keeping the colour of what is really coloured (signs,
+// flowers, leaves). Metal, paint and glass hardly
 // darken but bead. Leaves go darker and glisten. Puddles are level water:
 // mirrors whose reflection is found by marching the reflected ray through the
 // point map (screen-space reflection), rippled by every drop while it rains.
@@ -141,10 +144,14 @@ const float SUN_WALL = ${SUN_WALL.toFixed(2)};
 const float OVERCAST = ${OVERCAST.toFixed(2)};
 
 // The storm deck without the cumulus: slate cobalt overhead, deepening toward
-// the zenith, a paler grey low over the street's end (and in the rain veil).
+// the zenith, and under its far edge the bright gap: a band of pale sky low
+// over the street's end, where the cell ends and daylight still comes in
+// sideways. That gap is what the puddles and the rain catch.
 vec3 stormBase(float y) {
   float h = clamp(y / 0.62, 0.0, 1.0);
-  return mix(vec3(0.026, 0.042, 0.066), vec3(0.17, 0.19, 0.215), pow(h, 1.3));
+  vec3 c = mix(vec3(0.055, 0.07, 0.095), vec3(0.2, 0.22, 0.25), pow(h, 1.2));
+  float gap = smoothstep(0.5, 0.74, y);
+  return mix(c, vec3(0.58, 0.61, 0.64), gap);
 }
 
 // The rain sky is the photo's own sky gone over: the clear sky (sky matte
@@ -159,7 +166,7 @@ vec3 rainSky(vec2 iuv) {
   float mx = max(cl.r, max(cl.g, cl.b));
   float sat = (mx - min(cl.r, min(cl.g, cl.b))) / max(mx, 1e-4);
   float cloud = smoothstep(0.45, 0.15, sat);
-  vec3 body = vec3(0.085, 0.1, 0.125) * (0.55 + 0.9 * smoothstep(0.3, 1.0, Y));
+  vec3 body = vec3(0.15, 0.165, 0.19) * (0.5 + 1.0 * smoothstep(0.3, 1.0, Y));
   vec3 c = mix(stormBase(iuv.y), body, cloud);
   c *= clamp(pow(max(Y, 1e-4) / max(Yb, 1e-4), 1.6), 0.3, 3.3);
   // and it moves: slow darker masses in the deck
@@ -187,12 +194,24 @@ float sunAt(float z, vec2 iuv) {
 // The photo's light at any point, re-lit for the weather: sunlit surfaces
 // lose the sun (divided down to skylight), the blue clear-sky shade turns to
 // the grey of an overcast, and the sky itself becomes the rain sky.
-vec3 relit(vec2 iuv, float lod, float sunNow, out float skyA) {
+vec3 relit(vec2 iuv, float lod, float sunNow, float sunSky, out float skyA) {
   vec3 c = srgbToLinear(textureLod(uPhoto, iuv, lod).rgb);
-  skyA = textureLod(uSky, iuv, lod).r;
+  float skyRaw = textureLod(uSky, iuv, lod).r;
+  // The sky matte also traces every wire and ledge in front of the buildings
+  // with a hairline of "sky". Trust it only where there is sky to speak of:
+  // where the depth map (eroded to the nearest surface) sees open sky, or
+  // where the matte covers most of the neighbourhood (sky between wires).
+  float openSky = max(step(400.0, depthAt(uGeo, iuv)), smoothstep(0.55, 0.8, textureLod(uSky, iuv, 4.0).r));
+  skyA = skyRaw * openSky;
   vec4 m = texture(uMat, iuv);
   float glass = (1.0 - smoothstep(0.02, 0.07, m.r)) * smoothstep(0.5, 0.65, m.b) * (1.0 - smoothstep(0.18, 0.3, m.g));
   float lit = clamp(textureLod(uWater, iuv, 0.0).a * 2.0 - 1.0, 0.0, 1.0);
+  // The sunlight matte misses the thinnest things: the sunlit wall either
+  // side of a wire reads as shade, and comes out of the relight as a white
+  // outline. A pixel as bright as its sunlit surround is in that sun.
+  float litB = clamp(textureLod(uWater, iuv, 1.5).a * 2.0 - 1.0, 0.0, 1.0);
+  float yB = luma(srgbToLinear(textureLod(uPhoto, iuv, lod + 2.5).rgb));
+  lit = max(lit, litB * smoothstep(0.55, 0.95, luma(c) / max(yB, 1e-4)));
   vec3 clean = srgbToLinear(textureLod(uClean, iuv, 0.0).rgb);
   // A mixed pixel (a wire against the sky) is skyA of clear sky plus the
   // rest of the wire: take the sky's share out, keep the wire.
@@ -216,18 +235,43 @@ vec3 relit(vec2 iuv, float lod, float sunNow, out float skyA) {
   // alone: under the storm they go to silhouette, darker than the cloud.
   vec3 rs = rainSky(iuv);
   float nearSky = textureLod(uSky, iuv, 3.0).r;
-  yo = mix(yo, min(yo, 0.6 * luma(rs)), smoothstep(0.25, 0.6, nearSky));
-  // Overcast light is flat and grey. The photo's shade is lit by blue sky
-  // and graded to cyan with its red crushed, so it gives up more of its
-  // chroma than the sunlit side does; then all of it cools a touch.
-  vec3 over = yo * (1.0 + (surf / ys - 1.0) * (0.3 + 0.45 * lit)) * vec3(0.97, 1.0, 1.04);
+  float edgeSky = smoothstep(0.25, 0.6, nearSky);
+  yo = mix(yo, min(yo, 0.6 * luma(rs)), edgeSky);
+  // Light from the storm deck: lower and cooler, but not grey. The photo's
+  // shade is lit by blue sky and graded to cyan, so a weakly coloured pixel
+  // gives up most of that cast; what is really coloured (a sign, the
+  // flowers, the leaves) keeps its colour and reads richer for the dimmer,
+  // softer light. Then all of it goes a touch cool.
+  float mxs = max(surf.r, max(surf.g, surf.b));
+  float sats = (mxs - min(surf.r, min(surf.g, surf.b))) / max(mxs, 1e-4);
+  // (Blue and cyan are the clear sky's, in shade and in every window: those
+  // go with the sky.)
+  float skyish = smoothstep(0.05, 0.25, (surf.b - surf.r) / max(mxs, 1e-4));
+  float keep = mix(0.28 + 0.32 * lit, 1.0, smoothstep(0.4, 0.85, sats) * (1.0 - skyish));
+  keep *= 1.0 - 0.5 * skyish;
+  vec3 over = yo * max(1.0 + (surf / ys - 1.0) * keep, 0.0) * vec3(0.9, 0.97, 1.07);
+  // The wire matte: a hairline against the sky is a mixed pixel, and what is
+  // left of it after the clear sky is taken out is still partly that sky (the
+  // filled sky never matches the photo's to the last bit). Feather it: where
+  // the matte is mostly sky, the wire's own colour is only its darkness.
+  float fringe = smoothstep(0.15, 0.7, skyRaw) * edgeSky;
+  over = mix(over, vec3(luma(over)) * vec3(0.92, 0.97, 1.04), max(fringe, edgeSky * 0.6));
   // glass mirrors the sky, so it greys with it
   over = mix(over, mix(vec3(yo), over, 0.3) * 0.82, glass);
   // the departing cloud's edge is lit from behind: a silver rim
-  float rim = sunNow * (1.0 - sunNow) * 4.0;
+  float rim = sunSky * (1.0 - sunSky) * 4.0;
   rs = mix(rs, vec3(0.62, 0.64, 0.66), rim * 0.55);
-  vec3 wet = over * (1.0 - skyA) + rs * skyA;
-  return mix(wet, c, smoothstep(0.0, 1.0, sunNow));
+  // Surface and sky each change with their own cloud edge: a wire against
+  // the sky goes over with the sky behind it, so the clear sky can never
+  // show through its matte while the storm is already overhead.
+  float sf = smoothstep(0.0, 1.0, mix(sunNow, sunSky, edgeSky));
+  float ss = smoothstep(0.0, 1.0, sunSky);
+  vec3 fgDry = mix(surf, over, fringe * (1.0 - ss));
+  vec3 fgC = mix(over, fgDry, sf);
+  vec3 skyC = mix(rs, clean, ss);
+  // all clear: exactly the photo
+  vec3 comp = fgC * (1.0 - skyA) + skyC * skyA;
+  return mix(comp, c, sf * ss);
 }
 
 // Ring ripples on standing water, Lagarde-style: one drop per cell at a
@@ -258,13 +302,35 @@ vec2 ripples(vec2 g, float t) {
   return n;
 }
 
-// Screen-space reflection on the point map.
-vec3 reflectRay(vec3 P, vec3 R, float lod, float sunNow, out float hit) {
+// Rain veil: only with distance (along the line of sight, so a reflection
+// gets it for the whole of its path). The near street stays clear and dark;
+// the far end, seen through a few hundred metres of downpour, goes soft
+// toward the light of the bright gap behind it.
+const vec3 VEIL = vec3(0.29, 0.31, 0.335);
+float veilAt(float d) {
+  return (1.0 - exp(-max(d - 25.0, 0.0) / 220.0)) * uRain * (1.0 - smoothstep(250.0, 400.0, d)) * 0.6;
+}
+
+// The sky as a reflection sees it, at an image uv: the storm deck (with its
+// bright gap low over the street's end) or the clear sky, by the cloud edge.
+vec3 skyAt(vec2 su, float lod) {
+  vec3 clear = srgbToLinear(textureLod(uClean, su, lod).rgb);
+  return mix(rainSky(su), clear, smoothstep(0.0, 1.0, sunAt(1000.0, su)));
+}
+
+// Screen-space reflection on the point map: the photo seen in the water,
+// upside down about each object's foot (each re-lit for its own weather).
+vec3 reflectRay(vec3 P, vec3 R, float lod, out float hit) {
   hit = 0.0;
+  // a facet tilted far enough to send its ray down only sees more road: keep
+  // the ray just above the horizon instead of letting it read the sky there
+  float el = dot(R, uUp);
+  if (el < 0.015) R = normalize(R + uUp * (0.015 - el));
   float t = max(0.05, -P.z * 0.02);
   vec3 Q = P;
   vec2 uv = vec2(0.0);
   float prevT = 0.0;
+  float tHit = 0.0;
   for (int i = 0; i < 40; i++) {
     t *= 1.22;
     Q = P + R * t;
@@ -285,24 +351,28 @@ vec3 reflectRay(vec3 P, vec3 R, float lod, float sunNow, out float hit) {
         if (depthAt(uGeo, mu) < -M.z) b = m; else a = m;
       }
       uv = project(P + R * b);
+      tHit = b;
       hit = 1.0;
       break;
     }
     prevT = t;
   }
   float s;
+  // Open sky above, or out of frame: the sky in that direction (the filled
+  // sky is defined behind everything, so a ray past a roof still finds it).
+  vec2 su = clamp(project(P + R * 400.0), vec2(0.02), vec2(0.98));
+  vec3 sky = skyAt(su, max(lod, 2.0));
   if (hit > 0.5) {
-    vec3 c = relit(uv, lod, sunNow, s);
+    float zh = depthAt(uGeo, uv);
+    vec3 c = relit(uv, lod, sunAt(zh, uv), sunAt(1000.0, uv), s);
+    // seen through the rain, there and back: the far street's end mirrors
+    // as the pale sheet it is in the downpour
+    c = mix(c, VEIL, veilAt(length(P) + tHit) * (1.0 - s));
     // fade toward the frame edges so the reflection never ends on a line
     vec2 e = smoothstep(vec2(0.0), vec2(0.06), uv) * smoothstep(vec2(0.0), vec2(0.06), 1.0 - uv);
-    vec3 env = mix(rainSky(vec2(uv.x, 0.0)), srgbToLinear(textureLod(uPhoto, vec2(0.5, 0.05), 6.0).rgb), sunNow);
-    return mix(env, c, e.x * e.y);
+    return mix(sky, c, e.x * e.y);
   }
-  // Open sky above, or out of frame: the sky at the top of the picture.
-  vec2 su = clamp(project(P + R * 400.0), vec2(0.02), vec2(0.98));
-  su.y = min(su.y, 0.25);
-  vec3 top = relit(vec2(clamp(su.x, 0.3, 0.7), su.y), max(lod, 3.0), sunNow, s);
-  return top;
+  return sky;
 }
 
 void main() {
@@ -323,8 +393,9 @@ void main() {
   float lit = clamp(wat.a * 2.0 - 1.0, 0.0, 1.0);
   float sunNow = sunAt(z, iuv);
 
+  float sunSky = sunAt(1000.0, iuv);
   float skyA;
-  vec3 col = relit(iuv, uLodBias, sunNow, skyA);
+  vec3 col = relit(iuv, uLodBias, sunNow, sunSky, skyA);
   float surf = 1.0 - skyA;
 
   vec2 gp = vec2(dot(P, uRight), dot(P, uFwd));
@@ -391,7 +462,8 @@ void main() {
   vec3 c = col;
   float yl = luma(c);
   c = mix(vec3(yl), c, 1.0 + 0.45 * dark);
-  c *= 1.0 - 0.62 * dark * (0.9 + 0.2 * blot);
+  // (the road most: its open texture fills and goes near black under a film)
+  c *= 1.0 - (0.62 + 0.22 * isGround) * dark * (0.9 + 0.2 * blot);
   // leaves: darker, greener
   c = mix(c, c * vec3(0.78, 0.86, 0.8), fol * wet * 0.6);
 
@@ -399,36 +471,51 @@ void main() {
   float cosv = clamp(dot(-Vd, isGround > 0.5 ? uRoadN : N), 0.0, 1.0);
   float F = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
 
-  // Wet sheen on the film (asphalt, paint, metal, paint): a rough mirror of
-  // the street. Puddles: a smooth mirror, rippled while it rains.
+  // Wet sheen on the film (asphalt, lane paint): the road becomes a rough
+  // mirror of the street, by Fresnel, so it goes to glass toward the far end
+  // where you see it at a grazing angle. Puddles: a smooth mirror, rippled by
+  // every drop while it rains.
   float sheen = wet * gloss * surf;
   float mirror = water;
   if (isGround > 0.5 && (sheen > 0.02 || mirror > 0.01)) {
     vec3 Nr = uRoadN;
-    if (mirror > 0.01 && dist < 45.0) {
-      vec2 rp = ripples(gp, uTime) * uRain * (1.0 - smoothstep(20.0, 45.0, dist));
-      Nr = normalize(Nr + (uRight * rp.x + uFwd * rp.y) * 0.35);
-    }
     float hit;
-    float Fm = 0.02 + 0.98 * pow(1.0 - clamp(dot(-Vd, Nr), 0.0, 1.0), 5.0);
-    vec3 under = c * mix(1.0, 0.72, mirror);
-    vec3 refl;
-    if (mirror > 0.5) {
-      refl = reflectRay(P, reflect(Vd, Nr), uLodBias + 0.4, sunNow, hit);
-    } else {
-      // A wet film on rough asphalt: the micro-facets tilt mostly toward and
-      // away from you, so the reflection smears vertically (the long streaks
-      // under every light on a wet road). Four taps along that tilt.
-      refl = vec3(0.0);
+    // A wet film on rough asphalt: the micro-facets tilt mostly toward and
+    // away from you, so the reflection smears vertically (the long streaks
+    // under every light on a wet road). Four taps along that tilt; the film
+    // smooths as it thickens, so the smear tightens as the rain piles up.
+    float thick = smoothstep(0.25, 1.0, uAcc) * smoothstep(0.4, 1.0, wet);
+    vec3 rough = vec3(0.0);
+    if (mirror < 0.99) {
+      float spread = mix(0.075, 0.03, thick);
       for (int k = 0; k < 4; k++) {
-        float o = (float(k) - 1.5) * 0.045;
+        float o = (float(k) - 1.5) * spread;
         vec3 Nk = normalize(Nr + uFwd * o);
-        refl += reflectRay(P, reflect(Vd, Nk), uLodBias + 2.6, sunNow, hit);
+        rough += reflectRay(P, reflect(Vd, Nk), uLodBias + mix(2.4, 1.2, thick), hit);
       }
-      refl *= 0.25;
+      rough *= 0.25;
     }
-    vec3 filmC = under + refl * F * sheen * sheen * 0.42;
-    vec3 poolC = under * (1.0 - Fm) * 0.55 + refl * clamp(Fm * 1.1, 0.0, 0.9);
+    // The film is broken where the aggregate stands proud of it: finer and
+    // rarer as it thickens.
+    float grit = vnoise3(vec3(gp * vec2(9.0, 3.0), 1.7));
+    // First drops are dark spots, not mirrors: the sheen needs a film, and
+    // the film needs the rain to have run together (or a puddle's margin).
+    float film = max(smoothstep(0.12, 0.4, supply), mirror);
+    float filmK = sheen * film * mix(0.5, 0.95, thick) * mix(0.7 + 0.3 * grit, 1.0, thick);
+    vec3 filmC = c * (1.0 - F * filmK) + rough * F * filmK;
+    vec3 poolC = filmC;
+    if (mirror > 0.01) {
+      if (dist < 45.0) {
+        vec2 rp = ripples(gp, uTime) * uRain * (1.0 - smoothstep(20.0, 45.0, dist));
+        Nr = normalize(Nr + (uRight * rp.x + uFwd * rp.y) * 0.16);
+      }
+      float Fm = 0.02 + 0.98 * pow(1.0 - clamp(dot(-Vd, Nr), 0.0, 1.0), 5.0);
+      vec3 sharp = reflectRay(P, reflect(Vd, Nr), uLodBias + 0.3, hit);
+      // the asphalt under a few mm of water is darker still, and what the
+      // water reflects sits on top of it
+      float Rw = clamp(Fm * 1.15 + 0.05, 0.0, 0.94);
+      poolC = c * 0.3 * (1.0 - Rw) + sharp * Rw;
+    }
     c = mix(filmC, poolC, mirror);
   } else if (sheen > 0.02) {
     // walls, leaves, signs: a faint sheen of the grey sky at their Fresnel
@@ -473,10 +560,9 @@ void main() {
     c += vec3(0.5, 0.53, 0.56) * flash * 0.45 * (1.0 - smoothstep(12.0, 28.0, dist));
   }
 
-  // Rain veil: in a downpour the street's far end goes soft and grey.
-  // (Not on wires and edges against the sky itself: they are already sky.)
-  float veil = (1.0 - exp(-dist / 260.0)) * uRain * surf * (1.0 - smoothstep(250.0, 400.0, dist));
-  c = mix(c, stormBase(0.6) * 1.1, veil * 0.78);
+  // Rain veil (not on wires and edges against the sky itself: they are
+  // already sky).
+  c = mix(c, VEIL, veilAt(dist) * surf);
 
   // Steam, sparingly: sun on wet, warm asphalt just after the shower.
   float steam = isGround * wet * sunNow * lit * (1.0 - smoothstep(0.0, 0.6, uEvap)) * smoothstep(0.02, 0.15, uEvap);
@@ -659,20 +745,22 @@ const lerp3 = (a, b, t) => a.map((v, i) => lerp(v, b[i], t));
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
 // Summer film, and the cooler stock the shower slides it toward: less warm,
-// less cobalt (there is no blue left to deepen), more veil in the wet air.
+// less cobalt (there is no blue left to deepen). Not more veil: a dark wet
+// street under a storm has deep blacks and bright reflections, and a lifted,
+// blued toe and a wide mist over all of it is what turns it to grey.
 const SUMMER = { ...FILM_PRESETS.summer };
 const SHOWER = {
-  warmth: -0.32,
+  warmth: -0.22,
   blueDepth: 0.35,
-  saturation: 0.96,
-  contrast: 1.24,
-  bloom: 0.26,
-  softness: 0.62,
+  saturation: 1.12,
+  contrast: 1.3,
+  bloom: 0.14,
+  softness: 0.5,
   halation: 0.3,
-  shadowTint: [0.88, 1, 1.12],
-  highlightTint: [0.95, 1, 1.05],
-  toeColor: [0.7, 1, 1.25],
-  vignette: 0.34,
+  shadowTint: [0.92, 1, 1.07],
+  highlightTint: [0.97, 1, 1.03],
+  toeColor: [0.85, 1, 1.12],
+  vignette: 0.36,
 };
 function filmAt(k) {
   const out = {};
@@ -858,8 +946,8 @@ export async function createYuudachi(host, { embedded = false } = {}) {
 
   // ---- the weather, one step ----
   // While held: the cloud edge runs up the street toward you (τ 0.9 s), the
-  // first big drops, then the downpour (τ 1.1 s); rain piles up (~10 s to
-  // fill the hollows) and rewets anything that had started to dry. Let go:
+  // first big drops, then the downpour (τ 1.1 s); rain piles up (~6 s to
+  // fill the hollows to the brim) and rewets anything that had started to dry. Let go:
   // the rain stops (τ 0.45 s), the sun comes back down the street (τ 1.6 s),
   // and evaporation runs, three times faster in the sun than in the shade.
   const EVAP_END = 2.2;
@@ -870,7 +958,7 @@ export async function createYuudachi(host, { embedded = false } = {}) {
       S.sun += (0 - S.sun) * k(0.9);
       const goal = S.since > 0.45 ? 1 : 0.06;
       S.rain += (goal - S.rain) * k(S.since > 0.45 ? 1.1 : 0.3);
-      S.acc = Math.min(1.3, S.acc + S.rain * dt * 0.1);
+      S.acc = Math.min(1.3, S.acc + S.rain * dt * 0.2);
       S.evap = Math.max(0, S.evap - S.rain * dt * 1.2);
     } else {
       S.since = 0;
@@ -924,9 +1012,10 @@ export async function createYuudachi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uAcc, S.acc);
     gl.uniform1f(u.uEvap, S.evap);
     gl.uniform1f(u.uSun, S.sun);
-    // the camera opens up about half a stop in the gloom, as an eye would
+    // Under the storm the street is lit by the deck alone: the camera keeps
+    // its exposure a little under, so it reads as dark and wet, not lifted.
     const gloom = 1 - S.sun;
-    gl.uniform1f(u.uExpo, 2 ** (expoStops + 0.2 * gloom));
+    gl.uniform1f(u.uExpo, 2 ** (expoStops - 0.15 * gloom));
     gl.uniform1f(u.uLodBias, Math.max(0, Math.log2((IMG_H * L.crop[3]) / L.rh)));
     gl.uniform3fv(u.uUp, UP);
     gl.uniform3fv(u.uRight, RIGHT);
