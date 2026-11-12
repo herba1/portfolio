@@ -9,11 +9,16 @@ import { createStage, clamp } from "../_kit/stage";
 // Loosening it never blurs anything. Each point hands over from its opaque
 // square to a crisp additive dot of its own colour on black, one device pixel
 // at first, so the photo turns into a countable grid of light. Then the grid
-// thins to what a spinning Velodyne would have returned: points on horizontal
-// scan rings of constant elevation seen from a sensor a little above the lens,
-// every other step of azimuth. Because the sensor sits above the camera, a
-// ring lands lower on near things than on far ones, so the lines jog at every
-// depth edge (the figure, the taxis, the truck) even before the camera moves.
+// thins to what a spinning Velodyne would have returned: points on scan rings
+// of constant elevation seen from a sensor a little above the lens, so on the
+// street they are arcs round the sensor's feet. Because the sensor sits above
+// the camera, a ring lands lower on near things than on far ones, so the
+// lines jog at every depth edge (the figure, the taxis, the truck) even
+// before the camera moves. Each return carries energy, not colour: its
+// reflectance over r^2, summed in a float buffer and tone-mapped, so the near
+// bodies, scanned densely in 2x2 dots, pile up and clip to solid white, and
+// the far street, scanned sparsely and losing its weak returns, is a scatter
+// of faint single pixels.
 // Then the camera swings round half a radian about the middle distance: near
 // and far layers shear apart, black shadows open behind everything the photo
 // could not see past, and the street reads as a volume. The sky gives no
@@ -32,11 +37,15 @@ const SENSOR = 0.03; // sensor height above the lens, world units (z = 1 is the 
 const YAW = 0.55;
 const PITCH = 0.16;
 const PIVOT = 2.1;
-// Return intensity: the floor a black surface still reflects, and the gain at
-// the nearest point, ahead of a soft shoulder (a dark coat up close comes
-// back at FLOOR x GAIN, which the shoulder holds just under full strength).
+// Return energy: the floor a black surface still reflects, and the energy a
+// white wall standing at the nearest point sends back, before 1/r^2. A dark
+// coat up close comes back at FLOOR x GAIN, about three times what it takes
+// to clip to white; the far street, skimmed and three times as far, comes
+// back at a few percent of that.
 const FLOOR = 0.35;
-const GAIN = 8.5;
+const GAIN = 14;
+// The resolve curve's exposure: display = 1 - exp(-EXPOSURE x energy).
+const EXPOSURE = 1;
 // Local detail: what the photo's structure does to a return. Luminance less
 // an 8 px Gaussian of itself, plus Sobel edge strength, mapped so a flat
 // interior comes back at DETAIL[0] and a hard edge or a letter at DETAIL[1].
@@ -109,14 +118,25 @@ void main(){
   if (uPass == 1) {
     // The sky is out of range: no return.
     if (d < 0.015) { cull(); return; }
+    // Range from the sensor.
+    vec3 q = p - vec3(0.0, uSensor, 0.0);
+    float r = length(q);
+    // Range falloff, 1 at the nearest point. It also sets how densely a
+    // surface is sampled: the rings bunch up close to the sensor, so the
+    // strong returns are the dense ones and the weak ones are sparse, never
+    // a uniform hatch. It leaves out the photo's brightness, so a surface
+    // keeps one ring spacing across its whole face and the lines stay whole.
+    float near = 1.0 / (r * r);
+    float dense = smoothstep(0.15, 0.6, near);
     // Which scan ring this point sits on: elevation from the sensor, in ring
     // steps. A point is a return if its cell holds the ring's centre line.
-    // Anything close and standing (the figure, the truck's flank) fills its
-    // beam with the most returns: it is scanned on twice the rings and on
-    // every azimuth step, so it comes back as the densest thing in the cloud.
-    bool body = d > 0.66 && aUpright > 0.5;
-    float ring = body ? uRing * 0.5 : uRing;
-    vec3 q = p - vec3(0.0, uSensor, 0.0);
+    // Near surfaces come back on up to three times the rings, so the street
+    // at the sensor's feet is written in close-packed arcs that open out with
+    // range. Anything near and standing (the figure, the taxis, the
+    // pedicab) fills its beam on every azimuth step too, so it comes back as
+    // a solid mass of returns.
+    bool body = near > 0.25 && aUpright > 0.5;
+    float ring = uRing * mix(1.0, 0.34, dense);
     float u = q.y / length(q.xz) * uFocal / ring;
     float k = floor(u + 0.5);
     bool onRing = abs(u - k) * ring < cell * 0.5;
@@ -124,44 +144,45 @@ void main(){
     // signs return on every step too, so they read as solid strips.
     float m = max(max(srgb.r, srgb.g), srgb.b);
     bool onStep = mod(gx + k, 2.0) < 0.5 || m > 0.55 || body;
-    bool ret = onRing && onStep;
-    // Everything else goes out early: the dense grid is a stage on the way.
-    float keep = ret ? 1.0 : 1.0 - smoothstep(0.08, 0.42, s);
-    w *= keep;
-    if (w < 0.004) { cull(); return; }
-    // Returns off an edge, a letter or a seam are a whole device pixel wider
-    // than the grid's dots; returns off a flat interior stay one pixel, so
-    // the structure is written in the size of the points as well as their
-    // strength, and dense flat surfaces never pile up into a white slab.
-    size = ret && aDetail > 0.9 ? 2.0 : 1.0;
-    // Return intensity, not photo colour. A lidar measures how much of its
-    // own laser comes back, so a black coat, a tyre or wet asphalt still
-    // returns: reflectance has a floor, and the photo's luminance only lifts
-    // it. Incidence takes it down: the street the beam skims returns 30% of
-    // what a body standing square to it does. Range takes it down too, full
-    // strength at the nearest point to about 30% at the far end, so the figure in front is the brightest thing in
-    // the cloud and the far towers are faint.
+    // Return energy. A lidar measures how much of its own laser comes back:
+    // a black coat, a tyre or wet asphalt still returns, so reflectance has a
+    // floor and the photo's luminance only lifts it. Incidence takes it down
+    // (the street the beam skims returns 40% of what a body
+    // standing square to it does), the photo's local structure scales it (an
+    // edge, a letter or a seam scatters more than the flat panel round it),
+    // and range takes it down as 1/r^2. The sum is light, not colour: it
+    // goes into a float buffer and is tone-mapped at the end, so near returns
+    // overlap and clip to white while the far street fades to faint single
+    // dots.
     float y = dot(srgb, vec3(0.2126, 0.7152, 0.0722));
     float refl = max(uFloor, pow(y, 0.6));
-    float range = clamp((z - 1.0) / 1.86, 0.0, 1.0);
-    float I = refl * mix(1.0, 0.3, range) * mix(0.3, 1.0, aUpright) * uGain;
+    float I = uGain * refl * mix(0.4, 1.0, aUpright) * mix(1.0, aDetail, 0.6) * near;
+    // A return too weak to clear the receiver's threshold is lost. The odds
+    // are fixed per point, so the far street thins to a stable scatter.
+    float lost = hash(uint(aCell) * 2654435761u);
+    bool ret = onRing && onStep && lost < smoothstep(0.15, 2.0, I);
+    // Everything else goes out early: the dense grid is a stage on the way.
+    float keep = ret ? 1.0 : 1.0 - smoothstep(0.06, 0.3, s);
+    w *= keep;
+    if (w < 0.004) { cull(); return; }
+    // Near and standing returns are 2x2 device px, so they close up into a
+    // solid mass; an edge or a letter in the middle distance gets the same
+    // weight; everything else is a single device pixel.
+    size = ret && (body || aDetail > 1.1 && dense > 0.2) ? 2.0 : 1.0;
     // Near-white, a touch cool. Only the signs keep their hue, and only as a
-    // tint: bright and saturated in the photo, so lit panels, not paint.
+    // tint: bright and saturated in the photo, so lit panels, not paint. The
+    // tint's brightest channel is 1, so a strong return still clips to white
+    // through the curve while a weak one keeps its colour.
     float chroma = m - min(min(srgb.r, srgb.g), srgb.b);
     float lit = smoothstep(0.5, 0.85, m) * smoothstep(0.3, 0.65, chroma / max(m, 1e-3));
     vec3 hue = srgb / max(m, 1e-3);
     vec3 tint = mix(vec3(0.9, 0.96, 1.0), hue, 0.75 * lit);
-    // A soft shoulder on the return, then structure: a beam that crosses an
-    // edge, a letter, a seam or a window frame scatters more back than the
-    // flat panel around it, so the photo's local detail is multiplied in,
-    // brighter on edges and lettering, dimmer across flat interiors. It goes
-    // in after the shoulder, so a bright panel keeps its letters instead of
-    // clipping to a blank slab. The tint's brightest channel is 1, so the
-    // final clip keeps a sign's hue.
-    vec3 c = tint * min(I / sqrt(1.0 + I * I) * aDetail, 1.0);
+    vec3 c = tint * I;
     // While the photo is still handing over, a dot starts as its own pixel
-    // and turns into a return as it loosens.
-    c = mix(srgb, c, smoothstep(0.04, 0.3, s));
+    // and turns into a return as it loosens. The pixel goes in through the
+    // inverse of the resolve curve, so a lone dot comes out its own colour.
+    vec3 px = srgb / max(m, 1e-3) * -log(1.0 - min(m, 0.996));
+    c = mix(px, c, smoothstep(0.04, 0.3, s));
     vColor = vec4(c * w, 0.0);
   } else {
     vColor = vec4(srgb * w, w);
@@ -198,6 +219,34 @@ out vec4 o;
 // Pass 0 is premultiplied over; pass 1 adds light. Either way a square of
 // one flat colour: nothing is filtered, so every dot stays a hard pixel.
 void main(){ o = vColor; }`;
+
+// The lidar's light, summed in a float buffer, resolved through an
+// exponential film curve (display = 1 - exp(-energy)) and added over the
+// photo. One return reads as its
+// own strength; where returns pile up (a near body, two layers sheared over
+// each other) the sum runs past 1 and every channel saturates, so it clips
+// to a white mass instead of wrapping or banding.
+const RESOLVE_VS = `#version 300 es
+void main(){
+  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+const RESOLVE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uLight;
+uniform float uExposure;
+out vec4 o;
+void main(){
+  vec3 e = uExposure * texelFetch(uLight, ivec2(gl_FragCoord.xy), 0).rgb;
+  // The curve runs on the brightest channel, so a sign's tint keeps its hue
+  // up to the shoulder; past it each channel runs on its own, so a pile of
+  // returns bleaches to pure white whatever its tint.
+  float mx = max(max(e.r, e.g), e.b);
+  vec3 keep = e / max(mx, 1e-5) * (1.0 - exp(-mx));
+  vec3 bleach = 1.0 - exp(-e);
+  o = vec4(mix(keep, bleach, smoothstep(1.5, 6.0, mx)), 0.0);
+}`;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -376,11 +425,38 @@ export async function createCloud(host) {
 
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false, alpha: false });
   const gl = stage.ctx;
-  const prog = gl.createProgram();
-  gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
-  gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const link = (vs, fs) => {
+    const pr = gl.createProgram();
+    gl.attachShader(pr, compile(gl, gl.VERTEX_SHADER, vs));
+    gl.attachShader(pr, compile(gl, gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+    return pr;
+  };
+  const prog = link(VS, FS);
+  const resolve = link(RESOLVE_VS, RESOLVE_FS);
+  const uLight = gl.getUniformLocation(resolve, "uLight");
+  const uExposure = gl.getUniformLocation(resolve, "uExposure");
+  const empty = gl.createVertexArray();
+
+  // The light buffer: half float where the GPU can render to it, so summed
+  // returns run past 1 before the curve; 8 bit otherwise, which clips early
+  // but keeps the same picture.
+  const floatLight = !!gl.getExtension("EXT_color_buffer_float");
+  const light = { tex: gl.createTexture(), fbo: gl.createFramebuffer(), w: 0, h: 0 };
+  const sizeLight = (w, h) => {
+    if (light.w === w && light.h === h) return;
+    light.w = w;
+    light.h = h;
+    gl.bindTexture(gl.TEXTURE_2D, light.tex);
+    if (floatLight) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, light.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, light.tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  };
   const NAMES = ["uColor", "uGrid", "uRect", "uCanvas", "uOffset", "uFocal", "uLod", "uLoose", "uOrbit", "uTime", "uPivot", "uRing", "uSensor", "uPass", "uFloor", "uGain"];
   const U = Object.fromEntries(NAMES.map((k) => [k, gl.getUniformLocation(prog, k)]));
 
@@ -523,11 +599,24 @@ export async function createCloud(host) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArrays(gl.POINTS, 0, n);
 
-    // The same points as light on black, added.
+    // The same points as light on black: summed as energy in the light
+    // buffer, then resolved through the curve and added over the photo.
     if (Math.max(st.near.x, st.far.x) > 1e-4) {
+      sizeLight(cw, ch);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, light.fbo);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.uniform1i(U.uPass, 1);
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.drawArrays(gl.POINTS, 0, n);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      gl.useProgram(resolve);
+      gl.bindVertexArray(empty);
+      gl.bindTexture(gl.TEXTURE_2D, light.tex);
+      gl.uniform1i(uLight, 0);
+      gl.uniform1f(uExposure, EXPOSURE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
   };
 
@@ -558,6 +647,8 @@ export async function createCloud(host) {
   return {
     destroy() {
       stage.destroy();
+      gl.deleteFramebuffer(light.fbo);
+      gl.deleteTexture(light.tex);
       img.close?.();
       dep.close?.();
     },
