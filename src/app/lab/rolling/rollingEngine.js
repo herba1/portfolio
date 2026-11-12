@@ -36,10 +36,12 @@ import { createStage, clamp } from "../_kit/stage";
 // The room is lit by a ring fluorescent on the same 60 Hz mains that drives
 // the motor, so its light pulses at 120 Hz, and every row integrates it over
 // its own exposure window too. Four lamp cycles fit the 1/30 s readout, so the
-// frame carries four soft bright and dark bands: the readout itself, drawn
-// in the picture's own light. They lie along the sensor's rows (they turn
-// when the phone turns), they light the plate, the acrylic and the guard
-// through the same linear composite, and at 29.97 fps the 120 Hz lamp gains
+// frame carries four bands: broad cool crests and short warm, dim gaps, the
+// readout itself drawn in the picture's own light. They lie along the
+// sensor's rows (they turn when the phone turns) and they light everything
+// through the same linear composite: a crest blows out a row of the guard's
+// chrome and the blade islands under it, the gap beside it drops them almost
+// to silhouette. At 29.97 fps the 120 Hz lamp gains
 // 0.004 of a cycle a frame, so they creep up the frame while the torn
 // blades creep backwards.
 //
@@ -67,17 +69,62 @@ const FPS = 30000 / 1001; // sensor frame rate: NTSC 29.97, a hair under 30
 const READOUT = 1 / 30; // top row to bottom row (fits inside the 1 / 29.97 s frame)
 const EXPOSURE = 1 / 16000; // each row's open time (?exp=N for 1 / N s)
 const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrated as ramps, not stacks of copies
-// The room's lamp: a ring fluorescent on the same 60 Hz mains as the motor.
-// The tube's discharge goes out and re-strikes every half cycle, so its light
-// pulses at 120 Hz; each phosphor holds it for its own decay time, so each
-// channel keeps its own share of the ripple and lags by its own angle (a
-// first-order decay: depth 1 / sqrt(1 + (w tau)^2), lag atan(w tau)). Blue
-// decays fastest and ripples most, so the bright bands run cool and the dark
-// ones warm, as real flicker bands do.
+// The room's lamp: a ring fluorescent on the same 60 Hz mains as the motor,
+// on an old choke ballast. The arc goes out every time the mains voltage
+// falls below its re-strike level (STRIKE of the peak) and the tube is dark
+// until it re-strikes; while it burns its light follows the voltage softly
+// (a discharge's light saturates with current, so ARC < 1 flattens the
+// crest). That is a 120 Hz train of broad bright crests and short dark
+// gaps. Each phosphor holds the light for its own decay time, a first-order
+// lag (each harmonic k scaled by 1 / (1 + i k w tau)), so each channel keeps
+// its own share of the gap and lags by its own angle; blue decays fastest
+// and drops nearly to nothing in the gap, red holds on, so the crests run
+// cool and the gaps warm, as real flicker bands do. STEADY is each channel's
+// light that does not flicker (long afterglow, the daylight at the shoji).
+// The result is carried as LAMP_K harmonics, so a row's exposure integrates
+// it exactly. Behind a phone's sensor this is the deep banding real footage
+// under mains tubes shows: about four bands down a 1/30 s readout, the
+// crests near half again the mean light, the gaps under a fifth of it.
 const MAINS = 60;
 const LAMP = 2 * MAINS; // Hz
-const RIPPLE = 0.85; // the discharge's own ripple before the phosphors smooth it
-const DECAY = [0.0011, 0.0013, 0.0007]; // phosphor decay, s (r, g, b)
+const STRIKE = 0.55;
+const ARC = 0.35;
+const DECAY = [0.0016, 0.0011, 0.0004]; // phosphor decay, s (r, g, b)
+const STEADY = [0.04, 0.03, 0.06];
+const LAMP_K = 10;
+
+// The lamp's light as a function of phase (cycles), mean 1 per channel:
+// 1 + sum_k C_k cos(2 pi k phase) + S_k sin(2 pi k phase), per channel.
+function lampWave() {
+  const N = 2048;
+  const d = new Float64Array(N);
+  let mean = 0;
+  for (let i = 0; i < N; i++) {
+    d[i] = Math.max(0, Math.sin((Math.PI * (i + 0.5)) / N) - STRIKE) ** ARC;
+    mean += d[i] / N;
+  }
+  const C = new Float32Array(LAMP_K * 3);
+  const S = new Float32Array(LAMP_K * 3);
+  for (let k = 1; k <= LAMP_K; k++) {
+    let a = 0;
+    let b = 0;
+    for (let i = 0; i < N; i++) {
+      const th = (2 * Math.PI * k * (i + 0.5)) / N;
+      a += (2 / N) * d[i] * Math.cos(th);
+      b += (2 / N) * d[i] * Math.sin(th);
+    }
+    for (let c = 0; c < 3; c++) {
+      // Z = a - i b through H = 1 / (1 + i x): Z H = (a - i b)(1 - i x) / (1 + x^2).
+      const x = 2 * Math.PI * k * LAMP * DECAY[c];
+      const re = (a - b * x) / (1 + x * x);
+      const im = (-b - a * x) / (1 + x * x);
+      const g = (1 - STEADY[c]) / mean;
+      C[(k - 1) * 3 + c] = re * g;
+      S[(k - 1) * 3 + c] = -im * g;
+    }
+  }
+  return { C, S };
+}
 const H = 1 / 960; // physics step and angle-history spacing
 const NANG = 48; // angle samples per frame (covers READOUT + EXPOSURE)
 const RPM = (2 * Math.PI) / 60;
@@ -135,8 +182,8 @@ uniform float uSdf;
 uniform float uRim;
 uniform float uTint;
 uniform float uLamp0; // the lamp's phase (cycles) at the frame's first row
-uniform vec3 uLampDepth;
-uniform vec3 uLampLag;
+uniform vec3 uLampC[${LAMP_K}];
+uniform vec3 uLampS[${LAMP_K}];
 uniform vec2 uLampDir;
 out vec4 o;
 
@@ -150,15 +197,33 @@ float angAt(float tau){
 
 // The lamp's light at tau seconds into the frame, mean 1 per channel.
 vec3 lampAt(float tau){
-  float ph = 6.2831853 * (uLamp0 + ${LAMP.toFixed(1)} * tau);
-  return 1.0 - uLampDepth * cos(vec3(ph) - uLampLag);
+  float th = 6.2831853 * fract(uLamp0 + ${LAMP.toFixed(1)} * tau);
+  vec2 r1 = vec2(cos(th), sin(th));
+  vec2 r = r1;
+  vec3 l = vec3(1.0);
+  for (int k = 0; k < ${LAMP_K}; k++) {
+    l += uLampC[k] * r.x + uLampS[k] * r.y;
+    r = vec2(r.x * r1.x - r.y * r1.y, r.x * r1.y + r.y * r1.x);
+  }
+  return max(l, 0.0);
 }
 
-// ...and its mean over a row's exposure [tau, tau + uExpo], exactly.
+// ...and its mean over a row's exposure [tau, tau + uExpo], exactly: each
+// harmonic's mean over the window, (sin, -cos) differences over k w uExpo.
 vec3 lampOver(float tau){
-  float w = 6.2831853 * ${LAMP.toFixed(1)};
-  vec3 a = vec3(6.2831853 * (uLamp0 + ${LAMP.toFixed(1)} * tau)) - uLampLag;
-  return 1.0 - uLampDepth * (sin(a + w * uExpo) - sin(a)) / (w * uExpo);
+  float w = 6.2831853 * ${LAMP.toFixed(1)} * uExpo;
+  float th = 6.2831853 * fract(uLamp0 + ${LAMP.toFixed(1)} * tau);
+  vec2 a1 = vec2(cos(th), sin(th));
+  vec2 b1 = vec2(cos(th + w), sin(th + w));
+  vec2 a = a1, b = b1;
+  vec3 l = vec3(1.0);
+  for (int k = 0; k < ${LAMP_K}; k++) {
+    float kw = float(k + 1) * w;
+    l += (uLampC[k] * (b.y - a.y) - uLampS[k] * (b.x - a.x)) / kw;
+    a = vec2(a.x * a1.x - a.y * a1.y, a.x * a1.y + a.y * a1.x);
+    b = vec2(b.x * b1.x - b.y * b1.y, b.x * b1.y + b.y * b1.x);
+  }
+  return max(l, 0.0);
 }
 
 // The front: the photo's own guard wires, cut from its luminance with their
@@ -265,8 +330,7 @@ export async function createRolling(host, { embedded = false } = {}) {
   const expQ = num("exp");
   // Never longer than the angle history covers past the last row.
   const expo = expQ && expQ > 0 ? clamp(1 / expQ, 1e-5, 1 / 100) : EXPOSURE;
-  const lampDepth = DECAY.map((d) => RIPPLE / Math.hypot(1, 2 * Math.PI * LAMP * d));
-  const lampLag = DECAY.map((d) => Math.atan(2 * Math.PI * LAMP * d));
+  const lamp = lampWave();
 
   host.style.background = `rgb(${PAPER.map((c) => Math.round(c * 255)).join(",")})`;
   const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
@@ -430,8 +494,8 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniform1f(u.uReadout, READOUT);
     gl.uniform1f(u.uExpo, expo);
     gl.uniform1f(u.uLamp0, lastFrame.lamp);
-    gl.uniform3f(u.uLampDepth, ...lampDepth);
-    gl.uniform3f(u.uLampLag, ...lampLag);
+    gl.uniform3fv(u.uLampC, lamp.C);
+    gl.uniform3fv(u.uLampS, lamp.S);
     gl.uniform2f(u.uLampDir, LAMP_DIR[0], LAMP_DIR[1]);
     // Readout direction: rows run along (cos, sin) of the scan angle's
     // perpendicular; s grows down the frame at scan = 0.
