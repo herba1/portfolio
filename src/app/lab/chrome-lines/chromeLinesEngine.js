@@ -136,8 +136,9 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // reflections and calm between them, not a scatter of islands.
   const K2 = [num("H2", 0.015), num("Hr", 0.015), num("bw", 0.42), num("Hb", 0.12)];
   // How far the colour plates sit out of register with the key (a fraction
-  // of the pitch), the ripples' slope, how far the reflected ray turns the
-  // screen, and the ripples' scale.
+  // of the pitch), the ripples' slope, a retired slot (the screen no longer
+  // turns with the reflected ray: it keeps one cutting angle), and the
+  // ripples' scale. K's third slot (displacement by tone) is retired too.
   const E = [num("mis", 0.2), num("rip", 0.05), num("kx", 7), num("rk", 56)];
   // The studio: how far every normal leans out from the pool's middle (one
   // dome under the whole body), the horizon's tilt (radians) and offset,
