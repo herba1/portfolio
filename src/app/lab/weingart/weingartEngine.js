@@ -1,32 +1,31 @@
 // Weingart: a song credit set as a forme of metal type. Every line is a row
 // of sorts, single pieces of lead, that move only in whole steps, straight
 // down, so a word keeps its shape while its baseline breaks. A line's first
-// sort is locked to its composed place on the chase's left margin, so the
-// Swiss axis of the forme always holds: push a sort down and the line
-// swings on that first sort like a lever, a step at a time, its far end
-// first, so the line bends before it breaks into an uneven staircase
-// hinged on the margin. Display type, brass and the credit lines all step
-// by one unit, the brass rule's body, so every riser in the forme is a whole
-// number of the same piece of brass. Sorts of the same ink are solid
-// bodies: a line that comes down onto a neighbouring line shoves the sorts
-// it lands on a step, the line bends to them from the margin, and past that
-// knee it takes on the shoving line's own riser, sort for sort, and hands it
-// on down the chain, so a full push nests the title lines as stairs. Lead
-// stays in contact: no sort ever hangs more than its own body below the one
-// before it. The stair is the type's alone. The brass rule is one length,
-// never cut, from the margin to the right edge of the figure, set at rest as
-// the foot of the title. It is solid and only ever moves whole: the moment a
-// sort comes down into its lead it drops in one knock to the forme's foot,
-// its heavy face across the bottom strokes of the red, just over the
-// writer's credit, and there the black overprints the red and the two inks
-// make a third. Type that comes down onto it there locks the run; when its
-// composed place is clear again it goes back. The writer's credit is set
-// flush on the margin on the red's own baseline. At rest the forme is
-// strict: the title on the margin, the colophon flush on the red's edge,
-// hung from the cap line of "Here". Every stair on the page is one a push
-// made.
-// ?t=0..1 holds a still of "Here" pushed down through the forme; t=1 is the
-// last even stair before the run locks.
+// sort is locked to the chase's left margin, so the Swiss axis of the forme
+// always holds. The display lines break only at a few joins, a word space or
+// one break inside a long word (He|re, Co|mes, the |Sun); between joins the
+// sorts are locked up as one piece on one shared baseline, and each join
+// drops a whole tread, the title's x-height on the brass's own pitch. So a
+// broken line is flat treads and hard risers, never a slope. Push a line
+// down and it breaks at its join; push harder and the push passes into the
+// stack under it: the line below breaks at its join, then the next, one
+// tread at a time, until the title is three stairs stacked to the foot of
+// the forme. A line that is shoved by the one above goes down whole, a tread
+// at a time, still on the margin, so lines never run into each other. Small
+// type steps by the brass body and bends in word slugs, hinged on its first
+// word. The brass rule is one length, never cut, from the margin to the
+// right edge of the figure, set at rest as the foot of the title. It is
+// solid and only ever moves whole: the moment a sort comes down into its
+// lead it drops in one knock to the forme's foot, its heavy face across the
+// bottom strokes of the red, just over the writer's credit, and there the
+// black overprints the red and the two inks make a third. Type that comes
+// down onto it there locks the run; when its composed place is clear again
+// it goes back. The writer's credit is set flush on the margin on the red's
+// own baseline. At rest the forme is strict: the title on the margin, the
+// colophon flush on the red's edge, hung from the cap line of "Here". Every
+// stair on the page is one a push made.
+// ?t=0..1 holds a still of "Here" pushed down through the forme, one tread
+// per push; t=1 is the last tread before the run locks.
 import { createStage, clamp } from "../_kit/stage";
 
 // Design space the forme is composed in, fitted into the piece box.
@@ -38,9 +37,9 @@ const DH = 600;
 // breaks.
 const STEP_BODY = 1 / 3;
 // The forme's one riser: the brass rule's body, the lead it is cast on.
-// Display type, brass and the credit lines all step by it, so every stair in
-// the forme, type or rule, rises in whole multiples of the same piece of
-// brass and they nest as one system instead of three pitches colliding.
+// Brass and the credit lines step by it, and display type by a tread of a
+// whole number of it (TREAD, below), so every stair in the forme, type or
+// rule, rises in whole multiples of the same piece of brass.
 const UNIT = 12;
 // What prints of the brass: a heavy face, nearly the whole body, so where
 // it crosses the red the overprint is a band of the third ink, not a
@@ -86,10 +85,14 @@ const law = (size) => -0.043 * (size - 12);
 // The forme. x, y are the baseline-left (or rule top-left) of each line as composed.
 const FORME = [
   { text: "The Beatles", size: 20, w: "strong", x: 4, y: 52 },
-  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 592 },
-  { text: "Here", size: 108, w: "semibold", x: 0, y: 168 },
-  { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
-  { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
+  // Display lines break only at their joins, marked "|", in the order a
+  // push opens them: a word space, or one break inside a long word. Between
+  // joins the sorts are locked up as one piece on one baseline, so a broken
+  // line is flat treads with hard risers, never a slope.
+  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 592, joins: ["3:|05"] },
+  { text: "Here", size: 108, w: "semibold", x: 0, y: 168, joins: ["He|re"] },
+  { text: "Comes", size: 108, w: "semibold", x: 0, y: 264, joins: ["Co|mes"] },
+  { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360, joins: ["the |Sun"] },
   // The rule: one length of brass, never cut, from the title's margin to
   // the right edge of the "5" (see cutRule). At rest it is the foot of the
   // title, a full measure over the red. It is solid and only ever moves
@@ -284,6 +287,22 @@ export async function createWeingart(host) {
     }
   };
   cut();
+  // The tread: display type drops by whole steps of the forme, the title's
+  // x-height to the nearest brass body, so a broken word lands its foot a
+  // full lowercase below the piece before it: a riser, not a slope. Each
+  // join a push opens is one tread; a line hangs no more than one tread at
+  // any join, so pushing harder opens the next join, it never steepens one.
+  const title = slugs.find((o) => o.text === HANG_FROM);
+  const TREAD = Math.max(UNIT, Math.round(measure(title, "x").cap / UNIT) * UNIT);
+  for (const s of slugs) {
+    if (!s.joins) continue;
+    s.terrace = true;
+    s.sy = TREAD;
+    s.reach = 1;
+    // Each join as the index of the sort that starts the piece after it.
+    s.at = s.joins.map((j) => j.indexOf("|"));
+    s.hinge = Math.min(...s.at);
+  }
 
   // A line's state is one whole step per sort, counted from where it was
   // composed. The first sort never moves: it is locked on the margin, and
@@ -302,6 +321,39 @@ export async function createWeingart(host) {
     const q = Math.floor(a / J);
     const r = a - q * J;
     return s.ord.map((n) => Math.sign(D) * (n <= J ? n * q + Math.max(0, n - (J - r)) : a + n - J));
+  };
+  // A display line breaks a tread at a time, and only at its joins: to take
+  // sort j one tread further (dir), a join broken the other way is closed
+  // first, the last one opened first; otherwise the next join at or before j
+  // in the line's order opens, and every sort past it goes with it, locked
+  // on one shared baseline. The line stays hinged on its first piece.
+  // Returns false when there is no join left to open.
+  const terrace = (s, v, j, dir) => {
+    const riser = (k) => v[k] - v[k - 1];
+    const open = (k) => {
+      for (let i = k; i < v.length; i++) v[i] += dir;
+      return true;
+    };
+    for (let n = s.at.length - 1; n >= 0; n--) if (s.at[n] <= j && riser(s.at[n]) * dir < 0) return open(s.at[n]);
+    for (const k of s.at) if (k <= j && riser(k) === 0) return open(k);
+    return false;
+  };
+  // One push on a display line in the hand. It breaks at its own next join;
+  // once it has none left, a push down passes into the stack under it, and
+  // the next display line below that can still break opens its join, top
+  // to bottom. So pushing harder adds a tread to the forme, one at a time,
+  // and never steepens one. Returns the line that breaks and its new state,
+  // or null where the run is locked.
+  const push = (s, j, dir) => {
+    const v = s.vec.slice();
+    if (terrace(s, v, j, dir) && !clash(s, v)) return [s, v];
+    if (dir < 0) return null;
+    const below = slugs.filter((o) => o.terrace && o.layer === s.layer && o.y > s.y).sort((a, b) => a.y - b.y);
+    for (const o of below) {
+      const w = o.vec.slice();
+      if (terrace(o, w, o.units.length - 1, dir)) return [o, w];
+    }
+    return null;
   };
   // A sort's ink at offset o steps, with a hair of clearance.
   const inkRect = (s, u, o) => ({
@@ -358,6 +410,12 @@ export async function createWeingart(host) {
   // Hit on its first sort, the margin holds and the run locks. Returns
   // false then.
   const carry = (s, v, j, dir, rise = 0) => {
+    // A display line that is shoved does not break: it goes on whole, a
+    // tread at a time, its first sort still on the margin.
+    if (s.terrace) {
+      for (let i = 0; i < v.length; i++) v[i] += dir;
+      return true;
+    }
     const J = s.ord[j];
     if (j <= 0 || J <= 0) return false;
     // Worked in the direction the line is broken: sd turns it the right way up.
@@ -539,8 +597,13 @@ export async function createWeingart(host) {
   const setVec = (s, vec, animate, depth = 0) => {
     s.vec = vec;
     const stagger = s === held ? STAGGER_HELD : STAGGER;
+    // A display line moves as locked-up pieces: everything a step moves goes
+    // on one beat, the beat of its first sort, and only that sort knocks.
+    const first = s.terrace ? s.units.findIndex((u, j) => vec[j] !== u.q) : -1;
     s.units.forEach((u, j) => {
       const to = vec[j];
+      const beat = s.terrace ? first : j;
+      u.head = !s.terrace || j === first;
       if (!animate) {
         u.p = u.k = u.q = to;
         u.v = 0;
@@ -552,7 +615,7 @@ export async function createWeingart(host) {
       u.q = to;
       u.settled = false;
       // Already queued: keep its place in the sequence, it takes the newest step when it goes.
-      if (u.wait <= 0) u.wait = depth * LINK + j * stagger + 1e-6;
+      if (u.wait <= 0) u.wait = depth * LINK + beat * stagger + 1e-6;
     });
   };
 
@@ -565,8 +628,8 @@ export async function createWeingart(host) {
     let deepest = 0;
     while (at !== d) {
       const dir = Math.sign(d - at);
-      const v = dragged(s, base, j, at + dir);
-      const pl = v && plan(s, v, dir);
+      const step = s.terrace ? push(s, j, dir) : [s, dragged(s, base, j, at + dir)];
+      const pl = step && step[1] && plan(step[0], step[1], dir);
       if (!pl) return { at, steps, deepest, locked: true };
       for (const [o, { v, depth }] of pl) {
         deepest = Math.max(deepest, depth);
@@ -601,10 +664,10 @@ export async function createWeingart(host) {
     chase = { lo: -ox / scale + m, hi: (W - ox) / scale - m, top: -oy / scale + m, bot: (H - oy) / scale - m };
   };
 
-  // Still: from the composed forme, push "Here" down the chase by its last
-  // sort and let it shove everything below it. t is the fraction of the way
-  // to where the whole run locks against the chase; t=1 is the last even
-  // stair short of that lock.
+  // Still: from the composed forme, push "Here" down by its last sort, one
+  // tread a push, and let it break and shove everything below it. t is the
+  // fraction of the pushes it takes to lock the run; t=1 is the last tread
+  // before that lock.
   const applyStill = () => {
     const here = slugs.find((s) => s.text === "Here");
     const tail = here.units.length - 1;
@@ -615,11 +678,7 @@ export async function createWeingart(host) {
     reset();
     const all = drag(here, here.vec, tail, 0, D_MAX, false).steps;
     reset();
-    // A full push holds the last even stair before the lock: "Here" one
-    // riser per sort, so the lines it shoves take that riser on.
-    const J = here.ord[tail];
-    const at = Math.round(stillT * all);
-    drag(here, here.vec, tail, 0, stillT === 1 ? at - (at % J) : at, false);
+    drag(here, here.vec, tail, 0, Math.round(stillT * all), false);
   };
 
   stage.onResize((w, h, d) => {
@@ -715,7 +774,10 @@ export async function createWeingart(host) {
     // Held by the sort under the hand: what is ahead of it is pushed, what
     // is behind it trails into a staircase. The first sort is locked, so a
     // hand on it works the sort beside it.
-    grab = { x: p.x, y: p.y, base: s.vec.slice(), j: Math.max(1, h.j), d: 0 };
+    // A display line held on its first piece, before any join, is worked by
+    // its far end.
+    const j = s.terrace && h.j < s.hinge ? s.units.length - 1 : Math.max(1, h.j);
+    grab = { x: p.x, y: p.y, base: s.vec.slice(), j, d: 0 };
     s.lockedAt = false;
     canvas.style.cursor = "grabbing";
   });
@@ -855,8 +917,9 @@ export async function createWeingart(host) {
     dirty = false;
     if (stillT == null) {
       for (const s of slugs) {
-        // The pull shows along the lever: nothing at the hinge, most at the far end.
-        const pull = s === held ? s.nudge / grab.j : 0;
+        // The pull shows along the lever: nothing at the hinge, most at the
+        // far end. A display line shows it whole, past its first join.
+        const pull = s !== held ? 0 : s.terrace ? s.nudge : s.nudge / grab.j;
         // Stiff and critically damped while held; a touch stiffer to seat.
         // Shoved sorts are stiffer than the hand, so they stay just ahead of
         // the sort pushing them instead of being passed through in transit.
@@ -870,7 +933,7 @@ export async function createWeingart(host) {
             u.wait -= dt;
             if (u.wait <= 0) u.k = u.q;
           }
-          const target = u.k + pull * j;
+          const target = u.k + (s.terrace ? (j >= s.hinge ? pull : 0) : pull * j);
           const sub = 3;
           const h = dt / sub;
           for (let i = 0; i < sub; i++) {
@@ -887,7 +950,7 @@ export async function createWeingart(host) {
               u.seat = 1;
               // Brass seating whole lands with one heavy knock.
               if (s.rule) click(520, 0.16, 1.1);
-              else if (u.vis) knock(j);
+              else if (u.vis && u.head) knock(j);
             }
           }
         });
