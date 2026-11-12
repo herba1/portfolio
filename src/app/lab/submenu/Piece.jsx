@@ -34,6 +34,12 @@ const TRAIL = { k: 520, zeta: 1 };
 
 const EASE_OUT = [0.22, 1, 0.36, 1];
 
+// The still's cut: unless ?aim names a point, a held cascade freezes the
+// pointer here, relative to the root menu's top-left — over Go to, having
+// crossed Share from Add to Playlist, heading for the submenu.
+const AIM_STILL = { x: 186, y: 160 };
+const AIM_ANGLE = 0.67; // the still's cut: px across per px down since the exit
+
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function rowsOf(items) {
@@ -157,6 +163,19 @@ function Chevron() {
   );
 }
 
+// "186,160" → { x: 186, y: 160 }, or null.
+function parsePt(v) {
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(v ?? "");
+  return m ? { x: +m[1], y: +m[2] } : null;
+}
+
+// The safe triangle for a panel and its open child: apex just behind where the
+// pointer left the open row, base on the child's near edge.
+function triFor(child, E) {
+  const nx = child.dir > 0 ? child.x : child.x + child.w;
+  return { nx, tri: [{ x: E.x - child.dir * APEX_BACK, y: E.y }, { x: nx, y: child.y - PAD }, { x: nx, y: child.y + child.h + PAD }] };
+}
+
 // "playlist.seasons.long-summer" → open each named submenu; a final leaf
 // is the highlighted row.
 function parseOpen(items, spec) {
@@ -178,6 +197,8 @@ function parseOpen(items, spec) {
 export default function Piece() {
   const rootRef = useRef(null);
   const debugRef = useRef({ tri: null, ray: null, dot: null });
+  const aimRef = useRef({});
+  const stillAim = useRef(null);
   const [box, setBox] = useState({ W: 0, H: 0 });
   const [st, setSt] = useState({ menu: null, path: [], hl: [], flash: null });
   const stRef = useRef(st);
@@ -207,6 +228,36 @@ export default function Piece() {
   const commitState = useCallback((next) => {
     stRef.current = next;
     setSt(next);
+  }, []);
+
+  // ── The aim: the safe triangle, drawn while it holds the highlight ──
+  // A hairline wedge from where the pointer left the open row to the
+  // child's near edge, the cut travelled since, and where the current
+  // heading meets that edge. It fades out as the pointer lands.
+  const aimOff = useCallback(() => {
+    aimRef.current.svg?.removeAttribute("data-on");
+  }, []);
+
+  const drawAim = useCallback((child, E, P, v) => {
+    const R = aimRef.current;
+    if (!R.svg) return;
+    const { nx, tri } = triFor(child, E);
+    const [, A, B] = tri;
+    R.wedge.setAttribute("points", tri.map((q) => `${q.x},${q.y}`).join(" "));
+    R.cut.setAttribute("d", `M${E.x} ${E.y}L${P.x} ${P.y}`);
+    R.exit.setAttribute("cx", E.x);
+    R.exit.setAttribute("cy", E.y);
+    R.at.setAttribute("cx", P.x);
+    R.at.setAttribute("cy", P.y);
+    if (v.x * child.dir > 0) {
+      const yh = clamp(P.y + (v.y * (nx - P.x)) / v.x, A.y, B.y);
+      R.ray.setAttribute("d", `M${P.x} ${P.y}L${nx} ${yh}`);
+      R.tick.setAttribute("d", `M${nx - 6} ${yh}h12`);
+    } else {
+      R.ray.setAttribute("d", "");
+      R.tick.setAttribute("d", "");
+    }
+    R.svg.setAttribute("data-on", "");
   }, []);
 
   // ── Size against the piece box ──────────────────────────────────────
@@ -257,10 +308,11 @@ export default function Piece() {
     const root = rootRef.current;
     if (root && root.contains(document.activeElement)) root.focus({ preventScroll: true });
     commitState({ menu: null, path: [], hl: [], flash: null });
+    aimOff();
     const d = debugRef.current;
     if (d.tri) d.tri.setAttribute("points", "");
     if (d.ray) d.ray.setAttribute("d", "");
-  }, [commitState]);
+  }, [aimOff, commitState]);
 
   // ── Boot: open by default, or hold the state the URL names ──────────
   useEffect(() => {
@@ -281,6 +333,10 @@ export default function Piece() {
       const { path, hl, deepest } = parseOpen(items, spec);
       openAt(CONTEXT_TRACK, ax, ay, ox, oy, { path, hl, held: true });
       fl.current = hl.length - 1;
+      // The cut, held: ?aim=x,y (from the root menu's top-left) or the
+      // default over Go to once a submenu is open; ?aim=none leaves it off.
+      const aim = q.get("aim");
+      if (aim !== "none" && path.length) stillAim.current = parsePt(aim) ?? AIM_STILL;
       const from = q.get("from");
       const t = parseFloat(q.get("t"));
       if (from && Number.isFinite(t)) {
@@ -394,6 +450,26 @@ export default function Piece() {
     }
     kick();
 
+    // A held cut: the pointer frozen inside the triangle of the panel it is
+    // over, having left that panel's open row on the angle that led here.
+    const a = stillAim.current;
+    if (a && panels.length > 1) {
+      stillAim.current = null;
+      const r0 = panels[0];
+      const P = { x: r0.x + a.x, y: r0.y + a.y };
+      const owner = panels.slice(0, -1).findLast((p) => inside(p, P.x, P.y));
+      const row = owner && owner.rows[st.path[owner.level]];
+      if (row) {
+        const child = panels[owner.level + 1];
+        const ey = owner.y + row.top + (P.y > owner.y + row.top ? ROW : 0);
+        const E = { x: clamp(P.x - Math.abs(P.y - ey) * AIM_ANGLE * child.dir, owner.x + PAD, owner.x + owner.w - PAD), y: ey };
+        const d = Math.hypot(P.x - E.x, P.y - E.y) || 1;
+        const v = { x: (P.x - E.x) / d, y: (P.y - E.y) / d };
+        drawAim(child, E, P, v);
+        drawDebug(triFor(child, E).tri, true, P, v);
+      }
+    }
+
     if (wantFocus.current) {
       wantFocus.current = false;
       const level = Math.min(fl.current, panels.length - 1);
@@ -401,7 +477,7 @@ export default function Piece() {
       const el = (idx >= 0 && itemRefs.current.get(`${panels[level]?.key}:${idx}`)) || panelRefs.current.get(panels[level]?.key);
       el?.focus({ preventScroll: true });
     }
-  }, [panels, st.hl, kick, reduce]);
+  }, [panels, st.hl, st.path, kick, reduce, drawAim]);
 
   const thaw = () => {
     if (frozen.current === true) {
@@ -508,6 +584,7 @@ export default function Piece() {
       const d = ps[ps.length - 1];
       if ((cur.hl[d.level] ?? -1) >= 0) commitState({ ...cur, hl: cur.hl.slice(0, d.level).concat(-1) });
       drawDebug(tri, false, { x, y }, vel.current);
+      aimOff();
       return;
     }
 
@@ -521,6 +598,7 @@ export default function Piece() {
       else if (l < ps.length - 2) commitState({ ...cur, path: cur.path.slice(0, l + 1), hl: cur.hl.slice(0, l + 1).concat(-1) });
       fl.current = l;
       drawDebug(tri, false, { x, y }, vel.current);
+      aimOff();
       return;
     }
     if (i === null) {
@@ -540,12 +618,11 @@ export default function Piece() {
       }
       // Triangle from where the pointer left the open row to the child's near edge.
       const E = exitPt.current[l] ?? { x, y };
-      const apex = { x: E.x - child.dir * APEX_BACK, y: E.y };
-      const A = { x: nx, y: child.y - PAD };
-      const B = { x: nx, y: child.y + child.h + PAD };
+      const [apex, A, B] = triFor(child, E).tri;
       if (ok) ok = inTriangle({ x, y }, apex, A, B);
       if (l === ps.length - 2) drawDebug([apex, A, B], ok, { x, y }, v);
       if (ok) {
+        drawAim(child, E, { x, y }, v);
         clearTimeout(grace.current);
         grace.current = setTimeout(() => {
           const p = last.current;
@@ -556,9 +633,10 @@ export default function Piece() {
     } else drawDebug(tri, false, { x, y }, vel.current);
 
     clearTimeout(grace.current);
+    aimOff();
     highlight(l, i, { open: true });
     exitPt.current[l] = { x, y };
-  }, [commitState, highlight]);
+  }, [aimOff, commitState, drawAim, highlight]);
 
   const onPointerMove = (e) => {
     if (e.pointerType === "touch") return;
@@ -877,6 +955,25 @@ export default function Piece() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      {box.W ? (
+        <svg
+          className="sm-aim"
+          width="100%"
+          height="100%"
+          aria-hidden="true"
+          ref={(el) => {
+            aimRef.current.svg = el;
+          }}
+        >
+          <polygon className="sm-aim-wedge" ref={(el) => (aimRef.current.wedge = el)} points="" />
+          <path className="sm-aim-cut" ref={(el) => (aimRef.current.cut = el)} d="" />
+          <path className="sm-aim-ray" ref={(el) => (aimRef.current.ray = el)} d="" />
+          <path className="sm-aim-tick" ref={(el) => (aimRef.current.tick = el)} d="" />
+          <circle className="sm-aim-exit" ref={(el) => (aimRef.current.exit = el)} r="2.5" />
+          <circle className="sm-aim-at" ref={(el) => (aimRef.current.at = el)} r="2.5" />
+        </svg>
+      ) : null}
 
       {debug ? (
         <svg className="sm-debug" width="100%" height="100%" aria-hidden="true">
