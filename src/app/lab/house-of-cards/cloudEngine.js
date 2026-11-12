@@ -1,24 +1,37 @@
 import { createStage, clamp } from "../_kit/stage";
 
-// A photograph as a point cloud. Every cell of the depth grid becomes one
-// point, unprojected along its own camera ray to the depth Depth Anything
-// gave it, and coloured from the photo. Seen from the camera that took it,
-// the cloud reprojects to exactly the photograph: each point lands on its own
-// cell, square and opaque. Loosening it does three things at once: the points
-// turn into soft round dots of light, they drift apart along their rays and in
-// a slow divergence-free current, and the camera turns a few degrees, which is
-// what shows the depth. The loose cloud is not drawn as dots on screen: it is
-// splatted as wide Gaussians (wider the further a point sits from the focal
-// depth, so the points carry their own depth of field) into a half-res
-// half-float buffer, light and coverage kept apart so dark points vanish
-// instead of drawing as specks, then resolved with a normalized-convolution
-// pyramid and laid over the sharp photograph, which fades point by point.
-// Two springs carry the loosening, a quick one for near
-// points and a slow one for far ones, so the picture re-forms front to back.
+// A photograph as a point cloud, then as a lidar scan. Every cell of the depth
+// grid becomes one point, unprojected along its own camera ray to the depth
+// Depth Anything gave it, and coloured from the photo. Seen from the camera
+// that took it, the cloud reprojects to exactly the photograph: each point
+// lands on its own cell, square and opaque.
+//
+// Loosening it never blurs anything. Each point hands over from its opaque
+// square to a crisp additive dot of its own colour on black, one device pixel
+// at first, so the photo turns into a countable grid of light. Then the grid
+// thins to what a spinning Velodyne would have returned: points on horizontal
+// scan rings of constant elevation seen from a sensor a little above the lens,
+// every other step of azimuth. Because the sensor sits above the camera, a
+// ring lands lower on near things than on far ones, so the lines jog at every
+// depth edge (the figure, the taxis, the truck) even before the camera moves.
+// Then the camera swings round half a radian about the middle distance: near
+// and far layers shear apart, black shadows open behind everything the photo
+// could not see past, and the street reads as a volume. The sky gives no
+// return and stays black. Two springs carry the loosening, a quick one for
+// near points and a slow one for far ones, so the picture re-forms front to
+// back.
 
 const SCENES = {
   city: { src: "/lab/house-of-cards/city.webp", depth: "/lab/house-of-cards/city-depth.png", bg: [0, 0, 0], fit: "contain" },
 };
+
+// Scan geometry.
+const RINGS = 150; // scan rings across the frame
+const SENSOR = 0.03; // sensor height above the lens, world units (z = 1 is the nearest point)
+// Orbit: the most the camera turns, radians, about a pivot in world units.
+const YAW = 0.55;
+const PITCH = 0.16;
+const PIVOT = 2.1;
 
 const VS = `#version 300 es
 layout(location=0) in float aCell;
@@ -34,28 +47,26 @@ uniform vec2 uLoose;       // near spring, far spring
 uniform vec2 uOrbit;       // yaw, pitch
 uniform float uTime;
 uniform float uPivot;
-uniform float uFocus;      // depth (0 far .. 1 near) that stays sharp
-uniform float uScale;      // target px per device px (0.5 for the soft layer)
-uniform int uPass;         // 0 sharp photo, 1 soft light
-out vec3 vColor;
-out float vW;
-out float vLum;
+uniform float uRing;       // scan ring spacing, device px
+uniform float uSensor;     // sensor height above the lens
+uniform int uPass;         // 0 opaque photo, 1 lidar dots
+out vec4 vColor;
 
-// Integer hash: a float sin-hash loses precision past a few thousand cells
-// and paints diagonal moire across half a million points.
 float hash(uint x){
   x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
   return float(x) / 4294967295.0;
 }
 
-// Each component ignores its own axis, so the field has no divergence: points
-// flow around each other instead of bunching up.
+// Each component ignores its own axis, so the field has no divergence: the
+// scan lines bend together instead of fraying.
 vec3 flow(vec3 p, float t){
   return vec3(
     sin(p.y * 1.7 + t) + 0.5 * sin(p.z * 2.3 - t * 0.7),
     sin(p.z * 1.9 + t * 0.8) + 0.5 * sin(p.x * 2.1 + t * 0.6),
     sin(p.x * 1.5 - t * 0.9) + 0.5 * sin(p.y * 2.7 + t * 0.5));
 }
+
+void cull(){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; }
 
 void main(){
   float gx = mod(aCell, uGrid.x);
@@ -65,27 +76,59 @@ void main(){
 
   float d = aDepth;                       // relative inverse depth, 1 = near
   float far = 1.0 - d;
-  float z = 1.0 / (0.16 + 0.84 * d);       // 1 near .. ~6 far
+  float z = 1.0 / (0.35 + 0.65 * d);       // 1 near .. ~2.9 far
   vec2 scr = (uv - 0.5) * uRect * vec2(1.0, -1.0) + uOffset * vec2(1.0, -1.0);
   vec3 p = vec3(scr / uFocal * z, z);
 
   // Far points let go first and come back last.
   float s = mix(uLoose.x, uLoose.y, smoothstep(0.0, 1.0, far));
-  // How far this point has handed over from the photo to the soft light.
-  float L = smoothstep(0.0, 0.16, s);
+  // How far this point has handed over from the photo to a dot of light.
+  float L = smoothstep(0.0, 0.12, s);
   float w = uPass == 0 ? 1.0 - L : L;
-  if (w < 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+  if (w < 0.002) { cull(); return; }
 
+  float cell = uRect.y / uGrid.y;
+  float size = cell + 0.6;
+  if (uPass == 1) {
+    // The sky is out of range: no return.
+    if (d < 0.015) { cull(); return; }
+    // Which scan ring this point sits on: elevation from the sensor, in ring
+    // steps. A point is a return if its cell holds the ring's centre line.
+    vec3 q = p - vec3(0.0, uSensor, 0.0);
+    float u = q.y / length(q.xz) * uFocal / uRing;
+    float k = floor(u + 0.5);
+    bool onRing = abs(u - k) * uRing < cell * 0.5;
+    // Along the ring, every other azimuth step, staggered ring to ring; a
+    // lit surface returns on every step, so the signs read as solid strips.
+    float m = max(max(srgb.r, srgb.g), srgb.b);
+    bool onStep = mod(gx + k, 2.0) < 0.5 || m > 0.55;
+    bool ret = onRing && onStep;
+    // Everything else goes out early: the dense grid is a stage on the way.
+    float keep = ret ? 1.0 : 1.0 - smoothstep(0.08, 0.42, s);
+    w *= keep;
+    if (w < 0.004) { cull(); return; }
+    // Returns are a whole device pixel wider than the grid's dots.
+    size = ret ? 2.0 : 1.0;
+    // Light on black. The signs run hot and keep their hue (scaled back under 1 instead of
+    // clipping to white, and a touch more saturated); walls and asphalt stay
+    // dim grey lines, so the city's light carries the picture.
+    float y = dot(srgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 c = max(mix(vec3(y), srgb, 1.3), 0.0) * 1.8;
+    // Near surfaces return stronger, as a real scanner's do, so a dark coat
+    // close by still reads as lines while the far dark street sinks.
+    c = c / max(1.0, max(max(c.r, c.g), c.b)) + vec3(0.88, 1.0, 1.1) * (0.03 + 0.2 * d * d * d);
+    vColor = vec4(c * w, 0.0);
+  } else {
+    vColor = vec4(srgb * w, w);
+  }
+
+  // Apart along the ray, the far street more than the near figure, so the
+  // layers that sat flush separate in depth as the camera turns.
+  p *= 1.0 + s * 0.12 * far;
+  // A slow current; it is smooth, so whole scan lines bend together.
   uint id = uint(aCell);
-  float r1 = hash(id), r2 = hash(id ^ 0x9e3779b9u), r3 = hash(id + 0x632be5abu);
-  // Apart along the ray: depth is stretched and every point gets its own
-  // share of scatter, so layers that sat flush pull away from each other.
-  float spread = 1.0 + s * (0.22 * (r1 - 0.5) + 0.18 * far);
-  p *= spread;
-  // A slow current, scaled with distance so it reads the same on screen.
-  vec3 q = p * 0.9 + vec3(r2, r3, r1) * 0.12;
-  p += flow(q, uTime + r2 * 0.3) * (0.016 * z) * s * s;
-  p += (vec3(r1, r2, r3) - 0.5) * 0.007 * z * s;
+  float r2 = hash(id ^ 0x9e3779b9u);
+  p += flow(p * 0.9, uTime + r2 * 0.05) * (0.005 * z) * s * s;
 
   // Orbit about a pivot in the middle distance.
   p.z -= uPivot;
@@ -94,133 +137,22 @@ void main(){
   float cp = cos(uOrbit.y), sp = sin(uOrbit.y);
   p = vec3(p.x, cp * p.y - sp * p.z, sp * p.y + cp * p.z);
   p.z += uPivot;
+  if (p.z < 0.1) { cull(); return; }
 
   vec2 o = p.xy / p.z * uFocal;
   gl_Position = vec4(o / (uCanvas * 0.5), 0.0, 1.0);
-
-  float cell = uRect.y / uGrid.y * uScale;
-  float persp = z / p.z;
-  if (uPass == 0) {
-    // At rest a point is exactly its cell, a hair over to close the seams.
-    gl_PointSize = clamp((cell + 0.6) * persp, 1.0, 40.0);
-    vColor = srgb;
-  } else {
-    // Depth of field on the points themselves: the further a point sits from
-    // the focal depth and the further it has drifted, the wider its disc.
-    float dof = abs(d - uFocus);
-    float grow = s * (1.4 + 1.8 * r3 + 16.0 * dof * dof + 6.0 * dof);
-    gl_PointSize = clamp(cell * (3.0 + grow) * persp, 1.0, 64.0);
-    vColor = pow(srgb, vec3(2.2));   // light adds in linear
-    // Dark street and dark clothes give way: only the city's light stays.
-    float m = max(srgb.r, max(srgb.g, srgb.b));
-    vLum = smoothstep(0.08, 0.42, m);
-    w = pow(w, 2.2);                 // so the crossfade is even after encoding
-  }
-  vW = w;
+  // At rest a point is exactly its cell, a hair over to close the seams; a
+  // dot stays its fixed device size however close it comes.
+  gl_PointSize = uPass == 0 ? clamp(size * z / p.z, 1.0, 40.0) : size;
 }`;
 
-const FS_SHARP = `#version 300 es
+const FS = `#version 300 es
 precision highp float;
-in vec3 vColor; in float vW;
+in vec4 vColor;
 out vec4 o;
-void main(){
-  // Square, opaque at rest: the photograph, pixel for pixel. Premultiplied.
-  o = vec4(vColor * vW, vW);
-}`;
-
-const FS_SOFT = `#version 300 es
-precision highp float;
-in vec3 vColor; in float vW; in float vLum;
-layout(location=0) out vec4 o;
-layout(location=1) out vec4 oCov;
-void main(){
-  vec2 c = gl_PointCoord - 0.5;
-  float r2 = dot(c, c) * 4.0;
-  if (r2 > 1.0) discard;
-  float g = exp(-r2 * 4.0);
-  // Target 0 holds light only: dark points add nothing to it, so they never
-  // draw as dark specks. Target 1 holds every point's coverage, which says
-  // where the cloud is, light or not.
-  o = vec4(vColor * (g * vW * vLum), g * vLum);
-  oCov = vec4(g * vW, 0.0, 0.0, 0.0);
-}`;
-
-const VS_QUAD = `#version 300 es
-out vec2 vUv;
-void main(){
-  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
-  vUv = p * 0.5 + 0.5;
-  gl_Position = vec4(p, 0.0, 1.0);
-}`;
-
-const FS_MASK = `#version 300 es
-precision highp float;
-in vec2 vUv;
-uniform sampler2D uCov;
-out vec4 o;
-// What fraction of the screen the cloud covers, as 0..1, so its mips say
-// "mostly inside" or "mostly outside" regardless of how densely points pile.
-void main(){ o = vec4(smoothstep(0.05, 0.6, texture(uCov, vUv).r), 0.0, 0.0, 1.0); }`;
-
-const FS_COMPOSITE = `#version 300 es
-precision highp float;
-in vec2 vUv;
-uniform sampler2D uAcc;
-uniform sampler2D uCov;
-uniform sampler2D uMask;
-uniform vec2 uTexel;
-out vec4 o;
-// A 3x3 tent over one mip level; bilinear taps make it wide and smooth so
-// the coarse levels never show their blocks.
-vec4 blurLod(sampler2D tx, float lod){
-  vec2 k = uTexel * exp2(lod) * 1.2;
-  vec4 s = textureLod(tx, vUv, lod) * 4.0;
-  s += (textureLod(tx, vUv + vec2(k.x, 0.0), lod) + textureLod(tx, vUv - vec2(k.x, 0.0), lod)
-      + textureLod(tx, vUv + vec2(0.0, k.y), lod) + textureLod(tx, vUv - vec2(0.0, k.y), lod)) * 2.0;
-  s += textureLod(tx, vUv + k, lod) + textureLod(tx, vUv - k, lod)
-     + textureLod(tx, vUv + vec2(k.x, -k.y), lod) + textureLod(tx, vUv + vec2(-k.x, k.y), lod);
-  return s / 16.0;
-}
-vec4 soft(float lod){ return blurLod(uAcc, lod); }
-void main(){
-  // A small tent over the half-res buffer; bilinear taps make it 4x4.
-  vec4 a = texture(uAcc, vUv) * 0.36;
-  a += texture(uAcc, vUv + uTexel * vec2( 0.9,  0.9)) * 0.16;
-  a += texture(uAcc, vUv + uTexel * vec2(-0.9,  0.9)) * 0.16;
-  a += texture(uAcc, vUv + uTexel * vec2( 0.9, -0.9)) * 0.16;
-  a += texture(uAcc, vUv + uTexel * vec2(-0.9, -0.9)) * 0.16;
-  // Where the dark points were (the street, the figure, the sky between
-  // buildings) the light around them closes in from coarser levels of the
-  // same buffer, a normalized-convolution pyramid, like a defocused lens
-  // spreading the signs into the shadow. Big dark areas far from any light
-  // stay dark: the fill fades with how much light the neighbourhood holds.
-  vec4 m3 = soft(3.0);
-  vec4 m5 = soft(5.0);
-  // Half a step coarser again, so no single point reads on its own.
-  a = mix(a, soft(1.0), 0.55);
-  vec4 t = a;
-  float h = max(0.0, 1.0 - t.a) * smoothstep(0.0, 0.25, m3.a);
-  t += vec4(m3.rgb / max(m3.a, 1e-4), 1.0) * h;
-  h = max(0.0, 1.0 - t.a) * smoothstep(0.0, 0.2, m5.a);
-  t += vec4(m5.rgb / max(m5.a, 1e-4), 1.0) * h;
-  // Where splats pile up, their weighted average: a smooth field.
-  vec3 c = t.rgb / max(t.a, 1.0);
-  // Only inside the cloud's footprint, which falls off softly at its edge.
-  // Narrow gaps the cloud opens behind near objects are inside too, so they
-  // fill with light; the outer edge fades over a few pixels.
-  float inside = max(smoothstep(0.25, 0.75, blurLod(uMask, 1.5).r), smoothstep(0.45, 0.75, blurLod(uMask, 4.5).r));
-  c *= inside;
-  // Keep the neon's chroma: averaging neighbours pulls toward grey.
-  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = max(mix(vec3(y), c, 1.25), 0.0);
-  // A breath of glow from the raw sum, rolled off so it never clips.
-  vec3 glow = 1.0 - exp(-a.rgb * 0.06);
-  c += glow * 0.3;
-  // And a wide, faint bloom off the signs, inside the cloud only.
-  vec3 bloom = 1.0 - exp(-soft(4.0).rgb * 0.05);
-  c += bloom * 0.35 * inside;
-  o = vec4(pow(c, vec3(1.0 / 2.2)), 0.0);
-}`;
+// Pass 0 is premultiplied over; pass 1 adds light. Either way a square of
+// one flat colour: nothing is filtered, so every dot stays a hard pixel.
+void main(){ o = vColor; }`;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -257,7 +189,7 @@ export async function createCloud(host) {
   for (let i = 0; i < n; i++) depth[i] = (px[i * 4] * 256 + px[i * 4 + 1]) / 65535;
 
   // Far to near, once: drawing in this order lets the opaque rest state
-  // occlude correctly and keeps the soft state free of depth-test fringes.
+  // occlude correctly without a depth buffer.
   const order = new Uint32Array(n);
   for (let i = 0; i < n; i++) order[i] = i;
   const keys = new Uint16Array(n);
@@ -272,66 +204,13 @@ export async function createCloud(host) {
 
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false, alpha: false });
   const gl = stage.ctx;
-  const link = (vs, fs) => {
-    const p = gl.createProgram();
-    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs));
-    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-    return p;
-  };
-  const progSharp = link(VS, FS_SHARP);
-  const progSoft = link(VS, FS_SOFT);
-  const progComp = link(VS_QUAD, FS_COMPOSITE);
-  const progMask = link(VS_QUAD, FS_MASK);
-  const NAMES = ["uColor", "uGrid", "uRect", "uCanvas", "uOffset", "uFocal", "uLod", "uLoose", "uOrbit", "uTime", "uPivot", "uFocus", "uScale", "uPass"];
-  const uniforms = (p) => Object.fromEntries(NAMES.map((k) => [k, gl.getUniformLocation(p, k)]));
-  const USharp = uniforms(progSharp);
-  const USoft = uniforms(progSoft);
-  const UComp = { uAcc: gl.getUniformLocation(progComp, "uAcc"), uMask: gl.getUniformLocation(progComp, "uMask"), uTexel: gl.getUniformLocation(progComp, "uTexel") };
-
-  // The soft layer accumulates at half resolution in a half-float target, so
-  // hundreds of overlapping splats sum without banding and the per-pixel
-  // speckle of a point cloud never reaches the screen.
-  const floatOk = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
-  const acc = { tex: gl.createTexture(), cov: gl.createTexture(), mask: gl.createTexture(), fbo: gl.createFramebuffer(), mfbo: gl.createFramebuffer(), w: 0, h: 0 };
-  const UMask = gl.getUniformLocation(progMask, "uCov");
-  const sizeAcc = (w, h) => {
-    if (w === acc.w && h === acc.h) return;
-    acc.w = w;
-    acc.h = h;
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, acc.tex);
-    if (floatOk) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.bindTexture(gl.TEXTURE_2D, acc.cov);
-    if (floatOk) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, acc.fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, acc.tex, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, acc.cov, 0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    gl.bindTexture(gl.TEXTURE_2D, acc.mask);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, acc.mfbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, acc.mask, 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.activeTexture(gl.TEXTURE0);
-  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const NAMES = ["uColor", "uGrid", "uRect", "uCanvas", "uOffset", "uFocal", "uLod", "uLoose", "uOrbit", "uTime", "uPivot", "uRing", "uSensor", "uPass"];
+  const U = Object.fromEntries(NAMES.map((k) => [k, gl.getUniformLocation(prog, k)]));
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -373,15 +252,15 @@ export async function createCloud(host) {
   if (hold != null) {
     st.near.x = hold * 0.82;
     st.far.x = hold;
-    st.yaw.x = 0.1 * hold;
-    st.pitch.x = -0.035 * hold;
+    st.yaw.x = -YAW * 0.75 * hold;
+    st.pitch.x = -PITCH * 0.25 * hold;
     st.time = 2.4;
   }
 
   let dirty = true;
   let grab = null;
   stage.on("down", (p) => {
-    grab = { x: p.x, y: p.y, yaw: st.tYaw, pitch: st.tPitch };
+    grab = { x: p.x, y: p.y };
     st.target = 0.22;
     dirty = true;
   });
@@ -390,10 +269,13 @@ export async function createCloud(host) {
     const dx = p.x - grab.x;
     const dy = p.y - grab.y;
     const s = Math.min(stage.width, stage.height);
-    // Soft limits: the camera turns a few degrees at most.
+    // Soft limits: far enough round that the depth shows, never so far the
+    // street turns edge-on.
     const soft = (v, m) => m * Math.tanh(v / m);
-    st.tYaw = soft((dx / s) * 0.5, 0.14);
-    st.tPitch = soft((-dy / s) * 0.3, 0.06);
+    // Dragging right carries the near layer right, as if the street were
+    // held by the figure in front and turned about the middle distance.
+    st.tYaw = soft((-dx / s) * 1.6, YAW);
+    st.tPitch = soft((-dy / s) * 0.8, PITCH);
     st.target = clamp(0.22 + Math.hypot(dx, dy) / (s * 0.45), 0, 1);
     dirty = true;
   });
@@ -413,32 +295,9 @@ export async function createCloud(host) {
     return Math.abs(target - sp.x) > 1e-4 || Math.abs(sp.v) > 1e-4;
   };
 
-  let W = 1;
-  let H = 1;
-  let dpr = 1;
-  stage.onResize((w, h, d) => {
-    W = w;
-    H = h;
-    dpr = d;
+  stage.onResize(() => {
     dirty = true;
   });
-
-  const setCloud = (U, pass, scale, rw, rh, cw, ch) => {
-    gl.uniform1i(U.uColor, 0);
-    gl.uniform2f(U.uGrid, gw, gh);
-    gl.uniform2f(U.uRect, rw, rh);
-    gl.uniform2f(U.uCanvas, cw, ch);
-    gl.uniform2f(U.uOffset, 0, 0);
-    gl.uniform1f(U.uFocal, Math.max(rw, rh) * 1.1);
-    gl.uniform1f(U.uLod, Math.max(0, Math.log2(img.width / gw)));
-    gl.uniform2f(U.uLoose, st.near.x, st.far.x);
-    gl.uniform2f(U.uOrbit, st.yaw.x, st.pitch.x);
-    gl.uniform1f(U.uTime, st.time);
-    gl.uniform1f(U.uPivot, 2.2);
-    gl.uniform1f(U.uFocus, 0.6);
-    gl.uniform1f(U.uScale, scale);
-    gl.uniform1i(U.uPass, pass);
-  };
 
   const draw = () => {
     const cw = gl.drawingBufferWidth;
@@ -453,65 +312,38 @@ export async function createCloud(host) {
       rw = cw;
       rh = rw / ia;
     }
-    gl.bindVertexArray(vao);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.enable(gl.BLEND);
-    const open = Math.max(st.near.x, st.far.x) > 1e-4;
-
-    // Soft light, half resolution, summed.
-    if (open) {
-      const hw = Math.ceil(cw / 2);
-      const hh = Math.ceil(ch / 2);
-      sizeAcc(hw, hh);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, acc.fbo);
-      gl.viewport(0, 0, hw, hh);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.useProgram(progSoft);
-      setCloud(USoft, 1, hw / cw, rw, rh, cw, ch);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      gl.drawArrays(gl.POINTS, 0, n);
-      // Coverage to a 0..1 mask with mips.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, acc.mfbo);
-      gl.disable(gl.BLEND);
-      gl.useProgram(progMask);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, acc.cov);
-      gl.uniform1i(UMask, 2);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.enable(gl.BLEND);
-      gl.bindTexture(gl.TEXTURE_2D, acc.mask);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
-
-    // The sharp photograph, fading out point by point as each one lets go.
     gl.viewport(0, 0, cw, ch);
     gl.clearColor(br, bg, bb, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(progSharp);
+    gl.bindVertexArray(vao);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    setCloud(USharp, 0, 1, rw, rh, cw, ch);
+    gl.useProgram(prog);
+    gl.uniform1i(U.uColor, 0);
+    gl.uniform2f(U.uGrid, gw, gh);
+    gl.uniform2f(U.uRect, rw, rh);
+    gl.uniform2f(U.uCanvas, cw, ch);
+    gl.uniform2f(U.uOffset, 0, 0);
+    gl.uniform1f(U.uFocal, Math.max(rw, rh) * 1.1);
+    gl.uniform1f(U.uLod, Math.max(0, Math.log2(img.width / gw)));
+    gl.uniform2f(U.uLoose, st.near.x, st.far.x);
+    gl.uniform2f(U.uOrbit, st.yaw.x, st.pitch.x);
+    gl.uniform1f(U.uTime, st.time);
+    gl.uniform1f(U.uPivot, PIVOT);
+    gl.uniform1f(U.uRing, rh / RINGS);
+    gl.uniform1f(U.uSensor, SENSOR);
+    gl.enable(gl.BLEND);
+
+    // The photograph, opaque, fading out point by point as each one lets go.
+    gl.uniform1i(U.uPass, 0);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArrays(gl.POINTS, 0, n);
 
-    if (open) {
-      gl.useProgram(progComp);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, acc.tex);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.uniform1i(UComp.uAcc, 1);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, acc.mask);
-      gl.uniform1i(UComp.uMask, 2);
-      gl.uniform2f(UComp.uTexel, 1 / acc.w, 1 / acc.h);
+    // The same points as light on black, added.
+    if (Math.max(st.near.x, st.far.x) > 1e-4) {
+      gl.uniform1i(U.uPass, 1);
       gl.blendFunc(gl.ONE, gl.ONE);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.activeTexture(gl.TEXTURE0);
+      gl.drawArrays(gl.POINTS, 0, n);
     }
   };
 
