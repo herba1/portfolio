@@ -82,28 +82,47 @@ const rubber = (v, lo, hi, c = 48) => {
 
 // The poster as a guillotine grid: every split is one gutter. `x` splits
 // side by side (a vertical gutter), `y` stacks (a horizontal gutter); k is
-// the share of the space the first child takes. In portrait the grid is
-// transposed so the same composition stands up.
+// the share of the space the first child takes. Leaves are "w" (a solved W)
+// or "type" (the set exhibition line). In portrait the grid is transposed
+// so the same composition stands up.
 //
 //   ┌─────┬───────────────────┐
-//   │     │         B         │   A  tall
-//   │  A  ├─────────┬─────────┤   B  panoramic
-//   │     │    C    │    D    │   C  square
-//   │     │         ├─────────┤   D,E  wide
-//   │     │         │    E    │
+//   │     │         B         │   A  tall W
+//   │  A  ├─────────┬─────────┤   B  panoramic W
+//   │     │         │    D    │   C  square W
+//   │     │    C    ├─────────┤   D  wide, shallow W
+//   │     │         │  E type │   E  the type, deeper than D
 //   └─────┴─────────┴─────────┘
+//
+// The type sits under the wide W rather than beside it, so the gutter that
+// narrows its column also re-proportions C and D: marks and lines answer
+// the same drag. `pull` is where the hero still drags a gutter to.
 const LAYOUT = {
   dir: "x",
   k: 0.3,
-  pull: 0.15, // where the hero still drags this gutter to
-  a: null,
+  pull: 0.15,
+  a: "w",
   b: {
     dir: "y",
     k: 0.33,
-    a: null,
-    b: { dir: "x", k: 0.49, a: null, b: { dir: "y", k: 0.5, a: null, b: null } },
+    a: "w",
+    b: { dir: "x", k: 0.49, pull: 0.7, a: "w", b: { dir: "y", k: 0.38, a: "w", b: "type" } },
   },
 };
+
+// The exhibition line the type frame sets. Invented, after the posters the
+// Whitney system ran on: a title, what it is, when, where.
+const TITLE = "Every Edge Touched";
+// No-break spaces keep a date and a city whole when the column narrows.
+const FACTS = [
+  "Drawings for a responsive W",
+  "12\u00a0November\u00a02026 – 21\u00a0February\u00a02027",
+  "40 Gutter Street, New\u00a0York",
+];
+// Title steps from the type scale, largest first. The frame takes the
+// largest that sets without breaking a word or running out of depth.
+const STEPS = ["display", "title-xl", "title-lg", "title"];
+const GAP = 16; // the least room between title and facts, as in zigzag.css
 
 export function createZigzag(host) {
   const stage = createStage(host, { dpr: 2 });
@@ -115,13 +134,62 @@ export function createZigzag(host) {
   // current share, a target it settles on, a velocity, and its rule's ink.
   const gutters = [];
   const build = (n) => {
-    if (!n) return null;
+    if (typeof n === "string") return { leaf: n };
     const node = { dir: n.dir, rest: n.k, pull: n.pull, k: n.k, target: n.k, v: 0, ink: 0, a: build(n.a), b: build(n.b), box: null };
     gutters.push(node);
     return node;
   };
   const root = build(LAYOUT);
-  const hero = root;
+  // The hero pulls every gutter that has a pull: the root toward the
+  // margin and the nested one under B toward the type, so a tall W, a
+  // squarer W, a shallower W and a re-ragged column all answer at once.
+  const pulled = gutters.filter((node) => node.pull != null);
+
+  // The type frame: real DOM text over the canvas, set by the browser so
+  // it rags and steps like a page would. Its box is the leaf's box.
+  const type = document.createElement("div");
+  type.className = "zigzag-type";
+  type.setAttribute("aria-label", `${TITLE}. ${FACTS.join(". ")}.`);
+  const title = document.createElement("h2");
+  title.className = "zigzag-title";
+  title.textContent = TITLE;
+  const facts = document.createElement("p");
+  facts.className = "zigzag-facts";
+  FACTS.forEach((line, i) => {
+    const el = document.createElement(i === 0 ? "strong" : "span");
+    el.textContent = line;
+    facts.appendChild(el);
+  });
+  type.append(title, facts);
+  host.appendChild(type);
+  // A hidden twin at the smallest step answers how deep the block must be
+  // at a trial width, so a drag stops before the lines run out of room.
+  const probe = type.cloneNode(true);
+  probe.removeAttribute("aria-label");
+  probe.setAttribute("aria-hidden", "true");
+  probe.dataset.step = STEPS[STEPS.length - 1];
+  Object.assign(probe.style, { visibility: "hidden", height: "auto", justifyContent: "flex-start" });
+  host.appendChild(probe);
+  const depthCache = new Map();
+  let minTypeW = 0;
+  const measure = () => {
+    depthCache.clear();
+    probe.style.width = "min-content";
+    minTypeW = Math.ceil(probe.offsetWidth) + 1;
+    typeBox = null;
+  };
+  // Geist may land after the first layout; measure again once it has.
+  document.fonts?.ready.then(measure);
+  const typeDepth = (w) => {
+    const key = Math.round(w);
+    let d = depthCache.get(key);
+    if (d == null) {
+      probe.style.width = `${key}px`;
+      d = probe.offsetHeight;
+      depthCache.set(key, d);
+    }
+    return d;
+  };
 
   let BW = 1;
   let BH = 1;
@@ -133,6 +201,7 @@ export function createZigzag(host) {
   let hover = null; // node
   let demo = null;
   let hinted = false;
+  let typeBox = null; // the box the type was last set in
   const t0 = performance.now();
 
   stage.onResize((w, h) => {
@@ -143,6 +212,7 @@ export function createZigzag(host) {
     G = clamp(Math.round((short * 0.02) / 4) * 4, 8, 20);
     M = clamp(Math.round((short * 0.04) / 4) * 4, 12, 40);
     weight = Math.max(5, Math.round(short * 0.038));
+    measure();
   });
 
   // The axis a split works along, after transposing for portrait.
@@ -151,8 +221,8 @@ export function createZigzag(host) {
   // Lay out the tree into boxes. With `over` a single split can be given a
   // trial share without touching the live state.
   const lay = (node, box, leaves, over) => {
-    if (!node) {
-      leaves.push(box);
+    if (node.leaf) {
+      leaves.push({ kind: node.leaf, box });
       return;
     }
     node.box = box;
@@ -177,7 +247,10 @@ export function createZigzag(host) {
 
   // A frame is fillable when the W can still touch all four sides at the
   // shared weight: tall enough for the mitres, wide enough for the crotches.
-  const fits = ([, , w, h]) => h >= weight * 2.6 && w >= minWidth(h, weight) * 1.08;
+  // The type frame is fillable while its words fit unbroken and its lines,
+  // at the smallest title step, still clear its depth.
+  const fits = ({ kind, box: [, , w, h] }) =>
+    kind === "type" ? w >= minTypeW && h >= typeDepth(w) : h >= weight * 2.6 && w >= minWidth(h, weight) * 1.08;
   const leavesOf = (node, side) => {
     const out = [];
     const [x, y, w, h] = node.box;
@@ -253,9 +326,9 @@ export function createZigzag(host) {
     }
     if (best) return best;
     // Inside a frame: the nearest of its own sides that is a gutter.
-    const leaf = leaves.find(([x, y, w, h]) => px >= x && px <= x + w && py >= y && py <= y + h);
+    const leaf = leaves.find(({ box: [x, y, w, h] }) => px >= x && px <= x + w && py >= y && py <= y + h);
     if (!leaf) return null;
-    const [lx, ly, lw, lh] = leaf;
+    const [lx, ly, lw, lh] = leaf.box;
     bestD = Infinity;
     for (const node of gutters) {
       const [x, y, w, h] = node.box;
@@ -333,6 +406,21 @@ export function createZigzag(host) {
     }
   };
 
+  // Move the type into its frame and, when the frame changed size, take the
+  // largest title step whose words fit unbroken and whose lines clear the
+  // depth. The browser re-rags the balanced title on every width.
+  const setType = ([x, y, w, h]) => {
+    type.style.transform = `translate(${x}px, ${y}px)`;
+    if (typeBox && Math.abs(typeBox[0] - w) < 0.25 && Math.abs(typeBox[1] - h) < 0.25) return;
+    typeBox = [w, h];
+    type.style.width = `${w}px`;
+    type.style.height = `${h}px`;
+    for (const step of STEPS) {
+      type.dataset.step = step;
+      if (title.scrollWidth <= w + 0.5 && title.offsetHeight + GAP + facts.offsetHeight <= h + 0.5) break;
+    }
+  };
+
   const draw = () => {
     const dpr = stage.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -359,7 +447,12 @@ export function createZigzag(host) {
     // The W's, one per frame, at one weight.
     ctx.fillStyle = INK;
     ctx.beginPath();
-    for (const [x, y, w, h] of leaves) {
+    for (const { kind, box } of leaves) {
+      if (kind === "type") {
+        setType(box);
+        continue;
+      }
+      const [x, y, w, h] = box;
       const pts = outline(x, y, x + w, y + h, weight);
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
@@ -370,11 +463,13 @@ export function createZigzag(host) {
 
   stage.onFrame((dt) => {
     if (still != null) {
-      // The hero: the main gutter pulled toward the margin, so the tall,
-      // the panoramic and the square W stand side by side.
-      for (const node of gutters) node.k = node.rest;
-      hero.k = mix(hero.rest, hero.pull, still);
-      for (const node of gutters) node.ink = still > 0 && node === hero ? 1 : 0;
+      // The hero: the main gutter pulled toward the margin and the nested
+      // one toward the type, so the tall, the panoramic and the square W
+      // stand beside a column that has re-ragged for the same pull.
+      for (const node of gutters) {
+        node.k = node.pull != null ? mix(node.rest, node.pull, still) : node.rest;
+        node.ink = still > 0 && node.pull != null ? 1 : 0;
+      }
       draw();
       return;
     }
@@ -391,19 +486,27 @@ export function createZigzag(host) {
         demo = null;
       } else {
         const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, k / 0.6));
-        hero.k = mix(hero.rest, mix(hero.rest, hero.pull, 0.7), e);
-        hero.v = 0;
-        hero.target = hero.rest;
+        for (const node of pulled) {
+          node.k = mix(node.rest, mix(node.rest, node.pull, 0.7), e);
+          node.v = 0;
+          node.target = node.rest;
+        }
       }
     }
     if (!demo) spring(dt);
-    const act = drag ? drag.node : demo ? hero : stage.pointer.inside ? hover : null;
+    const act = drag ? drag.node : stage.pointer.inside ? hover : null;
     for (const node of gutters) {
-      const on = node === act;
+      const on = demo ? node.pull != null : node === act;
       node.ink = mix(node.ink, on ? 1 : 0, 1 - Math.exp(-dt * (on ? 18 : 6)));
     }
     draw();
   });
 
-  return { destroy: () => stage.destroy() };
+  return {
+    destroy: () => {
+      stage.destroy();
+      type.remove();
+      probe.remove();
+    },
+  };
 }

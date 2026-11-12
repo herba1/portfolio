@@ -1,6 +1,6 @@
 {
   "title": "Zigzag",
-  "description": "A poster grid of black zigzags, after the Whitney's responsive W. Five frames share their gutters, and each holds its own solved W at one stroke weight. Drag any gutter and the frames on both sides re-proportion at once: one W goes flat and panoramic while its neighbour goes tall and narrow, and every mitre still lands exactly on all four sides of its frame.",
+  "description": "A responsive poster after the Whitney's W. Five frames share their gutters: four hold a solved W at one stroke weight, and one sets an exhibition line in Geist from the type scale. Drag any gutter and the frames on both sides re-proportion at once. One W goes flat and panoramic while its neighbour goes tall and narrow, every mitre still lands on all four sides of its frame, and the type column re-rags and steps its title size to match.",
   "tags": ["Identity", "Geometry", "Canvas"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",

@@ -1,0 +1,84 @@
+/* The set-type frame. It is one more leaf of the gutter grid: the engine
+ * moves and sizes it every frame, the browser sets and rags the lines.
+ * Each step pulls size, leading, tracking and weight from one scale token,
+ * so the block can step down a size as its frame narrows without any of
+ * the four numbers drifting apart. */
+.zigzag-type {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  pointer-events: none;
+  color: #000;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  opacity: 0;
+  transition: opacity 600ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.kit-piece[data-ready] .zigzag-type {
+  opacity: 1;
+}
+
+/* Like the W, the type touches its frame: the title's cap height sits on
+ * the top edge and the last baseline on the bottom edge. */
+.zigzag-title {
+  margin: 0;
+  text-wrap: balance;
+  text-box: trim-start cap alphabetic;
+}
+
+.zigzag-type[data-step="display"] .zigzag-title {
+  font-size: var(--text-display);
+  line-height: var(--text-display--line-height);
+  letter-spacing: var(--text-display--letter-spacing);
+  font-weight: var(--text-display--font-weight);
+}
+
+.zigzag-type[data-step="title-xl"] .zigzag-title {
+  font-size: var(--text-title-xl);
+  line-height: var(--text-title-xl--line-height);
+  letter-spacing: var(--text-title-xl--letter-spacing);
+  font-weight: var(--text-title-xl--font-weight);
+}
+
+.zigzag-type[data-step="title-lg"] .zigzag-title {
+  font-size: var(--text-title-lg);
+  line-height: var(--text-title-lg--line-height);
+  letter-spacing: var(--text-title-lg--letter-spacing);
+  font-weight: var(--text-title-lg--font-weight);
+}
+
+.zigzag-type[data-step="title"] .zigzag-title {
+  font-size: var(--text-title);
+  line-height: var(--text-title--line-height);
+  letter-spacing: var(--text-title--letter-spacing);
+  font-weight: var(--text-title--font-weight);
+}
+
+/* The facts: one small step, held at full ink. Hierarchy against the title
+ * is weight and scale, never fade. */
+.zigzag-facts {
+  margin: 0;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  font-variant-numeric: tabular-nums;
+  text-box: trim-end cap alphabetic;
+}
+
+.zigzag-facts span {
+  display: block;
+}
+
+.zigzag-facts strong {
+  display: block;
+  font-weight: var(--font-weight-strong);
+}
