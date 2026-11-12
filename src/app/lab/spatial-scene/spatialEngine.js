@@ -22,6 +22,11 @@ const YAW = 6; // degrees at |x| = 1
 const PITCH_UP = 16; // degrees at y = 1
 const PITCH_DOWN = 8; // degrees at y = -1
 const GRID_X = 120;
+// The film finish: diffusion added back, halation strength (linear), grain
+// amplitude (sRGB units, at mid grey).
+const MIST = 0.09;
+const HALATION = 0.3;
+const GRAIN = 0.045;
 const GRID_Y = 160;
 
 const smooth = (a, b, x) => {
@@ -45,12 +50,12 @@ vec3 unproject(vec2 X){
   float th = atan(r * uS / uF) / uS;
   return r > 1e-6 ? vec3(X / r * sin(th), cos(th)) : vec3(0.0, 0.0, 1.0);
 }
-// Film-like: blacks lifted a hair, highlights rolled off under paper white.
-vec3 grade(vec3 rgb){
-  rgb = mix(vec3(0.035, 0.03, 0.04), vec3(1.0), rgb);
-  vec3 o = max(rgb - 0.85, 0.0);
-  return min(rgb, 0.85 + o / (1.0 + o / 0.13));
-}`;
+// The layers are drawn in linear light into a half-float target, so the film
+// pass can scatter light the way glass and emulsion do. (Where half float
+// can't be rendered to, an 8-bit target holds sqrt(linear) instead.)
+uniform float uPack;
+vec3 toLinear(vec3 c){ return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 store(vec3 c){ return uPack > 0.5 ? sqrt(c) : c; }`;
 
 const NEAR_VS = `#version 300 es
 layout(location=0) in vec2 aUv;
@@ -76,7 +81,7 @@ out vec4 o;
 void main(){
   vec4 c = texture(uCol, vUv); // premultiplied on upload
   vec3 rgb = c.a > 0.0 ? c.rgb / c.a : vec3(0.0);
-  o = vec4(grade(rgb) * c.a, c.a);
+  o = vec4(store(toLinear(rgb)) * c.a, c.a);
 }`;
 
 const QUAD_VS = `#version 300 es
@@ -95,7 +100,106 @@ void main(){
   vec3 d = uM * unproject(X);
   vec2 p = uF * d.xy / max(d.z, 0.05);
   vec2 uv = vec2((p.x - uCanvas.x) / (uCanvas.z - uCanvas.x), (uCanvas.w - p.y) / (uCanvas.w - uCanvas.y));
-  o = vec4(grade(texture(uSky, uv).rgb), 1.0);
+  vec3 c = texture(uSky, uv).rgb;
+  // Alpha carries the highlight mask (luma past ~0.75) for halation; the
+  // near layer occludes it as it's drawn, and the mips blur it.
+  float hl = smoothstep(0.68, 0.84, dot(c, vec3(0.2126, 0.7152, 0.0722)));
+  o = vec4(store(toLinear(c)), hl);
+}`;
+
+// The film finish: one shader, 1:1 with device pixels, run in two stages so
+// that a still view costs only the grain. uStage 0 develops the linear frame
+// (diffusion and halation, written out sRGB-encoded) whenever the camera
+// moves; uStage 1 prints that (grade and grain) at 24 fps.
+//  - Pro-Mist diffusion: a wide, low veil of the whole image (three mip
+//    taps out to 1/16 res) added back, so cloud bleeds into the cobalt
+//    and over the pole's edges.
+//  - Halation: light from the highlights (luma > 0.75, carried in the
+//    target's alpha) that went through the emulsion and came back off the
+//    base through the red layer, a thin
+//    warm ring on the dark side of bright edges only: a hairline round the
+//    pole and wires where they cross cloud.
+//  - The grade: blacks lifted a hair, shadows and sky midtones pulled to
+//    cyan, highlights opened and rolled off from 0.9 towards a warm neutral
+//    (#fff6ea) under paper white.
+//  - Grain: monochrome, at 24 fps, 1.5-2 device px, strongest in midtones.
+const FILM_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene; uniform vec2 uTexel; uniform float uPack; uniform float uFrame;
+uniform float uMist; uniform float uHalation; uniform float uGrain; uniform float uStage;
+out vec4 o;
+vec3 fetch(vec2 uv, float lod){ vec3 c = textureLod(uScene, uv, lod).rgb; return uPack > 0.5 ? c * c : c; }
+float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 toSrgb(vec3 c){ c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+// Four rotated bilinear taps at one mip level: a soft, roughly Gaussian lobe
+// rather than the mip's box.
+vec3 lobe(vec2 uv, float lod){
+  vec2 d = uTexel * exp2(lod);
+  return 0.25 * (fetch(uv + d * vec2(0.9, 0.4), lod) + fetch(uv + d * vec2(-0.4, 0.9), lod)
+               + fetch(uv + d * vec2(-0.9, -0.4), lod) + fetch(uv + d * vec2(0.4, -0.9), lod));
+}
+// n is the grain, added before the shoulder so the highlights hold it down
+vec3 grade(vec3 c, float n){
+  float l = luma(c);
+  // what the phone held down at ~0.9 opens towards paper white, and its
+  // brightest cloud bleaches to neutral rather than staying blue-grey
+  float h = smoothstep(0.66, 0.95, l);
+  c = mix(c, vec3(l), h * h * 0.45) * mix(1.0, 1.1, h);
+  c = mix(vec3(0.035, 0.03, 0.04), vec3(1.0), c);
+  // cyan in the shadows and through the sky's midtones
+  float m = smoothstep(0.0, 0.3, l) * (1.0 - smoothstep(0.55, 0.85, l));
+  c += m * vec3(-0.022, 0.004, 0.012);
+  // grain, in the print's tones: strongest in the midtones
+  c += n * (0.15 + 3.4 * l * (1.0 - l));
+  // shoulder at 0.9, rolling off towards a warm neutral, never paper white
+  vec3 over = max(c - 0.9, 0.0);
+  c = min(c, 0.9 + over / (1.0 + over / 0.11));
+  c *= mix(vec3(1.0), vec3(1.0, 0.965, 0.918), smoothstep(0.88, 0.955, luma(c)) * 0.9);
+  return min(c, vec3(0.975));
+}
+float hash(vec3 p){
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+// Smooth value noise on a 1.75 px lattice, triangular values: film grain
+// clumps rather than a pixel-sharp digital speckle.
+float grain(vec2 px, float f){
+  vec2 g = px / 1.75;
+  vec2 i = floor(g);
+  vec2 t = g - i;
+  t = t * t * (3.0 - 2.0 * t);
+  float v[4];
+  for (int k = 0; k < 4; k++){
+    vec3 q = vec3(i + vec2(k & 1, k >> 1), f);
+    v[k] = hash(q) + hash(q + 17.13) - 1.0;
+  }
+  return mix(mix(v[0], v[1], t.x), mix(v[2], v[3], t.x), t.y);
+}
+void main(){
+  if (uStage > 0.5){
+    vec3 c = textureLod(uScene, vUv, 0.0).rgb;
+    o = vec4(grade(c, grain(gl_FragCoord.xy, uFrame) * uGrain), 1.0);
+    return;
+  }
+  vec3 lin = fetch(vUv, 0.0);
+  // diffusion
+  vec3 veil = 0.2 * fetch(vUv, 2.0) + 0.35 * fetch(vUv, 3.0) + 0.45 * lobe(vUv, 4.0);
+  lin += uMist * (veil - 0.35 * lin);
+  // halation: the highlight mask blurred ~3-6 px, kept only where the pixel
+  // itself is dark and not highlight
+  float self = textureLod(uScene, vUv, 0.0).a;
+  float around = 0.0;
+  for (int k = 0; k < 8; k++){
+    float a = float(k) * 0.7853982 + 0.4;
+    vec2 d = vec2(cos(a), sin(a)) * uTexel;
+    around += (k & 1) == 0 ? textureLod(uScene, vUv + d * 2.0, 1.5).a : textureLod(uScene, vUv + d * 4.5, 2.5).a;
+  }
+  around /= 8.0;
+  float ring = max(around - self, 0.0) * (1.0 - smoothstep(0.02, 0.35, luma(lin)));
+  lin += ring * uHalation * vec3(1.0, 0.34, 0.1);
+  o = vec4(toSrgb(lin), 1.0);
 }`;
 
 // A print lying on the ground: a soft, faint contact shadow, nothing more.
@@ -215,6 +319,42 @@ export async function createSpatial(host) {
   const nearProg = compile(gl, NEAR_VS, NEAR_FS);
   const skyProg = compile(gl, QUAD_VS, SKY_FS);
   const shadowProg = compile(gl, QUAD_VS, SHADOW_FS);
+  const filmProg = compile(gl, QUAD_VS, FILM_FS);
+
+  // The layers render into a target the size of the print in device pixels,
+  // with mips for the film pass's wide taps.
+  const halfFloat = !!gl.getExtension("EXT_color_buffer_float");
+  const pack = halfFloat ? 0 : 1;
+  const film = { tex: gl.createTexture(), fbo: gl.createFramebuffer(), dev: gl.createTexture(), devFbo: gl.createFramebuffer(), w: 0, h: 0 };
+  const sizeTarget = (w, h) => {
+    if (w === film.w && h === film.h) return;
+    film.w = w;
+    film.h = h;
+    const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
+    // texStorage is immutable; a resize needs a fresh texture.
+    gl.deleteTexture(film.tex);
+    film.tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, film.tex);
+    gl.texStorage2D(gl.TEXTURE_2D, levels, halfFloat ? gl.RGBA16F : gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, film.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, film.tex, 0);
+    // the developed frame, which the print stage reads 1:1
+    gl.deleteTexture(film.dev);
+    film.dev = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, film.dev);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, halfFloat ? gl.RGBA16F : gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, film.devFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, film.dev, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  };
 
   // The near layer's grid; each vertex is displaced by the layer's depth.
   const verts = new Float32Array((GRID_X + 1) * (GRID_Y + 1) * 2);
@@ -276,11 +416,90 @@ export async function createSpatial(host) {
   });
 
   let drift = held ? 0 : 1;
+  let grainFrame = -1;
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
   let time = 0;
   const drawn = { x: NaN, y: NaN };
 
-  const render = () => {
+  const drawLayers = () => {
+    const { dpr } = stage;
+    // the camera: yaw about the pole's (world-vertical) axis, pitch about
+    // the horizontal, both through the anchor
+    const yaw = (cam.x * YAW * Math.PI) / 180;
+    const pitch = ((cam.y > 0 ? cam.y * PITCH_UP : cam.y * PITCH_DOWN) * Math.PI) / 180;
+    const M = mul(rotation(UP, yaw), rotation([1, 0, 0], -pitch));
+    const s = lensFor(cam.y);
+    // The lens change moves the anchor radially; a principal-point shift puts it back.
+    const pa = projectJS(A, F, s);
+    const off = [pa[0] - restA[0], pa[1] - restA[1]];
+    const Mc = columnMajor(M);
+    const setLens = (prog) => {
+      gl.uniform1f(prog.u.uF, F);
+      gl.uniform1f(prog.u.uS, s);
+      gl.uniform2f(prog.u.uOff, off[0], off[1]);
+      gl.uniformMatrix3fv(prog.u.uM, false, Mc);
+      gl.uniform4f(prog.u.uRect, -1, -1, 1, 1);
+      gl.uniform1f(prog.u.uPack, pack);
+    };
+
+    // the layers, in linear light, filling the target
+    sizeTarget(Math.max(1, Math.round(print.w * dpr)), Math.max(1, Math.round(print.h * dpr)));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, film.fbo);
+    gl.viewport(0, 0, film.w, film.h);
+    gl.disable(gl.SCISSOR_TEST);
+
+    gl.disable(gl.BLEND);
+    gl.useProgram(skyProg.p);
+    setLens(skyProg);
+    gl.uniform4f(skyProg.u.uCanvas, ...scene.canvas);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex.sky);
+    gl.uniform1i(skyProg.u.uSky, 0);
+    gl.bindVertexArray(quadVao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.enable(gl.BLEND);
+    // colour: premultiplied over; alpha (the sky's highlight mask): occluded
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(nearProg.p);
+    setLens(nearProg);
+    gl.uniform3f(nearProg.u.uA, A[0], A[1], A[2]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex.depth);
+    gl.uniform1i(nearProg.u.uDepth, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tex.near);
+    gl.uniform1i(nearProg.u.uCol, 1);
+    gl.bindVertexArray(gridVao);
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+    gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, film.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+
+    // develop: diffusion and halation, into the developed frame
+    gl.bindFramebuffer(gl.FRAMEBUFFER, film.devFbo);
+    gl.disable(gl.BLEND);
+    gl.useProgram(filmProg.p);
+    gl.uniform4f(filmProg.u.uRect, -1, -1, 1, 1);
+    gl.uniform1f(filmProg.u.uStage, 0);
+    gl.uniform2f(filmProg.u.uTexel, 1 / film.w, 1 / film.h);
+    gl.uniform1f(filmProg.u.uPack, pack);
+    gl.uniform1f(filmProg.u.uMist, MIST);
+    gl.uniform1f(filmProg.u.uHalation, HALATION);
+    gl.uniform1i(filmProg.u.uScene, 0);
+    gl.bindVertexArray(quadVao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+  };
+
+  // Two speeds: the layers are drawn into the film target only when the
+  // camera moves; the film pass runs every grain frame (24 fps) on top.
+  const render = (layers) => {
     const { width: W, height: H, dpr } = stage;
+    if (layers) drawLayers();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(GROUND[0], GROUND[1], GROUND[2], 1);
@@ -302,54 +521,25 @@ export async function createSpatial(host) {
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // the camera: yaw about the pole's (world-vertical) axis, pitch about
-    // the horizontal, both through the anchor
-    const yaw = (cam.x * YAW * Math.PI) / 180;
-    const pitch = ((cam.y > 0 ? cam.y * PITCH_UP : cam.y * PITCH_DOWN) * Math.PI) / 180;
-    const M = mul(rotation(UP, yaw), rotation([1, 0, 0], -pitch));
-    const s = lensFor(cam.y);
-    // The lens change moves the anchor radially; a principal-point shift puts it back.
-    const pa = projectJS(A, F, s);
-    const off = [pa[0] - restA[0], pa[1] - restA[1]];
-    const Mc = columnMajor(M);
-    const setLens = (prog) => {
-      gl.uniform1f(prog.u.uF, F);
-      gl.uniform1f(prog.u.uS, s);
-      gl.uniform2f(prog.u.uOff, off[0], off[1]);
-      gl.uniformMatrix3fv(prog.u.uM, false, Mc);
-      gl.uniform4f(prog.u.uRect, ...rect);
-    };
-
-    // the scene, clipped to the print
+    // the developed print
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(Math.round(print.x * dpr), Math.round((H - print.y - print.h) * dpr), Math.round(print.w * dpr), Math.round(print.h * dpr));
-
     gl.disable(gl.BLEND);
-    gl.useProgram(skyProg.p);
-    setLens(skyProg);
-    gl.uniform4f(skyProg.u.uCanvas, ...scene.canvas);
+    gl.useProgram(filmProg.p);
+    gl.uniform4f(filmProg.u.uRect, ...rect);
+    gl.uniform1f(filmProg.u.uStage, 1);
+    gl.uniform1f(filmProg.u.uFrame, grainFrame % 997);
+    gl.uniform1f(filmProg.u.uGrain, GRAIN);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex.sky);
-    gl.uniform1i(skyProg.u.uSky, 0);
+    gl.bindTexture(gl.TEXTURE_2D, film.dev);
+    gl.uniform1i(filmProg.u.uScene, 0);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-    gl.enable(gl.BLEND);
-    gl.useProgram(nearProg.p);
-    setLens(nearProg);
-    gl.uniform3f(nearProg.u.uA, A[0], A[1], A[2]);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tex.depth);
-    gl.uniform1i(nearProg.u.uDepth, 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, tex.near);
-    gl.uniform1i(nearProg.u.uCol, 1);
-    gl.bindVertexArray(gridVao);
-    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(null);
   };
 
-  stage.onFrame((dt) => {
+
+  stage.onFrame((dt, t) => {
     if (!held) {
       time += dt;
       const p = stage.pointer;
@@ -388,8 +578,12 @@ export async function createSpatial(host) {
         cam.y += cam.vy * h;
       }
     }
-    if (dirty || Math.abs(cam.x - drawn.x) > 2e-4 || Math.abs(cam.y - drawn.y) > 2e-4) {
-      render();
+    const moved = dirty || Math.abs(cam.x - drawn.x) > 2e-4 || Math.abs(cam.y - drawn.y) > 2e-4;
+    // Grain is locked to 24 fps, and holds still for reduced motion.
+    const frame = still.matches ? 0 : Math.floor(t * 24);
+    if (moved || frame !== grainFrame) {
+      grainFrame = frame;
+      render(moved);
       drawn.x = cam.x;
       drawn.y = cam.y;
       dirty = false;
@@ -399,6 +593,10 @@ export async function createSpatial(host) {
   return {
     destroy() {
       window.removeEventListener("deviceorientation", onOrient);
+      gl.deleteTexture(film.tex);
+      gl.deleteFramebuffer(film.fbo);
+      gl.deleteTexture(film.dev);
+      gl.deleteFramebuffer(film.devFbo);
       stage.destroy();
     },
   };
