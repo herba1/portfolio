@@ -4,16 +4,29 @@
   --it-ground: #f2f0eb;
   --it-ink: #0d0d0c;
 
-  /* Display scale, fitted: the row spans the canvas edge to edge.
-     --it-fit is the row's width in em, measured once the face has loaded
-     (Piece.jsx); 12.4 is close enough for the first paint. */
-  --it-gutter: max(16px, 3cqw);
-  --it-fit: 12.4;
-  --it-size: calc((100cqw - 2 * var(--it-gutter)) / var(--it-fit));
+  /* Display scale, fitted: the row runs the full width of the canvas, the
+     first and last letters touching the frame. --it-fit is the row's width
+     in em, measured once the face has loaded (Piece.jsx); 12 is close
+     enough for the first paint. */
+  --it-fit: 12;
+  --it-size: calc(100cqw / var(--it-fit));
+  /* The sleeve's one margin: the baseline hangs this far above the bottom
+     edge. A multiple of 4px at every canvas size. */
+  --it-base: max(16px, round(nearest, 3cqw, 4px));
+  /* Row bottom to baseline, in px, measured from a probe on the baseline
+     (Piece.jsx). The hang subtracts it so the baseline, not the line box,
+     lands on --it-base. */
+  --it-drop: 0px;
+  /* Side bearings of the first and last glyph, in em, measured from the
+     face; the outer tabs pull out by these so ink, not advance, meets the
+     frame. */
+  --it-lsb: 0;
+  --it-rsb: 0;
 
   position: relative;
   display: grid;
-  place-items: center;
+  align-items: end;
+  justify-items: start;
   width: 100%;
   height: 100%;
   min-height: 100cqh;
@@ -31,6 +44,7 @@
 
 .it-bar {
   position: relative;
+  margin-bottom: calc(var(--it-base) - var(--it-drop));
   touch-action: none;
   cursor: default;
 }
@@ -57,19 +71,33 @@
 
 /* The highlight is a colour field, not a pill: the whole canvas in ink,
    clipped left and right to the active tab's edges and open top and bottom,
-   so it runs the full height of the poster as a square-edged column. The
-   row inside it is centred by the same grid as the live row above, so the
-   inverted words land on the live ones exactly. */
+   so it rises out of the type and runs off the top of the poster as a
+   square-edged column. The outer tabs' outer edges sit on the frame, so on
+   Albums or Demos the field bleeds. The row inside it hangs from the same
+   grid and margin as the live row, so the inverted words land on the live
+   ones exactly. */
 .it-ink {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  align-items: end;
+  justify-items: start;
   background: var(--it-ink);
   color: var(--it-ground);
   pointer-events: none;
   will-change: clip-path;
   clip-path: inset(0 100% 0 0);
+}
+
+.it-ink > .it-row {
+  margin-bottom: calc(var(--it-base) - var(--it-drop));
+}
+
+/* A zero-size box on the baseline, so the hang can be measured. */
+.it-probe {
+  display: inline-block;
+  width: 0;
+  height: 0;
 }
 
 .it-tab {
@@ -86,6 +114,20 @@
   cursor: inherit;
   outline: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Flush: no outer padding on the end tabs, and each pulls out by its
+   glyph's side bearing. The last tab also gives back the tracking Chrome
+   hangs after its final letter, so its ink, not its advance, meets the
+   right edge. */
+.it-tab:first-child {
+  padding-left: 0;
+  margin-left: calc(-1em * var(--it-lsb));
+}
+
+.it-tab:last-child {
+  padding-right: 0;
+  margin-right: calc(-1em * var(--it-rsb) + 0.043 * (1em - 12px));
 }
 
 .it-bar .it-tab:focus-visible {

@@ -32,6 +32,8 @@ export default function Piece() {
   const barRef = useRef(null);
   const rowRef = useRef(null);
   const inkRef = useRef(null);
+  const probeRef = useRef(null);
+  const bearRef = useRef(null);
   const tabRefs = useRef([]);
   // tabs: edges in row space. ox: the row's left edge in root space, and
   // W: the root's width, so the column's clip can be written against the
@@ -158,41 +160,84 @@ export default function Piece() {
     [at, wake],
   );
 
+  // Side bearings of the row's first and last glyph, in em. Measured once
+  // from the face itself (canvas ink bounds), so the flush edges are optical,
+  // not the advance box's.
+  const bearings = useCallback((row) => {
+    if (bearRef.current) return bearRef.current;
+    const cs = getComputedStyle(row);
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return null;
+    const px = 200;
+    ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${px}px ${cs.fontFamily}`;
+    const first = TABS[0][0];
+    const lastWord = TABS[TABS.length - 1];
+    const last = lastWord[lastWord.length - 1];
+    const a = ctx.measureText(first);
+    const b = ctx.measureText(last);
+    const lsb = -a.actualBoundingBoxLeft / px;
+    const rsb = (b.width - b.actualBoundingBoxRight) / px;
+    if (!Number.isFinite(lsb) || !Number.isFinite(rsb)) return null;
+    const out = { lsb: Math.round(lsb * 1e4) / 1e4, rsb: Math.round(rsb * 1e4) / 1e4 };
+    if (document.fonts?.status === "loaded") bearRef.current = out;
+    return out;
+  }, []);
+
   const measure = useCallback(() => {
     const row = rowRef.current;
     if (!row) return;
-    // Fit the row to the canvas. Everything in it (glyphs, tracking, tab
-    // padding) is in em, so its width per em is a constant of the face:
-    // hand that to CSS once and let cqw carry the size through resizes.
-    const size = parseFloat(getComputedStyle(row).fontSize);
-    const fit = size ? Math.round((row.offsetWidth / size) * 1000) / 1000 : 0;
+    const bear = bearings(row);
+    if (bear && rootRef.current) {
+      rootRef.current.style.setProperty("--it-lsb", String(bear.lsb));
+      rootRef.current.style.setProperty("--it-rsb", String(bear.rsb));
+    }
+    // Fit the row to the canvas, edge to edge. Nearly everything in it is
+    // in em, so its width per em is close to a constant of the face; the
+    // tracking law's 12px term makes it drift a hair with size, so settle
+    // it in a few passes here (each read forces layout) rather than across
+    // ResizeObserver round trips.
     const root = rootRef.current;
-    if (fit && root && Math.abs(fit - fitRef.current) > 0.002) {
+    if (!root) return;
+    for (let n = 0; n < 4; n += 1) {
+      const size = parseFloat(getComputedStyle(row).fontSize);
+      const fit = size ? Math.round((row.offsetWidth / size) * 10000) / 10000 : 0;
+      if (!fit || Math.abs(fit - fitRef.current) < 0.0005) break;
       fitRef.current = fit;
       root.style.setProperty("--it-fit", String(fit));
-      return; // the size change re-fires the ResizeObserver
     }
     // Sub-pixel offset of the row inside the root, in layout pixels (the
     // box may be scaled by its container, so divide the transform back out).
     const rb = root.getBoundingClientRect();
     const k = root.offsetWidth ? rb.width / root.offsetWidth : 1;
-    geo.current = {
-      ox: (row.getBoundingClientRect().left - rb.left) / k,
-      W: root.offsetWidth,
-      w: row.offsetWidth,
-      h: row.offsetHeight,
-      tabs: tabRefs.current.map((el) => ({ l: el.offsetLeft, r: el.offsetLeft + el.offsetWidth })),
-    };
+    // Hang the row from its baseline: the probe sits on it in the ink copy,
+    // which lays out exactly like the live row.
+    const probe = probeRef.current;
+    const inkRow = probe?.closest(".it-row");
+    if (probe && inkRow) {
+      const drop = (inkRow.getBoundingClientRect().bottom - probe.getBoundingClientRect().top) / k;
+      const cur = parseFloat(root.style.getPropertyValue("--it-drop")) || 0;
+      if (Math.abs(drop - cur) > 0.01) root.style.setProperty("--it-drop", `${Math.round(drop * 100) / 100}px`);
+    }
+    const ox = (row.getBoundingClientRect().left - rb.left) / k;
+    const W = root.offsetWidth;
+    const tabs = tabRefs.current.map((el) => ({ l: el.offsetLeft, r: el.offsetLeft + el.offsetWidth }));
+    // The outer edge of each end tab is the frame itself, so the column
+    // bleeds off the canvas on Albums and Demos rather than stopping short.
+    if (tabs.length) {
+      tabs[0].l = -ox;
+      tabs[tabs.length - 1].r = W - ox;
+    }
+    geo.current = { ox, W, w: row.offsetWidth, h: row.offsetHeight, tabs };
     const t = hold.current ?? activeRef.current;
     const g = hold.current != null ? flight(t) : at(t);
     target.current = { l: g.l, r: g.r, drag: false };
     springs.current = { l: { x: g.l, v: 0 }, r: { x: g.r, v: 0 } };
     paint();
-  }, [at, flight, paint]);
+  }, [at, bearings, flight, paint]);
 
   useLayoutEffect(() => {
-    // ?t=1.6 holds the highlight in flight from Singles toward Live, for a
-    // still of the moment.
+    // ?t=0.5 holds the highlight in flight from Albums toward Singles, for a
+    // still of the moment (any fractional index works).
     try {
       const t = parseFloat(new URLSearchParams(window.location.search).get("t"));
       if (Number.isFinite(t)) hold.current = clamp(t, 0, TABS.length - 1);
@@ -315,9 +360,10 @@ export default function Piece() {
           clipped to a vertical band. Not interactive; the row is the hit area. */}
       <div ref={inkRef} className="it-ink" aria-hidden="true">
         <div className="it-row">
-          {TABS.map((label) => (
+          {TABS.map((label, i) => (
             <span key={label} className="it-tab">
               {label}
+              {i === 0 && <span ref={probeRef} className="it-probe" />}
             </span>
           ))}
         </div>
