@@ -129,13 +129,21 @@ const SKY = {
   top: hex("#00518A"),
   low: hex("#82BADA"),
   curve: 1.0,
-  cloud: [0.26, 0.6],
+  // the cloud/sky unmix, a soft alpha: [cloud is solid this far (linear
+  // luminance) above the clear sky, smoothstep contrast on the alpha (0:
+  // linear, so a translucent wisp stays partly cloud over the cobalt rather
+  // than keyed out to it), the clear-sky map's scale]. The map is a low
+  // percentile, so the open blue between wisps sits ~6-10% above it; scaled
+  // to meet it, the open blue is w ~ 0 and keeps its density.
+  cloud: [0.13, 0, 1.06],
   // #F2F0EA, warmed against the film's cool highlight tint (.95, 1, 1.05)
   warm: lin(hex("#F2F0EA")).map((v, i) => v * [1.06, 1, 0.93][i]),
   // skylight blue, saturated past what should print: the diffusion and the
   // shoulder take most of it back off the cloud's shaded midtones
   under: lin(hex("#64A2DE")),
-  underRange: [0.4, 0.92, 1.0],
+  // (the plate's thin cloud is dim: below ~0.8 the brightest core still
+  // took the blue and smeared grey-violet; this rolls it off warm)
+  underRange: [0.35, 0.8, 1.0],
   // The density of the graded sky, as an exponent on its luminance in the
   // midtones (1 is the ramp as aimed; below 1 lightens the blue back
   // toward a phone's mid-blue). The ramp is aimed at the density wanted.
@@ -233,8 +241,8 @@ uniform vec3 uSkyLow;         // and at its horizon end
 uniform float uSkyCurve;
 uniform vec3 uUp;             // the vertical, camera space
 uniform vec2 uSkyElev;        // sin(elevation) at the frame's horizon end, at its zenith end
-uniform sampler2D uClear;     // the plate's clear-sky luminance x2 (coarse)
-uniform vec2 uCloudY;         // cloud starts this far above the clear sky; unmix contrast
+uniform sampler2D uClear;     // the plate's clear sky, linear x2 (coarse)
+uniform vec3 uCloudY;         // cloud starts this far above the clear sky; unmix contrast; clear-sky bias
 uniform vec3 uWarmCloud;      // linear, relative
 uniform vec3 uUnderBlue;      // linear, relative
 uniform vec3 uUnder;          // luminance range of the underside tint, amount
@@ -301,10 +309,12 @@ vec3 toLin(vec3 c) {
 vec3 gradeSky(vec3 c, vec2 uv) {
   float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // How much of the pixel is cloud: a linear unmix on luminance between the
-  // plate's own clear blue here and the dimmest cloud. (Luminance, not
-  // chroma: the plate's colour is coarser than its drawing, and a chroma key
-  // blotches.) A little contrast on it, so thin haze stays sky.
-  float ySky = 0.5 * texture(uClear, uv).r;
+  // plate's own clear blue here and the dimmest cloud, read as the cloud's
+  // opacity. (Luminance, not chroma: the plate's colour is coarser than its
+  // drawing, and a chroma key blotches.) Kept linear and the range narrow, so
+  // a translucent wisp is partly cloud rather than keyed out to sky.
+  vec3 cSky = 0.5 * texture(uClear, uv).rgb * uCloudY.z;
+  float ySky = dot(cSky, vec3(0.2126, 0.7152, 0.0722));
   float yCl = ySky + uCloudY.x;
   float w = clamp((Y - ySky) / (yCl - ySky), 0.0, 1.0);
   w = mix(w, w * w * (3.0 - 2.0 * w), uCloudY.y);
@@ -316,13 +326,20 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   vec3 dir = normalize(vec3((uv * uSize - uC) / uF, 1.0));
   float t = clamp((dot(dir, uUp) - uSkyElev.x) / (uSkyElev.y - uSkyElev.x), 0.0, 1.0);
   vec3 tgt = toLin(mix(uSkyLow, uSkyTop, pow(t, uSkyCurve)));
-  vec3 S = tgt * clamp(pow(Y / ySky, 0.6), 0.75, 1.0);
-  // cloud at its own luminance (within the unmix range it is the dimmest
-  // cloud), warm-neutral where lit, skylight blue in its shadowed undersides
+  vec3 S = tgt * clamp(pow(Y / max(ySky, 1e-4), 0.6), 0.75, 1.0);
+  // the cloud itself, unmixed: the pixel is w of cloud over (1 - w) of the
+  // plate's clear blue, so taking that blue back out leaves the cloud in its
+  // own colour, at the dimmest cloud's luminance (yCl) until it is solid.
+  // Its thin edges keep that (thin cloud is lit through, and stays feathered
+  // over the new blue); the fuller cloud rolls over to warm-neutral where
+  // lit, skylight blue in its shadowed undersides.
+  vec3 own = max(c - (1.0 - w) * cSky, 0.0) / max(w, 1e-3);
   float yc = max(Y, yCl);
   float under = (1.0 - smoothstep(uUnder.x, uUnder.y, yc)) * uUnder.z;
   vec3 tint = mix(uWarmCloud, uUnderBlue, under);
-  vec3 C = yc * tint / dot(tint, vec3(0.2126, 0.7152, 0.0722));
+  tint *= yc / dot(tint, vec3(0.2126, 0.7152, 0.0722));
+  vec3 C = mix(own, tint, smoothstep(0.0, 0.5, w));
+  // C over S, in linear light, w its opacity
   vec3 g = mix(S, C, w);
   // density held back in the midtones (the clear blue and the cloud's
   // shadowed undersides), the brightest cloud left where it is
@@ -710,9 +727,11 @@ function pixels(bm) {
   return x.getImageData(0, 0, bm.width, bm.height).data;
 }
 
-// The plate's clear-sky luminance, as a coarse field: per cell the dim end of
-// the sky's luminance (the blue between the clouds), spread from cells that
-// are all cloud by a min, then smoothed. Linear luminance x2, in a byte.
+// The plate's clear sky, as a coarse field: per cell the dim end of the
+// sky's luminance (the blue between the clouds) in the colour of the dimmest
+// fifth of the cell, spread from cells that are all cloud by a min on
+// luminance, then smoothed. Linear RGB x2, in bytes (luminance stays linear
+// through the smoothing, so it is the map's own luminance).
 function clearSky(px, w, h) {
   const C = 25;
   const gw = Math.ceil(w / C);
@@ -722,7 +741,8 @@ function clearSky(px, w, h) {
     const c = i / 255;
     L[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   }
-  let g = new Float32Array(gw * gh);
+  const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  let g = new Array(gw * gh);
   const vals = [];
   for (let gy = 0; gy < gh; gy++) {
     for (let gx = 0; gx < gw; gx++) {
@@ -730,15 +750,20 @@ function clearSky(px, w, h) {
       for (let y = gy * C; y < Math.min(h, gy * C + C); y += 2) {
         for (let x = gx * C; x < Math.min(w, gx * C + C); x += 2) {
           const i = (y * w + x) * 4;
-          vals.push(0.2126 * L[px[i]] + 0.7152 * L[px[i + 1]] + 0.0722 * L[px[i + 2]]);
+          const c = [L[px[i]], L[px[i + 1]], L[px[i + 2]]];
+          vals.push([lum(c), c]);
         }
       }
-      vals.sort((a, b) => a - b);
-      g[gy * gw + gx] = vals[Math.floor(vals.length * 0.1)];
+      vals.sort((a, b) => a[0] - b[0]);
+      const y10 = vals[Math.floor(vals.length * 0.1)][0];
+      const dim = vals.slice(0, Math.max(1, Math.floor(vals.length * 0.2)));
+      const m = [0, 1, 2].map((k) => dim.reduce((a, v) => a + v[1][k], 0));
+      const s = y10 / Math.max(lum(m), 1e-6);
+      g[gy * gw + gx] = m.map((v) => v * s);
     }
   }
   const pass = (f) => {
-    const o = new Float32Array(gw * gh);
+    const o = new Array(gw * gh);
     for (let y = 0; y < gh; y++) {
       for (let x = 0; x < gw; x++) {
         const n = [];
@@ -750,10 +775,13 @@ function clearSky(px, w, h) {
     }
     g = o;
   };
-  pass((n) => Math.min(...n));
-  for (let i = 0; i < 3; i++) pass((n) => n.reduce((a, b) => a + b, 0) / n.length);
-  const data = new Uint8Array(gw * gh);
-  for (let i = 0; i < data.length; i++) data[i] = clamp(Math.round(g[i] * 2 * 255), 0, 255);
+  pass((n) => n.reduce((a, b) => (lum(b) < lum(a) ? b : a)));
+  for (let i = 0; i < 3; i++) pass((n) => [0, 1, 2].map((k) => n.reduce((a, b) => a + b[k], 0) / n.length));
+  const data = new Uint8Array(gw * gh * 4);
+  for (let i = 0; i < g.length; i++) {
+    for (let k = 0; k < 3; k++) data[i * 4 + k] = clamp(Math.round(g[i][k] * 2 * 255), 0, 255);
+    data[i * 4 + 3] = 255;
+  }
   return { data, w: gw, h: gh };
 }
 
@@ -843,7 +871,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
   const clearTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, clearTex);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, clear.w, clear.h, 0, gl.RED, gl.UNSIGNED_BYTE, clear.data);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, clear.w, clear.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, clear.data);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -1579,7 +1607,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1f(U.uSkyCurve, SKY.curve);
     gl.uniform3fv(U.uUp, UP);
     gl.uniform2fv(U.uSkyElev, SKY_ELEV);
-    gl.uniform2fv(U.uCloudY, SKY.cloud);
+    gl.uniform3fv(U.uCloudY, SKY.cloud);
     gl.uniform3fv(U.uWarmCloud, SKY.warm);
     gl.uniform3fv(U.uUnderBlue, SKY.under);
     gl.uniform3fv(U.uUnder, SKY.underRange);
