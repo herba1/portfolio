@@ -10,6 +10,9 @@
 export const MAXB = 56;
 // Threads: the neck a pulled drop draws out of the pool.
 export const MAXT = 4;
+// Hollows: subtractive charges in the body (dimples, saddles, holes clean
+// through the sheet), plus one a press drives in under the hand.
+export const MAXC = 8;
 
 export const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -19,6 +22,7 @@ const FS_HEAD = `#version 300 es
 precision highp float;
 #define MAXB ${MAXB}
 #define MAXT ${MAXT}
+#define MAXC ${MAXC}
 uniform vec4 uB[MAXB];      // centre x, y (css px), kernel radius (css px), weight
 uniform vec4 uD[MAXB];      // displacement from rest (css px): carries the relief; the tilt of the studio
                             // this ball sees (radians, about a horizontal axis), so no two drops reflect alike
@@ -27,6 +31,9 @@ uniform vec4 uTa[MAXT];     // thread: root end x, y; drop end x, y (css px)
 uniform vec4 uTr[MAXT];     // thread kernel radius at the root, at the waist, at the drop; weight
 uniform vec4 uTm[MAXT];     // where the waist sits (0 root .. 1 drop); displacement at the drop end
 uniform int uNT;
+uniform vec4 uC[MAXC];      // hollow: centre x, y (css px), kernel radius (css px), field it takes away
+uniform vec4 uCe[MAXC];     // its long axis (rad), squash across it, sag of the sheet into it (scale units)
+uniform int uNC;
 uniform vec2 uRes;          // css px
 uniform float uDpr;
 uniform float uScale;
@@ -244,6 +251,39 @@ vec4 surface(vec2 p){
       ws += k;
     }
   }
+  // The hollows. Each takes field away under an elliptical kernel: a shallow
+  // one only lowers the field and the sheet sags into a dimple, or, drawn
+  // long across a swell, a saddle; a deep one takes more than is there and
+  // the sheet opens onto the paper, its edge standing up as the same
+  // meniscus as the outer rim. Around each, over a wider reach, the sheet
+  // sags (hc), so the reflection runs down into it.
+  float hc = 0.0; vec2 ghc = vec2(0.0);
+  for (int j = 0; j < MAXC; j++){
+    if (j >= uNC) break;
+    vec4 c = uC[j];
+    vec4 ce = uCe[j];
+    if (c.w <= 0.0 && ce.z <= 0.0) continue;
+    vec2 d = p - c.xy;
+    vec2 ax = vec2(cos(ce.x), sin(ce.x));
+    vec2 ay = vec2(-ax.y, ax.x);
+    vec2 l = vec2(dot(d, ax), dot(d, ay) * ce.y);
+    vec2 dl = ax * l.x + ay * (l.y * ce.y);       // half the gradient of |l|^2
+    float ll = dot(l, l);
+    float R2 = c.z * c.z;
+    float q = ll / R2;
+    if (q < 1.0){
+      float m = 1.0 - q;
+      f -= c.w * m * m * m;
+      g += c.w * 3.0 * m * m * (2.0 * dl / R2);
+    }
+    float Rs2 = R2 * 2.4;
+    float qs = ll / Rs2;
+    if (qs < 1.0){
+      float m = 1.0 - qs;
+      hc += ce.z * m * m * m;
+      ghc += ce.z * 3.0 * m * m * (-2.0 * dl / Rs2);
+    }
+  }
   disp /= ws;
   et /= ws;
 
@@ -282,6 +322,8 @@ vec4 surface(vec2 p){
   float h = H * sqrt(1.0 - e) + H2 * g2 * s2 + Hr * sat * rl.x + Hb * bb;
   float dh = H * e / (2.0 * a * sqrt(max(1.0 - e, 1e-6))) + H2 * (s2 / (1.0 + xe / 0.5) + g2 * exp(-xe / 0.35) / 0.35) + Hr * rl.x * exp(-xe / a2) / a2;
   vec2 gh = dh * gF + Hr * sat * rl.yz / uScale + Hb * gb / (1.0 + fb);
+  h -= hc * uScale;
+  gh -= ghc * uScale;
   // The ripples ride with the liquid and die toward the rim, so the
   // silhouette stays a clean meniscus.
   // One large dome over the whole pool: every normal is leaned out from the

@@ -1,5 +1,5 @@
 import { createStage, clamp } from "../_kit/stage";
-import { VS, FS_ONE, FS_SURF, FS_MONO, FS_EASE, FS_PRINT, MAXB, MAXT } from "./chromeLinesShader";
+import { VS, FS_ONE, FS_SURF, FS_MONO, FS_EASE, FS_PRINT, MAXB, MAXT, MAXC } from "./chromeLinesShader";
 
 // A pool of mercury on acid paper, printed as a line engraving.
 //
@@ -85,6 +85,20 @@ function growLayout() {
 }
 const LAYOUT = growLayout();
 
+// Hollows in the body: u, v (box fractions); kernel radius (scale units);
+// depth, as a share of what the field holds above the edge there at rest
+// (past 1 the sheet opens through to the paper); sag of the sheet into it
+// (scale units); long axis (rad); squash across it. Three go clean through,
+// the rest are dimples and, drawn long across the swells, saddles.
+const HOLLOWS = [
+  [0.3, 0.56, 0.095, 1.8, 0.034, 0.3, 1.3],
+  [0.51, 0.595, 0.07, 1.65, 0.03, -0.4, 1.7],
+  [0.12, 0.53, 0.06, 1.5, 0.026, 0.0, 1.0],
+  [0.43, 0.5, 0.11, 0.42, 0.03, 0.0, 1.0],
+  [0.22, 0.71, 0.13, 0.32, 0.026, -0.42, 3.2],
+  [0.6, 0.46, 0.1, 0.38, 0.028, 1.1, 2.4],
+];
+
 function program(gl, vs, fs) {
   const make = (type, src) => {
     const s = gl.createShader(type);
@@ -128,16 +142,18 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // The neck: kernel radius at its waist before it thins (scale units), and
   // how fast it drains while a stretched drop is held.
   const TH = [num("waist", 0.036), num("drain", 0.6)];
-  const still = q.has("t") || q.has("pull");
+  const still = q.has("t") || q.has("pull") || q.has("dent");
   const stillT = num("t", 2.4);
   // ?let=s lets go of the still's pull at s seconds.
   const letGo = num("let", 1e9);
   const pullAt = q.get("pull") ? q.get("pull").split(",").map(Number) : null;
+  // ?dent=x,y holds a press still there from t = 0.2 (box fractions).
+  const dentAt = q.get("dent") ? q.get("dent").split(",").map(Number) : null;
 
   // Two passes where a half-float target is renderable (nearly everywhere),
   // else one pass that does the surface per device pixel.
   const twoPass = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
-  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uG", "uSurfRes", "uSurf", "uMono"];
+  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uC", "uCe", "uNC", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uG", "uSurfRes", "uSurf", "uMono"];
   const make = (fs) => {
     const p = program(gl, VS, fs);
     const u = {};
@@ -214,6 +230,16 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const TM = new Float32Array(MAXT * 4);
   const slot = () => threads.find((t) => !t.on) || threads[0];
   const B = new Float32Array(MAXB * 4);
+  const C = new Float32Array(MAXC * 4);
+  const CE = new Float32Array(MAXC * 4);
+  const hollows = HOLLOWS.slice(0, MAXC - 1).map(([u, v, r, depth, sag, ang, sq], i) => ({
+    u, v, r, depth, sag, ang, sq, x: 0, y: 0, R: 0, s: 0, h: 0, ox: 0, oy: 0, f0: -1,
+    ph: [i * 2.13 + 0.7, i * 1.37 + 2.2, i * 0.91 + 1.3],
+  }));
+  // The dent a press drives into the mirror under the hand: it sinks while
+  // the hand holds still (a long press goes through), gives way to the drop
+  // once the hand draws out, and heals with a snap when it lets go.
+  const dent = { u: 0, v: 0, r: 0.07, depth: 1.5, sag: 0.034, ang: 0, sq: 1, x: 0, y: 0, R: 0, s: 0, h: 0, ox: 0, oy: 0, f0: 0, amp: 0, ph: [0, 0, 0] };
   const D = new Float32Array(MAXB * 4);
 
   let W = 1;
@@ -238,6 +264,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       }
     }
     placed = true;
+    for (const c of hollows) c.f0 = -1;
   };
   stage.onResize((w, h) => place(w, h));
 
@@ -278,7 +305,8 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       b.y = y;
       b.vx = b.vy = 0;
       b.held = b === free[0];
-      b.wt = b === free[0] ? 1 : 0;
+      // The drop's weight comes in with the draw (see step).
+      b.wt = 0;
       b.w = b === free[0] ? b.w : 0;
       b.R = b.r0 * 2.3 * scale;
     }
@@ -311,9 +339,18 @@ export async function createChromeLines(host, { embedded = false } = {}) {
     s.w = 0.6;
     s.held = false;
   };
+  const press = (x, y) => {
+    grab = takeHold(x, y);
+    if (grab) {
+      dent.u = x / W;
+      dent.v = y / H;
+      dent.f0 = fieldAt(x, y);
+    }
+    return grab;
+  };
   stage.on("down", (p) => {
     if (still) return;
-    grab = takeHold(p.x, p.y);
+    press(p.x, p.y);
   });
   const release = (vx, vy) => {
     if (!grab) return;
@@ -331,6 +368,9 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const step = (dt, t, pointer) => {
     const breathe = scale * 0.012;
     const g = grab && grab.best ? grab : null;
+    // A press alone dents; the drop rises only as the hand draws out.
+    const drawn = g ? Math.hypot(g.x - g.x0, g.y - g.y0) / scale : 0;
+    if (g && !g.broken) g.best.wt = Math.max(g.best.wt, clamp((drawn - 0.01) / 0.05, 0, 1));
     for (const b of balls) {
       // At rest it breathes: each rest point drifts on a slow loop and the
       // pool swells and settles.
@@ -451,6 +491,46 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
     }
+    // The hollows: each drifts on the pool's own slow loops, and rides with
+    // the liquid around it (the displacement of the balls it sits in).
+    const ride = (c) => {
+      let wx = 0, wy = 0, ws = 1e-6;
+      for (const b of balls) {
+        if (b.free || b.w <= 0) continue;
+        const k = kernel(b, c.x, c.y);
+        wx += k * (b.x - b.ax);
+        wy += k * (b.y - b.ay);
+        ws += k;
+      }
+      c.ox = wx / ws;
+      c.oy = wy / ws;
+    };
+    const rest = (x, y) => balls.reduce((f, b) => (b.free ? f : f + (((x - b.ax) ** 2 + (y - b.ay) ** 2) < b.R * b.R ? b.w * (1 - ((x - b.ax) ** 2 + (y - b.ay) ** 2) / (b.R * b.R)) ** 3 : 0)), 0);
+    const drift = scale * 0.03;
+    for (const c of hollows) {
+      const hx = c.u * W + drift * (Math.sin(t * 0.31 + c.ph[0]) + 0.5 * Math.sin(t * 0.53 + c.ph[2]));
+      const hy = c.v * H + drift * Math.cos(t * 0.27 + c.ph[1]) * 0.8;
+      if (c.f0 < 0) c.f0 = rest(c.u * W, c.v * H);
+      c.x = hx;
+      c.y = hy;
+      ride(c);
+      const br = 1 + 0.06 * Math.sin(t * 0.42 + c.ph[2]);
+      c.R = c.r * scale * br;
+      c.s = c.depth * Math.max(c.f0 - THR, 0.05) * br;
+      c.h = c.sag;
+    }
+    // The dent sinks while the hand holds still and gives way as it draws out.
+    const holding = grab && grab.best && !grab.broken;
+    const target = holding ? clamp(1 - (drawn - 0.015) / 0.04, 0, 1) : 0;
+    const rate = holding ? (target > dent.amp ? 1.6 : 6) : 7;
+    dent.amp += (target - dent.amp) * (1 - Math.exp(-dt * rate));
+    dent.x = dent.u * W;
+    dent.y = dent.v * H;
+    ride(dent);
+    const sink = dent.amp * dent.amp * (3 - 2 * dent.amp);
+    dent.R = dent.r * scale * (0.8 + 0.2 * sink);
+    dent.s = dent.depth * Math.max(dent.f0 - THR, 0) * sink;
+    dent.h = dent.sag * sink;
   };
 
   let simT = 0;
@@ -478,6 +558,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       b.vx = b.vy = 0;
     }
     for (const th of threads) Object.assign(th, { on: false, w: 0 });
+    dent.amp = 0;
     step(0, 0, null);
     let start = null;
     const end = pullAt ? [pullAt[0] * W, pullAt[1] * H] : null;
@@ -499,13 +580,15 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       if (end && simT >= letGo && grab) {
         release(0, 0);
       } else if (end && simT >= 0.2 && simT < letGo) {
-        if (!grab) grab = takeHold(start[0], start[1]) || { best: null };
+        if (!grab) grab = press(start[0], start[1]) || { best: null };
         const k = easeOut((simT - 0.2) / 1.3);
         if (grab.best) {
           grab.x = start[0] + (end[0] - start[0]) * k;
           grab.y = start[1] + (end[1] - start[1]) * k;
         }
       }
+      if (dentAt && !end && simT >= 0.2 && simT < letGo && !grab) grab = press(dentAt[0] * W, dentAt[1] * H) || { best: null };
+      if (dentAt && !end && simT >= letGo && grab) release(0, 0);
       step(SUB, simT, null);
       simT += SUB;
     }
@@ -534,6 +617,13 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       TR.set([Math.max(th.ra, 1), Math.max(th.rm, 0.5), Math.max(th.rb, 1), w], j * 4);
       TM.set([th.tm, th.dx, th.dy, 0], j * 4);
     });
+    C.fill(0);
+    CE.fill(0);
+    [...hollows, dent].forEach((c, j) => {
+      C.set([c.x + c.ox, c.y + c.oy, Math.max(c.R, 1), c.s], j * 4);
+      CE.set([c.ang, c.sq, c.h, 0], j * 4);
+    });
+    const NC = hollows.length + 1;
     const envRot = 0.07 * Math.sin(time * 0.11) + 0.03 * Math.sin(time * 0.29);
     const bind = ({ p, u }) => {
       gl.useProgram(p);
@@ -544,6 +634,9 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       gl.uniform4fv(u.uTr, TR);
       gl.uniform4fv(u.uTm, TM);
       gl.uniform1i(u.uNT, MAXT);
+      gl.uniform4fv(u.uC, C);
+      gl.uniform4fv(u.uCe, CE);
+      gl.uniform1i(u.uNC, NC);
       gl.uniform2f(u.uRes, W, H);
       gl.uniform1f(u.uDpr, stage.dpr);
       gl.uniform1f(u.uScale, scale);
