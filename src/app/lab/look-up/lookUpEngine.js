@@ -69,6 +69,9 @@ const FILM = {
   softness: 0.22,
   saturation: 1.08,
   blueDepth: 0.6,
+  // Neutral highlights: the bake already rolls the cloud tops off
+  // warm-neutral, and the kit's cool default would cancel that.
+  highlightTint: [1.0, 1.0, 0.99],
   grain: 0.32,
   vignette: 0.22,
 };

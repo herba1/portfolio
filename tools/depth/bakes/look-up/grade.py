@@ -100,8 +100,13 @@ def _profile(b, wsky, elev1, P):
     return elev1[o], bg[o], bc[o]
 
 def _grade3(eq, P, w, elev, Y, wsky, bn, prof):
+    # A wide, soft ramp: the capture's own cumulus carry through with their
+    # thin edges translucent, instead of a hard blueness key cutting them out.
     alpha = 1 - smooth(P['aLo'], P['aHi'], bn)
     alpha = alpha ** P['alphaGamma']
+    # Feather the matte (in degrees of sky) so cloud edges bleed into the blue.
+    if P.get('alphaBlur', 0) > 0:
+        alpha = cv2.GaussianBlur(alpha.astype(np.float32), (0, 0), w / 360 * P['alphaBlur'])
     # local structure
     sig = w / 360 * 3  # ~3 degrees
     Yb = cv2.GaussianBlur(Y, (0, 0), sig)
@@ -148,7 +153,11 @@ def _grade3(eq, P, w, elev, Y, wsky, bn, prof):
     out = out * (Yn / (Yo + 1e-6))[..., None]
     return out.astype(np.float32), wsky, alpha, prof
 
-P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=1.3,
+# Cloud: a wide, feathered matte (aLo..aHi, alphaBlur in degrees) and form
+# contrast near 1, so the capture's own cumulus carry through rather than
+# being redrawn from noise; no unsharp. Lit tops roll off warm-neutral
+# (cloudLit) while the shaded folds keep the skylight blue (cloudShade).
+P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          skyHex=['#08408f', '#1462b4', '#3b8ccc', '#8db8e2'], skyGain=0.74, gapTex=0.6,
-         expo=0.36, cloudLit=[1.0, 0.985, 0.95], cloudShade=[0.78, 0.86, 0.95],
-         restTint=[1.0, 1.0, 0.98], cloudContrast=1.7, formContrast=1.6, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=0.9, fineContrast=1.6, sharpR=2.5, sharpA=0.8, cloudLevel=0.62, denoise=2.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.12, aHi=0.55, knee=0.85, ceil=1.3)
+         expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.78, 0.86, 0.95],
+         restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3)

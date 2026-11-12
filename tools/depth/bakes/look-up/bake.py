@@ -1,5 +1,5 @@
 import numpy as np, cv2, sys, os, json
-sys.path.insert(0, '/tmp/claude-0/look-up-scripts')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grade import grade, P, CAP, smooth
 from PIL import Image
 src, outdir = sys.argv[1], sys.argv[2]
