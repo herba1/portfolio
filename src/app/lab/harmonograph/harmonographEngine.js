@@ -12,18 +12,20 @@ import { createNib } from "./penAudio";
 // and the arm swings from where you dropped it; take the paper and throw it,
 // and the table circles. Lifting the nib starts a new figure, and the old one
 // is pulled into the sheet as an impression in a spot ink, the next of a
-// small fixed set each time: a broad, flat mark of ink, not a second pen
-// line, overprinted and a hair out of register, so the sheet builds up as a
-// riso or letterpress print with the pen's near-black key always on top. The pen lifts itself once the swing has wound in, so
-// the centre of every figure stays open.
+// small fixed set each time. The impression is a plate, not a second pen
+// line: the figure's path is turned into a density field, and the plate is
+// solid where its turns crowd and screened away to open paper where they
+// spread, printed one fixed misregistration off the key. The sheet builds up
+// as a riso or letterpress print with the pen's near-black key, the only
+// linework on it, always on top. The pen lifts itself once the swing has
+// wound in, so the centre of every figure stays open.
 //
 // Ink is laid opaque on a transparent layer, so one continuous line never
 // beads where its segments meet. Width and density follow the pen's speed:
 // thin and a little grey where it races, wider and blacker where it slows.
 // They also follow how far the swing has wound in: the inner winds, where
 // the pen is slowest and the loops crowd closest, fine down to a hairline
-// instead of swelling, so the core resolves into moire and the spot plate
-// under it shows through.
+// instead of swelling, so the core resolves into moire over the flat plate.
 
 const TAU = Math.PI * 2;
 const H = 1 / 1600; // physics substep, seconds
@@ -171,12 +173,14 @@ const PLATE_IN = 0.55; // share of the pull over which the plate inks up
 // finished is pulled into the sheet as an impression in the next spot ink,
 // at full strength and overprinted (multiply), each plate about a
 // millimetre out of register with the key, as a riso or a jobbing
-// letterpress lays it. The key always prints last, over every spot.
+// letterpress lays it, and each tint screened at its own angle so stacked
+// plates rosette instead of beating. The key always prints last, over every
+// spot.
 const SPOTS = [
-  { rgb: [232, 78, 44], mx: 3.5, my: -2.6 }, // vermilion
-  { rgb: [0, 112, 186], mx: -3, my: 3.3 }, // process blue
-  { rgb: [255, 76, 150], mx: 2.8, my: 3.5 }, // fluorescent pink
-  { rgb: [0, 128, 120], mx: -3.7, my: -2.8 }, // teal
+  { rgb: [232, 78, 44], mx: 3.5, my: -2.6, screen: 15 }, // vermilion
+  { rgb: [0, 112, 186], mx: -3, my: 3.3, screen: 75 }, // process blue
+  { rgb: [255, 76, 150], mx: 2.8, my: 3.5, screen: 45 }, // fluorescent pink
+  { rgb: [0, 128, 120], mx: -3.7, my: -2.8, screen: 0 }, // teal
 ];
 const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
@@ -366,91 +370,138 @@ export async function createHarmonograph(host) {
   };
   const inks = () => [curCtx];
 
-  // The finished figure as one path, at k device px to the sheet's side.
-  const plotPath = (k) => {
-    const path = new Path2D();
-    let down = false;
+  // The key of a finished figure, as a plate in spot ink. The plate is not
+  // a second pen line: it is the figure's density. The path is replayed into
+  // a coarse field as ink laid per unit of paper (line length per square
+  // pixel, so its reciprocal is the spacing between turns), averaged over a
+  // few millimetres, and the plate is cut from that field the way a printer
+  // would make it from a drawing: solid where the turns crowd closer than
+  // SOLID, open paper where they spread past OPEN, and between the two a
+  // coarse halftone screen at the ink's own angle, so the tint fades into
+  // the sheet as dots, not as a wash. Nothing of the line survives in it;
+  // the near-black key is the only linework on the sheet.
+  const CELL = 2; // CSS px per field cell
+  const SPREAD = 4; // CSS px, the radius the density is averaged over
+  const SOLID = 0.0022; // turn spacing, share of the sheet's side, for solid
+  const OPEN = 0.0075; // ... and for open paper
+  const SCREEN = 3.2; // CSS px, the halftone's pitch
+  const field = () => {
+    const g = Math.max(8, Math.round(side / CELL));
+    const cell = side / g; // CSS px
+    const F = new Float32Array(g * g);
+    let lx = NaN;
+    let ly = NaN;
     for (let i = 0; i < prevPath.length; i += 2) {
-      const x = prevPath[i];
-      if (Number.isNaN(x)) {
-        down = false;
+      const x = prevPath[i] * g;
+      const y = prevPath[i + 1] * g;
+      if (Number.isNaN(x) || Number.isNaN(lx)) {
+        lx = x;
+        ly = y;
         continue;
       }
-      if (down) path.lineTo(x * k, prevPath[i + 1] * k);
-      else path.moveTo(x * k, prevPath[i + 1] * k);
-      down = true;
+      const L = Math.hypot(x - lx, y - ly);
+      const k = Math.max(1, Math.ceil(L * 2));
+      const w = (L * cell) / k; // CSS px of line per sample
+      for (let j = 0; j < k; j++) {
+        const t = (j + 0.5) / k;
+        const sx = lx + (x - lx) * t - 0.5;
+        const sy = ly + (y - ly) * t - 0.5;
+        const ix = Math.floor(sx);
+        const iy = Math.floor(sy);
+        if (ix < 0 || iy < 0 || ix >= g - 1 || iy >= g - 1) continue;
+        const fx = sx - ix;
+        const fy = sy - iy;
+        const o = iy * g + ix;
+        F[o] += w * (1 - fx) * (1 - fy);
+        F[o + 1] += w * fx * (1 - fy);
+        F[o + g] += w * (1 - fx) * fy;
+        F[o + g + 1] += w * fx * fy;
+      }
+      lx = x;
+      ly = y;
     }
-    return path;
+    // Three box passes each way: close to a gaussian of radius SPREAD.
+    const r = Math.max(1, Math.round(SPREAD / cell / 1.7));
+    const tmp = new Float32Array(g * g);
+    const box = (src, dst, stride, step) => {
+      for (let l = 0; l < g; l++) {
+        const o = l * stride;
+        let acc = 0;
+        for (let i = -r; i <= r; i++) acc += src[o + clamp(i, 0, g - 1) * step];
+        for (let i = 0; i < g; i++) {
+          dst[o + i * step] = acc / (2 * r + 1);
+          acc += src[o + Math.min(g - 1, i + r + 1) * step] - src[o + Math.max(0, i - r) * step];
+        }
+      }
+    };
+    for (let p = 0; p < 3; p++) {
+      box(F, tmp, g, 1);
+      box(tmp, F, 1, g);
+    }
+    // Line per square pixel.
+    const area = cell * cell;
+    for (let i = 0; i < F.length; i++) F[i] /= area;
+    return { F, g };
   };
 
-  // The key of a finished figure, as a plate in spot ink. The plate is not
-  // a second pen: it is ink coverage, the kind of mark a riso drum or an
-  // inked block leaves. The figure is fully determined by the pendulums, so
-  // its path is replayed as one broad, flat stroke, several times the key's
-  // width, and then inked: the film is a little uneven across the sheet
-  // (formation, mottle and the odd pinhole), it lays heavier where the loops
-  // crowd into a solid, and it squashes out past the stroke there as a faint
-  // halo into the paper between the turns. Multiplied under the key, the
-  // black line sits on it as a fine engraved line over a field of colour.
-  const PLATE = 2.4; // CSS px, the impression's width (the key is 0.45-1.8)
   const tint = () => {
     const n = spot.width;
-    // Coverage: the stroke at full strength, one path so its crossings never
-    // double up.
-    const mask = layer(n, n);
-    const mc = mask.getContext("2d", { willReadFrequently: true });
-    mc.strokeStyle = "#000";
-    mc.lineWidth = PLATE * dpr;
-    mc.lineCap = "round";
-    mc.lineJoin = "round";
-    const path = plotPath(side * dpr);
-    mc.stroke(path);
-    // The squash: the press pushes the ink out to the edge of the mark, so
-    // its rim prints a shade heavier than its middle. The middle is the same
-    // path at half the width.
-    const core = layer(n, n);
-    const cc = core.getContext("2d", { willReadFrequently: true });
-    cc.strokeStyle = "#000";
-    cc.lineWidth = PLATE * 0.5 * dpr;
-    cc.lineCap = "round";
-    cc.lineJoin = "round";
-    cc.stroke(path);
-    // Crowding: the coverage averaged over a few millimetres, by stepping it
-    // down and back up (a soft blur that needs no canvas filter).
-    const s1 = Math.max(1, Math.round(n / 4));
-    const s2 = Math.max(1, Math.round(n / 14));
-    const a = layer(s1, s1);
-    const b = layer(s2, s2);
-    const blur = layer(n, n);
-    for (const c of [a, b, blur]) {
-      const g = c.getContext("2d", { willReadFrequently: true });
-      g.imageSmoothingEnabled = true;
-      g.imageSmoothingQuality = "high";
-    }
-    a.getContext("2d").drawImage(mask, 0, 0, s1, s1);
-    b.getContext("2d").drawImage(a, 0, 0, s2, s2);
-    blur.getContext("2d").drawImage(b, 0, 0, n, n);
-    const M = mc.getImageData(0, 0, n, n).data;
-    const C = cc.getImageData(0, 0, n, n).data;
-    const B = blur.getContext("2d").getImageData(0, 0, n, n).data;
+    const { F, g } = field();
+    const lo = 1 / (OPEN * side);
     const out = spotCtx.createImageData(n, n);
     const d = out.data;
-    const [r, g, bl] = pulling.rgb;
+    const [r, gr, bl] = pulling.rgb;
     const grain = inkGrain(n);
-    for (let i = 0, p = 0; p < n * n; i += 4, p++) {
-      const m = M[i + 3] / 255;
-      const crowd = B[i + 3] / 255;
-      const heavy = crowd < 0.3 ? 0 : crowd > 0.85 ? 1 : (crowd - 0.3) / 0.55;
-      // Flat ink, a touch lighter in open loops and full in the solids; the
-      // halo only where the turns crowd, and only into the paper.
-      const rim = Math.max(0, m - C[i + 3] / 255);
-      const film = m * (0.78 + 0.2 * heavy) + rim * 0.14;
-      const halo = (1 - m) * 0.3 * heavy * heavy;
-      const al = Math.min(1, (film + halo) * grain[p]);
-      d[i] = r;
-      d[i + 1] = g;
-      d[i + 2] = bl;
-      d[i + 3] = al * 255;
+    const ang = (pulling.screen * Math.PI) / 180;
+    const pitch = SCREEN * dpr;
+    const cu = (Math.cos(ang) * TAU) / pitch;
+    const su = (Math.sin(ang) * TAU) / pitch;
+    // The screen's two waves, cos(x cu + y su) and cos(y cu - x su), split
+    // into per-row and per-column tables so a pixel costs no trig.
+    const wave = (k) => {
+      const c = new Float32Array(n);
+      const sn = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        c[i] = Math.cos(i * k);
+        sn[i] = Math.sin(i * k);
+      }
+      return [c, sn];
+    };
+    const [cXu, sXu] = wave(cu);
+    const [cXs, sXs] = wave(su);
+    const aa = 1.2 / pitch; // the spot function's slope: about one device px of edge
+    const fs = g / n;
+    for (let y = 0, p = 0; y < n; y++) {
+      const gy = clamp((y + 0.5) * fs - 0.5, 0, g - 1.001);
+      const iy = gy | 0;
+      const ty = gy - iy;
+      for (let x = 0; x < n; x++, p++) {
+        const gx = clamp((x + 0.5) * fs - 0.5, 0, g - 1.001);
+        const ix = gx | 0;
+        const tx = gx - ix;
+        const o = iy * g + ix;
+        const dens = (F[o] * (1 - tx) + F[o + 1] * tx) * (1 - ty) + (F[o + g] * (1 - tx) + F[o + g + 1] * tx) * ty;
+        if (dens <= lo) continue;
+        // Tone on the reciprocal (spacing) scale, so the edge of the solid
+        // follows the turns, not the raw sum.
+        const tone = smooth(OPEN * side, SOLID * side, 1 / dens);
+        let ink;
+        if (tone >= 0.985) ink = 1;
+        else {
+          // A round-dot screen: dots in the light tint, a chequer at half,
+          // holes in the shadow.
+          const cosU = cXu[x] * cXs[y] - sXu[x] * sXs[y];
+          const cosV = cXu[y] * cXs[x] + sXu[y] * sXs[x];
+          const spotFn = 0.5 + 0.25 * (cosU + cosV);
+          ink = clamp((spotFn - (1 - tone)) / aa + 0.5, 0, 1);
+        }
+        const al = Math.min(1, 0.94 * ink * grain[p]);
+        const i = p * 4;
+        d[i] = r;
+        d[i + 1] = gr;
+        d[i + 2] = bl;
+        d[i + 3] = al * 255;
+      }
     }
     spotCtx.setTransform(1, 0, 0, 1, 0, 0);
     spotCtx.putImageData(out, 0, 0);
