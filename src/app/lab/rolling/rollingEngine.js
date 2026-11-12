@@ -47,19 +47,20 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // The fan: an induction motor that pushes toward its set speed (it cannot
 // brake), quadratic air drag, viscous and dry bearing friction. Left alone
-// it runs as a two-pole motor straight off 60 Hz mains, just under its
-// 3600 rpm synchronous speed: almost two whole turns per readout, so every
-// blade is read several times over, as curls and islands torn off it, and
-// the three blades pass at just under 6 x 30 Hz, so that torn pattern holds
-// still against the frame rate and creeps slowly backwards. Drag up (or
-// scroll up) to overdrive it; drag down to drop the set speed and let it
-// coast down through the hooks and the wagon-wheel speeds; let go and it
-// returns to the mains speed. Drag sideways to turn the phone: the sensor's
-// readout direction rotates with it.
+// it runs on its 'high' notch, a shaded-pole motor slipping well below its
+// 3600 rpm synchronous speed, at 2395 rpm: a turn and a third per readout,
+// so one blade is read twice down the frame, torn clean off the hub into
+// floating pieces, while the others stay hooked to it and trail long
+// tapering tails, and the three blades pass just under 4 x 29.97 times a
+// second, so the torn pattern crawls slowly backwards against the frame
+// rate. Drag up (or scroll up) to overdrive it; drag down to drop the set
+// speed and let it coast down through the hooks and the wagon-wheel speeds;
+// let go and it returns to the notch. Drag sideways to turn the phone: the
+// sensor's readout direction rotates with it.
 //
 // Stills: ?rpm=4800&t=0.25 holds the frame that starts at t (seconds) with
-// the rotor at a steady rpm; the hero is ?rpm=3590&t=0.4, the mains speed.
-// ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
+// the rotor at a steady rpm; the hero is ?rpm=2395&t=13.78043, the frame the
+// live view opens on. ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
 // is 1/16000, so a blade tip travels a few px while its row is open and every
 // hook keeps a hard edge: long exposures blur the blades and wash the bands out, and at
 // 1/120 s the bands vanish).
@@ -70,9 +71,9 @@ const READOUT = 1 / 30; // top row to bottom row (fits inside the 1 / 29.97 s fr
 const EXPOSURE = 1 / 16000; // each row's open time (?exp=N for 1 / N s)
 const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrated as ramps, not stacks of copies
 // The room's lamp: a ring fluorescent on the same 60 Hz mains as the motor,
-// on an old choke ballast. The arc goes out every time the mains voltage
-// falls below its re-strike level (STRIKE of the peak) and the tube is dark
-// until it re-strikes; while it burns its light follows the voltage softly
+// on a tired choke ballast. The arc goes out every time the mains voltage
+// falls below its re-strike level (STRIKE of the peak, high on an old tube)
+// and the tube is dark until it re-strikes, nearly half of every cycle; while it burns its light follows the voltage softly
 // (a discharge's light saturates with current, so ARC < 1 flattens the
 // crest). That is a 120 Hz train of broad bright crests and short dark
 // gaps. Each phosphor holds the light for its own decay time, a first-order
@@ -81,18 +82,19 @@ const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrate
 // and drops furthest in the gap, red holds on, so the crests run
 // cool and the gaps warm, as real flicker bands do. STEADY is each channel's
 // light that does not flicker: the phosphors' long afterglow and the
-// daylight through the shoji, nearly half the room's light. The result is
+// daylight through the shoji, over half the room's light. The result is
 // carried as LAMP_K harmonics, so a row's exposure integrates it exactly.
-// Behind a phone's sensor that is about four bands down a 1/30 s readout,
-// the crests about 1.4 times the mean light, the gaps about half
-// of it: deep enough to see the readout in, never deep enough to drown the
-// guard's chrome or the hub.
+// Behind a phone's sensor that is four bands down a 1/30 s readout, each
+// gap a broad plateau at about 0.56 of the mean light (on the screen, about
+// a quarter darker than the mean) and each crest about 1.6 times it: plain
+// bands across the torn blades and the guard, never deep enough to drown
+// the guard's chrome or the hub.
 const MAINS = 60;
 const LAMP = 2 * MAINS; // Hz
-const STRIKE = 0.55;
+const STRIKE = 0.8;
 const ARC = 0.35;
 const DECAY = [0.0016, 0.0011, 0.0004]; // phosphor decay, s (r, g, b)
-const STEADY = [0.45, 0.44, 0.47];
+const STEADY = [0.55, 0.54, 0.57];
 const LAMP_K = 10;
 
 // The lamp's light as a function of phase (cycles), mean 1 per channel:
@@ -132,7 +134,16 @@ const NANG = 48; // angle samples per frame (covers READOUT + EXPOSURE)
 const RPM = (2 * Math.PI) / 60;
 
 // Fan dynamics, in rad/s and rad/s^2 (per unit rotor inertia).
-const REST = 3590; // mains speed, rpm: just under 3600, so 3 blades pass just under 180 = 6 x 30 times a second and creep backwards
+// The fan on its 'high' notch: a two-pole shaded-pole motor slips a third
+// below its 3600 rpm synchronous speed under the blades' load. 2395 rpm is
+// 1.33 turns per readout, enough to tear one blade off the hub and leave
+// the others hooked to it, and just under 2397.6 rpm (3 blades x 4 x 29.97
+// Hz), so the torn pattern crawls backwards, a blade pitch every 8 s.
+const REST = 2395;
+// The live view starts at this frame (k / FPS), the hero still: two blades
+// hooked to the hub with long tapering tails, one torn clean off at the top
+// and one at the bottom, the lamp's gaps lying across the hooks.
+const HERO_FRAME = 413;
 const MAX = 5400; // rpm, overdriven
 const DRAG = 0.0005; // quadratic air drag
 const VISC = 0.06; // viscous bearing loss
@@ -466,10 +477,11 @@ export async function createRolling(host, { embedded = false } = {}) {
   let omega = (stillRpm ?? REST) * RPM;
   const rest = stillRpm ?? REST;
   let setRpm = rest;
-  let simT = stillT ?? 0;
+  let simT = stillT ?? HERO_FRAME / FPS;
   const ring = new Float64Array(4096); // theta at simT steps: ring[(step) & 4095]
   let step = Math.round(simT / H);
-  if (stillT != null) theta = omega * stillT;
+  // The rotor's angle is its absolute time's (the ring holds it at whole steps).
+  theta = stillT != null ? omega * stillT : omega * step * H;
   ring[step & 4095] = theta;
 
   const physics = () => {
