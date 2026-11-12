@@ -1,5 +1,5 @@
 # Tenki, step 4: each recorded sky, as seen through the photo's lens and as light.
-#   python3 -I light.py OUTDIR name hdr yaw [res]
+#   python3 -I light.py OUTDIR name hdr yaw [res] [pitch zoom]
 # Frame: "heading" world, y up, +z the camera's horizontal heading (the HDRI is
 # turned by yaw so that lon = yaw is straight ahead).
 # Writes OUTDIR/<name>.png (the sky through the lens, 1.1x margin in tan space,
@@ -13,6 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cam import *
 out, name, fn, yaw = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
 res = int(sys.argv[5]) if len(sys.argv) > 5 else 1440
+# Aim of the sky picture only (the light is the HDRI's at this yaw): pitch (deg,
+# + looks higher) and zoom (>1 narrows the lens onto the sky), so one cloud can
+# be put behind the pole's crown at the size it needs to carry the frame.
+PITCH = float(sys.argv[6]) if len(sys.argv) > 6 else 0.0
+ZOOM = float(sys.argv[7]) if len(sys.argv) > 7 else 1.0
 MARGIN = 1.1
 os.makedirs(out, exist_ok=True)
 eq = load_hdr(fn)
@@ -70,7 +75,9 @@ sunE = sunE * wb; Esh = Esh * wb[None]; Eh = Eh * wb
 
 # ---- the sky through the lens (full-res source)
 Ws, Hs = res, int(round(res * H0 / W0))
-d = cam_dirs(Ws, Hs, MARGIN)
+d = cam_dirs(Ws, Hs, MARGIN / ZOOM)
+pa = np.radians(PITCH)
+d = d @ np.array([[1, 0, 0], [0, np.cos(pa), -np.sin(pa)], [0, np.sin(pa), np.cos(pa)]]).T
 M = cam_to_world_basis(yaw)
 im = sample(eq, d @ M.T, cv2.INTER_CUBIC)
 im = np.maximum(im, 0) * wb
@@ -107,7 +114,7 @@ x = (sky_part + cloud) * g['expo']
 enc = (x / (1 + x)) ** (1 / 2.2)
 cv2.imwrite(os.path.join(out, name + '.png'), np.round(np.clip(enc, 0, 1) * 65535).astype(np.uint16)[..., ::-1])
 pct = [float(np.percentile(Lf * K, q)) for q in (1, 50, 99, 99.9, 100)]
-info = dict(name=name, hdr=os.path.basename(fn), yaw=yaw, K=K, skyMed=med, sun=sdir.tolist(), sunE=sunE.tolist(),
+info = dict(name=name, hdr=os.path.basename(fn), yaw=yaw, pitch=PITCH, zoom=ZOOM, K=K, skyMed=med, sun=sdir.tolist(), sunE=sunE.tolist(),
             sunSpread=np.degrees(spread), sunAlt=float(np.degrees(np.arcsin(sdir[1]))), sh=Esh.tolist(), Eh=Eh.tolist(),
             framePct=pct, margin=MARGIN, res=[Ws, Hs])
 json.dump(info, open(os.path.join(out, name + '.json'), 'w'), indent=1)

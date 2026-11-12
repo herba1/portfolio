@@ -37,7 +37,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // cumulus, is the default sky; 0 clear low sun, 1 cirrus, 2 mackerel,
 // 3 fair-weather cumulus); ?t=7..18.5 holds the hour; ?still=1 skips the
 // reveal; ?grain=0 for static grain; ?raw=1 the light without the film;
-// ?dbg=1 grey albedo, 2 sun visibility, 3 sun only, 4 albedo.
+// ?dbg=1 grey albedo, 2 sun visibility, 3 sun only, 4 albedo, 5 the light on
+// the clouds.
 
 const BASE = "/lab/tenki/";
 const SKY_FILES = ["clear", "cirrus", "mackerel", "cumulus", "tower"];
@@ -68,6 +69,22 @@ const AUREOLE = 0.6;
 const CLOUD_WARM = 2;
 const CLOUD_FILL = 0.25;
 const CLOUD_SKY = [0.78, 0.97, 1.32];
+// A cloud with form (herb-ref 3): its sunlit side in the beam, at a scene
+// value the film's shoulder carries to ~0.93 (CLOUD_SUN, through the soft
+// shoulder at CLOUD_KNEE); its shade side and base in the zenith's blue
+// skylight (CLOUD_SHADE x CLOUD_BASE); CLOUD_TAU how fast the beam is used up
+// going into the body; CLOUD_AIR the light a lit cloud lends the air round it.
+// FORM: how far each sky takes it (a veiled sun leaves its clouds flatter).
+const CLOUD_SUN = 2.0;
+const CLOUD_KNEE = 1.5;
+const CLOUD_SHADE = 0.24;
+const CLOUD_BASE = [0.55, 0.86, 1.7];
+const CLOUD_TAU = 3.4;
+const CLOUD_AIR = 0.05;
+const FORM = { clear: 1, cirrus: 0.6, mackerel: 0.35, cumulus: 1, tower: 1 };
+// Where each sky's haze ends and its cloud begins, in the picture's red / blue:
+// the fair-weather sky is milky blue between its cumulus, the tower sky clean.
+const MASK = { clear: [0.5, 0.75], cirrus: [0.6, 0.95], mackerel: [0.6, 0.92], cumulus: [0.72, 0.97], tower: [0.45, 0.86] };
 // The HDRIs are open-field skies. Lying in a residential street, the pole
 // sees the sun but not the whole sky: houses, wires and trees take the lower
 // band of it (a sky-view factor of ~0.6 for a vertical face in a street of
@@ -219,8 +236,11 @@ uniform vec3 uOldSun;     // the photo's own sun and sky colours (luminance 1)
 uniform vec3 uOldSky;
 uniform vec3 uVeil;       // the lens's veiling glare in the photograph (linear)
 uniform vec3 uKeyDir;     // the dominant sun now (camera space), for the clouds
-uniform vec3 uCloudTint;  // cloud colour now / under a high sun
-uniform float uRim;       // strength of the sun side of each cloud
+uniform vec3 uCloudSun;   // the beam on a cloud's sunlit side (scene units)
+uniform vec3 uCloudSky;   // the blue skylight on its shade side and base
+uniform vec3 uCloudFlat;  // a flat cloud's tint (a veiled sun)
+uniform vec4 uCloudForm;  // optical depth, highlight shoulder, form, air glow
+uniform vec2 uCloudMask;  // red / blue of the sky picture: haze below, cloud above
 uniform float uSkyDim;    // the blue sky's light now / at the recorded hour
 uniform float uExpo;      // reveal exposure, linear factor
 uniform float uLinearOut;
@@ -294,10 +314,17 @@ vec2 skyUv(vec3 ds) {
   return vec2(0.5) + vec2(ds.x / -ds.z, -ds.y / -ds.z) * uFx / uSize / uMargin;
 }
 
-// how much of a sky pixel is cloud: white against the polarised cobalt
+// how much of a sky pixel is cloud: white against the polarised cobalt (each
+// sky says where its haze ends and its cloud begins)
 float cloudAt(vec2 su, float lod) {
   vec3 v = textureLod(uSky0, su, lod).rgb * uSkyK.x + textureLod(uSky1, su, lod).rgb * uSkyK.y;
-  return smoothstep(0.42, 0.86, v.r / max(v.b, 1e-3));
+  return smoothstep(uCloudMask.x, uCloudMask.y, v.r / max(v.b, 1e-3));
+}
+
+// the sky picture's brightness (scene units), a little blurred
+float lumAt(vec2 su, float lod) {
+  vec3 v = decodeSky(textureLod(uSky0, su, lod).rgb) * uSkyK.x + decodeSky(textureLod(uSky1, su, lod).rgb) * uSkyK.y;
+  return dot(v, vec3(0.2126, 0.7152, 0.0722));
 }
 
 void main() {
@@ -309,29 +336,62 @@ void main() {
   vec3 ds = rot(d, uUp, uDrift);
   vec2 su = clamp(skyUv(ds), vec2(0.001), vec2(0.999));
   vec3 sky = decodeSky(texture(uSky0, su).rgb) * uSkyK.x + decodeSky(texture(uSky1, su).rgb) * uSkyK.y;
-  // the clouds take the hour's sun: the side of each cloud that faces it
-  // lifts in the sun's colour, the side away from it falls to skylight blue
-  {
+  // The clouds are lit, not pasted: each is a body the hour's sun falls on.
+  // Its light is marched through the cloud field toward the sun (in the sky
+  // picture's own plane, the way a cumulus shades itself), so the side that
+  // faces the sun takes the beam in its colour and the far side and the base
+  // fall to the blue zenith skylight. The picture's own drawing is kept as
+  // relative detail, and the tops roll into a soft shoulder that glows but
+  // never clips. (Only where there is cloud, and sky to see it through.)
+  vec4 f = texture(uFg, pu);
+  // a soft edge: the cloud's own feathering, not a cut-out
+  float c = 0.5 * (cloudAt(su, 0.0) + cloudAt(su, 1.5));
+  // how deep in the body: the inside of a big cloud sees less of the sky
+  float body = cloudAt(su, 5.0);
+  if (f.a > 0.998 || c + body < 0.002) {
+    sky *= uSkyDim;
+  } else {
     vec3 Ls = rot(uKeyDir, uUp, uDrift);
     vec2 sb = skyUv(normalize(ds + 0.04 * (Ls - ds * dot(ds, Ls))));
     vec2 toSun = sb - skyUv(ds);
     toSun /= max(length(toSun), 1e-6);
-    vec2 o = vec2(5.0) / vec2(textureSize(uSky0, 0));
-    float c = cloudAt(su, 0.0);
-    vec2 g = vec2(cloudAt(su + vec2(o.x, 0.0), 2.0) - cloudAt(su - vec2(o.x, 0.0), 2.0),
-                  cloudAt(su + vec2(0.0, o.y), 2.0) - cloudAt(su - vec2(0.0, o.y), 2.0));
-    float face = -dot(g, toSun) * 3.0;
-    float lit = clamp(face, 0.0, 1.0);
-    float shd = clamp(-face, 0.0, 1.0);
-    vec3 cl = sky * uCloudTint;
-    cl *= 1.0 + uRim * lit * normalize(uCloudTint) * 1.732;
-    cl *= mix(vec3(1.0), vec3(0.78, 0.86, 1.0), uRim * shd);
-    // the blue between them is skylight, and dims with it; the clouds are
-    // lit by the sun, and go with the key
-    sky = mix(sky * uSkyDim, cl, c);
+    // the light into a cumulus is the sun's, and the bright sky above it: the
+    // march leans toward the zenith, so the base is the darkest part of it
+    vec2 toUp = skyUv(normalize(ds + 0.04 * (uUp - ds * dot(ds, uUp)))) - skyUv(ds);
+    vec2 toLight = normalize(toSun + 0.6 * toUp / max(length(toUp), 1e-6));
+    float tau = 0.0;
+    for (int i = 0; i < 16; i++) {
+      float t = (float(i) + 0.5) / 16.0;
+      tau += cloudAt(su + toLight * (0.004 + 0.34 * t), 2.0 + 1.5 * t);
+    }
+    // a wisp is thin: the beam goes through it and it has no shade side
+    float thick = smoothstep(0.3, 0.85, cloudAt(su, 3.0));
+    float T = mix(1.0, exp(-uCloudForm.x * tau / 16.0), thick);
+    const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
+    vec3 sl = decodeSky(textureLod(uSky0, su, 4.0).rgb) * uSkyK.x + decodeSky(textureLod(uSky1, su, 4.0).rgb) * uSkyK.y;
+    float lm = max(dot(sl, LW), 1e-4);
+    float detail = pow(clamp(dot(sky, LW) / lm, 0.7, 1.6), 1.2);
+    // and each lobe of it its own lit side: the slope of the cloud's own
+    // brightness toward the sun, a few texels across
+    vec2 o = vec2(6.0) / vec2(textureSize(uSky0, 0));
+    vec2 g = vec2(lumAt(su + vec2(o.x, 0.0), 2.0) - lumAt(su - vec2(o.x, 0.0), 2.0),
+                  lumAt(su + vec2(0.0, o.y), 2.0) - lumAt(su - vec2(0.0, o.y), 2.0)) / lm;
+    vec2 g2 = vec2(lumAt(su + vec2(3.0 * o.x, 0.0), 3.5) - lumAt(su - vec2(3.0 * o.x, 0.0), 3.5),
+                   lumAt(su + vec2(0.0, 3.0 * o.y), 3.5) - lumAt(su - vec2(0.0, 3.0 * o.y), 3.5)) / lm;
+    float lobe = clamp(-dot(4.0 * g + 3.0 * g2, toSun), -1.0, 1.0) * c * (0.4 + 0.6 * thick);
+    vec3 cl = detail * (uCloudSky * (1.0 - 0.35 * body) * (1.0 - 0.4 * lobe) + uCloudSun * (0.08 + T) * (1.0 + 0.9 * lobe));
+    // a soft highlight shoulder: the sunlit tops approach the film's near-white
+    float Lc = dot(cl, LW);
+    cl *= pow(1.0 + pow(Lc / uCloudForm.y, 4.0), -0.25);
+    // the old flat cloud, for a sky that asks for less form (a veiled sun)
+    cl = mix(sky * uCloudFlat, cl, uCloudForm.z);
+    // the blue between them is skylight, and dims with it; round a lit cloud
+    // it takes a breath of the cloud's light (the air in front of it)
+    vec3 blue = sky * uSkyDim + uCloudSun * uCloudForm.w * body * (1.0 - c);
+    sky = mix(blue, cl, c);
+    if (abs(uDbg - 5.0) < 0.5) sky = vec3(T * c * (1.0 + 0.9 * lobe) * 0.5);
   }
 
-  vec4 f = texture(uFg, pu);
   vec3 col = sky;
   if (f.a > 0.002) {
     vec4 nd = texture(uNd, pu);
@@ -768,6 +828,11 @@ export async function createTenki(host, { embedded = false } = {}) {
   const spread = new Float32Array(2);
   const keyDir = [0, 1, 0];
   const cloudTint = [1, 1, 1];
+  const cloudSun = [1, 1, 1];
+  const cloudSky = [1, 1, 1];
+  const cloudForm = [CLOUD_TAU, CLOUD_KNEE, 1, CLOUD_AIR];
+  const baseL = dot3(CLOUD_BASE, LUM);
+  const cloudMask = [0.45, 0.86];
   const lightAt = (pos, hr) => {
     const p = clamp(pos, 0, N - 1);
     const i0 = Math.min(N - 2, Math.floor(p));
@@ -835,6 +900,14 @@ export async function createTenki(host, { embedded = false } = {}) {
     const ct = trel.map((v) => (v / trl) ** CLOUD_WARM);
     const ctl = dot3(ct, LUM);
     for (let c = 0; c < 3; c++) cloudTint[c] = ((1 - CLOUD_FILL) * (ct[c] / ctl) * Math.pow(rl, 0.6) + CLOUD_FILL * CLOUD_SKY[c] * skyDim) / ((1 - CLOUD_FILL) + CLOUD_FILL * CLOUD_SKY[c]);
+    // the lit cloud: the beam in its colour on the sun side, the zenith blue
+    // (dimming with the skylight) in the shade and under the base
+    for (let c = 0; c < 3; c++) {
+      cloudSun[c] = CLOUD_SUN * expo * (ct[c] / ctl) * Math.pow(rl, 0.6);
+      cloudSky[c] = CLOUD_SHADE * expo * skyDim * (CLOUD_BASE[c] / baseL);
+    }
+    cloudForm[2] = (1 - w) * (FORM[a.name] ?? 1) + w * (FORM[b.name] ?? 1);
+    for (let i = 0; i < 2; i++) cloudMask[i] = (1 - w) * (MASK[a.name] ?? MASK.tower)[i] + w * (MASK[b.name] ?? MASK.tower)[i];
     // sky: decoded x = L K (median .5); shown at the photo's sky median, times
     // the exposure; the blue of it dims with the skylight
     const gs = (data.skyMed / 0.5) * expo;
@@ -942,8 +1015,11 @@ export async function createTenki(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uOldSun, oldSun);
     gl.uniform3fv(u.uOldSky, oldSky);
     gl.uniform3fv(u.uKeyDir, keyDir);
-    gl.uniform3fv(u.uCloudTint, cloudTint);
-    gl.uniform1f(u.uRim, RIM);
+    gl.uniform3fv(u.uCloudSun, cloudSun);
+    gl.uniform3fv(u.uCloudSky, cloudSky);
+    gl.uniform3fv(u.uCloudFlat, cloudTint);
+    gl.uniform4fv(u.uCloudForm, cloudForm);
+    gl.uniform2fv(u.uCloudMask, cloudMask);
     gl.uniform1f(u.uSkyDim, lt.skyDim);
     gl.uniform1f(u.uDbg, dbg);
     gl.uniform1f(u.uCal, cal);
@@ -1091,9 +1167,6 @@ export async function createTenki(host, { embedded = false } = {}) {
   };
 }
 
-// The sun side of each cloud: how far it lifts toward the sun's colour.
-const RIM = 1.0;
-
 // The print: Superia-ish summer, developed from a linear render. The scene
 // already sits on the photo's own exposure, so the curve is gentle; the sky's
 // depth comes from the bake's polariser and blueDepth here.
@@ -1108,7 +1181,10 @@ const FILM = {
   halation: 0.26,
   halationThreshold: 0.85,
   halationLocal: 0,
-  bloom: 0.12,
+  // Pro-Mist on the highlights only: the lit cloud tops spread into the blue
+  // and over the wires in front of them; the sky keeps its own drawing
+  bloom: 0.4,
+  bloomThreshold: 0.75,
   softness: 0.45,
   toe: 0.05,
   grain: 0.32,
