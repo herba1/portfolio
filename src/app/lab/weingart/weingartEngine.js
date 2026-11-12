@@ -628,8 +628,8 @@ export async function createWeingart(host) {
   let H = 1;
   let dpr = 1;
   // Sheets: the reversed slug is cut on its own, each ink is printed on its
-  // own (red, black) so a fleck in one ink shows what lies under it, and the
-  // third ink is worked out where the two sheets cross.
+  // own (red, black), and the third ink is worked out where the two sheets
+  // cross.
   const sheet = () => {
     const c = document.createElement("canvas");
     return [c, c.getContext("2d")];
@@ -639,105 +639,6 @@ export async function createWeingart(host) {
   const [redc, rctx] = sheet();
   const [blkc, bctx] = sheet();
   let dirty = true;
-
-  // Ink that did not take belongs to the lead, not the paper: every sort, every
-  // piece of brass and every block of the reversed slug carries its own field
-  // of flecks, from its own seed, fixed to its face, so it travels with the
-  // sort as it drops and knocks. Sorts ink unevenly: the far end of a line
-  // takes a little less ink than the margin, small type holds it better, and
-  // some faces have a patch where the roller ran thin.
-  const rng = (seed) => {
-    let a = seed >>> 0;
-    return () => {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  };
-  // Flecks per device pixel of face, on average across the forme.
-  const FLECKS = 0.0068;
-  // A sort's face box from its origin, design px: for a rule piece or a
-  // reversed block, room for the risers that join it to the piece before.
-  const grainBox = (s, u) => {
-    if (s.rule) return { x0: -s.thick, y0: -s.thick - 3 * UNIT, x1: u.w + s.thick, y1: s.thick * 2 + 3 * UNIT };
-    if (s.rev) return { x0: -12, y0: -17 - REV_H * 1.5, x1: u.w + 12, y1: -17 + REV_H * 2.5 };
-    return { x0: u.ink.x0 - 2, y0: u.ink.y0 - 2, x1: u.ink.x1 + 2, y1: u.ink.y1 + 3 };
-  };
-  const grains = new Map();
-  const grainOf = (s, u, j) => {
-    const key = s.id * 64 + j;
-    let G = grains.get(key);
-    if (G) return G;
-    const k = dpr * scale;
-    const b = grainBox(s, u);
-    const bx0 = Math.floor(b.x0 * k);
-    const by0 = Math.floor(b.y0 * k);
-    const w = Math.max(1, Math.ceil(b.x1 * k) - bx0);
-    const h = Math.max(1, Math.ceil(b.y1 * k) - by0);
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const g = c.getContext("2d");
-    const rnd = rng(0x9e3779b1 ^ Math.imul(s.id + 1, 0x85ebca6b) ^ Math.imul(j + 1, 0xc2b2ae35));
-    const px = Math.max(1, Math.round(dpr));
-    const far = s.ord[j] / Math.max(1, s.ord[s.ord.length - 1]);
-    const small = s.rule || s.rev ? 0.8 : clamp(s.size / 60, 0.45, 1);
-    const f = (0.72 + 0.5 * far) * (0.8 + 0.4 * rnd()) * small;
-    const n = Math.round(w * h * FLECKS * f);
-    // Most flecks fall anywhere on the face; some gather where the ink ran short.
-    const spots = Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => [rnd() * w, rnd() * h]);
-    const sig = Math.min(w, h) * 0.14;
-    const gauss = () => (rnd() + rnd() + rnd() - 1.5) * sig;
-    for (let i = 0; i < n; i++) {
-      const big = rnd() < (s.size && s.size < LETTER_MIN ? 0.05 : 0.12);
-      const a = big ? 0.4 + rnd() * 0.32 : 0.1 + rnd() * 0.16;
-      const fw = px * (big ? 1 + rnd() * 1.6 : 0.6 + rnd() * 0.8);
-      const fh = px * (big ? 0.8 + rnd() * 1.2 : 0.6 + rnd() * 0.6);
-      let x = rnd() * w;
-      let y = rnd() * h;
-      if (rnd() < 0.28) {
-        const [cx, cy] = spots[Math.floor(rnd() * spots.length)];
-        x = cx + gauss();
-        y = cy + gauss();
-      }
-      g.fillStyle = `rgba(0,0,0,${a.toFixed(3)})`;
-      g.fillRect(x, y, fw, fh);
-    }
-    // A display face may carry a pale, soft streak where the roller ran
-    // thin: long across the face, the way the roller travels.
-    if (!s.rule && !s.rev && s.size >= LETTER_MIN && rnd() < 0.6) {
-      const r = Math.min(w, h) * (0.1 + rnd() * 0.12);
-      const x = w * (0.2 + rnd() * 0.6);
-      const y = h * (0.2 + rnd() * 0.6);
-      g.save();
-      g.translate(x, y);
-      g.scale(2.4, 1);
-      const rg = g.createRadialGradient(0, 0, 0, 0, 0, r);
-      rg.addColorStop(0, `rgba(0,0,0,${(0.035 + rnd() * 0.03).toFixed(3)})`);
-      rg.addColorStop(1, "rgba(0,0,0,0)");
-      g.fillStyle = rg;
-      g.fillRect(-r, -r, r * 2, r * 2);
-      g.restore();
-    }
-    // A type sort's field is cut to its own face once, here, so taking it
-    // out of the sheet can never touch the ink of a sort beside it. (Brass
-    // and reversed ground are cut to their pieces when printed.)
-    if (!s.rule && !s.rev) {
-      const tx = dpr * ox - Math.round(dpr * ox + k * (s.x + u.x)) - bx0;
-      const ty = dpr * oy - Math.round(dpr * oy + k * s.y) - by0;
-      g.globalCompositeOperation = "destination-in";
-      g.setTransform(k, 0, 0, k, tx, ty);
-      g.fillStyle = "#000";
-      g.font = s.font;
-      g.textBaseline = "alphabetic";
-      glyphs(g, s, u, s.x, s.y);
-    }
-    G = { c, bx0, by0, w, h };
-    grains.set(key, G);
-    return G;
-  };
 
   const limits = () => {
     const m = 12 / scale;
@@ -778,7 +679,6 @@ export async function createWeingart(host) {
     // Sit a little left of centre and a little high: an asymmetric forme.
     ox = (w - DW * scale) * 0.44;
     oy = (h - DH * scale) * 0.46;
-    grains.clear();
     if (stillT != null) applyStill();
     else limits();
     dirty = true;
@@ -898,13 +798,6 @@ export async function createWeingart(host) {
   });
 
   /* ---------- draw ---------- */
-  // Each sort's own ink density: a fresh knock prints a touch darker.
-  const density = (s, u) => Math.min(1, (s.layer === "red" ? 0.93 : 0.95) + u.seat * 0.05);
-  const slugDensity = (s) => Math.max(...s.units.map((u) => density(s, u)));
-  // A sort just seated was struck hard: it takes ink better, so its flecks
-  // fade while the knock lasts.
-  const fleckAlpha = (u) => 1 - 0.6 * u.seat;
-
   const fillGround = (g, s) => {
     g.beginPath();
     for (const r of ground(s, (u) => u.p)) g.rect(r.x, r.y, r.w, r.h);
@@ -929,58 +822,16 @@ export async function createWeingart(host) {
     return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
   };
   const toForme = (g) => g.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * ox, dpr * oy);
-  // Where a sort's fleck field lands on the device, snapped to whole pixels
-  // so the flecks stay crisp; it rides on the sort's own origin.
-  const grainAt = (G, x, y) => [Math.round(dpr * (ox + x * scale)) + G.bx0, Math.round(dpr * (oy + y * scale)) + G.by0];
-
-  // One type sort printed onto an ink sheet where it sits, at its own
-  // density, and its own flecks (already cut to its face) taken out of it.
-  const printSort = (g, s, u, j, ink) => {
-    const G = grainOf(s, u, j);
+  // One type sort printed onto an ink sheet where it sits, in flat, solid ink.
+  const printSort = (g, s, u, ink) => {
     const [x, y] = sortAt(s, u);
     toForme(g);
     g.globalCompositeOperation = "source-over";
-    g.globalAlpha = density(s, u);
+    g.globalAlpha = 1;
     g.fillStyle = ink;
     g.font = s.font;
     g.textBaseline = "alphabetic";
     glyphs(g, s, u, x, y);
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.globalCompositeOperation = "destination-out";
-    g.globalAlpha = fleckAlpha(u);
-    g.drawImage(G.c, ...grainAt(G, s.x + u.x + u.p * s.sx, y));
-    g.globalCompositeOperation = "source-over";
-    g.globalAlpha = 1;
-  };
-
-  // Flecks on a continuous ground (brass rule, reversed slug): each piece's
-  // own field, clipped to that piece's face and the riser that joins it to
-  // the piece before, and kept off the face of the piece before.
-  const fleckGround = (g, s) => {
-    const rs = ground(s, (u) => u.p);
-    s.units.forEach((u, j) => {
-      const own = rs.filter((r) => r.j === j);
-      if (!own.length) return;
-      const before = rs.find((r) => r.j === j - 1 && !r.riser);
-      const G = grainOf(s, u, j);
-      g.save();
-      toForme(g);
-      g.beginPath();
-      for (const r of own) g.rect(r.x, r.y, r.w, r.h);
-      g.clip();
-      if (before) {
-        g.beginPath();
-        g.rect(-1e4, -1e4, 2e4, 2e4);
-        g.rect(before.x, before.y, before.w, before.h);
-        g.clip("evenodd");
-      }
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.globalCompositeOperation = "destination-out";
-      g.globalAlpha = fleckAlpha(u);
-      const [gx, gy] = grainAt(G, s.x + u.x + u.p * s.sx, s.y + u.p * s.sy);
-      g.drawImage(G.c, gx, gy);
-      g.restore();
-    });
   };
 
   // The reversed slug is solid ink with its letters cut out, one block per
@@ -1010,10 +861,7 @@ export async function createWeingart(host) {
         // Pieces and risers filled as one path, so the joins never show as seams.
         toForme(g);
         g.fillStyle = ink;
-        g.globalAlpha = slugDensity(s);
         fillGround(g, s);
-        g.globalAlpha = 1;
-        fleckGround(g, s);
         continue;
       }
       if (s.rev) {
@@ -1025,14 +873,11 @@ export async function createWeingart(host) {
         octx.clearRect(d.x, d.y, d.w, d.h);
         toForme(octx);
         drawRev(octx, s);
-        fleckGround(octx, s);
         g.setTransform(1, 0, 0, 1, 0, 0);
-        g.globalAlpha = slugDensity(s);
         g.drawImage(off, d.x, d.y, d.w, d.h, d.x, d.y, d.w, d.h);
-        g.globalAlpha = 1;
         continue;
       }
-      s.units.forEach((u, j) => u.vis && printSort(g, s, u, j, ink));
+      for (const u of s.units) if (u.vis) printSort(g, s, u, ink);
     }
   };
 
@@ -1053,8 +898,7 @@ export async function createWeingart(host) {
 
     // Where black lands on red the two inks make a third: inside each red
     // slug's box, the black sheet kept only where the red sheet printed, in
-    // the dark ink. A fleck in either ink is missing from it, so where the
-    // black did not take, the red shows through.
+    // the dark ink.
     for (const red of slugs) {
       if (red.layer !== "red") continue;
       const d = devRect(union(rectsNow(red)), red.size ? red.size * 0.12 : 4);
