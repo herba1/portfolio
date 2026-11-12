@@ -2,20 +2,32 @@ import { createStage, clamp, damp } from "../_kit/stage";
 import { createSound, db } from "@/lib/sound/engine";
 import { takes } from "./noCoverTakes";
 import { LABEL, rng, handle, fingertip, drag, lift } from "./noCoverHandling";
+import { decodeProgramme, cutLacquer, SR, SPT, TURN, WR, WAVE_W } from "./noCoverLathe";
 
 // After Christian Marclay, Record Without a Cover (1985): a record sold with
 // no sleeve, so the marks of handling become part of what it plays.
 //
-// The record is drawn in one full-screen pass, analytically, at the true
-// proportions of a 12-inch LP (302 mm across, 100 mm label, grooves from
-// 146 mm in to 60 mm), close enough that it runs off the frame. The grooves
-// are far finer than a pixel, so they are not drawn as lines: they are a
-// tangent field. Each point of vinyl reflects light along the groove's circle
-// (an anisotropic lobe, Kajiya-Kay in the tangent, Ward across it), so the
-// record lights up only where the groove runs across the half vector: a
-// narrow fan through the centre that points at the light and turns with it.
-// Band gaps between tracks are smooth vinyl and break the fan into rings.
-// The pressing is a hair off centre and a little warped, so the fan sways.
+// The record is drawn in one full-screen pass at the true proportions of a
+// 12-inch LP (302 mm across, 100 mm label), close enough that it runs off the
+// frame. Its grooves are cut from a real programme (see noCoverLathe.js): a
+// public-domain recording of Satie's first Gymnopedie, decoded with WebAudio
+// and fed to a variable-pitch lathe, so loud passages spread the turns wide,
+// quiet ones pack them tight, the silence between the two tracks is a band of
+// flat vinyl and the run-out spirals down to the locked groove. A bake pass
+// turns the spiral into a field fixed to the record, 4096 texels across: how
+// much of each texel is groove wall, which way its walls tilt, and the slope
+// of the groove where the waveform pushes it sideways, the part a texel
+// resolves as a mean and the part it cannot as an energy. Each turn is
+// displaced sideways by the waveform itself, by less than a texel.
+//
+// The light reads that field through one anisotropic lobe (Kajiya-Kay along
+// the groove, Ward across it): a groove lights only where it runs across the
+// half vector, a narrow fan through the centre that turns with the light. Where
+// the music is quiet the groove barely wanders and the fan is a hard, clean
+// streak; where it is loud the groove swings, the lobe tilts and spreads with
+// it, and the fan breaks into a scattered shimmer; the band between the tracks
+// is near-flat vinyl and stays dark. The pressing is a hair off centre and a
+// little warped, so the fan sways.
 //
 // Damage is a height field fixed to the record, 4096 texels across. What is
 // in it is not drawn: it comes from a simulation of handling (see
@@ -38,7 +50,10 @@ import { LABEL, rng, handle, fingertip, drag, lift } from "./noCoverHandling";
 // weighted by a shutter that opens and closes, and the paper label is
 // integrated in the same loop, so it smears with the vinyl. Each cut also
 // leaves its angle in a ring of bins; spinning sweeps the stylus through the
-// bins, and every bin with damage in it ticks or pops.
+// bins, and every bin with damage in it ticks or pops. Pressing and holding
+// drops the stylus at the radius pressed: it plays the programme from that
+// turn at the platter's own speed (eccentricity and all), and the scratches
+// it meets in its ring tick and pop over the music they cut through.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -119,25 +134,108 @@ void main(){
   oD = vec4(0.5 + 0.5 * cos(a2), 0.5 + 0.5 * sin(a2), 0.0, cover);
 }`;
 
+
+// --- the lathe's spiral, baked into the record-space groove field
+const BAKE_FS = `#version 300 es
+precision highp float;
+precision highp int;
+uniform highp sampler2D uSpiral;  // radius, half width; SPT a turn
+uniform highp sampler2D uWave;    // displacement, slope, fine slope, modulated
+uniform float uSize;
+uniform int uTurns;
+uniform float uLead;              // seconds of lead-in before the programme
+uniform float uDur;               // programme length
+uniform int uWaveN;
+uniform float uLat;               // full-scale sideways swing, record units
+uniform float uSmax;
+uniform vec2 uEcc;
+out vec4 o;
+const int SPT = ${SPT};
+const float TURN = ${TURN.toFixed(4)};
+const float WR = ${WR.toFixed(2)};
+const int WW = ${WAVE_W};
+vec2 spiralAt(float f){
+  f = clamp(f, 0.0, float(uTurns * SPT) - 1.001);
+  float fi = floor(f);
+  int i = int(fi);
+  vec2 a = texelFetch(uSpiral, ivec2(i % SPT, i / SPT), 0).rg;
+  vec2 b = texelFetch(uSpiral, ivec2((i + 1) % SPT, (i + 1) / SPT), 0).rg;
+  return mix(a, b, f - fi);
+}
+vec4 waveAt(float t){
+  if (t < 0.0 || t >= uDur) return vec4(0.0);
+  float f = t * WR;
+  int i = min(int(f), uWaveN - 2);
+  vec4 a = texelFetch(uWave, ivec2(i % WW, i / WW), 0);
+  vec4 b = texelFetch(uWave, ivec2((i + 1) % WW, (i + 1) / WW), 0);
+  return mix(a, b, fract(f));
+}
+void main(){
+  vec2 p = gl_FragCoord.xy / uSize * 2.0 - 1.0 - uEcc;
+  float r = length(p);
+  float tex = 2.0 / uSize;
+  // The record turns clockwise on screen, so the stylus reads the groove
+  // toward falling angle: the fraction of a turn grows as the angle falls.
+  float u = fract(-atan(p.y, p.x) / 6.2831853);
+  float r0 = spiralAt(u * float(SPT)).x;
+  float rN = spiralAt((float(uTurns - 1) + u) * float(SPT)).x;
+  if (r > r0 + 0.004 || r < rN - 0.004) { o = vec4(0.0, 0.5, 0.0, 0.5); return; }
+  // Find the two turns either side of this texel: radius falls turn by turn.
+  int lo = 0, hi = uTurns - 1;
+  if (r >= r0) hi = 0;
+  else if (r <= rN) lo = uTurns - 1;
+  else for (int it = 0; it < 12; it++) {
+    if (hi - lo <= 1) break;
+    int mid = (lo + hi) / 2;
+    if (spiralAt((float(mid) + u) * float(SPT)).x >= r) lo = mid; else hi = mid;
+  }
+  float cov = 0.0, sM = 0.0, sE = 0.0, tilt = 0.0;
+  for (int j = 0; j < 2; j++) {
+    int g = j == 0 ? lo : hi;
+    if (j == 1 && hi == lo) break;
+    float f = (float(g) + u) * float(SPT);
+    vec2 sp = spiralAt(f);
+    vec4 w = waveAt(f / float(SPT) * TURN - uLead);
+    // The cut: displaced sideways by the waveform, a V of the lathe's width.
+    float d = r - (sp.x + uLat * w.r * w.a);
+    float hw = sp.y;
+    float c = clamp((hw - abs(d)) / tex + 0.5, 0.0, 1.0);
+    // Its slope along the groove: how fast it swings sideways for each unit
+    // it runs forward, resolved, and the energy finer than a texel.
+    float v = 6.2831853 * r / TURN;
+    float s = uLat * w.g * w.a / v;
+    float sf = uLat * w.b * w.a / v;
+    cov += c;
+    sM += c * s;
+    sE += c * (s * s + sf * sf);
+    // The walls: the outer one faces in, the inner one out.
+    tilt += c * clamp(d / max(hw, tex), -1.0, 1.0);
+  }
+  // Slope mean and RMS are stored weighted by the groove's share of the
+  // texel, so they average right through the mips and divide back out.
+  float rmsS = cov > 0.0 ? sqrt(sE / cov) * min(cov, 1.0) : 0.0;
+  cov = min(cov, 1.0);
+  o = vec4(cov, 0.5 + 0.5 * clamp(sM / uSmax, -1.0, 1.0), clamp(rmsS / uSmax, 0.0, 1.0), 0.5 + 0.5 * clamp(tilt, -1.0, 1.0));
+}`;
+
 const FS = `#version 300 es
 precision highp float;
 uniform vec2 uRes; uniform float uDpr; uniform vec2 uC; uniform float uR;
 uniform float uA; uniform float uBlur; uniform vec3 uL; uniform vec2 uEcc;
 uniform sampler2D uDmg; uniform sampler2D uDir; uniform sampler2D uLab;
-uniform float uTex; uniform float uLod;
+uniform sampler2D uGroove;
+uniform float uTex; uniform float uLod; uniform float uSmax;
 out vec4 o;
 
 const float LABEL = 0.331;   // 50 / 151
 const float HOLE = 0.0238;   // 3.6 / 151
-const float G_OUT = 0.966;   // first groove
-const float G_IN = 0.40;     // last music groove
 const int TAPS = 48;
+const float WALL = 0.22;     // how far a groove wall's share tilts the normal
+const float SIG = 0.05;      // groove slope spread that doubles the lobe
 const float HB = 0.55;       // burr height, relative to trench depth
 const float SLOPE = 1.25;    // height per texel to surface slope
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-float h1(float x){ return fract(sin(x * 127.1) * 43758.5453); }
-float n1(float x){ float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(h1(i), h1(i + 1.0), f); }
 float noise(vec2 p){
   vec2 i = floor(p), f = fract(p);
   vec2 u = f * f * (3.0 - 2.0 * f);
@@ -146,24 +244,6 @@ float noise(vec2 p){
 // Interleaved gradient noise: a cheap blue-ish dither per pixel.
 float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 vec2 rot(vec2 v, float a){ float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
-float ampAt(vec2 l){
-  vec2 lg = l - uEcc;
-  float rl = length(lg);
-  vec2 ring = lg / max(rl, 1e-4);
-  return 0.62 + 0.55 * noise(vec2(rl * 110.0, 0.0) + ring * 3.2) * noise(vec2(rl * 31.0, 7.0) + ring * 1.6);
-}
-
-// Where each track ends: a smooth band a millimetre wide.
-float gaps(float r, float aa){
-  float g = 0.0;
-  g += 1.0 - smoothstep(0.0035, 0.0035 + aa, abs(r - 0.872));
-  g += 1.0 - smoothstep(0.0030, 0.0030 + aa, abs(r - 0.771));
-  g += 1.0 - smoothstep(0.0040, 0.0040 + aa, abs(r - 0.668));
-  g += 1.0 - smoothstep(0.0030, 0.0030 + aa, abs(r - 0.583));
-  g += 1.0 - smoothstep(0.0035, 0.0035 + aa, abs(r - 0.489));
-  return clamp(g, 0.0, 1.0);
-}
-
 // The one reflectance for grooves and cuts alike: a tangent-aligned lobe.
 // Narrow along the tangent (it lights where the tangent crosses the half
 // vector), wide across it, and divided through by the normal component so a
@@ -215,39 +295,13 @@ void main(){
     float rg = length(dg);
     vec2 Tg = vec2(-dg.y, dg.x) / max(rg, 1e-4);
 
-    // Fine striations in the groove field: the land between turns catches
-    // the light unevenly, ring by ring.
-    float stri = 0.72 + 0.28 * n1(rg * 900.0) * (0.6 + 0.4 * n1(rg * 260.0 + 3.0));
-    float grooved = smoothstep(G_IN - aa, G_IN + aa, rg) * (1.0 - smoothstep(G_OUT - aa, G_OUT + aa, rg));
-    grooved *= 1.0 - gaps(rg, aa);
-    // The run-out: a few turns of lead-out spiral on smooth vinyl, and the
-    // locked groove at the end.
-    float runout = 0.0;
-    for (int k = 0; k < 4; k++) {
-      float rr = G_IN - 0.012 - float(k) * 0.011;
-      runout += 1.0 - smoothstep(0.0012, 0.0012 + aa, abs(rg - rr));
-    }
-    runout += 1.0 - smoothstep(0.0012, 0.0012 + aa, abs(rg - 0.352));
-
     float lab = 1.0 - smoothstep(LABEL - aa * 0.6, LABEL + aa * 0.6, r);
     float labWide = 1.0 - step(LABEL + 4.0 * aa, r);
 
-    // How hard the music drives the groove changes along the spiral: the
-    // sheen is mottled by it, and the mottling is what streams. It varies
-    // smoothly round the record, so its average over the shutter's arc is
-    // taken exactly enough by Simpson's rule: three samples, not a tap each.
-    float amp = (ampAt(rot(q, -uA + 0.5 * uBlur)) + 4.0 * ampAt(rot(q, -uA)) + ampAt(rot(q, -uA - 0.5 * uBlur))) / 6.0;
-
-    // Undamaged vinyl under the fan: the same lobe, with a flat normal.
-    vec3 N0 = vec3(0.0, 0.0, 1.0);
-    vec3 T0 = vec3(Tg, 0.0);
-    float f0 = aniso(T0, cross(N0, T0), N0, Hw, 1.0, 2.5);
-    float base = grooved * stri * amp + runout * 0.8;
-
     // The shutter: the arc this pixel sweeps while it is open, integrated with
     // a tap per pixel of travel, each tap jittered within its stratum by its
-    // own blue-noise offset. Clean vinyl costs a tap one fetch; only taps that
-    // land on damage pay for its normal and its lobe.
+    // own blue-noise offset. Clean vinyl costs a tap two fetches, the groove
+    // and the damage; only taps that land on damage pay for its normal.
     float arc = uBlur * r * uR * uDpr;
     int n = uBlur > 1e-4 ? int(clamp(ceil(arc / 1.4), 1.0, float(TAPS))) : 1;
     float bn = ign(gl_FragCoord.xy);
@@ -256,9 +310,10 @@ void main(){
     float spread = max(1.0, arc / float(n));
     float lod = uLod + log2(spread);
     float step_ = uTex * spread;
-    float dspec = 0.0, stress = 0.0, cavity = 0.0, scuff = 0.0;
+    float spec = 0.0, stress = 0.0, cavity = 0.0, scuff = 0.0, grooved = 0.0;
     vec3 paper = vec3(0.0);
     float wsum = 0.0;
+    vec2 radial = dg / max(rg, 1e-4);
     for (int i = 0; i < TAPS; i++) {
       if (i >= n) break;
       float u = n == 1 ? 0.5 : (float(i) + fract(bn + float(i) * 0.6180339)) / float(n);
@@ -271,10 +326,33 @@ void main(){
       wsum += w;
       if (labWide > 0.0) paper += w * texture(uLab, l / LABEL * 0.5 + 0.5).rgb;
 
+      // The groove, as the lathe cut it: its share of the pixel, the way its
+      // walls lean, and how far the music swings it off its circle, as a mean
+      // tilt of its direction and a spread around it.
+      vec4 gf = textureLod(uGroove, uv, lod);
+      float gcov = gf.r;
+      // The swing is read a level coarser than the rings: what the eye takes
+      // from it is the tilt of a few waves together and their spread, not the
+      // sign of each one, which would tile the groove into cells.
+      vec4 gw = textureLod(uGroove, uv, lod + 1.25);
+      float ic = 1.0 / max(gw.r, 0.04);
+      float gs = (gw.g * 2.0 - 1.0) * uSmax * ic;
+      float grms = gw.b * uSmax * ic;
+      float gvar = max(grms * grms - gs * gs, 0.0);
+      float wT = sqrt(1.0 + gvar / (SIG * SIG));
+      vec3 Ng = normalize(vec3(radial * (gf.a * 2.0 - 1.0) * WALL, 1.0));
+      vec3 Tm = vec3(normalize(Tg + radial * gs), 0.0);
+      grooved += w * gcov;
+
       // The damage: height from trench and burr, normal from its slope.
       vec2 s0 = textureLod(uDmg, uv, lod).rg;
       scuff += w * s0.r;
-      if (s0.r + s0.g < 0.002) continue;
+      if (s0.r + s0.g < 0.002) {
+        vec3 T1 = normalize(Tm - Ng * dot(Tm, Ng));
+        // A lobe spread wider is dimmer for it: the same light, scattered.
+        spec += w * gcov * aniso(T1, cross(Ng, T1), Ng, Hw, wT, 2.5) / wT;
+        continue;
+      }
       // The field is read prefiltered to the pixel (a mip level picked from
       // the zoom), and its slope by central differences a pixel apart: a
       // hairline narrower than a pixel dims and widens to one, it does not
@@ -285,7 +363,10 @@ void main(){
       float hx = (sxp.g - sxm.g) * HB - (sxp.r - sxm.r);
       float hy = (syp.g - sym.g) * HB - (syp.r - sym.r);
       vec2 grad = rot(vec2(hx, hy) * 0.5 * SLOPE, a);
-      vec3 N = normalize(vec3(-grad, 1.0));
+      // The scratch has its own walls; the groove's lean only where the
+      // groove survives.
+      vec3 Nd = normalize(vec3(-grad, 1.0));
+      vec3 N = normalize(vec3(-grad + Ng.xy / Ng.z, 1.0));
       float dmg = s0.r + s0.g;
       float brk = smoothstep(0.03, 0.22, dmg);
 
@@ -296,9 +377,9 @@ void main(){
       float cov = smoothstep(0.02, 0.6, length(de));
       float ang = 0.5 * atan(de.y, de.x) + a;
       vec2 D = vec2(cos(ang), sin(ang));
-      vec3 T3 = normalize(vec3(D, 0.0) - N * dot(vec3(D, 0.0), N));
-      vec3 B3 = cross(N, T3);
-      vec3 Tg3 = normalize(vec3(Tg, 0.0) - N * dot(vec3(Tg, 0.0), N));
+      vec3 T3 = normalize(vec3(D, 0.0) - Nd * dot(vec3(D, 0.0), Nd));
+      vec3 B3 = cross(Nd, T3);
+      vec3 Tg3 = normalize(Tm - N * dot(Tm, N));
 
       // Two lobes. The groove's, on the tilted surface, where the groove
       // survives. And the scratch's own, along the line the grit travelled:
@@ -306,18 +387,17 @@ void main(){
       // crosses the light and free across it, so a family of arcs about one
       // centre lights up as its own small fan; a deep cut's walls are facets,
       // narrow across, so only the wall that faces the light catches it.
-      // What this tap adds is its difference from clean vinyl.
-      float fg = aniso(Tg3, cross(N, Tg3), N, Hw, 1.0, 2.5);
-      float fs = aniso(T3, B3, N, Hw, 1.9, mix(2.2, 0.34, brk));
-      dspec += w * (fg * base * (1.0 - max(brk, 0.6 * cov)) + fs * cov * (1.25 + 0.8 * s0.g) - f0 * base);
+      float fg = aniso(Tg3, cross(N, Tg3), N, Hw, wT, 2.5) / wT;
+      float fs = aniso(T3, B3, Nd, Hw, 1.9, mix(2.2, 0.34, brk));
+      spec += w * (fg * gcov * (1.0 - max(brk, 0.6 * cov)) + fs * cov * (1.25 + 0.8 * s0.g));
       // Fresh-cut vinyl stress-whitens a little, and the floor of a deep
       // trench sits in its own shadow.
-      stress += w * (s0.g * 0.8 + s0.r * 0.35) * (0.4 + 0.6 * max(dot(N, uL), 0.0));
+      stress += w * (s0.g * 0.8 + s0.r * 0.35) * (0.4 + 0.6 * max(dot(Nd, uL), 0.0));
       cavity += w * s0.r;
     }
     float fn = wsum;
-    float spec = max(0.0, f0 * base + dspec / fn);
-    stress /= fn; cavity /= fn; paper /= fn; scuff /= fn;
+    spec /= fn;
+    stress /= fn; cavity /= fn; paper /= fn; scuff /= fn; grooved /= fn;
 
     // Black vinyl: almost no diffuse, a faint coherent reflection of the
     // room where it is smooth, a little more scatter where it is grooved.
@@ -392,6 +472,28 @@ const TAU = Math.PI * 2;
 const RPM = 100 / 3;
 const OMEGA = (RPM / 60) * TAU; // rad/s at 33 1/3
 const BINS = 720;
+const RINGS = 40; // the bins again by radius, so the stylus hears its own ring
+const LAT = 0.0004; // full-scale sideways swing of the cut: 0.06 mm, under a texel
+const SMAX = 0.35; // the steepest groove slope the field holds
+
+// Should the programme not load, a stand-in the lathe can still cut: two
+// short tracks of soft partials with a gap between.
+function standIn() {
+  const x = new Float32Array(Math.round(SR * 60));
+  const r = rng(33);
+  for (let k = 0; k < 40; k += 1) {
+    const t0 = k * 1.45 + (k >= 20 ? 3.5 : 0);
+    if (t0 > 58) break;
+    const f = 196 * Math.pow(2, Math.floor(r() * 12) / 12);
+    const amp = 0.05 + 0.25 * Math.pow(Math.sin((k / 20) * Math.PI), 2);
+    const n0 = Math.round(t0 * SR);
+    for (let i = 0; i < SR * 1.4 && n0 + i < x.length; i += 1) {
+      const t = i / SR;
+      x[n0 + i] += amp * Math.exp(-t * 2.2) * (Math.sin(6.2832 * f * t) + 0.3 * Math.sin(12.566 * f * t));
+    }
+  }
+  return x;
+}
 
 async function drawLabel(size) {
   const c = document.createElement("canvas");
@@ -435,10 +537,16 @@ export async function createNoCover(host, { embedded = false } = {}) {
 
   const params = new URLSearchParams(location.search);
   const still = params.has("t") ? clamp(parseFloat(params.get("t")) || 0, 0, 1) : null;
+  // The programme the grooves are cut from: fetched and decoded while the
+  // rest is set up.
+  const decoding = decodeProgramme("/lab/no-cover/gymnopedie.mp3").catch((err) => {
+    console.warn("no-cover: programme did not load, cutting a stand-in", err);
+    return null;
+  });
 
   const prog = program(gl, VS, FS);
   const U = {};
-  for (const n of ["uRes", "uDpr", "uC", "uR", "uA", "uBlur", "uL", "uEcc", "uDmg", "uDir", "uLab", "uTex", "uLod"]) U[n] = gl.getUniformLocation(prog, n);
+  for (const n of ["uRes", "uDpr", "uC", "uR", "uA", "uBlur", "uL", "uEcc", "uDmg", "uDir", "uLab", "uGroove", "uTex", "uLod", "uSmax"]) U[n] = gl.getUniformLocation(prog, n);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   const buf = gl.createBuffer();
@@ -462,10 +570,10 @@ export async function createNoCover(host, { embedded = false } = {}) {
   // direction each cut travelled, two RG8 targets written together.
   const S = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE));
   const LEVELS = Math.log2(S) + 1;
-  const fieldTex = () => {
+  const fieldTex = (format = gl.RG8) => {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texStorage2D(gl.TEXTURE_2D, LEVELS, gl.RG8, S, S);
+    gl.texStorage2D(gl.TEXTURE_2D, LEVELS, format, S, S);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -539,8 +647,58 @@ export async function createNoCover(host, { embedded = false } = {}) {
 
   const labTex = makeTex(await drawLabel(512));
 
-  // Damage by angle on the record, for the stylus to find.
-  const bins = new Float32Array(BINS);
+  // --- the groove field: the lathe's spiral, cut from the programme, baked
+  // once into record space at the field's resolution.
+  const ECC = [0.0035, -0.002];
+  const decoded = await decoding;
+  const lathe = cutLacquer(decoded ? decoded.getChannelData(0) : standIn());
+  const programme = decoded;
+  const grooveTex = fieldTex(gl.RGBA8);
+  {
+    const dataTex = (internal, format, w, h, data) => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, gl.FLOAT, data);
+      return t;
+    };
+    const spiralTex = dataTex(gl.RG32F, gl.RG, SPT, lathe.turns, lathe.spiral);
+    const waveTex = dataTex(gl.RGBA16F, gl.RGBA, WAVE_W, lathe.waveH, lathe.wave);
+    const bake = program(gl, VS, BAKE_FS);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, grooveTex, 0);
+    gl.viewport(0, 0, S, S);
+    gl.useProgram(bake);
+    const u = (n) => gl.getUniformLocation(bake, n);
+    gl.uniform1f(u("uSize"), S);
+    gl.uniform1i(u("uTurns"), lathe.turns);
+    gl.uniform1f(u("uLead"), lathe.leadT);
+    gl.uniform1f(u("uDur"), lathe.D);
+    gl.uniform1i(u("uWaveN"), lathe.nw);
+    gl.uniform1f(u("uLat"), LAT);
+    gl.uniform1f(u("uSmax"), SMAX);
+    gl.uniform2f(u("uEcc"), ECC[0], ECC[1]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, spiralTex);
+    gl.uniform1i(u("uSpiral"), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, waveTex);
+    gl.uniform1i(u("uWave"), 1);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fb);
+    gl.deleteTexture(spiralTex);
+    gl.deleteTexture(waveTex);
+    gl.deleteProgram(bake);
+    gl.bindTexture(gl.TEXTURE_2D, grooveTex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+  }
+
+  // Damage by angle and ring on the record, for the stylus to find.
+  const bins = new Float32Array(BINS * RINGS);
 
   // --- sound
   const sound = createSound({ level: -5, room: 0.06 });
@@ -587,8 +745,10 @@ export async function createNoCover(host, { embedded = false } = {}) {
     const th0 = Math.atan2(my, mx);
     const th = th0 < 0 ? th0 + TAU : th0;
     const bi = Math.floor((th / TAU) * BINS) % BINS;
+    const ring = Math.min(RINGS - 1, Math.floor(Math.hypot(mx, my) * 0.5 * RINGS));
     const lp = Math.hypot(x1 - x0, y1 - y0) * 512; // in the old 1024-texel units the sound was tuned in
-    bins[bi] = Math.min(2, bins[bi] + lp * 0.09 * depth * depth);
+    const k = ring * BINS + bi;
+    bins[k] = Math.min(2, bins[k] + lp * 0.27 * depth * depth);
     total += lp * Math.min(1, depth * 2);
   };
 
@@ -659,9 +819,69 @@ export async function createNoCover(host, { embedded = false } = {}) {
     if (surf || !sound.live) return;
     surf = sound.loop(surfBank);
   };
+  // The programme under the stylus: where in it the stylus sits, and the
+  // voice playing it, at the rate the platter turns the groove past.
+  let stylusT = null;
+  let voice = null;
+  const dropStylus = (x, y) => {
+    const r = clamp(Math.hypot(x - C[0], y - C[1]) / R, lathe.radiusAt(lathe.tEnd) + 0.002, 0.984);
+    stylusT = lathe.timeAt(r);
+    voice?.stop();
+    voice = null;
+  };
+  const startVoice = (rate) => {
+    const ctx = sound.ctx;
+    if (!ctx || !programme || ctx.state !== "running") return;
+    const src = ctx.createBufferSource();
+    src.buffer = programme;
+    src.playbackRate.value = Math.max(1e-4, rate);
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 9000;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    g.gain.setTargetAtTime(db(-3), ctx.currentTime, 0.01);
+    src.connect(lp);
+    lp.connect(g);
+    g.connect(sound.out);
+    src.start(ctx.currentTime, stylusT);
+    const v = {
+      src,
+      g,
+      stop() {
+        const t = ctx.currentTime;
+        g.gain.setTargetAtTime(0, t, 0.015);
+        src.stop(t + 0.1);
+      },
+    };
+    src.onended = () => {
+      g.disconnect();
+      if (voice === v) voice = null;
+    };
+    voice = v;
+  };
+  // Eccentricity: the groove's centre is a hair off the spindle, so the
+  // stylus sees its speed rise and fall once a turn.
+  const eccR = Math.hypot(...ECC);
+  const play = (dt, speed) => {
+    if (stylusT == null) return;
+    const rs = lathe.radiusAt(stylusT);
+    const wow = 1 + (eccR / rs) * Math.sin(angle - lightAz + Math.atan2(ECC[1], ECC[0]));
+    const rate = speed * wow;
+    stylusT += rate * dt;
+    const inProgramme = stylusT >= 0 && stylusT < lathe.D - 0.05;
+    if (!voice && speed > 0.02 && inProgramme && mode === "hold" && sound.live) startVoice(rate);
+    if (voice && sound.ctx) voice.src.playbackRate.setTargetAtTime(Math.max(1e-4, rate), sound.ctx.currentTime, 0.02);
+    if (voice && (speed < 0.004 || !inProgramme)) {
+      voice.stop();
+      voice = null;
+    }
+  };
+
   let lastRel = null;
   const listen = (dt) => {
     const speed = omega / OMEGA;
+    play(dt, speed);
     if (speed > 0.02) ensureSurf();
     if (surf && sound.ctx) {
       const t = sound.ctx.currentTime;
@@ -685,10 +905,14 @@ export async function createNoCover(host, { embedded = false } = {}) {
     }
     const b0 = (lastRel / TAU) * BINS;
     const nb = (sweep / TAU) * BINS;
+    // Only the ring the stylus is riding: it hears the scratches that cross
+    // its groove, not the ones elsewhere on the record.
+    const rs = stylusT == null ? 0.7 : lathe.radiusAt(stylusT);
+    const ring = Math.min(RINGS - 1, Math.floor(rs * RINGS)) * BINS;
     let hits = 0;
     for (let i = 0; i < Math.ceil(nb) && hits < 6; i += 1) {
       const bi = ((Math.floor(b0 - i) % BINS) + BINS) % BINS;
-      const s = bins[bi];
+      const s = bins[ring + bi];
       if (s < 0.02) continue;
       hits += 1;
       const at = (i / Math.max(1, nb)) * dt;
@@ -712,7 +936,10 @@ export async function createNoCover(host, { embedded = false } = {}) {
     const W = stage.width;
     const H = stage.height;
     const now = performance.now();
-    if (mode === "pending" && now - downAt > 170) mode = "hold";
+    if (mode === "pending" && now - downAt > 170) {
+      mode = "hold";
+      dropStylus(downX, downY);
+    }
     // A finger held still while the record spins up is on the platter's
     // edge, not on the vinyl: it lifts, and touches down again when it moves.
     if (tip && mode === "hold" && now - tipMoved > 60) {
@@ -754,7 +981,8 @@ export async function createNoCover(host, { embedded = false } = {}) {
     gl.uniform1f(U.uA, angle);
     gl.uniform1f(U.uBlur, blur);
     gl.uniform3f(U.uL, L[0], L[1], L[2]);
-    gl.uniform2f(U.uEcc, 0.0035, -0.002);
+    gl.uniform2f(U.uEcc, ECC[0], ECC[1]);
+    gl.uniform1f(U.uSmax, SMAX);
     // One pixel of screen, in texels of the field: the mip level to read at,
     // and the step for the slope.
     const pxTex = S / (2 * R * stage.dpr);
@@ -769,14 +997,18 @@ export async function createNoCover(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, dirTex);
     gl.uniform1i(U.uDir, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, grooveTex);
+    gl.uniform1i(U.uGroove, 3);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   });
 
   return {
     destroy() {
       surf?.stop();
+      voice?.stop();
       sound.destroy();
-      [dmgTex, dirTex].forEach((t) => gl.deleteTexture(t));
+      [dmgTex, dirTex, grooveTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteFramebuffer(fbo);
       stage.destroy();
     },

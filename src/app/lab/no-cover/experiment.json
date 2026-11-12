@@ -1,11 +1,31 @@
 {
   "title": "No Cover",
-  "description": "A bare black record, sold without a sleeve, lying on a white table under one soft light. The grooves throw the light back as a narrow fan that turns as the light moves. Drag across the vinyl and you cut fine scratches that catch the light. Press and hold and the record spins up: the sheen streams, and every scratch you made clicks once a turn as it passes under the stylus, so the damage you did is what you hear.",
-  "tags": ["WebGL", "Sound", "Material"],
+  "description": "A bare black record, sold without a sleeve, lying on a white table under one soft light. Its grooves are cut from a real recording, so loud passages spread the turns wide, quiet ones pack them tight and the gap between tracks is a dark band of flat vinyl; the light breaks across them as a fan that shimmers where the music is loud. Drag across the vinyl and you cut fine scratches that catch the light. Press and hold where you want the needle and the record spins up and plays that groove, and every scratch the stylus crosses clicks over the music it cut through.",
+  "tags": [
+    "WebGL",
+    "Sound",
+    "Material"
+  ],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
   "intent": "After Christian Marclay, Record Without a Cover (1985), https://en.wikipedia.org/wiki/Record_Without_a_Cover: a record sold with no sleeve, so the scratches from handling become part of its sound. Here the wear is the instrument.",
-  "tile": { "shape": "wide" },
-  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.44, 0.38], "to": [0.58, 0.62] },
-  "sources": ["https://en.wikipedia.org/wiki/Record_Without_a_Cover"]
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.44,
+      0.38
+    ],
+    "to": [
+      0.58,
+      0.62
+    ]
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Record_Without_a_Cover",
+    "https://commons.wikimedia.org/wiki/File:Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg"
+  ]
 }
