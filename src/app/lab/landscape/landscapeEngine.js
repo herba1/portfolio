@@ -22,12 +22,16 @@ const BASELINE = 0.26; // of the frame's height, from the top
 const GAP = 24; // between a plane's last line and the next level, when framed
 // The reference frame the placements are authored against (fit = 1).
 const REF = { w: 1280, h: 800 };
-// Projected-size cull: below CAP_MIN screen px of cap height a line
-// collapses to a solid bar of ink the length of the line; a plane whose
-// largest bar is thinner than a hairline goes.
+// Projected-size cull, whole-plane: a plane reads as type while its lead
+// (its largest line) stands at least LEAD_PX tall on screen and its
+// smallest line at least SMALL_PX; under either, the whole plane collapses
+// at once to one flat field of its ink. A note reads exactly when its entry
+// does, so no field ever sits beside legible type of its own family. A plane
+// whose lead would be thinner than a hairline as a bar goes.
 const CAP = 0.7; // cap height / font size, Geist and Geist Mono
-const CAP_MIN = 6;
-const BAR = 0.42; // bar thickness / font size, a little under the x-height
+const LEAD_PX = 11;
+const SMALL_PX = 3.6;
+const BAR = 0.42; // a bar's thickness / font size, for the vanishing test
 // What the frame may crop, by rendered size in design px: copy under
 // DISPLAY goes as soon as it touches an edge, display type must stand almost
 // wholly in frame, and only GIANT type may run hard off an edge.
@@ -79,15 +83,15 @@ const f = (v) => (Math.abs(v) < 1e-9 ? 0 : +v.toFixed(7));
 // (from the centre, design px) of the margin and the baseline.
 export const grid = (w, h, fit) => [-w / (2 * fit) + MARGIN, -h / (2 * fit) + (BASELINE * h) / fit];
 
-// Read each text line's extent so it can collapse to a bar, and the plane's
-// first baseline. Runs before any transform is written.
+// Read each text line's extent (for the edge test), the plane's first
+// baseline, and the field its type covers, from the first cap line to the
+// last baseline, which the plane collapses to when it is too small to read.
+// Runs before any transform is written.
 function measurePlane(el) {
   const box = el.getBoundingClientRect();
   const texts = [...el.querySelectorAll("p, h2, h3, h4")];
-  const layer = document.createElement("div");
-  layer.className = "ls-bars";
-  layer.setAttribute("aria-hidden", "true");
   let bl = null;
+  let top = Infinity, foot = -Infinity, right = 0;
   const parts = texts.map((t) => {
     const fs = parseFloat(getComputedStyle(t).fontSize);
     const mark = document.createElement("span");
@@ -109,23 +113,27 @@ function measurePlane(el) {
     }
     // the first line's baseline sits this far above its glyph box's foot
     const drop = lines.length ? lines[0].b - box.top - base : 0;
-    const g = document.createElement("div");
-    g.className = "ls-bar-g";
-    for (const l of lines) {
-      const bar = document.createElement("i");
-      const y = l.b - box.top - drop; // baseline
-      bar.style.cssText = `left:${(l.l - box.left).toFixed(1)}px;top:${(y - fs * BAR).toFixed(1)}px;width:${(l.r - l.l).toFixed(1)}px;height:${(fs * BAR).toFixed(1)}px`;
-      g.appendChild(bar);
-    }
-    layer.appendChild(g);
     // the lines' extent, plane px, for the edge test
     const ext = lines.length
       ? [Math.min(...lines.map((l) => l.l)) - box.left, lines[0].b - box.top - drop - fs * CAP, Math.max(...lines.map((l) => l.r)) - box.left, lines[lines.length - 1].b - box.top]
       : [0, 0, 0, 0];
-    return { t, g, fs, cap: fs * CAP, ext, last: {} };
+    if (lines.length) {
+      top = Math.min(top, ext[1]);
+      foot = Math.max(foot, lines[lines.length - 1].b - box.top - drop);
+      right = Math.max(right, ext[2]);
+    }
+    return { t, fs, ext, last: {} };
   });
-  el.appendChild(layer);
-  return { parts, bl: bl ?? 0, layer, big: Math.max(...parts.map((p) => p.fs)) };
+  // One field, flush with the plane's left edge (a note's rule included).
+  const block = document.createElement("div");
+  block.className = "ls-block";
+  block.setAttribute("aria-hidden", "true");
+  if (Number.isFinite(top)) {
+    block.style.cssText = `left:0;top:${top.toFixed(1)}px;width:${right.toFixed(1)}px;height:${(foot - top).toFixed(1)}px`;
+  }
+  el.appendChild(block);
+  const sizes = parts.map((p) => p.fs);
+  return { parts, bl: bl ?? 0, block, big: Math.max(...sizes), small: Math.min(...sizes) };
 }
 
 // When the camera frames a child, its owner stands behind it A times its
@@ -284,6 +292,8 @@ export function createLandscape(root, { embedded = false } = {}) {
       if (wMin > 0.04 * s && wc > 0) op = smooth(-1.7, -1.1, lr) * smooth(0.6, 0.66, p.big * BAR * sc);
       p.keep = 0;
       p.sc = 0;
+      p.read = 0;
+      p.field = 1;
       if (op < 0.01) {
         if (st.vis !== "hidden") p.el.style.visibility = st.vis = "hidden";
         continue;
@@ -301,9 +311,6 @@ export function createLandscape(root, { embedded = false } = {}) {
       }
       if (st.tf !== tf) p.el.style.transform = st.tf = tf;
 
-      // Projected-size cull, line by line: type whose cap height on screen
-      // drops under CAP_MIN px gives way to a bar of its own ink, so far
-      // levels read as clean colour shapes instead of specks.
       // The other way, an owner standing far behind and blown up keeps only
       // its display line, as a cropped field of colour; its small copy at
       // that size would only read as torn-off words.
@@ -344,19 +351,32 @@ export function createLandscape(root, { embedded = false } = {}) {
       const opS = op > 0.995 ? "" : op.toFixed(3);
       if (st.op !== opS) p.el.style.opacity = st.op = opS;
 
+      // Whole-plane cull: the plane reads as type or as one field of its
+      // ink, never half and half. A note follows its entry.
+      // The swap is quick, and the field only comes up once the type has
+      // mostly gone, so a plane never shows type over a tinted box.
+      const lead = p.big * sc, least = p.small * sc;
+      let read = smooth(LEAD_PX - 0.8, LEAD_PX, lead) * smooth(SMALL_PX - 0.4, SMALL_PX, least);
+      let field = 1 - smooth(LEAD_PX - 0.8, LEAD_PX - 0.3, lead) * smooth(SMALL_PX - 0.4, SMALL_PX - 0.15, least);
+      if (owner && owner.kind === "entry") {
+        read = Math.min(smooth(SMALL_PX - 0.4, SMALL_PX, least), owner.read);
+        field = Math.max(1 - smooth(SMALL_PX - 0.4, SMALL_PX - 0.15, least), owner.field);
+      }
+      p.read = read;
+      p.field = field;
+      const rS = read > 0.995 ? "" : read.toFixed(3);
+      if (st.read !== rS) p.el.style.setProperty("--ls-read", (st.read = rS) || "1");
+      const bS = field < 0.005 ? "0" : field.toFixed(3);
+      if (st.blk !== bS) p.block.style.opacity = st.blk = bS;
+
       for (const part of p.parts) {
         const px = (part.fs * sc) / fit; // design px, so the rule holds at any fit
-        const bar = part.cap * sc < CAP_MIN;
-        let ta = bar ? 0 : 1;
+        let ta = read;
         if (part.fs < p.big) ta *= blown;
-        let pk = 1;
-        if (px >= GIANT) pk = smooth(0.5, 0.53, inFrame(part)[1]);
-        else if (giant) pk = keep;
-        ta *= pk;
+        if (px >= GIANT) ta *= smooth(0.44, 0.46, inFrame(part)[1]);
+        else if (giant) ta *= keep;
         const tS = ta > 0.995 ? "" : ta.toFixed(3);
-        const bS = bar ? (pk > 0.995 ? "1" : pk.toFixed(3)) : "0";
         if (part.last.t !== tS) part.t.style.opacity = part.last.t = tS;
-        if (part.last.b !== bS) part.g.style.opacity = part.last.b = bS;
       }
 
       // A light depth of field around the camera's focus distance, capped at
@@ -516,7 +536,8 @@ export function createLandscape(root, { embedded = false } = {}) {
       root.removeEventListener("pointercancel", onUp);
       root.removeEventListener("keydown", onKey);
       for (const p of planes) {
-        p.layer.remove();
+        p.block.remove();
+        p.el.style.removeProperty("--ls-read");
         for (const part of p.parts) part.t.style.opacity = "";
       }
     },

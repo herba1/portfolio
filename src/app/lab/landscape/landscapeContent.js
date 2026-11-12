@@ -23,14 +23,15 @@ export const PLANES = [
     sub: "Nine songs, written in a rented house by the estuary and recorded in one room, January to November.",
   },
 
-  // Chapters hang from one baseline across the foot of the title, in the
-  // four columns of the grid, each a step further back than the last.
+  // Chapters hang from one baseline just under the title's, clear of its
+  // letters, in the four columns of the grid, each a step further back
+  // than the last.
   {
     id: "writing",
     kind: "chapter",
     parent: "title",
     rel: 0.3,
-    k: 0.5, dx: 0, dy: 232,
+    k: 0.5, dx: 0, dy: 48,
     n: "01",
     when: "January to March",
     title: "Writing",
@@ -41,7 +42,7 @@ export const PLANES = [
     kind: "chapter",
     parent: "title",
     rel: 0.26,
-    k: 0.4, dx: 256, dy: 232,
+    k: 0.4, dx: 256, dy: 48,
     n: "02",
     when: "April to June",
     title: "Tracking",
@@ -52,7 +53,7 @@ export const PLANES = [
     kind: "chapter",
     parent: "title",
     rel: 0.22,
-    k: 0.32, dx: 512, dy: 232,
+    k: 0.32, dx: 512, dy: 48,
     n: "03",
     when: "July to September",
     title: "Mixing",
@@ -63,7 +64,7 @@ export const PLANES = [
     kind: "chapter",
     parent: "title",
     rel: 0.18,
-    k: 0.25, dx: 768, dy: 232,
+    k: 0.25, dx: 768, dy: 48,
     n: "04",
     when: "October and November",
     title: "Cutting",

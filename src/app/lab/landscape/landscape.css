@@ -90,35 +90,16 @@
   text-wrap: balance;
 }
 
-/* Level 0: the title, far away and large. The name sits at the foot of
-   the plane so the chapters can hang across it. */
+/* Level 0: the title, far away and large. The name hangs from the grid's
+   baseline at the head of the poster and runs off the right edge; the
+   chapters hang in a row below its baseline, and the colophon stands in
+   the last half-column at the foot of the poster, its last baseline on
+   the bottom margin of the reference frame. */
 .ls-title {
-  display: flex;
-  flex-direction: column;
   width: 1240px;
 }
 
-.ls-kicker {
-  order: -2;
-}
-
-.ls-sub {
-  order: -1;
-}
-
-.ls-title .ls-title-h {
-  margin-top: 12px;
-}
-
-.ls-kicker {
-  font-size: 20px;
-  line-height: 28px;
-  letter-spacing: -0.0172em;
-  font-weight: var(--font-weight-strong);
-}
-
 .ls-title-h {
-  margin-top: 4px;
   font-size: 192px;
   line-height: 192px;
   letter-spacing: -0.0403em;
@@ -126,12 +107,24 @@
   color: var(--ls-tint);
 }
 
+.ls-colophon {
+  margin-top: 392px;
+  margin-left: 896px;
+  width: 192px;
+}
+
+.ls-kicker,
 .ls-sub {
-  margin-top: 20px;
-  max-width: 560px;
-  font-size: 20px;
-  line-height: 28px;
-  letter-spacing: -0.0172em;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: -0.09px;
+}
+
+.ls-kicker {
+  font-weight: var(--font-weight-strong);
+}
+
+.ls-sub {
   font-weight: var(--font-weight-body);
 }
 
@@ -199,11 +192,11 @@
   font-weight: var(--font-weight-body);
 }
 
-/* Level 3: notes, the smallest layer. */
+/* Level 3: notes, the smallest layer. The rule in the margin fades with
+   the text when the plane collapses to its block. */
 .ls-note {
   width: 240px;
   padding-left: 12px;
-  border-left: 1px solid currentColor;
   color: var(--ls-accent);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -213,25 +206,26 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The projected-size cull: a line too small to read on screen is swapped
-   for a solid bar of its own ink, the length of the line. */
-.ls-bars {
+.ls-note::before {
+  content: "";
   position: absolute;
-  inset: 0;
-  pointer-events: none;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: currentColor;
+  opacity: var(--ls-read, 1);
 }
 
-.ls-bar-g {
-  opacity: 0;
-}
-
-.ls-bar-g i {
+/* The projected-size cull is whole-plane: a plane too small to read on
+   screen gives way, all at once, to one flat field of its own ink over the
+   extent of its type, from the first cap line to the last baseline. Distant
+   levels read as Cooper's colour shapes, never as a half-read plane. */
+.ls-block {
   position: absolute;
   background: currentColor;
-}
-
-.ls-title .ls-bar-g:nth-child(2) i {
-  background: var(--ls-tint);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ls-mark {

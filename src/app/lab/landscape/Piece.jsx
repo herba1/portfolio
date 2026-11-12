@@ -9,9 +9,11 @@ function Plane({ p }) {
   if (p.kind === "title") {
     return (
       <div className="ls-plane ls-title" data-id={p.id}>
-        <p className="ls-kicker">{p.kicker}</p>
         <h2 className="ls-title-h">{p.title}</h2>
-        <p className="ls-sub">{p.sub}</p>
+        <div className="ls-colophon">
+          <p className="ls-kicker">{p.kicker}</p>
+          <p className="ls-sub">{p.sub}</p>
+        </div>
       </div>
     );
   }
