@@ -24,6 +24,11 @@ import { createStage, clamp } from "../_kit/stage";
 // the same vanishing point as the buildings. The dome turns and tilts with the
 // dragged sun so its own sun, and the sunlit sides of its clouds, stand where
 // the key light comes from.
+//
+// Plate and dome are then developed as one exposure: a single film pass over
+// the matted frame spreads its highlights (a warm Pro-Mist diffusion), throws
+// a thin red halation ring onto the dark side of every bright edge, and lays
+// one grain field, stepping at 24 fps, over sky and concrete alike.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -31,7 +36,7 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uHalo, uSky, uSkyBlue;
+uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uSky, uSkyBlue;
 uniform vec2 uRes;        // canvas px
 uniform vec4 uMap;        // image uv = frag * uMap.xy + uMap.zw (cover fit)
 uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y up, z to the viewer)
@@ -48,18 +53,15 @@ const float ASPECT = 2048.0 / 1536.0;
 // (PITCH) that is where the zenith stands for this lens, so sky rays through
 // it converge with the walls.
 const float LENS = 1.034;
-// The sky dome: where its own sun stands across the equirect, its texel size,
-// and its open blue sky's chroma (luma 1).
+// The sky dome: where its own sun stands across the equirect, and its open
+// blue sky's chroma (luma 1).
 const float SKY_U = 0.5951;
-const vec2 SKY_TEX = vec2(8192.0, 2048.0);
 const vec3 SKY_BLUE = vec3(0.72, 1.0, 1.79);
 // The clouds' exposure against the graded blue: a sunlit top lands near
 // paper white, the way a polariser holds a cobalt sky under bright cumulus.
 const float CLOUD = 2.6;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
-
-float hash(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
 
 vec3 toLin(vec3 c){ return pow(c, vec3(2.2)); }
 vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
@@ -93,8 +95,11 @@ void main(){
   // of SKY_BLUE) and what the clouds and the haze round the sun add over it.
   // They are graded apart, the way a polariser does it: the blue deepens to
   // cobalt toward the zenith and pales to cyan lower down, while the
-  // clouds keep their light, warmed toward the key.
-  vec3 cloud = skyDecode(textureGrad(uSky, st, sx, sy).rgb, 4.0);
+  // clouds keep their light, warmed toward the key. The clouds are read
+  // half a mip soft: a kilometre of air sits between them and the walls,
+  // and at the dome's full resolution their edges were crisper than the
+  // plate's own.
+  vec3 cloud = skyDecode(textureGrad(uSky, st, sx * 1.6, sy * 1.6).rgb, 4.0);
   float beta = skyDecode(textureGrad(uSkyBlue, st, sx, sy).rrr, 1.0).r;
   // Paler only with the ray's own elevation: the sky does not know where the
   // walls stand, and paling it toward them drew a lit band along every edge
@@ -109,15 +114,16 @@ void main(){
   // What is left over the blue is mostly neutral; at thin edges where the
   // dome's sky leans off SKY_BLUE the remainder turns violet, and the
   // clouds' exposure would show it as a fringe. So it is held near grey.
-  cloud = mix(vec3(luma(cloud)), cloud, 0.3) * CLOUD * warm;
+  cloud = mix(vec3(luma(cloud)), cloud, 0.3) * CLOUD;
+  // A cloud's shadow side is not grey: the sun does not reach it, the open
+  // sky does, so it takes the sky's own blue (this ray's, cobalt high and
+  // cyan low) at the same luminance, and sits a little deeper. Only the
+  // sunlit tops keep the key's warm white.
+  float sunlit = smoothstep(2.0, 14.0, luma(cloud));
+  vec3 skyTint = mix(vec3(1.0), blue / luma(blue), 0.42);
+  cloud *= mix(skyTint * 0.5, warm, sunlit);
   cloud /= 1.0 + luma(cloud) / 12.0;
   vec3 skyL = (beta * blue + cloud) * mix(0.72, 1.0, uDay);
-  // Halation off the cloud tops: the dome a few mips softer, only what is
-  // brighter than the paper white of a cloud, thrown back red.
-  float sl = log2(max(length(sx * SKY_TEX), length(sy * SKY_TEX)));
-  vec3 rb = skyDecode(textureLod(uSky, st, max(sl, 0.0) + 2.2).rgb, 4.0);
-  float hs = max(luma(rb) * CLOUD - 2.0, 0.0);
-  skyL += vec3(1.0, 0.3, 0.08) * hs / (hs + 4.0) * 0.13 * mix(0.6, 1.0, uDay);
 
   // Surfaces. Albedo in linear light; the plate's grade left the concrete
   // olive, so most of the chroma comes off the walls (not the tower's paint),
@@ -164,33 +170,102 @@ void main(){
   float spec = pow(max(dot(n, h), 0.0), 40.0) * vis * mix(0.03, 0.12, tower) * smoothstep(0.0, 0.2, ndl);
   vec3 lit = alb * (uSunCol * key + fill + bounce) + uSunCol * spec;
 
-  // Halation: the tower's sunlit white paint bleeds red into what is around
-  // it, the way a film's base throws light back through the emulsion.
-  vec2 hp = 1.0 / vec2(256.0, 192.0);
-  float hal = 0.0;
-  hal += textureLod(uHalo, uv + vec2(hp.x, hp.y) * 0.5, 2.4).r;
-  hal += textureLod(uHalo, uv + vec2(-hp.x, hp.y) * 0.5, 2.4).r;
-  hal += textureLod(uHalo, uv + vec2(hp.x, -hp.y) * 0.5, 2.4).r;
-  hal += textureLod(uHalo, uv - vec2(hp.x, hp.y) * 0.5, 2.4).r;
-  hal = hal * 0.25 * 0.8 + textureLod(uHalo, uv, 3.4).r * 0.22;
-  float towerSun = 0.35 + 0.65 * clamp(dot(vec3(0.0, 0.22, 0.85), L) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 halo = vec3(1.0, 0.24, 0.07) * hal * towerSun * luma(uSunCol) * 0.22;
-
   // The sky goes over the plate after the tone curve, as a print would be
   // matted: the dome runs to a thousand times paper white at the sun, and
   // in linear light even the matte's last 1% inside the tower would carry
-  // it through as white blotches.
-  vec3 c = mix(tone(lit + halo), tone(skyL + halo), sky);
+  // it through as white blotches. Diffusion, halation and grain come after,
+  // in FILM, over the matted frame as one.
+  o = vec4(mix(tone(lit), tone(skyL), sky), 1.0);
+}`;
 
-  // A light film grade: a lifted toe, a breath of vignette, and fine
-  // monochrome grain from two hashes, so it is triangular, strongest in the
-  // midtones.
+// The film the whole frame shares, plate and dome alike, so they read as one
+// exposure. First the light that scatters, at half size: what is brighter
+// than 0.8 in rgb, for the diffusion, and the near-white that halates in a.
+// Four bilinear taps cover the 4x4 block, so a bright hairline does not
+// shimmer in and out of it.
+const PREP = `#version 300 es
+precision highp float;
+uniform sampler2D uScene;
+uniform vec2 uTexel;      // the scene's texel
+out vec4 o;
+float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec4 src(vec2 uv){
+  vec3 c = texture(uScene, uv).rgb;
+  float l = luma(c);
+  vec3 lin = pow(c, vec3(2.2));
+  return vec4(lin * smoothstep(0.7, 0.95, l), smoothstep(0.84, 0.97, l));
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy * 2.0 * uTexel;
+  vec2 t = uTexel;
+  o = 0.25 * (src(uv + vec2(-t.x, -t.y)) + src(uv + vec2(t.x, -t.y)) + src(uv + vec2(-t.x, t.y)) + src(uv + t));
+}`;
+
+// Then the frame itself: a Pro-Mist diffusion from those highlights (a few
+// px at DPR 2, warm, since the filter's scatter is warmer than the light it
+// takes), a thin red-orange halation on the dark side of every bright edge
+// (the tower and the walls against the cloud), a breath of vignette, a lifted
+// toe, and one grain field for the whole frame, stepping at 24 fps.
+const FILM = `#version 300 es
+precision highp float;
+uniform sampler2D uScene, uBright;
+uniform vec2 uRes;        // canvas px
+uniform vec2 uHalf;       // uBright's texel
+uniform float uSeed;
+uniform float uDay;
+out vec4 o;
+float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+// The bright layer spread at a mip: four taps a texel of that level apart,
+// turned off the pixel grid, so the mips' boxes do not show.
+vec4 spread(vec2 uv, float lod){
+  vec2 r = uHalf * exp2(lod) * 0.75;
+  return 0.25 * (textureLod(uBright, uv + r * vec2(0.92, 0.38), lod) + textureLod(uBright, uv + r * vec2(-0.38, 0.92), lod)
+               + textureLod(uBright, uv + r * vec2(-0.92, -0.38), lod) + textureLod(uBright, uv + r * vec2(0.38, -0.92), lod));
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec3 c = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec3 lin = pow(c, vec3(2.2));
+  float l = luma(c);
+
+  vec4 b0 = textureLod(uBright, uv, 0.0);
+  vec4 b1 = spread(uv, 0.5);
+  vec4 b2 = spread(uv, 1.5);
+  vec4 b3 = spread(uv, 2.6);
+
+  // Diffusion: a share of the highlight leaves its pixel and lands spread
+  // round it, so the cloud's white veils softly over the steel and the wall
+  // edges in front of it, and the tops lose their paper-cut edge. It only
+  // moves light, so a wide cloud keeps its level; what lands outside the
+  // highlight is warmer than what left.
+  vec3 d = b1.rgb * 0.4 + b2.rgb * 0.35 + b3.rgb * 0.25 - b0.rgb;
+  lin += 0.4 * (max(d, 0.0) * vec3(1.0, 0.93, 0.82) + min(d, 0.0));
+
+  // Halation: light through the emulsion off the base and back through the
+  // red layer. A ring, not a glow: the spread source minus what is already
+  // white here, only where the pixel is darker than the source.
+  float ring = max(b2.a * 0.4 + b3.a * 0.6 - b0.a * 0.85, 0.0) * (1.0 - smoothstep(0.45, 0.9, l));
+  lin += vec3(1.0, 0.3, 0.08) * ring * 0.32 * mix(0.75, 1.0, uDay);
+
+  c = pow(max(lin, 0.0), vec3(1.0 / 2.2));
   c = mix(vec3(0.018, 0.016, 0.02), vec3(1.0), c);
-  vec2 cv = (frag / uRes - 0.5);
+  vec2 cv = uv - 0.5;
   c *= 1.0 - 0.16 * dot(cv, cv);
-  float g = hash(frag) + hash(frag + 17.3) - 1.0;
+
+  // Grain: clumps about 1.5 px across at DPR 2 with a finer hash through
+  // them, triangular, strongest in the midtones but never gone, the same law
+  // on the sky as on the concrete. A touch of colour between the layers.
+  vec2 p = gl_FragCoord.xy + uSeed * vec2(37.1, 91.7);
+  float g = (vnoise(p / 1.5) - 0.5) * 1.5 + (hash(p) + hash(p + 17.3) - 1.0) * 0.55;
+  vec3 gc = vec3(g) + (vec3(hash(p + 3.1), hash(p + 5.7), hash(p + 9.3)) - 0.5) * 0.35;
   float lc = luma(c);
-  c += g * (0.044 * lc * (1.0 - lc) + 0.004);
+  c += gc * (0.06 * lc * (1.0 - lc) + 0.009);
   o = vec4(c, 1.0);
 }`;
 
@@ -263,38 +338,9 @@ function domeFor(az, el) {
   return [...p, ...right, ...z];
 }
 
-function readSmall(im, w, h) {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const x = c.getContext("2d", { willReadFrequently: true });
-  x.drawImage(im, 0, 0, w, h);
-  return x.getImageData(0, 0, w, h).data;
-}
-
-// Where the tower's paint is white: the halation source, at a quarter size
-// so its mips blur it cheaply in the shader.
-function haloMask(photo, matte) {
-  const w = 512;
-  const h = 384;
-  const p = readSmall(photo, w, h);
-  const m = readSmall(matte, w, h);
-  const out = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    const r = p[4 * i];
-    const g = p[4 * i + 1];
-    const b = p[4 * i + 2];
-    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-    const white = clamp((lum - 150) / 60, 0, 1) * clamp(1 - (chroma - 30) / 50, 0, 1);
-    out[i] = Math.round(255 * white * (m[4 * i + 1] / 255));
-  }
-  return { w, h, data: out };
-}
-
 export async function createPasses(host) {
-  const [photo, albedo, depth, normal, matte, skyCloud, skyBlue] = await Promise.all(
-    ["photo.webp", "albedo.webp", "depth.png", "normal.webp", "matte.png", "sky-cloud.avif", "sky-blue.avif"].map(
+  const [albedo, depth, normal, matte, skyCloud, skyBlue] = await Promise.all(
+    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "sky-cloud.avif", "sky-blue.avif"].map(
       (f) => loadImage(SRC + f),
     ),
   );
@@ -305,6 +351,7 @@ export async function createPasses(host) {
   const num = (k) => (params.has(k) ? clamp(parseFloat(params.get(k)) || 0, 0, 1) : null);
   const holdX = num("x");
   const holdY = num("y");
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   const sh = (type, src) => {
     const s = gl.createShader(type);
@@ -313,13 +360,27 @@ export async function createPasses(host) {
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
     return s;
   };
-  const prog = gl.createProgram();
-  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
-  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
-  gl.linkProgram(prog);
+  const program = (fs) => {
+    const p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, VS));
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  };
+  const prepProg = program(PREP);
+  const filmProg = program(FILM);
+  const prog = program(FS);
   gl.useProgram(prog);
   const U = (n) => gl.getUniformLocation(prog, n);
   const u = { res: U("uRes"), map: U("uMap"), sun: U("uSun"), sunCol: U("uSunCol"), up: U("uUp"), day: U("uDay"), dome: U("uDome") };
+  const up = { texel: gl.getUniformLocation(prepProg, "uTexel") };
+  const uf = {
+    res: gl.getUniformLocation(filmProg, "uRes"),
+    half: gl.getUniformLocation(filmProg, "uHalf"),
+    seed: gl.getUniformLocation(filmProg, "uSeed"),
+    day: gl.getUniformLocation(filmProg, "uDay"),
+  };
 
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -346,15 +407,6 @@ export async function createPasses(host) {
   tex(normal, 2, "uNormal", true);
   tex(albedo, 3, "uAlbedo", true);
   tex(matte, 4, "uMatte", true);
-
-  const halo = haloMask(photo, matte);
-  gl.activeTexture(gl.TEXTURE5);
-  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, halo.w, halo.h, 0, gl.RED, gl.UNSIGNED_BYTE, halo.data);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  params2d(true);
-  gl.uniform1i(U("uHalo"), 5);
 
   // The sky dome's two layers: azimuth repeats, and anisotropic filtering
   // where the GPU has it, since the equirect stretches across toward the
@@ -383,6 +435,36 @@ export async function createPasses(host) {
   dome(skyCloud, 6, "uSky");
   dome(skyBlue, 8, "uSkyBlue");
 
+  // The film's targets: the matted frame at full size (unit 10), and the
+  // light that scatters from it at half size, with mips to spread it (11).
+  // Allocated whenever the canvas changes size.
+  const scene = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
+  const bright = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
+  let fw = 0;
+  let fh = 0;
+  const alloc = (t, unit, w, h, mips) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+    params2d(mips);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
+  };
+  const targets = (W, Hc) => {
+    if (W === fw && Hc === fh) return;
+    fw = W;
+    fh = Hc;
+    alloc(scene, 10, W, Hc, false);
+    alloc(bright, 11, Math.ceil(W / 2), Math.ceil(Hc / 2), true);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  };
+  gl.useProgram(prepProg);
+  gl.uniform1i(gl.getUniformLocation(prepProg, "uScene"), 10);
+  gl.useProgram(filmProg);
+  gl.uniform1i(gl.getUniformLocation(filmProg, "uScene"), 10);
+  gl.uniform1i(gl.getUniformLocation(filmProg, "uBright"), 11);
+
   let dirty = true;
   stage.onResize(() => {
     dirty = true;
@@ -408,7 +490,23 @@ export async function createPasses(host) {
     if (p.down) aim(p);
   });
 
+  // The grain steps at 24 fps whether or not the light moves; between steps
+  // and while the sun is still, nothing is drawn. A sun held by the query is
+  // a still frame, and its grain holds too.
+  const still = held || reduce;
+  let seed = 0;
+  let grainClock = 0;
+  let tick = false;
+
   stage.onFrame((dt) => {
+    if (!still) {
+      grainClock += dt;
+      if (grainClock >= 1 / 24) {
+        grainClock %= 1 / 24;
+        seed = (seed + 1) % 997;
+        tick = true;
+      }
+    }
     const k = 1 - Math.exp(-dt * rate);
     const dx = target.x - sun.x;
     const dy = target.y - sun.y;
@@ -417,14 +515,22 @@ export async function createPasses(host) {
       sun.y += dy * k;
       dirty = true;
     }
-    if (!dirty) return;
-    dirty = false;
-    draw();
+    if (dirty) {
+      dirty = false;
+      draw();
+      develop();
+    } else if (tick) develop();
+    tick = false;
   });
 
+  // The light, into the scene target.
+  let day = 1;
   function draw() {
     const W = stage.canvas.width;
     const Hc = stage.canvas.height;
+    targets(W, Hc);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, scene.fbo);
+    gl.useProgram(prog);
     gl.viewport(0, 0, W, Hc);
     gl.uniform2f(u.res, W, Hc);
     // Cover fit: the photo fills the frame, cropped evenly on the long side.
@@ -436,12 +542,41 @@ export async function createPasses(host) {
     gl.uniform3f(u.sunCol, S.col[0], S.col[1], S.col[2]);
     gl.uniform3f(u.up, 0, Math.cos(PITCH), -Math.sin(PITCH));
     gl.uniform1f(u.day, S.day);
+    day = S.day;
     gl.uniformMatrix3fv(u.dome, false, domeFor(S.az, S.el));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // What scatters, at half size, spread through its mips.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bright.fbo);
+    gl.useProgram(prepProg);
+    gl.viewport(0, 0, Math.ceil(W / 2), Math.ceil(Hc / 2));
+    gl.uniform2f(up.texel, 1 / W, 1 / Hc);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE11);
+    gl.generateMipmap(gl.TEXTURE_2D);
+  }
+
+  // The film, to the canvas: cheap, so it alone runs for each grain step.
+  function develop() {
+    const W = stage.canvas.width;
+    const Hc = stage.canvas.height;
+    if (W !== fw || Hc !== fh) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(filmProg);
+    gl.viewport(0, 0, W, Hc);
+    gl.uniform2f(uf.res, W, Hc);
+    gl.uniform2f(uf.half, 1 / Math.ceil(W / 2), 1 / Math.ceil(Hc / 2));
+    gl.uniform1f(uf.seed, seed);
+    gl.uniform1f(uf.day, day);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   return {
     destroy() {
+      [scene, bright].forEach((t) => {
+        gl.deleteFramebuffer(t.fbo);
+        gl.deleteTexture(t.tex);
+      });
       stage.destroy();
     },
   };
