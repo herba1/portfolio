@@ -14,7 +14,8 @@
       answers 429); sky: segment.py sky hashi-3840.jpg hashi-3840-sky.png
       --work 3840, at its full width)
       OUT:  public/lab/curve-mirror (env.webp, envd.png, scene.json; photo.webp
-            and aux.png depend only on the photo and are unchanged by the 360)
+            (the sky-graded plate) and aux.png depend only on the photo and
+            are unchanged by the 360)
 
 The mirror stands 2.9 m in front of the lens, high on its pole over the old house
 on the left. Everything it can reflect is gathered into one equirect panorama
@@ -36,6 +37,12 @@ photo's vertical vanishing point):
     also works: turned to the photo's sun, its sun disc taken out; the engine
     draws the sun analytically, at HDR.)
   - the seam is feathered over ~9 degrees inside the photo's coverage.
+  - first, the photo's sky is graded through its matte to a deep summer
+    cobalt by elevation (sky_grade.py: its milky right half and the haze
+    over the roofs taken to the clear sky's colour, clouds kept pale), and
+    the panorama's fitted sky is that same target carried to the zenith, so
+    the sky in the glass meets the sky round the mirror. photo.webp is the
+    graded plate; aux.png is measured on the plate as shot.
 
 Also: a distance panorama (for parallax across the 0.8 m face), SH9 irradiance
 of the panorama (for lighting the paint), and aux.png for the photo: log depth
@@ -50,6 +57,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 import kit  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sky_grade  # noqa: E402
 
 WORK, OUT = sys.argv[1], sys.argv[2]
 # the world behind the lens: a Poly Haven HDRI (sun-matched) or an 8-bit 360 photo
@@ -96,6 +106,14 @@ Pw = Pc @ Rw.T
 rw = rc @ Rw.T
 rw /= np.linalg.norm(rw, axis=-1, keepdims=True)
 T.mark("load")
+
+# the photo's sky graded to a deep summer cobalt through its matte, by
+# elevation (sky_grade.py); everything downstream (the photo as shipped, its
+# pixels in the panorama, the cloud plane) takes the graded plate, and the
+# panorama's fitted sky is the same target carried to the zenith
+lin0 = lin
+lin = sky_grade.grade_photo(lin, sky, np.degrees(np.arcsin(np.clip(rw[..., 1], -1, 1))))
+T.mark("sky grade")
 
 # the mirror's face centre
 u0, v0 = MIRROR_PX
@@ -355,17 +373,10 @@ wb = (pr / hr) ** 0.15
 env_h *= wb
 print("hdri exposure %.3f wb %s" % (expo, wb.round(3)))
 # the HDRI's own sky (clear, pale November) becomes the photo's summer sky:
-# a fit of the photo's clear-sky colour by elevation and angle to the sun
-sk = (sky > 0.5) & ((lin.max(-1) - lin.min(-1)) / np.maximum(lin.max(-1), 1e-3) > 0.3)
-el_p = np.degrees(np.arcsin(np.clip(rw[sk][:, 1], -1, 1)))
-g_p = np.degrees(np.arccos(np.clip(rw[sk] @ sun, -1, 1)))
-def feats(el, g):
-    el = np.clip(el, 0, 62) / 60
-    return np.stack([np.ones_like(el), el, el * el], -1)
-A = feats(el_p, g_p)
-coef = np.linalg.lstsq(A, np.log(lin[sk] + 1e-4), rcond=None)[0]
+# the graded plate's clear-sky target by elevation, the same curve the photo's
+# sky was taken to, carried on up to the zenith
 g_e = np.degrees(np.arccos(np.clip(E @ sun, -1, 1)))
-skym = np.exp(feats(elev, g_e) @ coef)
+skym = sky_grade.target(elev)
 # circumsolar aureole: brighter and whiter toward the sun
 aur = np.exp(-g_e / 9)[..., None]
 skym = skym * (1 + 0.8 * aur) + 0.2 * aur
@@ -374,7 +385,7 @@ hsky = np.maximum(hsky, kit.smoothstep(14, 8, g_e).astype(np.float32))
 hs_l = kit.luma(env_h)
 var = np.clip(hs_l / np.maximum(cv2.GaussianBlur(hs_l, (0, 0), 40), 1e-4), 0.85, 1.15)
 for e_ in (10, 30, 50, 70, 85):
-    print("sky model at %d deg:" % e_, np.exp(feats(np.array([e_]), np.array([120])) @ coef).round(3))
+    print("sky target at %d deg:" % e_, sky_grade.target(e_).round(3))
 h_sun = np.array([np.cos(np.radians(h_el)) * np.sin((h_lon + rot) * 2 * np.pi), np.sin(np.radians(h_el)), -np.cos(np.radians(h_el)) * np.cos((h_lon + rot) * 2 * np.pi)])
 g_h = np.degrees(np.arccos(np.clip(E @ h_sun, -1, 1)))
 # the old sun's corona (bright, white) is sky too
@@ -504,7 +515,7 @@ nrm = cv2.imread(f"{WORK}/moge/normal.png", cv2.IMREAD_UNCHANGED)[..., ::-1].ast
 nw = nrm @ Rw.T
 nw /= np.linalg.norm(nw, axis=-1, keepdims=True) + 1e-6
 ndl = nw @ sun
-lum = kit.luma(lin)
+lum = kit.luma(lin0)  # the plate as shot: what is sunlit does not move with the grade
 # how much of a pixel's light is the sun's: facing it, and bright for its colour
 loc = cv2.dilate(lum, np.ones((61, 61), np.uint8))
 loc = kit.blur(loc, 20)
@@ -523,7 +534,7 @@ kit.save_rgb(f"{OUT}/env.webp", enc(env), quality=84)
 kit.save_gray(f"{OUT}/envd.png", code)
 q = np.clip(np.round(aux * 255), 0, 255).astype(np.uint8)
 cv2.imwrite(f"{OUT}/aux.png", q[..., ::-1])
-cv2.imwrite(f"{OUT}/photo.webp", cv2.imread(f"{WORK}/photo.png"), [cv2.IMWRITE_WEBP_QUALITY, 88])
+cv2.imwrite(f"{OUT}/photo.webp", np.clip(np.round(enc(lin) * 255), 0, 255).astype(np.uint8)[..., ::-1], [cv2.IMWRITE_WEBP_QUALITY, 88])
 scene = {
     "photo": [W, H],
     "f": fx,

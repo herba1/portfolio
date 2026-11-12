@@ -20,14 +20,14 @@
       "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca",
       "author": "PJH (@dokae)",
       "licence": "Unsplash License",
-      "note": "Ukyo, Kyoto (Ricoh GR II): a low-angle fumikiri crossbuck and lamps over an old tiled house. Resampled to 2464x1632 (photo.webp). Point map, normals and field of view: MoGe-2 ViT-S normal (Microsoft, MIT, https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx) via tools/depth/normals.py; sky matte tools/depth/segment.py sky. Baked by tools/depth/bakes/curve-mirror (vp.py vertical, bake.py panorama, distances, SH9, shadow aux)."
+      "note": "Ukyo, Kyoto (Ricoh GR II): a low-angle fumikiri crossbuck and lamps over an old tiled house. Resampled to 2464x1632 (photo.webp). Point map, normals and field of view: MoGe-2 ViT-S normal (Microsoft, MIT, https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx) via tools/depth/normals.py; sky matte tools/depth/segment.py sky; its sky graded through that matte to a deep summer cobalt by elevation, deepening toward the zenith, clouds kept pale (sky_grade.py). Baked by tools/depth/bakes/curve-mirror (vp.py vertical, bake.py panorama, distances, SH9, shadow aux)."
     },
     {
       "url": "https://commons.wikimedia.org/wiki/File:HashiNoMisasagi_Kofun,_Funkyu_South_360-degree.jpg",
       "file": "https://upload.wikimedia.org/wikipedia/commons/9/9c/HashiNoMisasagi_Kofun%2C_Funkyu_South_360-degree.jpg",
       "author": "AsPJT (Wikimedia Commons)",
       "licence": "CC0",
-      "note": "端陵神社・端陵古墳（南）, March 2025: a 360 at a Japanese residential junction, two lanes, utility poles and wires. The hemisphere behind the lens (the 3840 px rendition, the largest Commons serves to a script): exposed to the photo's sunlit walls, its grey sky (segment.py sky matte at full width, the open sky plus the pockets seen through the canopy) swapped for a fit of the photo's own clear sky by elevation by unmixing under a feathered, grown matte, so the leaves and the wires stay; the photo's own cumulus carried over the zenith on a cloud plane."
+      "note": "端陵神社・端陵古墳（南）, March 2025: a 360 at a Japanese residential junction, two lanes, utility poles and wires. The hemisphere behind the lens (the 3840 px rendition, the largest Commons serves to a script): exposed to the photo's sunlit walls, its grey sky (segment.py sky matte at full width, the open sky plus the pockets seen through the canopy) swapped for the photo's graded clear sky by elevation, carried up to the zenith, by unmixing under a feathered, grown matte, so the leaves and the wires stay; the photo's own cumulus carried over the zenith on a cloud plane."
     },
     "https://en.wikipedia.org/wiki/Curved_mirror#Convex_mirrors"
   ]
