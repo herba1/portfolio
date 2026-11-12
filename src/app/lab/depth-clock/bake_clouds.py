@@ -23,12 +23,16 @@
 #      pale, less saturated band of scattered light in the air beside the
 #      cloud, deepening to a saturated cobalt away from it and toward the top
 #      of the frame, a little paler again toward the low sun at the lower
-#      right;
+#      right. None of the capture's own clear sky survives in it, not even as
+#      texture (it held the park's trees as a ghost crown over the figures);
+#      the air's unevenness is drawn (AIR);
 #   4. the cloud is set to its light (its brightest sunlit crown at TOP, so on
 #      film it glows and never clips), its capture's grey cast taken off, and
 #      then lit as cloud is: its sunlit crown and flanks warm from the low sun,
-#      its bellies a stop down (DARK) in skylight blue (SHADE of a paled
-#      cobalt, mixed in as light), never a grey smear;
+#      its bellies a little down (DARK) in skylight blue (SHADE of a paled
+#      cobalt, mixed in as light), never a grey smear; then its whole body
+#      under the crown is lifted LIFT stops, so the tower glows as one
+#      luminous mass well over the blue, not a grey cut-out with white tops;
 #   5. its billows crisped in light only (SHARP, EDGE), so the cloud at
 #      infinity draws as crisply as the needles in front of it, and a last
 #      soft shoulder holds the odd brightest texel under the file's ceiling.
@@ -181,10 +185,20 @@ col = blue + (paleBlue - blue) * k
 col = col + (deepBlue - blue) * (deep * (1 - k[..., 0]))[..., None]
 col /= (col @ LUMA)[..., None]
 S = col * lum[..., None]
-# a trace of the capture's own sky texture, so the blue is never a flat fill
-tex = cv2.GaussianBlur(L, (0, 0), 2) / np.maximum(cv2.GaussianBlur(L, (0, 0), 40), 1e-5)
-S *= np.clip(1 + 0.5 * (tex - 1) * (1 - ground), 0.9, 1.1)[..., None]
-del tex, dc, far, top, yy, xx
+# Nothing of the capture's own clear sky is kept, not even as texture: its
+# light carries the shapes of the park's trees around the cloud (dark, not
+# green, so the leaf test misses them), and laid over the new blue they read
+# as a ghost crown in the air above the figures. The air gets a soft drawn
+# unevenness instead, a few percent over a few hundred px, so the blue is
+# never a flat fill and never banded.
+rng = np.random.default_rng(int(env('SEED', 7)))
+air = np.zeros((H // 8, W // 8), np.float32)
+for sig, amp in ((20, 1.0), (45, 0.8), (90, 0.6)):  # 160..720 px at full size
+    n = cv2.GaussianBlur(rng.standard_normal(air.shape).astype(np.float32), (0, 0), sig / 8)
+    air += amp * n / max(n.std(), 1e-6)
+air = cv2.resize(air / air.std(), (W, H), interpolation=cv2.INTER_CUBIC)
+S *= np.exp2(env('AIR', 0.03) * air)[..., None]
+del air, dc, far, top, yy, xx
 
 # --- 4. the cloud's light and colour
 cl = w > 0.6
@@ -219,16 +233,22 @@ lo, hi = np.percentile(Lbro[cl], 3), np.percentile(Lbro[cl], 99.5)
 lit = np.clip((Lbro - lo) / max(hi - lo, 1e-4), 0, 1)
 lit = lit * lit * (3 - 2 * lit)
 lit = lit ** env('LITG', 1.4)
-SHADE, SKYL = env('SHADE', 0.5), env('SKYLIGHT', 0.45)
+SHADE, SKYL = env('SHADE', 0.25), env('SKYLIGHT', 0.5)
 SUN = np.array([1.0, 0.955, 0.875], np.float32)  # low, warm
 sk = blue ** SKYL
 sk /= sk @ LUMA
 sh = (SHADE * (1 - lit))[..., None]
 tint = ((1 - sh) + sh * sk) * (1 + lit[..., None] * (SUN - 1))
 tint /= (tint @ LUMA)[..., None]
-DARK = env('DARK', 0.3)
+DARK = env('DARK', 0.15)
 tint *= (1 - DARK * (1 - lit))[..., None]
 C = C * tint
+# Above the trees the tower glows as one mass: everything under its sunlit
+# crown is lifted LIFT stops, wholly in its shaded body, tapering to nothing
+# on the crown (which already stands at TOP), so its bellies come up into a
+# luminous skylight blue well over the cobalt around it instead of a dim grey
+# a little over it, and the popcorn tops no longer stand alone in white.
+C *= np.exp2(env('LIFT', 0.8) * (1 - lit))[..., None]
 # --- 5. crisp, in light only, inside the cloud
 SHARP, EDGE = env('SHARP', 0.5), env('EDGE', 0.35)
 lc = C @ LUMA
