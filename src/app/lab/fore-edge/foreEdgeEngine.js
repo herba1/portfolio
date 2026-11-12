@@ -32,15 +32,23 @@ const CONC = 0.55; // a rounded-and-backed book has a concave fore-edge
 const LIFT = 0.3; // the thumb opens the block a little as it fans
 const EDGE = D / 2;
 const Y0 = BOARD; // block sits on the lower board
+const CX = -0.4; // where the lens looks along the edge
 
-// Shared deformation: a leaf steps back near the fore-edge and not at all
-// at the spine, so it reads as a bend rather than a slide. The concave edge
-// shears out as the block fans, so the steps stay open in the upper half.
+// Shared deformation: the block shears like a deck of cards. Every leaf
+// slides back in its own plane by the same amount along its whole length,
+// so the head and tail stay square and the block skews into a parallelogram.
+// The lift thickens the leaves rather than parting them, so no dark gap ever
+// opens between two leaves. The concave edge shears out as the block fans.
 const BEND_GLSL = /* glsl */ `
 uniform float uBend;
-float bendW(float z){ return smoothstep(${(-EDGE).toFixed(2)}, ${(EDGE - 3.0).toFixed(2)}, z); }
-float bendDz(float frac, float z){ return -uBend * ${SMAX.toFixed(3)} * frac * bendW(z); }
-float bendDy(float frac, float z){ return uBend * ${LIFT.toFixed(3)} * frac * bendW(z) * bendW(z); }
+float bendDz(float frac){ return -uBend * ${SMAX.toFixed(3)} * frac; }
+float bendDy(float frac){ return uBend * ${LIFT.toFixed(3)} * frac; }
+float bendSy(){ return 1.0 + uBend * ${(LIFT / T).toFixed(5)}; }
+// A leaf that slides back also shrinks in the lens, which would pinch the
+// sheared block into a trapezoid. Stretch it along the edge by exactly what
+// the lens takes away, so head and tail stay parallel, as on a drawing board.
+uniform float uPersp;
+float bendSx(float frac){ return 1.0 - bendDz(frac) * uPersp; }
 float concK(){ return ${CONC.toFixed(3)} * (1.0 - 0.65 * smoothstep(0.0, 0.5, uBend)); }
 float concDz(float h){ float c = 2.0 * h - 1.0; return -concK() * (1.0 - c * c); }
 // Slope of the concave face, dz/dy, at height fraction h.
@@ -51,6 +59,7 @@ function leafMaterial(tex, uniforms) {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
   m.onBeforeCompile = (s) => {
     s.uniforms.uBend = uniforms.uBend;
+    s.uniforms.uPersp = uniforms.uPersp;
     s.uniforms.uPaint = { value: tex };
     s.vertexShader = s.vertexShader
       .replace(
@@ -77,9 +86,9 @@ if (normal.z > 0.5) {
 vObjN = normal; vLeaf = aLeaf;
 float frac = aLeaf.x / ${N.toFixed(1)};
 float hC = (aLeaf.x + 0.5) / ${N.toFixed(1)};
-transformed.x += aLeaf.y;
-transformed.y += ${Y0.toFixed(3)} + (aLeaf.x + 0.5) * ${LEAF.toFixed(5)} + bendDy(frac, transformed.z);
-transformed.z += aLeaf.z + concDz(hC) + bendDz(frac, transformed.z);
+transformed.x = (transformed.x + aLeaf.y - ${CX.toFixed(2)}) * bendSx(frac) + ${CX.toFixed(2)};
+transformed.y = (transformed.y + (aLeaf.x + 0.5) * ${LEAF.toFixed(5)}) * bendSy() + ${Y0.toFixed(3)};
+transformed.z += aLeaf.z + concDz(hC) + bendDz(frac);
 vLoc = vec3(position.x + aLeaf.y, position.y / ${LEAF.toFixed(5)} + 0.5, position.z + aLeaf.z);`,
       );
     s.fragmentShader = s.fragmentShader
@@ -91,42 +100,54 @@ uniform sampler2D uPaint;
 varying vec3 vObjN; varying vec3 vLoc; varying vec4 vLeaf;
 float h1(float n){ return fract(sin(n * 91.345) * 47453.21); }
 float h2(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-float gilt; float giltRough; float hair;
+float gilt; float giltRough; float hair; float painted;
 // The painting covers the fanned face: x along the edge, height up the block.
-vec3 paintAt(float u, float h){
-  return texture2D(uPaint, vec2(0.02 + 0.96 * u, 0.04 + 0.92 * h)).rgb;
-}`,
+// Watercolour on rag paper, not a print: a little of its saturation goes to
+// the paper it soaked into.
+vec3 paintAt(float u, float h, vec3 paper){
+  vec3 p = texture2D(uPaint, vec2(0.02 + 0.96 * u, 0.04 + 0.92 * h)).rgb;
+  float l = dot(p, vec3(0.299, 0.587, 0.114));
+  p = mix(vec3(l), p, 0.8);
+  return mix(p, p * paper * 1.06, 0.5);
+}
+// How much of each leaf's step is newly exposed page rather than gilt nose.
+// It grows from nothing with the bend, so the gold gives way to the picture
+// over the whole gesture instead of all at once.
+float reveal(){ return 0.85 * clamp((uBend - 0.03) / 0.85, 0.0, 1.0); }`,
       )
       .replace(
         "#include <map_fragment>",
         `#include <map_fragment>
 {
-  gilt = 0.0; giltRough = 0.3; hair = 0.0;
+  gilt = 0.0; giltRough = 0.3; hair = 0.0; painted = 0.0;
   vec3 paper = vec3(0.93, 0.905, 0.85) * (0.97 + 0.03 * vLeaf.w);
   // Paper fibre, so a page is not a flat colour.
   paper *= 0.99 + 0.02 * h2(floor(vLoc.xz * 8.0));
   vec3 c = paper;
   float u = (vLoc.x + ${(L / 2).toFixed(2)}) / ${L.toFixed(1)};
-  float fan = smoothstep(0.02, 0.3, uBend);
+  float fan = smoothstep(0.0, 0.08, uBend);
+  float p = reveal();
   if (vObjN.z > 0.5) {
-    // The gilt edge. Closed it is one burnished field; as the block fans the
-    // gold shrinks to a hairline on each leaf's nose, and the face below it,
-    // a sheaf of page edges fanned too, shows the picture painted under it.
+    // The gilt edge. Closed it is one burnished field. As the block shears,
+    // each leaf keeps its outermost sliver of gold, the nose, and the page the
+    // leaf above has stepped past shows below it, carrying its row of the
+    // picture that was painted under the gilding.
     float y = vLoc.y;
-    float g = 0.76 * fan;
-    float aa = fwidth(y) * 0.75;
-    float isGilt = max(smoothstep(g - aa, g + aa, y), 1.0 - fan);
-    hair = step(0.001, fan) * isGilt;
+    // A fixed edge rather than a screen-derivative one: fwidth is computed
+    // per 2x2 quad and would break each hairline into dots.
+    float aa = 0.05;
+    float gz = min(p, 0.85);
+    float isGilt = max(smoothstep(gz - aa, gz + aa, y), 1.0 - smoothstep(0.0, 0.04, p));
+    hair = fan * isGilt;
     vec3 gold = vec3(1.0, 0.71, 0.32) * (0.9 + 0.1 * h1(vLeaf.x));
     // Burnished, but each page edge leaves a faint line in the gold.
     gold *= 0.95 + 0.05 * h2(vec2(floor(y * 6.0), vLeaf.x));
     float h = (vLeaf.x + y) / ${N.toFixed(1)};
-    vec3 paint = paintAt(u, h);
-    // The foot of each step sits in the corner the strip below makes.
-    paint *= mix(0.74, 1.0, smoothstep(0.0, 0.4, y));
+    vec3 paint = paintAt(u, h, paper);
     c = mix(paint, gold, isGilt);
     gilt = isGilt;
-    giltRough = 0.1 + 0.04 * h1(vLeaf.x + 7.0) + 0.08 * hair;
+    painted = 1.0 - isGilt;
+    giltRough = 0.1 + 0.04 * h1(vLeaf.x + 7.0) + 0.16 * hair;
   } else if (vObjN.y > 0.5) {
     // The strip this leaf exposes when fanned was painted while fanned.
     float back = ${EDGE.toFixed(2)} - vLoc.z;
@@ -134,28 +155,44 @@ vec3 paintAt(float u, float h){
     float hj = (vLeaf.x + 1.5) / ${N.toFixed(1)};
     float exposed = max(1e-4, uBend * ${(SMAX / N).toFixed(5)} + concDz(hi) - concDz(hj));
     float t = clamp(back / exposed, 0.0, 1.0);
-    vec3 paint = paintAt(u, (vLeaf.x + 1.0 - 0.15 * t) / ${N.toFixed(1)});
+    vec3 paint = paintAt(u, (vLeaf.x + 1.0 - 0.15 * t) / ${N.toFixed(1)}, paper);
     // Watercolour sits in the paper: it fades a little under the leaf above.
     float inBand = 1.0 - smoothstep(exposed * 1.2, exposed * 1.8 + 0.05, back);
     c = mix(paper, paint, inBand * fan);
-    // The leaf above shades the back of the strip it overhangs.
-    c *= mix(0.72, 1.0, smoothstep(0.0, 0.8, 1.0 - t));
+    painted = inBand * fan;
+    // The leaf above only just shades the back of the strip it overhangs.
+    c *= mix(0.93, 1.0, smoothstep(0.0, 0.8, 1.0 - t));
+    // This strip faces straight up into the strip light while the fanned face
+    // beside it leans back only a little. Held level with that face, the
+    // sub-pixel sliver blends into the row instead of sparkling as dots.
+    c *= mix(1.0, 0.72, fan);
   }
   diffuseColor.rgb = c;
 }`,
       )
       .replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>\nmetalnessFactor = gilt;`)
+      // A fanned leaf's gilt nose is rounded, so some part of it always faces
+      // the strip light: it never goes dark the way a flat mirror can.
+      .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * 0.1 * hair;`)
       .replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, giltRough, gilt);`)
       .replace(
         "#include <normal_fragment_maps>",
         `#include <normal_fragment_maps>
 // The hairline is the rounded nose of a leaf: it faces up into the strip
 // light, each leaf tipped its own way, so each one catches its own glint.
-if (hair > 0.0) {
+{
   vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
-  float tip = h1(vLeaf.x + 3.0);
-  vec3 nose = normalize(mix(normal, upV, 0.04 + 0.5 * tip * tip));
-  normal = normalize(mix(normal, nose, hair));
+  if (hair > 0.0) {
+    float tip = h1(vLeaf.x + 3.0);
+    vec3 nose = normalize(mix(normal, upV, 0.04 + 0.5 * tip * tip));
+    normal = normalize(mix(normal, nose, hair));
+  }
+  // The painted part of a step is page fanned back at the slope of the
+  // block, so it faces up into the light as the shear opens.
+  if (vObjN.z > 0.5 && painted > 0.0) {
+    float slope = uBend * ${(SMAX / T).toFixed(4)};
+    normal = normalize(normal + upV * 0.3 * slope * painted);
+  }
 }`,
       );
   };
@@ -177,13 +214,15 @@ function clothMaterial(uniforms, frac, bump) {
   m.customProgramCacheKey = () => `cloth-${frac}`;
   m.onBeforeCompile = (s) => {
     s.uniforms.uBend = uniforms.uBend;
+    s.uniforms.uPersp = uniforms.uPersp;
     s.vertexShader = s.vertexShader
       .replace("#include <common>", `#include <common>\n${BEND_GLSL}`)
       .replace(
         "#include <begin_vertex>",
         `#include <begin_vertex>
-transformed.y += bendDy(${frac.toFixed(3)}, transformed.z);
-transformed.z += bendDz(${frac.toFixed(3)}, transformed.z);`,
+transformed.x = (transformed.x - ${CX.toFixed(2)}) * bendSx(${frac.toFixed(3)}) + ${CX.toFixed(2)};
+transformed.y += bendDy(${frac.toFixed(3)});
+transformed.z += bendDz(${frac.toFixed(3)});`,
       );
   };
   return m;
@@ -266,7 +305,7 @@ export async function createForeEdge(host) {
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   tex.needsUpdate = true;
 
-  const uniforms = { uBend: { value: 0 } };
+  const uniforms = { uBend: { value: 0 }, uPersp: { value: 0 } };
   const book = new THREE.Group();
   scene.add(book);
 
@@ -307,7 +346,7 @@ export async function createForeEdge(host) {
   // Low and close: the fore-edge nearly square to the lens, raked a little
   // so the head of the block shows its pages.
   const camera = new THREE.PerspectiveCamera(24, 1, 1, 400);
-  const target = new THREE.Vector3(-0.4, Y0 + T * 0.52, EDGE);
+  const target = new THREE.Vector3(CX, Y0 + T * 0.52, EDGE);
   const AZ = 0.13; // rake, radians round from square-on
   const EL = 0.22; // height above the table plane, radians
   const FILL = 0.68; // share of the frame's width the edge spans (more on a phone)
@@ -318,6 +357,7 @@ export async function createForeEdge(host) {
     const dist = (L * Math.cos(AZ)) / (fill * 2 * tanH);
     const dir = new THREE.Vector3(Math.sin(AZ) * Math.cos(EL), Math.sin(EL), Math.cos(AZ) * Math.cos(EL));
     camera.position.copy(target).addScaledVector(dir, dist);
+    uniforms.uPersp.value = dir.z / dist;
     camera.lookAt(target);
     camera.updateProjectionMatrix();
   };
