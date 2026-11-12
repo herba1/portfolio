@@ -4,11 +4,13 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // in parallel lines, as wide as the gaps between them, until type and pattern
 // are one field.
 //
-// The word is set in Geist 700 on a canvas and turned into a signed distance
+// The word is set in Geist 700, glyph by glyph with every gap between letters
+// exactly two line periods, and each glyph is turned into a signed distance
 // field on the CPU (Felzenszwalb's exact transform, seeded from the canvas's
 // own anti-aliasing the way Mapbox's TinySDF does, so edges keep their
-// sub-pixel position). The lines are its level sets, drawn in a shader with
-// derivative-width anti-aliasing at device resolution.
+// sub-pixel position). The lines are level sets of the glyph fields'
+// smooth union, drawn in a shader with derivative-width anti-aliasing at
+// device resolution.
 //
 // The pointer is a second source: a dot whose own distance field is smoothly
 // unioned with the word's, so its rings and the letters' rings meet in one
@@ -37,7 +39,8 @@ uniform vec2 uRes;         // device px
 uniform float uDpr;
 uniform float uP;          // line period, css px (line = gap = P/2)
 uniform vec3 uDot;         // xy css px, radius
-uniform float uK;          // smooth-union width, css px
+uniform float uK;          // smooth-union width with the dot, css px
+uniform float uKg;         // smooth-union width between letters, css px
 uniform vec4 uPulse[${MAX_PULSES}]; // xy origin, front radius, active
 uniform float uFront;      // pulse front width, css px
 uniform float uReveal;     // css px of field drawn so far (intro)
@@ -45,23 +48,27 @@ uniform vec3 uInk;
 uniform vec3 uPaper;
 out vec4 o;
 
+// Polynomial smooth minimum (Quilez): a crease between two sources is
+// rounded over a band k wide instead of meeting at a sharp mitre.
+float smin(float a, float b, float k){
+  float h = max(k - abs(a - b), 0.0) / k;
+  return min(a, b) - h * h * k * 0.25;
+}
+
+// One glyph per channel, bilinear by hand (float textures are not filterable
+// everywhere), then smoothly unioned. Letters sit two periods apart, wider
+// than uKg, so the union never moves a letter's own edge.
 float field(vec2 p){
   vec2 u = p * uGrid - 0.5;
   vec2 f = fract(u);
   ivec2 i = ivec2(floor(u));
   ivec2 m = uTexSize - 1;
-  float a = texelFetch(uSdf, clamp(i, ivec2(0), m), 0).r;
-  float b = texelFetch(uSdf, clamp(i + ivec2(1, 0), ivec2(0), m), 0).r;
-  float c = texelFetch(uSdf, clamp(i + ivec2(0, 1), ivec2(0), m), 0).r;
-  float d = texelFetch(uSdf, clamp(i + ivec2(1, 1), ivec2(0), m), 0).r;
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-// Polynomial smooth minimum (Quilez): the crease between the two sources is
-// rounded over a band uK wide instead of meeting at a sharp mitre.
-float smin(float a, float b, float k){
-  float h = max(k - abs(a - b), 0.0) / k;
-  return min(a, b) - h * h * k * 0.25;
+  vec4 a = texelFetch(uSdf, clamp(i, ivec2(0), m), 0);
+  vec4 b = texelFetch(uSdf, clamp(i + ivec2(1, 0), ivec2(0), m), 0);
+  vec4 c = texelFetch(uSdf, clamp(i + ivec2(0, 1), ivec2(0), m), 0);
+  vec4 d = texelFetch(uSdf, clamp(i + ivec2(1, 1), ivec2(0), m), 0);
+  vec4 g = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  return smin(smin(smin(g.x, g.y, uKg), g.z, uKg), g.w, uKg);
 }
 
 void main(){
@@ -134,69 +141,212 @@ function edt1d(grid, offset, stride, length, f, v, z) {
   }
 }
 
-function edt(grid, w, h, f, v, z) {
-  for (let x = 0; x < w; x++) edt1d(grid, x, w, h, f, v, z);
+function edt(grid, w, h, f, v, z, x0 = 0, x1 = w) {
+  // Columns outside [x0, x1) hold no seed, so their vertical pass would leave
+  // them untouched; skip it.
+  for (let x = x0; x < x1; x++) edt1d(grid, x, w, h, f, v, z);
   for (let y = 0; y < h; y++) edt1d(grid, y * w, 1, w, f, v, z);
+}
+
+// Three box passes each way, a near-Gaussian of sigma ~ r, edges clamped.
+function boxPass(src, dst, count, stride, lines, lineStride, r) {
+  const inv = 1 / (2 * r + 1);
+  for (let l = 0; l < lines; l++) {
+    const o = l * lineStride;
+    const last = o + (count - 1) * stride;
+    let acc = src[o] * (r + 1);
+    for (let j = 1; j <= r; j++) acc += src[o + Math.min(j, count - 1) * stride];
+    for (let j = 0; j < count; j++) {
+      dst[o + j * stride] = acc * inv;
+      const add = j + r + 1 < count ? o + (j + r + 1) * stride : last;
+      const sub = j - r >= 0 ? o + (j - r) * stride : o;
+      acc += src[add] - src[sub];
+    }
+  }
+}
+
+function blur(a, tmp, w, h, r) {
+  for (let p = 0; p < 3; p++) {
+    boxPass(a, tmp, w, 1, h, w, r);
+    boxPass(tmp, a, h, w, w, 1, r);
+  }
 }
 
 function layout(w, h) {
   // The word fills a little over half the box, centred on its x-height.
-  const font = Math.min((w * 0.62) / 2.25, h * 0.46);
+  const font = Math.min((w * 0.62) / 2.6, h * 0.46);
   const period = Math.max(6, Math.round(font * 0.074));
   return { font, period };
+}
+
+// One glyph's ink, drawn alone, as left and right edge profiles per row
+// (sub-pixel, TinySDF's convention: a pixel of coverage a puts the edge
+// 1 - a in from its outer side), relative to the glyph's pen origin.
+function profile(ctx, ch) {
+  ctx.font = ctx.canvas.dataset.font;
+  const m = ctx.measureText(ch);
+  const left = Math.ceil(m.actualBoundingBoxLeft) + 2;
+  const asc = Math.ceil(m.actualBoundingBoxAscent) + 2;
+  const gw = left + Math.ceil(m.actualBoundingBoxRight) + 2;
+  const gh = asc + Math.ceil(m.actualBoundingBoxDescent) + 2;
+  ctx.canvas.width = Math.max(gw, ctx.canvas.width);
+  ctx.canvas.height = Math.max(gh, ctx.canvas.height);
+  ctx.font = ctx.canvas.dataset.font;
+  ctx.textBaseline = "alphabetic";
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.fillStyle = "#000";
+  ctx.fillText(ch, left, asc);
+  const img = ctx.getImageData(0, 0, gw, gh).data;
+  const rows = [];
+  for (let y = 0; y < gh; y++) {
+    let l = -1;
+    let r = -1;
+    for (let x = 0; x < gw; x++) {
+      if (img[(y * gw + x) * 4 + 3] > 0) {
+        if (l < 0) l = x;
+        r = x;
+      }
+    }
+    if (l < 0) continue;
+    const al = img[(y * gw + l) * 4 + 3] / 255;
+    const ar = img[(y * gw + r) * 4 + 3] / 255;
+    rows.push({ y: y - asc, l: l + 1 - al - left, r: r + ar - left });
+  }
+  return { rows, asc: m.actualBoundingBoxAscent, desc: m.actualBoundingBoxDescent };
+}
+
+// Nearest-ink distance between glyph a and glyph b set `off` to its right.
+// Exact while every row of b lies right of every row of a it is nearest to,
+// which holds for any pair that is not kerned into each other.
+function gapAt(a, b, off) {
+  let best = Infinity;
+  for (const ra of a.rows) {
+    for (const rb of b.rows) {
+      const dx = Math.max(0, rb.l + off - ra.r);
+      const dy = rb.y - ra.y;
+      const d = dx * dx + dy * dy;
+      if (d < best) best = d;
+    }
+  }
+  return Math.sqrt(best);
 }
 
 function buildField(w, h, grid, family) {
   const W = Math.max(2, Math.round(w * grid));
   const H = Math.max(2, Math.round(h * grid));
-  const { font } = layout(w, h);
+  const { font, period } = layout(w, h);
+  const px = font * grid;
+  const fontCss = `700 ${px}px ${family}`;
+
+  // Glyph by glyph, no tracking: this is a distance field, not running text.
+  // Each neighbour is moved until the nearest ink of the pair is exactly two
+  // periods apart, so the gap holds a white ring, the two letters' first
+  // black rings meeting in one crease, and a white ring.
+  const mc = document.createElement("canvas");
+  mc.dataset.font = fontCss;
+  const mctx = mc.getContext("2d", { willReadFrequently: true });
+  const glyphs = [...WORD].map((ch) => ({ ch, ...profile(mctx, ch) }));
+  const target = 2 * period * grid;
+  const pens = [0];
+  for (let i = 1; i < glyphs.length; i++) {
+    const a = glyphs[i - 1];
+    const b = glyphs[i];
+    const aR = Math.max(...a.rows.map((r) => r.r));
+    const bL = Math.min(...b.rows.map((r) => r.l));
+    // Bracket: lo has the bounding boxes touching (gap <= target), hi
+    // separates them by the whole target (gap >= target).
+    let lo = aR - bL - target;
+    let hi = aR - bL + target;
+    for (let k = 0; k < 40; k++) {
+      const mid = (lo + hi) / 2;
+      if (gapAt(a, b, mid) < target) lo = mid;
+      else hi = mid;
+    }
+    pens.push(pens[i - 1] + (lo + hi) / 2);
+  }
+  const inkL = glyphs[0].rows.reduce((m, r) => Math.min(m, r.l), Infinity);
+  const last = glyphs.length - 1;
+  const inkR = pens[last] + glyphs[last].rows.reduce((m, r) => Math.max(m, r.r), -Infinity);
+  const asc = Math.max(...glyphs.map((g) => g.asc));
+  const desc = Math.max(...glyphs.map((g) => g.desc));
+  const x0 = (W - (inkR - inkL)) / 2 - inkL;
+  const y0 = H / 2 + (asc - desc) / 2;
+
+  // One exact distance field per glyph, packed one glyph per channel; the
+  // shader joins them with a smooth minimum so the creases between letters
+  // are rounded instead of the faceted medial axis of a single hard-min EDT.
   const c = document.createElement("canvas");
   c.width = W;
   c.height = H;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  const px = font * grid;
-  ctx.font = `700 ${px}px ${family}`;
-  ctx.fontKerning = "normal";
-  // Tracking law: -0.043 x (size - 12) px, written per css px of type.
-  if ("letterSpacing" in ctx) ctx.letterSpacing = `${-0.043 * (font - 12) * grid}px`;
+  ctx.font = fontCss;
   ctx.textBaseline = "alphabetic";
-  const m = ctx.measureText(WORD);
-  const left = m.actualBoundingBoxLeft;
-  const tw = m.actualBoundingBoxRight + left;
-  const asc = m.actualBoundingBoxAscent;
-  const desc = m.actualBoundingBoxDescent;
-  const x = (W - tw) / 2 + left;
-  const y = H / 2 + (asc - desc) / 2;
   ctx.fillStyle = "#000";
-  ctx.fillText(WORD, x, y);
-  const img = ctx.getImageData(0, 0, W, H).data;
 
   const n = W * H;
+  const out = new Float32Array(n * 4).fill(1e5);
   const outer = new Float32Array(n);
-  const inner = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const a = img[i * 4 + 3] / 255;
-    if (a >= 1) {
-      outer[i] = 0;
-      inner[i] = INF;
-    } else if (a <= 0) {
-      outer[i] = INF;
-      inner[i] = 0;
-    } else {
-      const o = Math.max(0, 0.5 - a);
-      const ii = Math.max(0, a - 0.5);
-      outer[i] = o * o;
-      inner[i] = ii * ii;
-    }
-  }
   const len = Math.max(W, H);
   const f = new Float32Array(len);
   const v = new Uint16Array(len);
   const z = new Float32Array(len + 1);
-  edt(outer, W, H, f, v, z);
-  edt(inner, W, H, f, v, z);
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = (Math.sqrt(outer[i]) - Math.sqrt(inner[i])) / grid;
+  const soft = new Float32Array(n);
+  const tmp = new Float32Array(n);
+  const blurR = Math.max(1, Math.round(period * grid * 0.45));
+  glyphs.forEach((g, gi) => {
+    const ch = gi % 4;
+    ctx.clearRect(0, 0, W, H);
+    const gx = x0 + pens[gi];
+    ctx.fillText(g.ch, gx, y0);
+    const bx0 = Math.max(0, Math.floor(gx + Math.min(...g.rows.map((r) => r.l))) - 2);
+    const bx1 = Math.min(W, Math.ceil(gx + Math.max(...g.rows.map((r) => r.r))) + 3);
+    const by0 = Math.max(0, Math.floor(y0 - g.asc) - 2);
+    const by1 = Math.min(H, Math.ceil(y0 + g.desc) + 3);
+    const img = ctx.getImageData(0, 0, W, H).data;
+    const bw = bx1 - bx0;
+    const bh = by1 - by0;
+    const inner = new Float32Array(bw * bh);
+    outer.fill(INF);
+    for (let y = by0; y < by1; y++) {
+      for (let x = bx0; x < bx1; x++) {
+        const i = y * W + x;
+        const j = (y - by0) * bw + (x - bx0);
+        const a = img[i * 4 + 3] / 255;
+        if (a >= 1) {
+          outer[i] = 0;
+          inner[j] = INF;
+        } else if (a <= 0) {
+          inner[j] = 0;
+        } else {
+          const o = Math.max(0, 0.5 - a);
+          const ii = Math.max(0, a - 0.5);
+          outer[i] = o * o;
+          inner[j] = ii * ii;
+        }
+      }
+    }
+    edt(outer, W, H, f, v, z, bx0, bx1);
+    edt(inner, bw, bh, f, v, z);
+    for (let i = 0; i < n; i++) {
+      const y = (i / W) | 0;
+      const x = i - y * W;
+      let d = Math.sqrt(outer[i]);
+      if (x >= bx0 && x < bx1 && y >= by0 && y < by1) d -= Math.sqrt(inner[(y - by0) * bw + (x - bx0)]);
+      outer[i] = d / grid;
+    }
+    // A glyph's own creases (an aperture closing, a counter's spine) are
+    // sharp ridges in its field, and a ring crossing one tapers to a needle.
+    // Away from the letter, the rings follow a blurred copy of the field, so
+    // ridges round off; at the letter the exact field holds the edge.
+    soft.set(outer);
+    blur(soft, tmp, W, H, blurR);
+    for (let i = 0; i < n; i++) {
+      const d = outer[i];
+      const t = clamp((d - period * 0.25) / period, 0, 1);
+      const k = i * 4 + ch;
+      out[k] = Math.min(out[k], d + (soft[i] - d) * t * t * (3 - 2 * t));
+    }
+  });
   return { data: out, W, H };
 }
 
@@ -244,7 +394,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   const U = {};
-  for (const name of ["uSdf", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uPulse", "uFront", "uReveal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
+  for (const name of ["uSdf", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uKg", "uPulse", "uFront", "uReveal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -284,7 +434,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
     if (revealStart < 0) revealStart = performance.now() + 120;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, sdf.W, sdf.H, 0, gl.RED, gl.FLOAT, sdf.data);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, sdf.W, sdf.H, 0, gl.RGBA, gl.FLOAT, sdf.data);
     if (held) {
       dot.x = dot.tx = (hold.x ?? 0.72) * w;
       dot.y = dot.ty = (hold.y ?? 0.7) * h;
@@ -386,6 +536,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
     gl.uniform1f(U.uP, period);
     gl.uniform3f(U.uDot, dot.x, dot.y, dotR - push);
     gl.uniform1f(U.uK, period * 2.2);
+    gl.uniform1f(U.uKg, period);
     gl.uniform4fv(U.uPulse, pulseData);
     gl.uniform1f(U.uFront, front);
     gl.uniform1f(U.uReveal, reveal);
