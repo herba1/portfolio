@@ -23,8 +23,12 @@ import { createNib } from "./penAudio";
 // printed one fixed misregistration off the key. The plates cross-hatch
 // where they overprint, under a shared ink limit
 // so the crowded core stays open. The sheet builds up as a riso or
-// letterpress print with the pen's near-black key always on top. The pen lifts itself once the swing has
-// wound in, so the centre of every figure stays open.
+// letterpress print with the pen's near-black key always on top, trapped:
+// the key the pen is drawing now cuts its own channel of paper through the
+// plates, wider where they lie heavy, so every ring of it sits in white
+// through the colour and the earlier figures read as colour under the one
+// being drawn. The pen lifts itself once the swing has wound in, so the
+// centre of every figure stays open.
 //
 // Ink is laid opaque on a transparent layer, so one continuous line never
 // beads where its segments meet. Width and density follow the pen's speed:
@@ -210,9 +214,10 @@ const layer = (w, h) => {
 };
 
 export async function createHarmonograph(host) {
-  // Three layers. The ground and the sheet are DOM: the sheet is two
+  // Three layers. The ground and the sheet are DOM: the sheet is three
   // canvases the table moves together with a compositor transform, the
-  // printed sheet (paper and the spot impressions) and over it the key plate
+  // printed sheet (paper and the spot impressions), over it the trap (the
+  // paper the live key cuts through the plates), and over that the key plate
   // the pen is inking now, a stroke at a time, which the compositor
   // overprints (multiply) so the sheet never has to be recomposed for it.
   // Over them the stage canvas carries the pen arm (repainted in its own
@@ -235,12 +240,18 @@ export async function createHarmonograph(host) {
   const fill = { position: "absolute", left: "0px", top: "0px", width: "100%", height: "100%", display: "block" };
   const comp = document.createElement("canvas");
   Object.assign(comp.style, fill, { background: `rgb(${PAPER.join(",")})` });
+  // The live key's trap: the paper the key cuts through the plates, laid
+  // over them (normal blend) just under the key, so every ring the pen
+  // draws now sits in its own clean white channel through the colour.
+  const trap = document.createElement("canvas");
+  Object.assign(trap.style, fill);
   const key = document.createElement("canvas");
   Object.assign(key.style, fill, { mixBlendMode: "multiply" });
-  pad.append(comp, key);
+  pad.append(comp, trap, key);
   deck.appendChild(pad);
   host.insertBefore(deck, stage.canvas);
   const compCtx = comp.getContext("2d");
+  const trapCtx = trap.getContext("2d");
   let shownOff = "";
   const params = new URLSearchParams(window.location.search);
   const preT = params.has("t") ? clamp(parseFloat(params.get("t")) || 0, 0, 1) : null;
@@ -291,6 +302,10 @@ export async function createHarmonograph(host) {
   let prevCtx = null;
   let spot = null;
   let spotCtx = null;
+  // The trap of the figure being pulled, which lets go with its key.
+  let prevTrap = null;
+  let prevTrapCtx = null;
+  let trapInk = null; // the sheet's own paper, as a fill
   const cur = key;
   const curCtx = key.getContext("2d");
   let settleT = 1; // 0..1 while the previous figure is pulled into the sheet
@@ -363,6 +378,9 @@ export async function createHarmonograph(host) {
     baseCtx.drawImage(paperTex, 0, 0);
     wipe(prevCtx);
     wipe(curCtx);
+    wipe(trapCtx);
+    wipe(prevTrapCtx);
+    resetKeyMap(base.width);
     prevInk = false;
     curInk = false;
     settleT = 1;
@@ -381,14 +399,19 @@ export async function createHarmonograph(host) {
       const e = ease(settleT);
       compCtx.globalCompositeOperation = "multiply";
       const k = 1 - smooth(0.2, 1, settleT);
-      if (k > 0) {
-        compCtx.globalAlpha = k;
-        compCtx.drawImage(prev, 0, 0);
-      }
       // The plate comes up to full strength (alpha 1, multiplied) over the
       // first half of the pull and stays there; it is never faded.
       compCtx.globalAlpha = smooth(0, PLATE_IN, settleT);
       compCtx.drawImage(spot, pulling.mx * e * dpr, pulling.my * e * dpr);
+      if (k > 0) {
+        // The finished key and the channel it cut let go together, so the
+        // plate closes over where the figure was.
+        compCtx.globalCompositeOperation = "source-over";
+        compCtx.globalAlpha = k;
+        compCtx.drawImage(prevTrap, 0, 0);
+        compCtx.globalCompositeOperation = "multiply";
+        compCtx.drawImage(prev, 0, 0);
+      }
       compCtx.globalAlpha = 1;
       compCtx.globalCompositeOperation = "source-over";
     }
@@ -818,6 +841,7 @@ export async function createHarmonograph(host) {
     if (plateTone) for (let i = 0; i < laid.length; i++) laid[i] += plateTone[i];
     plateTone = null;
     wipe(prevCtx);
+    wipe(prevTrapCtx);
     prevInk = false;
     settleT = 1;
     compose();
@@ -830,6 +854,10 @@ export async function createHarmonograph(host) {
     wipe(prevCtx);
     prevCtx.drawImage(cur, 0, 0);
     wipe(curCtx);
+    wipe(prevTrapCtx);
+    prevTrapCtx.drawImage(trap, 0, 0);
+    wipe(trapCtx);
+    resetKeyMap(base.width);
     prevPath = curPath;
     curPath = [];
     pulling = SPOTS[pull % SPOTS.length];
@@ -859,7 +887,9 @@ export async function createHarmonograph(host) {
     if (base) {
       const k = layer(cur.width, cur.height);
       k.getContext("2d").drawImage(cur, 0, 0);
-      keep = [base, prev, k];
+      const t = layer(trap.width, trap.height);
+      t.getContext("2d").drawImage(trap, 0, 0);
+      keep = [base, prev, k, t, prevTrap];
     }
     base = layer(n, n);
     baseCtx = base.getContext("2d");
@@ -867,14 +897,19 @@ export async function createHarmonograph(host) {
     prevCtx = prev.getContext("2d");
     spot = layer(n, n);
     spotCtx = spot.getContext("2d", { willReadFrequently: true }); // its ink grain is read back
+    prevTrap = layer(n, n);
+    prevTrapCtx = prevTrap.getContext("2d");
     comp.width = n;
     comp.height = n;
+    trap.width = n;
+    trap.height = n;
     key.width = n;
     key.height = n;
     Object.assign(pad.style, { width: `${side}px`, height: `${side}px`, left: `${sheetX}px`, top: `${sheetY}px` });
     shownOff = "";
     dirtyAll = true;
     paperTex = makePaperTexture(n, n);
+    trapInk = trapCtx.createPattern(paperTex, "no-repeat");
     inkGrain(n); // made now, so the first pull doesn't wait on it
     const ink = { prevInk, curInk, settleT };
     clearSheet();
@@ -882,6 +917,10 @@ export async function createHarmonograph(host) {
       baseCtx.drawImage(keep[0], 0, 0, n, n);
       prevCtx.drawImage(keep[1], 0, 0, n, n);
       curCtx.drawImage(keep[2], 0, 0, n, n);
+      // The kept trap is the old paper, stretched; close enough until the
+      // next figure.
+      trapCtx.drawImage(keep[3], 0, 0, n, n);
+      prevTrapCtx.drawImage(keep[4], 0, 0, n, n);
       ({ prevInk, curInk, settleT } = ink);
       if (prevInk) tint();
       compose();
@@ -935,13 +974,87 @@ export async function createHarmonograph(host) {
   let firstRun = true; // the line's first run keeps its round start
   let tone = -1; // smoothed 0 (fast, fine) .. 1 (slow, full)
   let back = null; // the point before `last`, where a continuing run starts
+  let runWidth = 0; // CSS px, the run's key width
+  // The trap. Before the key's ink, the same line is laid in the sheet's own
+  // paper, TRAP wider on each side, over the plates (as a banknote engraver
+  // knocks the key out of the tints under it), so the figure the pen is
+  // drawing now reads as black cut into white through every colour pulled
+  // before it. How wide it opens follows the ink the plates already carry
+  // there: nothing on bare paper, the full channel where they are near solid.
+  // Where the rings crowd, two channels would meet and wash the colour
+  // between them out to paper, so each channel also gives way to the nearest
+  // ring already drawn beside it, taking at most TRAP_SHARE of the gap: the
+  // earlier ring's channel takes as much from its side, and the colour keeps
+  // the middle. The rings the pen has laid are kept as a map at device
+  // resolution, each pixel stamped with the segment that crossed it, so a
+  // ring looks across for its neighbours, never along at itself.
+  // Its runs are batched by width, half a device pixel at a time.
+  const TRAP = 1.15; // CSS px each side of the key at full tone
+  const TRAP_FROM = 0.03; // plate tone where the channel starts to open ...
+  const TRAP_FULL = 0.7; // ... and where it is fully open
+  const TRAP_SHARE = 0.24; // of the gap to the neighbouring ring
+  const TRAP_SELF = 28; // segments back that are the ring itself
+  let trapW = -1; // device px of the open trap run, -1 when none
+  let trapS = -1; // the channel's half-width, smoothed along the line
+  let keyMap = new Int32Array(1);
+  let keyN = 1;
+  let keySeg = 1;
+  const resetKeyMap = (n) => {
+    if (keyMap.length !== n * n) keyMap = new Int32Array(n * n);
+    else keyMap.fill(0);
+    keyN = n;
+    keySeg = 1;
+  };
+  // Device px along the normal (ux, uy), either way, to the nearest earlier
+  // ring, up to lim.
+  const gapAt = (x, y, ux, uy, lim) => {
+    for (let d = 1.5; d <= lim; d += 0.5) {
+      for (let sgn = -1; sgn <= 1; sgn += 2) {
+        const X = Math.floor(x + ux * d * sgn);
+        const Y = Math.floor(y + uy * d * sgn);
+        if (X < 0 || Y < 0 || X >= keyN || Y >= keyN) continue;
+        const v = keyMap[Y * keyN + X];
+        if (v && keySeg - v > TRAP_SELF) return d;
+      }
+    }
+    return Infinity;
+  };
+  const stampKey = (x0, y0, x1, y1) => {
+    const L = Math.hypot(x1 - x0, y1 - y0);
+    const k = Math.max(1, Math.ceil(L / 0.7));
+    for (let j = 0; j <= k; j++) {
+      const X = Math.floor(x0 + ((x1 - x0) * j) / k - 0.5);
+      const Y = Math.floor(y0 + ((y1 - y0) * j) / k - 0.5);
+      if (X < 0 || Y < 0 || X >= keyN - 1 || Y >= keyN - 1) continue;
+      const o = Y * keyN + X;
+      keyMap[o] = keyMap[o + 1] = keyMap[o + keyN] = keyMap[o + keyN + 1] = keySeg;
+    }
+    keySeg++;
+  };
+  const trapAt = (x, y) => {
+    const gx = clamp((x / side) * G - 0.5, 0, G - 1.001);
+    const gy = clamp((y / side) * G - 0.5, 0, G - 1.001);
+    const ix = gx | 0;
+    const iy = gy | 0;
+    const fx = gx - ix;
+    const fy = gy - iy;
+    const o = iy * G + ix;
+    const at = (A) => (A[o] * (1 - fx) + A[o + 1] * fx) * (1 - fy) + (A[o + G] * (1 - fx) + A[o + G + 1] * fx) * fy;
+    return smooth(TRAP_FROM, TRAP_FULL, at(laid) + (plateTone ? at(plateTone) : 0));
+  };
+  const flushTrap = () => {
+    if (trapW >= 0) trapCtx.stroke();
+    trapW = -1;
+  };
   const flush = () => {
     if (runOpen) for (const c of inks()) c.stroke();
     runOpen = false;
+    flushTrap();
   };
   const deposit = (x, y, speed, taper, rch) => {
     if (!last) {
       last = { x, y };
+      trapS = -1;
       curPath.push(NaN, NaN, NaN, x / side, y / side, clock);
       back = null;
       firstRun = true;
@@ -992,6 +1105,7 @@ export async function createHarmonograph(host) {
       const wind = (wq / WIND_STEPS) ** 1.6;
       const full = (0.45 + 1.35 * Math.pow(f, 1.3)) * (0.4 + 0.6 * (tq / 3));
       const width = Math.min(full, HAIR) + (full - Math.min(full, HAIR)) * wind;
+      runWidth = width;
       const k = Math.min(1, f * 1.6) * wind;
       const r = INK_FAST[0] + (INK_DARK[0] - INK_FAST[0]) * k;
       const g = INK_FAST[1] + (INK_DARK[1] - INK_FAST[1]) * k;
@@ -1009,6 +1123,31 @@ export async function createHarmonograph(host) {
       runOpen = true;
     }
     for (const c of inks()) c.lineTo(x * dpr, y * dpr);
+    const X0 = last.x * dpr;
+    const Y0 = last.y * dpr;
+    const X1 = x * dpr;
+    const Y1 = y * dpr;
+    const kw = runWidth * dpr;
+    const most = TRAP * dpr * trapAt((x + last.x) / 2, (y + last.y) / 2);
+    let half = 0;
+    if (most > 0.05) {
+      const sl = Math.hypot(X1 - X0, Y1 - Y0) || 1;
+      const g = gapAt((X0 + X1) / 2, (Y0 + Y1) / 2, -(Y1 - Y0) / sl, (X1 - X0) / sl, kw + most / TRAP_SHARE);
+      half = Math.min(most, Math.max(0, (g - kw) * TRAP_SHARE));
+    }
+    stampKey(X0, Y0, X1, Y1);
+    trapS = trapS < 0 ? half : trapS + (half - trapS) * 0.35;
+    if (trapS > 0.2) {
+      const tw = Math.round((kw + 2 * trapS) * 2) / 2;
+      if (tw !== trapW) {
+        flushTrap();
+        trapCtx.lineWidth = tw;
+        trapCtx.beginPath();
+        trapCtx.moveTo(last.x * dpr, last.y * dpr);
+        trapW = tw;
+      }
+      trapCtx.lineTo(x * dpr, y * dpr);
+    } else flushTrap();
     curPath.push(x / side, y / side, clock);
     runSegs++;
     curInk = true;
@@ -1026,6 +1165,12 @@ export async function createHarmonograph(host) {
     curCtx.globalAlpha = 1;
     curCtx.lineCap = "round";
     curCtx.lineJoin = "round";
+    trapCtx.setTransform(1, 0, 0, 1, 0, 0);
+    trapCtx.globalAlpha = 1;
+    trapCtx.globalCompositeOperation = "source-over";
+    trapCtx.lineCap = "round";
+    trapCtx.lineJoin = "round";
+    trapCtx.strokeStyle = trapInk;
     const inking = pen === "down" && lift < 0.06;
     const held = hold && (hold.kind === "pen" || hold.taken) ? hold.kind : null;
     let [x0, y0] = penPos();
@@ -1171,6 +1316,7 @@ export async function createHarmonograph(host) {
     const snap = layer(comp.width, comp.height);
     const sc = snap.getContext("2d");
     sc.drawImage(comp, 0, 0);
+    sc.drawImage(trap, 0, 0);
     sc.globalCompositeOperation = "multiply";
     sc.drawImage(cur, 0, 0);
     const [ox, oy] = tableOff();
