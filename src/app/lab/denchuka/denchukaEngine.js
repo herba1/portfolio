@@ -161,17 +161,19 @@ vec3 skyGrade(vec3 c, float zen) {
   return mix(cloud, sky, blue);
 }
 // The towering cumulus (cloud.py: a photographed tower, unclipped, placed
-// under this camera) graded into the same light: its shade sides take the
-// skylight's blue, deeper and more saturated the higher up the sky they are
-// (the cobalt ramp, zen), its sunlit tops go warm-neutral and roll off below
-// white; in between it stays near neutral.
+// under this camera) graded into the same light, so it glows: its sunlit
+// crowns warm-neutral and lifted to just under white (the film's shoulder
+// lands them at ~0.97, never clipped); its body, in its own shade, lit only by
+// the sky, takes the skylight's blue (~205, s ~0.35, ~0.6 of the crowns'
+// value), a little deeper and bluer the higher up the sky it is (the cobalt
+// ramp, zen). Value comes from the bake, so the billows carry through.
 vec3 cloudGrade(vec3 c, float zen) {
   float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float top = smoothstep(0.83, 0.95, v);
-  float shade = 1.0 - smoothstep(0.58, 0.86, v);
-  float val = v * mix(1.0, mix(0.97, 0.9, zen), shade);
-  vec3 shadeC = hsv2rgb(vec3((211.0 + 4.0 * zen) / 360.0, 0.07 + shade * mix(0.17, 0.25, zen), val));
-  vec3 sunC = hsv2rgb(vec3(38.0 / 360.0, 0.075, min(val, 0.955)));
+  float top = smoothstep(0.78, 0.97, v);
+  float shade = 1.0 - smoothstep(0.5, 0.86, v);
+  float val = min(v * mix(1.03, mix(1.1, 1.05, zen), shade), 1.0);
+  vec3 shadeC = hsv2rgb(vec3((205.0 + 4.0 * zen) / 360.0, mix(0.07, mix(0.33, 0.38, zen), shade), val));
+  vec3 sunC = hsv2rgb(vec3(40.0 / 360.0, 0.055, min(v * 1.035, 1.0)));
   return mix(shadeC, sunC, top);
 }
 // A wire's matte at a plate point, filtered bilinearly over its own texels
