@@ -13,15 +13,14 @@ import { createNib } from "./penAudio";
 // and the table circles. Lifting the nib starts a new figure, and the old one
 // is pulled into the sheet as an impression in a spot ink, the next of a
 // small fixed set each time. The impression is a plate, not a second pen
-// line: the time the nib spent over every pixel of the paper becomes a
-// continuous tone, and the plate is a halftone of it at the ink's own screen
-// angle, darkest where the slow turns crowd (never quite solid: the dots
-// stop short of closing, so paper shows through every overprint) and
-// thinning out through ever smaller dots to open paper where they spread,
-// banded like the loops that laid it, printed one fixed
-// misregistration off the key. The sheet builds up
-// as a riso or letterpress print with the pen's near-black key, the only
-// linework on it, always on top. The pen lifts itself once the swing has
+// line: while the pen drew, every stretch of line kept the time the nib took
+// over it and the way it was heading, and the plate is engraved from those,
+// as evenly spaced lines that run along the pen's own flow, turned by the
+// ink's angle, swelling where the slow turns crowd and fining to hairlines
+// and gaps where the loops spread, printed one fixed misregistration off the
+// key. The plates cross-hatch where they overprint, under a shared ink limit
+// so the crowded core stays open. The sheet builds up as a riso or
+// letterpress print with the pen's near-black key always on top. The pen lifts itself once the swing has
 // wound in, so the centre of every figure stays open.
 //
 // Ink is laid opaque on a transparent layer, so one continuous line never
@@ -29,7 +28,7 @@ import { createNib } from "./penAudio";
 // thin and a little grey where it races, wider and blacker where it slows.
 // They also follow how far the swing has wound in: the inner winds, where
 // the pen is slowest and the loops crowd closest, fine down to a hairline
-// instead of swelling, so the core resolves into moire over the flat plate.
+// instead of swelling, so the core resolves into moire over the engraved plate.
 
 const TAU = Math.PI * 2;
 const H = 1 / 1600; // physics substep, seconds
@@ -177,13 +176,15 @@ const PLATE_IN = 0.55; // share of the pull over which the plate inks up
 // finished is pulled into the sheet as an impression in the next spot ink,
 // at full strength and overprinted (multiply), each plate a pixel or two
 // out of register with the key, as a riso or a jobbing letterpress lays it.
-// The key always prints last, over every spot. Each plate is screened at
-// its own angle, 15, 75, 45 and 0 degrees, so they rosette, not clash.
+// The key always prints last, over every spot. Each plate is engraved as
+// lines that follow the pen's own flow, turned by the ink's angle: the first
+// runs with the pen, the next across it, then the two diagonals, so the
+// plates overprint as hatching and cross-hatching, not as one tone on another.
 const SPOTS = [
-  { rgb: [232, 78, 44], mx: 1.5, my: -1, angle: 15 }, // vermilion
-  { rgb: [0, 112, 186], mx: -1, my: 1.5, angle: 75 }, // process blue
+  { rgb: [232, 78, 44], mx: 1.5, my: -1, angle: 0 }, // vermilion
+  { rgb: [0, 112, 186], mx: -1, my: 1.5, angle: 90 }, // process blue
   { rgb: [255, 76, 150], mx: 1.5, my: 1, angle: 45 }, // fluorescent pink
-  { rgb: [0, 128, 120], mx: -1.5, my: -1, angle: 0 }, // teal
+  { rgb: [0, 128, 120], mx: -1.5, my: -1, angle: -45 }, // teal
 ];
 const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
@@ -391,49 +392,71 @@ export async function createHarmonograph(host) {
   };
   const inks = () => [curCtx];
 
-  // The key of a finished figure, as a plate in spot ink: the figure's
-  // letterpress shadow, screened as a continuous-tone halftone. The path is
-  // replayed into a field at device resolution as the time the nib spent
-  // over each pixel (every stretch of line carries the seconds the pen took
-  // to cross it), so the slow turns and the crowded inner winds build ink
-  // and the fast open loops barely mark. The field is softened only over
-  // about the spacing of the figure's own loops, so the plate keeps their
-  // banding as bands of light and dark tone. It is read against a high
-  // percentile of itself (TONE_P of the inked area), not its peak, and
-  // through a log curve, so the long tail of the crowded core compresses
-  // instead of clipping and the whole range from rich mid-tones to the
-  // finest highlight dots stays in use. That tone is then set through an AM
-  // screen: round dots on a fixed ruling, turned to the ink's own angle,
-  // each dot's area matched to the tone and capped at DOT_MAX, so even the
-  // densest core keeps open paper between its dots and four plates over it
-  // still rosette instead of printing to black. There is no cut and no edge
-  // anywhere; the plate thins out as dots along the outer loops.
-  // Every ink sits at its own angle, as a four-colour printer sets them, so
-  // the plates overprint into rosettes and moire against each other and
-  // against the key's own line moire. Nothing of the line itself survives in
-  // the plate; the near-black key is the only linework on the sheet.
+  // The key of a finished figure, as a plate in spot ink: the figure's own
+  // motion, engraved. The path is replayed into two fields at device
+  // resolution. One is the time the nib spent over each pixel (every stretch
+  // of line carries the seconds the pen took to cross it), so the slow turns
+  // and the crowded inner winds build ink and the fast open loops barely
+  // mark; it is softened only over about the spacing of the loops, so it
+  // keeps their banding. The other is the direction the pen was moving there,
+  // as a doubled-angle orientation weighted by the same dwell, so the slow
+  // stretches set the grain and a loop going out and coming back agree.
+  // The dwell is read against a high percentile of itself (TONE_P of the
+  // inked area), not its peak, through a log curve, so the crowded core
+  // compresses instead of clipping.
+  // The plate is then cut as a line engraving: evenly spaced lines traced
+  // along that flow field, turned by the ink's own angle (the first ink runs
+  // with the pen, the next across it, the others on the diagonals), each
+  // line swelling with the dwell under it to at most RULE_MAX of its pitch
+  // and thinning to a hairline, then a gap, where the loops spread. Lines
+  // that run into each other stop, as a graver's do. The plates overprint
+  // as hatching and cross-hatching, and their moire against the key comes
+  // from the figure's own structure. Plates also share a total ink limit, as
+  // a printer caps total area coverage: a plate gives way, line by line,
+  // where earlier plates already lie heavy, so a five-drop core stays open.
   const SIGMA = 1.8; // CSS px, the softening of the time field: about a loop's pitch
+  const FLOW_SIGMA = 6; // CSS px, the smoothing of the direction field
+  const SCREEN_BIAS = 0.22; // the plain screen's share, against the pen's heading
+  const SCREEN_AT = Math.PI / 4; // ... and its heading, before the ink's turn
   const TONE_P = 0.95; // the field's own high percentile reads as full tone ...
   const TONE_K = 18; // ... through log(1 + K x) / log(1 + K)
-  const DOT_MAX = 0.77; // the largest dot, as a share of its screen cell
-  const SCREEN = 2.4; // CSS px, the halftone's pitch
-  // The round-dot spot function, 0.5 + 0.25 (cos u + cos v), read as the
-  // threshold for a given dot area: its values over one screen cell, sorted,
-  // so dot area follows the tone exactly from a speck to the closed solid.
-  const SPOT_LUT = (() => {
-    const m = 96;
-    const v = new Float32Array(m * m);
-    for (let j = 0; j < m; j++) {
-      for (let i = 0; i < m; i++) v[j * m + i] = 0.5 + 0.25 * (Math.cos(((i + 0.5) / m) * TAU) + Math.cos(((j + 0.5) / m) * TAU));
+  const PITCH = 2.8; // CSS px between engraved lines
+  const RULE_MAX = 0.62; // the widest line, as a share of its pitch
+  const RULE_MIN = 0.12; // device px: a narrower line breaks to a gap
+  const LIVE = 0.04; // tone under which no line is cut at all
+  const TAC = 1.45; // total tone the overprinted plates may carry at a point
+  const G = 192; // the ink-limit grid, cells per side of the sheet
+  let laid = new Float32Array(G * G); // tone already printed, per cell
+  let plateTone = null; // the plate being pulled, per cell, until it is baked
+
+  const blur = (A, tmp, n, r) => {
+    const norm = 1 / (2 * r + 1);
+    const box = (src, dst, stride, stepN) => {
+      for (let l = 0; l < n; l++) {
+        const o = l * stride;
+        let acc = 0;
+        for (let i = -r; i <= r; i++) acc += src[o + clamp(i, 0, n - 1) * stepN];
+        for (let i = 0; i < n; i++) {
+          dst[o + i * stepN] = acc * norm;
+          acc += src[o + Math.min(n - 1, i + r + 1) * stepN] - src[o + Math.max(0, i - r) * stepN];
+        }
+      }
+    };
+    // Three box passes each way: close to a gaussian.
+    for (let p = 0; p < 3; p++) {
+      box(A, tmp, n, 1);
+      box(tmp, A, 1, n);
     }
-    v.sort();
-    const lut = new Float32Array(1025);
-    for (let k = 0; k <= 1024; k++) lut[k] = v[Math.min(v.length - 1, Math.floor((1 - k / 1024) * v.length))];
-    return lut;
-  })();
+  };
+
   const field = () => {
     const n = spot.width;
     const F = new Float32Array(n * n);
+    // The heading is smoothed over FLOW_SIGMA, so it is kept at half
+    // resolution.
+    const m = Math.ceil(n / 2);
+    const Cx = new Float32Array(m * m);
+    const Cy = new Float32Array(m * m);
     let lx = NaN;
     let ly = NaN;
     let lt = NaN;
@@ -447,47 +470,60 @@ export async function createHarmonograph(host) {
         lt = t;
         continue;
       }
-      const L = Math.hypot(x - lx, y - ly);
+      const ddx = x - lx;
+      const ddy = y - ly;
+      const L = Math.hypot(ddx, ddy);
       const k = Math.max(1, Math.ceil(L * 2));
       const w = Math.max(0, t - lt) / k; // seconds of the nib per sample
+      // The pen's heading, as a doubled angle: going and coming agree.
+      const L2 = Math.max(1e-9, L * L);
+      const c2 = (w * (ddx * ddx - ddy * ddy)) / L2;
+      const s2 = (w * 2 * ddx * ddy) / L2;
       for (let j = 0; j < k; j++) {
         const f = (j + 0.5) / k;
-        const sx = lx + (x - lx) * f;
-        const sy = ly + (y - ly) * f;
+        const sx = lx + ddx * f;
+        const sy = ly + ddy * f;
         const ix = Math.floor(sx);
         const iy = Math.floor(sy);
         if (ix < 0 || iy < 0 || ix >= n - 1 || iy >= n - 1) continue;
         const fx = sx - ix;
         const fy = sy - iy;
         const o = iy * n + ix;
-        F[o] += w * (1 - fx) * (1 - fy);
-        F[o + 1] += w * fx * (1 - fy);
-        F[o + n] += w * (1 - fx) * fy;
-        F[o + n + 1] += w * fx * fy;
+        const a = (1 - fx) * (1 - fy);
+        const b = fx * (1 - fy);
+        const c = (1 - fx) * fy;
+        const e = fx * fy;
+        F[o] += w * a;
+        F[o + 1] += w * b;
+        F[o + n] += w * c;
+        F[o + n + 1] += w * e;
+        const h = (iy >> 1) * m + (ix >> 1);
+        Cx[h] += c2;
+        Cy[h] += s2;
       }
       lx = x;
       ly = y;
       lt = t;
     }
-    // Three box passes each way: close to a gaussian of SIGMA.
-    const r = Math.max(1, Math.round(SIGMA * dpr));
     const tmp = new Float32Array(n * n);
-    const box = (src, dst, stride, step) => {
-      const norm = 1 / (2 * r + 1);
-      for (let l = 0; l < n; l++) {
-        const o = l * stride;
-        let acc = 0;
-        for (let i = -r; i <= r; i++) acc += src[o + clamp(i, 0, n - 1) * step];
-        for (let i = 0; i < n; i++) {
-          dst[o + i * step] = acc * norm;
-          acc += src[o + Math.min(n - 1, i + r + 1) * step] - src[o + Math.max(0, i - r) * step];
-        }
-      }
-    };
-    for (let p = 0; p < 3; p++) {
-      box(F, tmp, n, 1);
-      box(tmp, F, 1, n);
+    const rf = Math.max(1, Math.round((FLOW_SIGMA * dpr) / 2));
+    // Where the pen crossed itself at every heading, the flow has no grain
+    // and the lines would curl into whorls: there they settle into a plain
+    // straight screen. A share SCREEN_BIAS of the dwell, at a fixed heading,
+    // is added to the flow, so it rules only where the pen's own heading is
+    // incoherent and gives way smoothly where it is not.
+    const D = new Float32Array(m * m);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) D[(y >> 1) * m + (x >> 1)] += F[y * n + x];
+    blur(D, tmp, m, rf);
+    const bc = Math.cos(SCREEN_AT * 2);
+    const bs = Math.sin(SCREEN_AT * 2);
+    blur(Cx, tmp, m, rf);
+    blur(Cy, tmp, m, rf);
+    for (let i = 0; i < D.length; i++) {
+      Cx[i] += SCREEN_BIAS * D[i] * bc;
+      Cy[i] += SCREEN_BIAS * D[i] * bs;
     }
+    blur(F, tmp, n, Math.max(1, Math.round(SIGMA * dpr)));
     // The field's own spread, from a sample of the inked area: its TONE_P
     // percentile is full tone, and everything past it is the same.
     let peak = 0;
@@ -497,67 +533,265 @@ export async function createHarmonograph(host) {
     for (let i = 0; i < F.length; i += 5) if (F[i] > floor) sample.push(F[i]);
     sample.sort((a, b) => a - b);
     const ref = sample.length ? sample[Math.floor(TONE_P * (sample.length - 1))] : 1;
-    return { F, ref, floor };
+    return { F, Cx, Cy, m, ref, floor };
   };
 
   const tint = () => {
     const n = spot.width;
-    const { F, ref, floor } = field();
-    const out = spotCtx.createImageData(n, n);
-    const d = out.data;
-    const [r, gr, bl] = pulling.rgb;
-    const grain = inkGrain(n);
-    const ang = (pulling.angle * Math.PI) / 180;
-    const pitch = SCREEN * dpr;
-    const kk = TAU / pitch;
-    const cu = Math.cos(ang) * kk;
-    const su = Math.sin(ang) * kk;
-    // The screen's two waves, u = x cu + y su and v = y cu - x su, split into
-    // per-row and per-column tables so a pixel costs no trig.
-    const wave = (k) => {
-      const c = new Float32Array(n);
-      const sn = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        c[i] = Math.cos(i * k);
-        sn[i] = Math.sin(i * k);
-      }
-      return [c, sn];
+    const { F, Cx, Cy, m, ref, floor } = field();
+    const bil = (A, x, y) => {
+      if (!(x >= 0 && y >= 0 && x < n - 1 && y < n - 1)) return 0;
+      const ix = x | 0;
+      const iy = y | 0;
+      const fx = x - ix;
+      const fy = y - iy;
+      const o = iy * n + ix;
+      return (A[o] * (1 - fx) + A[o + 1] * fx) * (1 - fy) + (A[o + n] * (1 - fx) + A[o + n + 1] * fx) * fy;
     };
-    const [cXu, sXu] = wave(cu);
-    const [cXs, sXs] = wave(su);
-    const slope = 0.25 * kk; // the spot function's slope per device px, per unit of sin
+    // The same, on the half-resolution heading field.
+    const bilH = (A, x, y) => {
+      const u = clamp((x - 0.5) / 2, 0, m - 1.001);
+      const v = clamp((y - 0.5) / 2, 0, m - 1.001);
+      const ix = u | 0;
+      const iy = v | 0;
+      const fx = u - ix;
+      const fy = v - iy;
+      const o = iy * m + ix;
+      return (A[o] * (1 - fx) + A[o + 1] * fx) * (1 - fy) + (A[o + m] * (1 - fx) + A[o + m + 1] * fx) * fy;
+    };
     const inv = 1 / ref;
     const logK = 1 / Math.log1p(TONE_K);
-    for (let y = 0, p = 0; y < n; y++) {
-      for (let x = 0; x < n; x++, p++) {
-        const dens = F[p];
-        if (dens <= floor) continue;
-        const tone = DOT_MAX * Math.log1p(TONE_K * Math.min(1, dens * inv)) * logK;
-        const c = tone * 1024;
-        const ci = c | 0;
-        const thr = ci >= 1024 ? SPOT_LUT[1024] : SPOT_LUT[ci] + (SPOT_LUT[ci + 1] - SPOT_LUT[ci]) * (c - ci);
-        const cosU = cXu[x] * cXs[y] - sXu[x] * sXs[y];
-        const cosV = cXu[y] * cXs[x] + sXu[y] * sXs[x];
-        const sinU = sXu[x] * cXs[y] + cXu[x] * sXs[y];
-        const sinV = sXu[y] * cXs[x] - cXu[y] * sXs[x];
-        const s = 0.5 + 0.25 * (cosU + cosV);
-        // About one device pixel of edge on every dot, whatever its size,
-        // centred on the dot's true edge, leaning a little toward paper for
-        // a speck so it can vanish into the paper; the largest dots never
-        // close up.
-        const g = Math.max(0.06, slope * Math.hypot(sinU, sinV));
-        const ink = clamp((s - thr) / g + 0.3 + 0.2 * tone, 0, 1);
-        if (ink <= 0) continue;
-        const al = Math.min(1, 0.94 * ink * grain[p]);
-        const i = p * 4;
-        d[i] = r;
-        d[i + 1] = gr;
-        d[i + 2] = bl;
-        d[i + 3] = al * 255;
+    const toneAt = (x, y) => {
+      const dens = bil(F, x, y);
+      return dens <= floor ? 0 : Math.log1p(TONE_K * Math.min(1, dens * inv)) * logK;
+    };
+    // What the earlier plates leave of the ink limit here, 0..1.
+    const roomAt = (x, y) => {
+      const gx = clamp((x / n) * G - 0.5, 0, G - 1.001);
+      const gy = clamp((y / n) * G - 0.5, 0, G - 1.001);
+      const ix = gx | 0;
+      const iy = gy | 0;
+      const fx = gx - ix;
+      const fy = gy - iy;
+      const o = iy * G + ix;
+      const l = (laid[o] * (1 - fx) + laid[o + 1] * fx) * (1 - fy) + (laid[o + G] * (1 - fx) + laid[o + G + 1] * fx) * fy;
+      return smooth(TAC, TAC * 0.45, l);
+    };
+    // The flow, turned by the ink's angle: the doubled-angle vector is turned
+    // by twice it, then halved back to a heading.
+    const rot = (pulling.angle * Math.PI) / 90;
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const dir = [0, 0];
+    const flowAt = (x, y) => {
+      const a = bilH(Cx, x, y);
+      const b = bilH(Cy, x, y);
+      const m = Math.hypot(a, b);
+      if (m < 1e-12) return false;
+      const c = (a * cr - b * sr) / m;
+      const s = (a * sr + b * cr) / m;
+      dir[0] = Math.sqrt(Math.max(0, (1 + c) / 2));
+      dir[1] = (s < 0 ? -1 : 1) * Math.sqrt(Math.max(0, (1 - c) / 2));
+      return true;
+    };
+
+    // Evenly spaced streamlines (Jobard and Lefer): a line is traced both
+    // ways from its seed until it leaves the ink, turns too hard, or comes
+    // within DTEST of another line; new seeds are taken one pitch either side
+    // of every finished line, and a raster sweep picks up what they miss.
+    const dsep = PITCH * dpr;
+    const dtest = dsep * 0.5;
+    const hstep = Math.max(1, 0.6 * dpr);
+    const gc = dsep;
+    const gw = Math.ceil(n / gc) + 1;
+    const cells = new Array(gw * gw);
+    const put = (x, y) => {
+      const o = ((y / gc) | 0) * gw + ((x / gc) | 0);
+      (cells[o] || (cells[o] = [])).push(x, y);
+    };
+    const near = (x, y, d) => {
+      const cx = (x / gc) | 0;
+      const cy = (y / gc) | 0;
+      const d2 = d * d;
+      for (let j = Math.max(0, cy - 1); j <= Math.min(gw - 1, cy + 1); j++) {
+        for (let i = Math.max(0, cx - 1); i <= Math.min(gw - 1, cx + 1); i++) {
+          const c = cells[j * gw + i];
+          if (!c) continue;
+          for (let k = 0; k < c.length; k += 2) {
+            const ex = c[k] - x;
+            const ey = c[k + 1] - y;
+            if (ex * ex + ey * ey < d2) return true;
+          }
+        }
+      }
+      return false;
+    };
+    const lag = Math.ceil((2.2 * dsep) / hstep);
+    const MAX = Math.ceil((n * 6) / hstep);
+    const trace = (sx, sy, sign, out) => {
+      if (!flowAt(sx, sy)) return;
+      let dx = dir[0] * sign;
+      let dy = dir[1] * sign;
+      let x = sx;
+      let y = sy;
+      const start = out.length;
+      for (let i = 0; i < MAX; i++) {
+        if (!flowAt(x, y)) break;
+        let ax = dir[0];
+        let ay = dir[1];
+        if (ax * dx + ay * dy < 0) {
+          ax = -ax;
+          ay = -ay;
+        }
+        const mx = x + ax * hstep * 0.5;
+        const my = y + ay * hstep * 0.5;
+        if (!flowAt(mx, my)) break;
+        let bx = dir[0];
+        let by = dir[1];
+        if (bx * ax + by * ay < 0) {
+          bx = -bx;
+          by = -by;
+        }
+        if (bx * dx + by * dy < 0.82) break; // a knot in the field: stop short of it
+        const nx = x + bx * hstep;
+        const ny = y + by * hstep;
+        if (nx < 1 || ny < 1 || nx > n - 2 || ny > n - 2) break;
+        if (toneAt(nx, ny) < LIVE) break;
+        if (near(nx, ny, dtest)) break;
+        out.push(nx, ny);
+        x = nx;
+        y = ny;
+        dx = bx;
+        dy = by;
+        // The line's own wake joins the grid a little behind the graver, so a
+        // loop closing on itself stops a pitch short of its start.
+        const back = out.length - 2 * lag;
+        if (back >= start) put(out[back], out[back + 1]);
+      }
+    };
+
+    const lines = [];
+    const queue = [];
+    const seedOk = (x, y) => x > 1 && y > 1 && x < n - 2 && y < n - 2 && toneAt(x, y) >= LIVE && !near(x, y, dsep * 0.9);
+    const grow = (sx, sy) => {
+      const fw = [];
+      const bw = [];
+      trace(sx, sy, 1, fw);
+      trace(sx, sy, -1, bw);
+      // Seed, then each half, joined into one line from end to end.
+      const pts = [];
+      for (let i = bw.length - 2; i >= 0; i -= 2) pts.push(bw[i], bw[i + 1]);
+      pts.push(sx, sy);
+      for (let i = 0; i < fw.length; i += 2) pts.push(fw[i], fw[i + 1]);
+      // Everything not yet in the grid goes in now.
+      const fl = fw.length - 2 * lag;
+      const bl = bw.length - 2 * lag;
+      for (let i = Math.max(0, fl); i < fw.length; i += 2) put(fw[i], fw[i + 1]);
+      for (let i = Math.max(0, bl); i < bw.length; i += 2) put(bw[i], bw[i + 1]);
+      put(sx, sy);
+      if (pts.length < 8) return;
+      lines.push(pts);
+      const every = Math.max(1, Math.round(dsep / hstep));
+      for (let i = 2; i < pts.length - 2; i += 2 * every) {
+        const tx = pts[i + 2] - pts[i - 2];
+        const ty = pts[i + 3] - pts[i - 1];
+        const l = Math.hypot(tx, ty) || 1;
+        queue.push(pts[i] - (ty / l) * dsep, pts[i + 1] + (tx / l) * dsep);
+        queue.push(pts[i] + (ty / l) * dsep, pts[i + 1] - (tx / l) * dsep);
+      }
+    };
+    const drain = () => {
+      while (queue.length) {
+        const y = queue.pop();
+        const x = queue.pop();
+        if (seedOk(x, y)) grow(x, y);
+      }
+    };
+    const sweep = dsep * 1.5;
+    for (let y = sweep / 2; y < n; y += sweep) {
+      for (let x = sweep / 2; x < n; x += sweep) {
+        if (!seedOk(x, y)) continue;
+        grow(x, y);
+        drain();
       }
     }
+
+    // Cut the lines: each a ribbon whose half-width follows the dwell under
+    // it, cut short into separate rules wherever it fines past RULE_MIN.
+    const [r, gr, bl] = pulling.rgb;
     spotCtx.setTransform(1, 0, 0, 1, 0, 0);
-    spotCtx.putImageData(out, 0, 0);
+    spotCtx.clearRect(0, 0, n, n);
+    spotCtx.fillStyle = `rgb(${r},${gr},${bl})`;
+    const half = 0.5 * dsep * RULE_MAX;
+    const ribbon = (pts, hw, a, b) => {
+      // pts in field coordinates; the canvas puts pixel centres at +0.5.
+      spotCtx.beginPath();
+      for (let i = a; i <= b; i += 2) {
+        const j0 = Math.max(0, i - 2);
+        const j1 = Math.min(pts.length - 2, i + 2);
+        const tx = pts[j1] - pts[j0];
+        const ty = pts[j1 + 1] - pts[j0 + 1];
+        const l = Math.hypot(tx, ty) || 1;
+        const w = hw[i >> 1];
+        const X = pts[i] + 0.5 - (ty / l) * w;
+        const Y = pts[i + 1] + 0.5 + (tx / l) * w;
+        if (i === a) spotCtx.moveTo(X, Y);
+        else spotCtx.lineTo(X, Y);
+      }
+      for (let i = b; i >= a; i -= 2) {
+        const j0 = Math.max(0, i - 2);
+        const j1 = Math.min(pts.length - 2, i + 2);
+        const tx = pts[j1] - pts[j0];
+        const ty = pts[j1 + 1] - pts[j0 + 1];
+        const l = Math.hypot(tx, ty) || 1;
+        const w = hw[i >> 1];
+        spotCtx.lineTo(pts[i] + 0.5 + (ty / l) * w, pts[i + 1] + 0.5 - (tx / l) * w);
+      }
+      spotCtx.closePath();
+      spotCtx.fill();
+    };
+    for (const pts of lines) {
+      const m = pts.length >> 1;
+      const hw = new Float32Array(m);
+      for (let i = 0; i < m; i++) {
+        const x = pts[2 * i];
+        const y = pts[2 * i + 1];
+        hw[i] = half * toneAt(x, y) * roomAt(x, y);
+      }
+      // Ease the ends of every rule to a point over a pitch.
+      const ramp = Math.max(1, Math.round(dsep / hstep));
+      for (let i = 0; i < Math.min(ramp, m); i++) {
+        const f = (i + 0.5) / ramp;
+        hw[i] *= f;
+        hw[m - 1 - i] *= f;
+      }
+      let s = -1;
+      for (let i = 0; i <= m; i++) {
+        const on = i < m && hw[i] * 2 >= RULE_MIN;
+        if (on && s < 0) s = i;
+        else if (!on && s >= 0) {
+          if (i - s >= 2) ribbon(pts, hw, 2 * s, 2 * (i - 1));
+          s = -1;
+        }
+      }
+    }
+
+    // The ink film's unevenness over the cut lines.
+    const grain = inkGrain(n);
+    const img = spotCtx.getImageData(0, 0, n, n);
+    const d = img.data;
+    for (let p = 0, i = 3; p < n * n; p++, i += 4) if (d[i]) d[i] = Math.min(255, d[i] * 0.96 * grain[p]);
+    spotCtx.putImageData(img, 0, 0);
+
+    // What this plate lays, per cell of the ink-limit grid, for the next.
+    plateTone = new Float32Array(G * G);
+    for (let j = 0; j < G; j++) {
+      for (let i = 0; i < G; i++) {
+        const x = ((i + 0.5) / G) * n;
+        const y = ((j + 0.5) / G) * n;
+        plateTone[j * G + i] = toneAt(x, y) * roomAt(x, y);
+      }
+    }
   };
 
   // The impression goes into the sheet for good, overprinting whatever was
@@ -568,6 +802,8 @@ export async function createHarmonograph(host) {
     baseCtx.globalCompositeOperation = "multiply";
     baseCtx.drawImage(spot, pulling.mx * dpr, pulling.my * dpr);
     baseCtx.globalCompositeOperation = "source-over";
+    if (plateTone) for (let i = 0; i < laid.length; i++) laid[i] += plateTone[i];
+    plateTone = null;
     wipe(prevCtx);
     prevInk = false;
     settleT = 1;
@@ -617,7 +853,7 @@ export async function createHarmonograph(host) {
     prev = layer(n, n);
     prevCtx = prev.getContext("2d");
     spot = layer(n, n);
-    spotCtx = spot.getContext("2d");
+    spotCtx = spot.getContext("2d", { willReadFrequently: true }); // its ink grain is read back
     comp.width = n;
     comp.height = n;
     key.width = n;
@@ -929,6 +1165,8 @@ export async function createHarmonograph(host) {
     clearSheet();
     curPath = [];
     prevPath = [];
+    laid = new Float32Array(G * G);
+    plateTone = null;
     pen = "up";
     setIndex = (setIndex + 1) % SETS.length;
     applySet(setIndex);
