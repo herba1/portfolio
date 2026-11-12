@@ -35,9 +35,10 @@ import { orientation, skyField, createSpace, strokes as layStrokes, P, META } fr
 // so a pull bends the lines where the crown shears and draws their trailing
 // ends out a little (never more than a line and a half), while each keeps the
 // width of the light at its rest position, so the print stays an engraving
-// under a hard pull; and each is tinted by where that point is in its swing relative to the
-// pull (with it, leading, against, lagging), on a continuous hue wheel whose
-// saturation rises with the amplitude. So even a frozen frame shows the
+// under a hard pull; and each takes its lightness from that light too, while
+// where that point is in its swing relative to the pull (with it, leading,
+// against, lagging) only leans its hue, a low chroma rising with light times
+// amplitude, a cool/warm cast through an intact engraving. So even a frozen frame shows the
 // measured vibration structure of the real tree. The frame is
 // developed with the shared film kit (summer).
 //
@@ -71,6 +72,9 @@ const SKY_LUM = [0.36, 0.74]; // sky light (sRGB luma, softened) from its finest
 const SKY_THIN = 0.2; // the finest sky line, as a share of its widest
 const SKY_RUN = [14, 24]; // the sky's lines are cut into runs this long, in separations
 const SKY_INK = [0.84, 0.035, 4.3]; // OKLCH: a cool pale ink, so the crown stands off the sky
+const INK = [0.4, 0.97]; // OKLCH lightness of a crown line in deep shadow and in full light
+const PAPER_INK = [0.014, 1.35]; // OKLCH chroma and hue (rad) of the crown's warm paper white at rest
+const CHROMA = 0.075; // the crown's most chroma: full light at full swing (the phase only leans the hue)
 const SKY_UNDER = 70; // how far, in separations, the sky's lines run on beneath the crown
 const MASK = [960, 540]; // the crown's cover, at rest and as it swings (plate, half resolution)
 const COVER = 1.0; // how far the cover reaches past a crown line, in separations
@@ -96,12 +100,14 @@ void main() {
 // bends the strokes where the crown shears; only an end that trails its
 // motion lags behind, by a share of its displacement capped at a line and a
 // half, so a stroke draws out a little without ever smearing into a brush
-// mark, and its width stays the leaves' light at its rest position. Its tint is the phase of the
-// analytic signal sum_i phi_i (q_i - i v_i / omega_i) read in the frame of
-// the pull, on a continuous hue wheel: gold swings with the hand, violet
-// against it, teal leads it and rose lags it (or each swings off to one side of
-// it), with the saturation set by how hard the point is swinging. At rest the
-// ink is a warm paper white.
+// mark, and its width and its OKLCH lightness stay the leaves' light at its
+// rest position: near-white cream in the lit clumps, the hairline shadow ink
+// in the dark. Only its hue is the phase of the analytic signal
+// sum_i phi_i (q_i - i v_i / omega_i) read in the frame of the pull: gold
+// swings with the hand, violet against it, teal leads it and rose lags it (or
+// each swings off to one side of it), at a low chroma set by the light times
+// how hard the point is swinging, so the light and shadow stay a print's. At
+// rest the ink is a warm paper white.
 const strokeVert = (K, P, SPR, fieldTex) => `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -134,6 +140,9 @@ uniform float uSkyHalf; // the sky's widest half-width, target px
 uniform vec3 uSkyLight; // sky light of its finest and widest line, finest share
 uniform float uCapLen;  // a sky line's taper, plate px
 uniform vec3 uSkyInk;   // OKLCH
+uniform vec3 uInk;      // the crown's OKLCH lightness in shadow and in light, its paper chroma at rest
+uniform float uPaperHue; // the paper ink's hue, radians
+uniform float uChroma;  // the crown's most chroma, at full light and full swing
 uniform float uMove;    // 1: carried by the modal field, 0: at rest
 uniform float uCover;   // > 0: the cover pass, every line this half-width (target px)
 out float vKind;
@@ -244,6 +253,7 @@ void main() {
 
   float tp = float(j) / float(P - 1);
   float hw;
+  float light = 0.0; // the leaves' light at the rest position, 0..1
   if (sky) {
     // width: the sky's light, so its falloff reads as the lines thinning
     // toward the top and a cloud as them swelling; a run tapers only where
@@ -261,7 +271,8 @@ void main() {
     // lines on the ground rather than a hole cut out of the sky's ruling
     float cov = smoothstep(0.25, 0.7, t.a);
     float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * cov;
-    float w = max(pow(clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0), 0.6), uFloor * cov);
+    light = clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0);
+    float w = max(pow(light, 0.6), uFloor * cov);
     // tapered over a fixed length at each end, however long the line runs
     float taper = pow(clamp(min(tp, 1.0 - tp) * meta.y / uCapLen, 0.0, 1.0), 0.6);
     // (in the cover pass every line is as wide as the cover reaches, unless
@@ -280,17 +291,27 @@ void main() {
     vCol = oklch(uSkyInk.x, uSkyInk.y, uSkyInk.z);
     return;
   }
-  // tint: the phase in the frame of the pull
+  // ink: the light decides how light, the phase only which way it leans.
+  // Lightness is the leaves' light at the rest position, whatever the pull:
+  // near-white cream in the lit clumps falling to the hairline shadow ink, so
+  // the print's light and shadow survive a hard pull intact.
+  float L = mix(uInk.x, uInk.y, pow(light, 0.75));
+  // the phase in the frame of the pull picks the hue
   vec2 perp = vec2(-uRef.y, uRef.x);
   vec2 zr = F.xy;
   vec2 zi = F.zw;
   float th = atan(dot(zi, uRef) + dot(zr, perp), dot(zr, uRef));
-  // saturation keeps climbing with the swing's amplitude, so how hard each
-  // part of the crown answers reads as a gradient, not a threshold
-  float sat = 1.0 - exp(-length(F) / 26.0);
-  // (its lightness falls only a little, so the lit clumps still read as the
-  // light of the print under a hard pull, not as a colour map)
-  vCol = oklch(mix(0.95, 0.88, sat), mix(0.02, 0.17, sat), 1.66 + th);
+  // and how hard the point swings how far it leans, a gradient, not a threshold
+  float amp = 1.0 - exp(-length(F) / 26.0);
+  // chroma is low and scales with light times amplitude: the highlights stay
+  // almost white and the shadows dark, a cool/warm cast through an intact
+  // engraving rather than a colour map. At rest the ink is a warm paper white.
+  // (easing off again in the brightest light, so a lit clump's crest reads
+  // as white paper with a breath of colour, not as a pastel)
+  float lc = mix(0.35, 1.0, light) * (1.0 - 0.5 * smoothstep(0.7, 1.0, light));
+  vec2 ab = lc * ((1.0 - amp) * uInk.z * vec2(cos(uPaperHue), sin(uPaperHue))
+    + amp * uChroma * vec2(cos(1.66 + th), sin(1.66 + th)));
+  vCol = oklch(L, length(ab), atan(ab.y, ab.x));
 }`;
 
 const STROKE_FRAG = `#version 300 es
@@ -831,6 +852,9 @@ export async function createPoke(host, { embedded = false } = {}) {
       gl.uniform3f(su.uSkyLight, SKY_LUM[0], SKY_LUM[1], SKY_THIN);
       gl.uniform1f(su.uCapLen, (sep / k) * 1.5);
       gl.uniform3fv(su.uSkyInk, SKY_INK);
+      gl.uniform3f(su.uInk, INK[0], INK[1], PAPER_INK[0]);
+      gl.uniform1f(su.uPaperHue, PAPER_INK[1]);
+      gl.uniform1f(su.uChroma, CHROMA);
       gl.uniform1f(su.uMove, move);
       gl.uniform1f(su.uCover, cover * kk);
     };
