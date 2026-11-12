@@ -64,6 +64,13 @@ const AMBIENT = 0.1;
 // The lens: visible height of the print in its own image plane (~20° tall,
 // ~30° across a 3:2 print), tipped up PITCH radians; the horizon sits
 // HORIZON of the way down.
+// The grade's flare floor (plate radiance) and the width of its knee.
+const FLARE = 0.022;
+const FLARE_K = 0.01;
+// The cloud's shoulder: how far above the clear blue it can climb, and how
+// soon it rolls off.
+const GLOW_TOP = 1.02;
+const GLOW_S = 0.34;
 const VIEW_H = 0.36;
 const PITCH = (5 * Math.PI) / 180;
 const HORIZON = 0.72; // from the top
@@ -90,7 +97,12 @@ uniform float uAlphaC;  // critical depression, radians
 uniform float uExpo;
 uniform float uLodBias;
 uniform float uPol;
+uniform float uChroma; // midtone sky chroma lift
 
+const float FLARE = ${FLARE.toFixed(4)};
+const float FLARE_K = ${FLARE_K.toFixed(4)};
+const float GLOW_TOP = ${GLOW_TOP.toFixed(3)};
+const float GLOW_S = ${GLOW_S.toFixed(3)};
 const vec4 PLATE = vec4(${PX.toFixed(4)}, ${PB.toFixed(4)}, ${PT.toFixed(4)}, 0.0);
 
 vec2 plateUv(vec2 p) {
@@ -163,7 +175,7 @@ void main() {
 
   // The sky is read a touch softer so the plate's 8-bit dither melts into
   // the gradient (film grain textures it later); the cloud keeps its drawing.
-  vec3 col = radiance(p + d, lod + 0.6 * sky);
+  vec3 col = radiance(p + d, lod + 0.9 * sky);
 
   // Inferior mirage on the far road.
   if (elev < 0.0 && road > 0.001 && uAlphaC > 0.0) {
@@ -217,7 +229,37 @@ void main() {
     col = mix(col, refl, clamp(R * tm, 0.0, 1.0));
   }
 
-  outColor = vec4(col * uExpo, 1.0);
+  // Flare floor: the plate's shadows carry the lens veil of the tripod shot
+  // (nothing in it is darker than ~3% of the cloud). A soft knee takes that
+  // flare back out, so pole bases and bush cores print near black while the
+  // mids barely move. The sky keeps most of its own: there the floor is the
+  // blue's red channel, and taking it out would turn cobalt into neon.
+  // The far range keeps its aerial haze, which is air, not flare.
+  float fl = FLARE * (1.0 - 0.75 * sky) * (1.0 - 0.45 * smoothstep(1500.0, 9000.0, Z));
+  col = 0.5 * (col - fl + sqrt((col - fl) * (col - fl) + FLARE_K * FLARE_K));
+  col *= uExpo;
+  // Midtone sky chroma: the clear blue between the cloud, in the mids only,
+  // is pushed out from grey and a touch toward cyan, so mid-sky prints a deep
+  // cobalt; the cirrus (bright) and the shadowed blue (dark) are left alone.
+  float yl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  float mid = sky * smoothstep(0.012, 0.03, yl) * (1.0 - smoothstep(0.2, 0.36, yl));
+  float blue = smoothstep(0.02, 0.12, (col.b - col.r) / (col.b + 1e-4));
+  vec3 lift = vec3(yl) + (col - vec3(yl)) * uChroma;
+  col = mix(col, max(lift, 0.0), mid * blue);
+  // Cloud glow: in the sky only, the light past the clear blue is expanded
+  // onto a long exponential shoulder, so the cloud bank climbs well clear of
+  // the sunlit road and its tops crowd up under paper white without clipping,
+  // instead of sitting a half-step over the asphalt as flat grey.
+  // It starts above the clear blue, so the blue's own fine noise is not
+  // stretched with it.
+  float yc = 0.26 + GLOW_TOP * (1.0 - exp(-max(yl - 0.26, 0.0) / GLOW_S));
+  col *= mix(1.0, yc / max(yl, 1e-4), sky * smoothstep(0.24, 0.42, yl));
+  yl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  // Sunlit cloud tops lean warm-neutral as they climb into the shoulder (the
+  // film's own highlight tint is left near neutral so the sky is not greyed).
+  col *= mix(vec3(1.0), vec3(1.0, 0.975, 0.92), smoothstep(0.3, 0.95, yl));
+
+  outColor = vec4(col, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -303,6 +345,28 @@ const freeTarget = (gl, t) => {
   if (!t) return;
   gl.deleteTexture(t.tex);
   gl.deleteFramebuffer(t.fbo);
+};
+
+// The grade. Exposed ~0.6 stop over the plain summer development so the
+// tarmac and veld sit in the mids and the cloud tops ride the shoulder; the
+// preset's whole-frame Pro-Mist (which lifted every shadow into a grey veil)
+// is cut to a highlight-only halo, and its scan black brought down, so the
+// pole bases and bush cores print near black and the fence reads sharp.
+const EXPO = 2.3;
+const FILM = {
+  ...FILM_PRESETS.summer,
+  bloom: 0.22,
+  bloomThreshold: 0.8,
+  softness: 0.45,
+  toe: 0.012,
+  contrast: 1.28,
+  shoulder: 0.86,
+  whitePoint: 1.12,
+  vignette: 0.22,
+  blueDepth: 0.6,
+  grain: 0.22,
+  highlightTint: [1.01, 1, 0.975],
+  halation: 0.3,
 };
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
@@ -460,8 +524,9 @@ export async function createKagerou(host, { embedded = false } = {}) {
     gl.uniform1f(u.uHeat, heat);
     const a = clamp((air - 0.16) / 0.84, 0, 1);
     gl.uniform1f(u.uAlphaC, ALPHA_MAX * Math.sqrt(a));
-    gl.uniform1f(u.uExpo, 1.5 * 2 ** expoStops);
-    gl.uniform1f(u.uPol, 0.62);
+    gl.uniform1f(u.uExpo, EXPO * 2 ** expoStops);
+    gl.uniform1f(u.uPol, 0.8);
+    gl.uniform1f(u.uChroma, 1.12);
     // Match the plate's mip to the print.
     gl.uniform1f(u.uLodBias, Math.max(0, Math.log2((PLATE_W * (vw / (PX * 2))) / L.rw)));
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
@@ -471,7 +536,7 @@ export async function createKagerou(host, { embedded = false } = {}) {
     film.render(
       sceneT.tex,
       {
-        ...FILM_PRESETS.summer,
+        ...FILM,
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         grainSeed,
       },
