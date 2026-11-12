@@ -60,7 +60,7 @@ async function paintStrip() {
   const css = getComputedStyle(document.body);
   const sans = css.getPropertyValue("--font-geist-sans").trim() || "ui-sans-serif, system-ui, sans-serif";
   const numFont = `520 ${NUM_PX}px ${sans}`;
-  await document.fonts.load(numFont, "0123456789").catch(() => null);
+  await Promise.all([document.fonts.load(numFont, "0123456789"), document.fonts.load(`600 16px ${sans}`, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]).catch(() => null);
 
   const W = TEX_PANEL * N;
   const H = Math.round((TEX_PANEL * PH) / PW);
@@ -89,8 +89,8 @@ async function paintStrip() {
 
   // Each side is painted in its own frame: band on top, numbers hanging
   // below it. The far side is the same frame turned half a revolution.
-  const side = (seed, first, hills) => {
-    const { canvas, lots } = paintStreet(W, Math.round(bandH), seed, { creases: TEX_PANEL, hills });
+  const side = (seed, first) => {
+    const { canvas, lots } = paintStreet(W, Math.round(bandH), seed, { creases: TEX_PANEL, font: sans });
     g.drawImage(toStock(canvas), 0, 0, W, bandH);
     g.font = numFont;
     g.fillStyle = "#2b2824";
@@ -104,12 +104,12 @@ async function paintStrip() {
   };
   g.save();
   g.translate(0, MARGIN);
-  side(1966, 8100, true);
+  side(1966, 8100);
   g.restore();
   g.save();
   g.translate(W, H - MARGIN);
   g.rotate(Math.PI);
-  side(8024, 8101, false);
+  side(8024, 8101);
   g.restore();
   return c;
 }
