@@ -33,8 +33,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    than a pixel. Above the water, a wet band wicks a few cm up every surface
 //    and dries slowly after the water goes down, and a thin bright meniscus
 //    lies along every waterline.
-// Then the shared film kit develops it, and the print grades its own open
-// sky after the film: deeper toward the zenith, cloud split-toned.
+// Before either, the sky is graded into the plate once (GRADE): cobalt
+// overhead, pale cyan at the skyline, cloud split-toned, so the mirror holds
+// the same sky the frame shows. Then the shared film kit develops it.
 //
 // Query: ?level=0..1 holds the water (0..35 cm), glass-still, no reveal;
 // with ?ripple=0..1 it holds that much stirring at a frozen instant.
@@ -44,6 +45,12 @@ const LEVEL_MAX = 0.35;
 // the film's lifted black (sRGB); the print takes it back out of the sky
 const FILM_TOE = 0.008;
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
+// the plate's sky ramp (sRGB): cobalt overhead, pale cyan at the skyline,
+// between these plate rows (the print shows rows 150 down)
+const hex = (h) => [h >> 16, (h >> 8) & 255, h & 255].map((v) => v / 255);
+const ZENITH = hex(0x3a6db0);
+const SKYLINE = hex(0x9fc4cf);
+const RAMP = [150, 1150];
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -71,6 +78,115 @@ vec2 projectP(vec3 P) { return vec2(uC.x + uF * P.x / -P.z, uC.y - uF * P.y / -P
 float axial(vec2 p) { return length(vec3((p.x - uC.x) / uF, (p.y - uC.y) / uF, 1.0)); }
 float decodeRange(float code) { return exp2(mix(uDRange.x, uDRange.y, code)); }
 `;
+
+// ---------------------------------------------------------------- grade
+// The sky is graded in the plate itself, once, before anything reads it, so
+// the mirror inherits exactly the sky the frame shows. The scan's sky is a
+// pale teal (189 degrees, the lab's veil over it); on Superia at noon it is a
+// vertical ramp: cobalt overhead, pale cyan at the skyline. The MoGe sky mask
+// (no finite depth) says where sky is; a pixel's blueness says how much of it
+// is clear and how much cloud. Clear sky takes the ramp's colour at its row
+// and keeps its own light; cloud is split-toned on luminance, sunlit tops
+// lifted on a shoulder that rolls off warm-neutral below 250, shadow sides
+// tinted by the blue sky around them. Wires hanging in the sky are unmixed
+// by their matte, the sky behind them graded, and laid back over it.
+// Mode 1 grades the LaMa-filled photo: there the poles are gone, so what
+// filled a thin thing with open sky behind it is sky too, and has no wires.
+const GRADE = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+out vec4 outColor;
+uniform sampler2D uSrc;   // sRGB texture: reads linear
+uniform sampler2D uAux;
+uniform sampler2D uAux2;
+uniform vec2 uPlate;
+uniform float uMode;      // 0 plate, 1 clean
+uniform vec3 uZenith;     // sRGB
+uniform vec3 uSkyline;    // sRGB
+uniform vec2 uRamp;       // plate rows: zenith colour above x, skyline colour at y
+
+vec3 toS(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+vec3 toL(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec4 auxAt(ivec2 q) { return texelFetch(uAux, clamp(q, ivec2(0), ivec2(uPlate) - 1), 0); }
+bool skyPx(ivec2 q) {
+  vec4 a = auxAt(q);
+  if (a.g * 255.0 > 254.5) return true;
+  // the fill behind a pole or a lamp standard that has only sky behind it
+  if (uMode > 0.5 && a.b > 0.99) return texture(uAux2, (vec2(q) + 0.5) / uPlate).g > 0.985;
+  return false;
+}
+// highlights roll off softly into the top of the plate; the film's own
+// shoulder (white point 1.22) then lands them below 250, never a flat clip
+vec3 shoulder(vec3 x) {
+  const float k = 0.84, r = 0.16;
+  return mix(x, k + r * (1.0 - exp(-(x - k) / r)), step(k, x));
+}
+
+vec3 grade(vec3 c, float row) {
+  float y = luma(c);
+  float bl = (c.b - c.r) / (c.b + 1e-4);
+  // the ramp: deep over most of the dome, opening fast toward the skyline
+  float z = clamp((row - uRamp.x) / (uRamp.y - uRamp.x), 0.0, 1.0);
+  float t = pow(z, 2.5);
+  vec3 tgt = mix(uZenith, uSkyline, t);
+  // clear sky keeps its own light against the scan's clear sky at that row
+  float ref = mix(0.66, 0.73, smoothstep(0.0, 520.0, row));
+  vec3 clear = tgt * clamp(y / ref, 0.82, 1.18);
+  // cloud: more contrast about the body, tops lifted onto the shoulder
+  float s = smoothstep(0.76, 0.95, y);
+  float yl = 0.8 + (y - 0.8) * 1.6;
+  vec3 skyTint = tgt / max(luma(tgt), 1e-3);
+  // (low cloud and haze are seen through more air: bluer toward the skyline)
+  vec3 cool = mix(vec3(1.0), skyTint, 0.34 + 0.12 * t);
+  vec3 warm = vec3(1.045, 1.0, 0.92);
+  vec3 cloud = shoulder(max(yl, 0.0) * mix(cool, warm, s));
+  // The scan's clear blue is ~0.56 blue-over-red overhead and ~0.34 from the
+  // middle of the sky down; cloud is ~0.05-0.2. Haze between them keeps
+  // its share of blue.
+  float blClear = mix(0.56, 0.34, smoothstep(0.0, 620.0, row));
+  float w = 1.0 - smoothstep(0.1, 0.92 * blClear, bl);
+  // and a bright pixel is cloud whatever its tint
+  w = max(w, smoothstep(0.84, 0.92, y));
+  return mix(clear, cloud, w);
+}
+
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  vec3 lin = texelFetch(uSrc, q, 0).rgb;
+  vec3 c = toS(lin);
+  float row = gl_FragCoord.y;
+  float k = 0.0;
+  float wire = 0.0;
+  if (skyPx(q)) {
+    k = 1.0;
+    if (uMode < 0.5) wire = auxAt(q).b;
+  } else if (row < 1700.0) {
+    // MoGe's edge sits a pixel or two inside the skyline: the sky-coloured
+    // fringe there goes with the sky, by how sky-blue it is
+    bool near = false;
+    for (int i = 0; i < 4; i++) {
+      ivec2 o = ivec2(i == 0 ? 3 : i == 1 ? -3 : 0, i == 2 ? 3 : i == 3 ? -3 : 0);
+      near = near || skyPx(q + o);
+    }
+    if (near) k = smoothstep(0.25, 0.5, (c.b - c.r) / (c.b + 1e-4)) * smoothstep(0.45, 0.65, luma(c));
+  }
+  if (k > 0.0) {
+    vec3 g;
+    if (wire > 0.02) {
+      // c = (1 - a) sky + a wire: take the sky out from under the wire
+      const vec3 WC = vec3(0.12, 0.13, 0.15);
+      float a = min(wire, 0.92);
+      vec3 sk = clamp((c - a * WC) / (1.0 - a), 0.0, 1.0);
+      g = mix(grade(sk, row), WC, a);
+      if (wire > 0.92) g = mix(g, c, (wire - 0.92) / 0.08);
+    } else {
+      g = grade(c, row);
+    }
+    c = mix(c, g, k);
+  }
+  outColor = vec4(toL(clamp(c, 0.0, 1.0)), 1.0);
+}`;
 
 // ---------------------------------------------------------------- reflect
 const REFLECT = `#version 300 es
@@ -301,15 +417,9 @@ float fresnel(float ci) {
   return 0.5 * (rs * rs + rp * rp);
 }
 
-// The scan's sky sits at a teal 189 degrees; Superia would have printed it
-// cyan-cobalt. Only clear blue is moved (toward ~204 degrees): cloud, grey and
-// warm surfaces stay as they are.
+// how clear-blue a colour is (cloud, grey and warm surfaces are not)
 float skynessOf(vec3 c) {
   return smoothstep(0.3, 0.75, (c.b - c.r) / (c.b + 1e-4)) * step(c.r, c.g);
-}
-vec3 skyGrade(vec3 c) {
-  float skyness = skynessOf(c);
-  return c * vec3(1.0, 1.0 - 0.26 * skyness, 1.0 + 0.05 * skyness);
 }
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -406,12 +516,11 @@ void main() {
     // a ripple can tip the mirror image past the print's edge: fold back
     ruv = 1.0 - abs(1.0 - abs(ruv));
     vec4 rs = textureLod(uRefl, ruv, lod);
-    // The low sky in the scan is pale: airlight and the lens's own veil over
-    // the brightest part of the frame. Against black water the mirror carries
-    // none of that veil, so the open sky it holds is taken down to its colour
-    // (clouds keep their light), then given the same cobalt grade as the frame.
+    // The sky arrives already graded (GRADE). What is left of the lens's own
+    // veil over the brightest part of the frame is not carried by a mirror on
+    // black water, so the open sky it holds is taken down by that little.
     vec3 skyR = max(rs.rgb - uVeil, 0.0) / (1.0 - uVeil);
-    vec3 refl = skyGrade(mix(skyR, rs.rgb, rs.a));
+    vec3 refl = mix(skyR, rs.rgb, rs.a);
 
     // the bottom, through the refracted ray
     vec3 T = refract(d, nw, 1.0 / 1.333);
@@ -460,8 +569,6 @@ void main() {
     }
     if (sky || thin) skyA = 0.5 + 0.5 * sn;
   }
-  // the dry frame takes the same sky grade (the water already has it)
-  col = mix(skyGrade(col), col, wa);
   outColor = vec4(col * uExpo, skyA);
 }`;
 
@@ -473,68 +580,32 @@ uniform sampler2D uTex;
 uniform sampler2D uMask;  // the scene: a marks the open sky
 uniform float uFade;
 uniform vec3 uPaper;
-uniform vec4 uView;       // plate px: x0, y0 (top), w, h
 uniform float uToe;       // the film's lifted black, sRGB
 
-vec3 rgb2hsv(vec3 c) {
-  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-  float d = q.x - min(q.w, q.y);
-  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
-}
-vec3 hsv2rgb(vec3 c) {
-  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
-  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
-}
 // highlights roll off softly into 0.98 (250), never into a flat clip
 vec3 shoulder(vec3 x) {
   const float k = 0.9, r = 0.08;
   return mix(x, k + r * (1.0 - exp(-(x - k) / r)), step(k, x));
 }
 
-// The print's own sky. On Superia at noon the open sky darkens and fills
-// toward the zenith, cobalt-cyan overhead, pale cyan at the skyline, and it
-// is printed without the scan's lifted black or the mist's milk (the water
-// was given the same exemption). Cloud is split-toned: sunlit tops warm and
-// glowing, shadow sides lit by the blue sky around them.
-vec3 skyPrint(vec3 c, float a, float py) {
+// The print's own sky. Its colour was graded into the plate (GRADE), so the
+// mirror holds the same sky; here it is only printed without the scan's
+// lifted black, and the sunlit cloud tops, which the film's shoulder takes
+// down and cools, are printed back up to a warm white below the clip.
+vec3 skyPrint(vec3 c, float a) {
   float region = clamp(a * 2.0, 0.0, 1.0);
   float sn = clamp(a * 2.0 - 1.0, 0.0, 1.0);
   c = mix(c, max(c - uToe, 0.0) / (1.0 - uToe), region);
-  // height in the sky: 1 over the top third, 0 at the rooftops and hills
-  float z = 1.0 - smoothstep(420.0, 1180.0, py);
-  z = z * z * (3.0 - 2.0 * z);
-
-  // clear blue: hue, saturation and value graded toward the zenith
-  vec3 hsv = rgb2hsv(c);
-  float k = region * sn;
-  float hT = mix(198.0, 207.0, z) / 360.0;
-  float sT = mix(0.25, 0.59, z);
-  float vT = mix(0.84, 0.69, z);
-  hsv.x = mix(hsv.x, hT, k);
-  // (a dark wire keeps its own colour; only its light goes the sky's way)
-  hsv.y = mix(hsv.y, sT, k * 0.9 * smoothstep(0.25, 0.55, hsv.z));
-  hsv.z *= mix(1.0, vT / 0.79, k);
-  vec3 blue = hsv2rgb(hsv);
-
-  // cloud: split tone on luminance
-  float cw = region * (1.0 - sn);
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  // (the scan's veil puts the shadow sides at 0.7-0.82 here, not lower)
-  float hi = smoothstep(0.76, 0.88, y);
-  float sh = smoothstep(0.4, 0.5, y) * (1.0 - smoothstep(0.7, 0.84, y));
-  // sunlit tops: the cyan cast of the scan taken out to a warm white
-  vec3 cl = mix(c, vec3(y) * vec3(1.03, 1.0, 0.95), 0.75 * hi) * (1.0 + 0.085 * hi);
-  cl *= mix(vec3(1.0), vec3(0.9, 0.97, 1.05), sh);
-  cl = shoulder(cl);
-  return mix(blue, cl, cw);
+  float hi = region * (1.0 - sn) * smoothstep(0.72, 0.86, y);
+  c = mix(c, vec3(y) * vec3(1.03, 1.0, 0.95), 0.7 * hi) * (1.0 + 0.09 * hi);
+  return mix(c, shoulder(c), region);
 }
 
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
   float a = texture(uMask, vUv).a;
-  if (a > 0.0) c = skyPrint(c, a, uView.y + (1.0 - vUv.y) * uView.w);
+  if (a > 0.0) c = skyPrint(c, a);
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -635,8 +706,8 @@ export async function createMizukagami(host, { embedded = false } = {}) {
     loadImage(BASE + "aux.png"),
     loadImage(BASE + "aux2.png"),
   ]);
-  const plate = imageTexture(gl, plateImg, { srgb: true, mips: true });
-  const clean = imageTexture(gl, cleanImg, { srgb: true, mips: true });
+  const plateRaw = imageTexture(gl, plateImg, { srgb: true });
+  const cleanRaw = imageTexture(gl, cleanImg, { srgb: true });
   const aux = imageTexture(gl, auxImg);
   const aux2 = imageTexture(gl, aux2Img);
 
@@ -647,6 +718,60 @@ export async function createMizukagami(host, { embedded = false } = {}) {
   gl.bindVertexArray(vao);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  // Grade the sky into the plate and the filled photo, once (see GRADE).
+  const gradeP = program(gl, VERT, GRADE);
+  const graded = (src, w, h, mode) => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(w, h))) + 1, gl.SRGB8_ALPHA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    if (ok) {
+      const u = gradeP.u;
+      gl.useProgram(gradeP.p);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, src);
+      gl.uniform1i(u.uSrc, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, aux);
+      gl.uniform1i(u.uAux, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, aux2);
+      gl.uniform1i(u.uAux2, 2);
+      gl.uniform2f(u.uPlate, scene.plate[0], scene.plate[1]);
+      gl.uniform1f(u.uMode, mode);
+      gl.uniform3fv(u.uZenith, ZENITH);
+      gl.uniform3fv(u.uSkyline, SKYLINE);
+      gl.uniform2f(u.uRamp, RAMP[0], RAMP[1]);
+      gl.disable(gl.BLEND);
+      gl.viewport(0, 0, w, h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    if (ok) {
+      gl.deleteTexture(src);
+      return tex;
+    }
+    // no sRGB target here: the ungraded scan, with its own mips
+    gl.deleteTexture(tex);
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    return src;
+  };
+  const plate = graded(plateRaw, plateImg.naturalWidth, plateImg.naturalHeight, 0);
+  const clean = graded(cleanRaw, cleanImg.naturalWidth, cleanImg.naturalHeight, 1);
+  gl.deleteProgram(gradeP.p);
 
   const reflectP = program(gl, VERT, REFLECT);
   const composeP = program(gl, VERT, COMPOSE);
@@ -854,7 +979,7 @@ export async function createMizukagami(host, { embedded = false } = {}) {
     gl.uniform3f(u.uSigma, 3.6, 4.1, 5.6);
     gl.uniform3f(u.uSigmaBot, 12, 11.5, 11);
     gl.uniform3f(u.uMurk, 0.012, 0.02, 0.03);
-    gl.uniform1f(u.uVeil, 0.24);
+    gl.uniform1f(u.uVeil, 0.08);
     gl.uniform3fv(u.uSkyCol, SKY);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
@@ -897,7 +1022,6 @@ export async function createMizukagami(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
     gl.uniform1i(blit.u.uMask, 1);
-    gl.uniform4f(blit.u.uView, V.x, V.y, V.w, V.h);
     gl.uniform1f(blit.u.uToe, FILM_TOE);
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
