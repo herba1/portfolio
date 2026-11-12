@@ -69,7 +69,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    surface. Only the change from the photo is applied, so at rest the
 //    frame is the photograph exactly.
 // The sky is regraded on its own (gradeSky): a dense cyan-cobalt that
-// deepens toward the top of the frame, cloud warm-neutral with skylight-blue
+// deepens with elevation toward the zenith (the top-left corner), cloud warm-neutral with skylight-blue
 // undersides, its density held back in the midtones. Then the whole
 // composited frame, moved objects and live cables included, is developed
 // as one print: local contrast taken out of the surfaces (the photo was a
@@ -117,24 +117,29 @@ const WIRE_MARGIN = 0.15;
 
 const hex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const lin = (c) => c.map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
-// The sky grade (see gradeSky): herb's cyan-cobalt, dense at the zenith and
-// paler toward the horizon far below the frame; cloud warm-neutral, its
-// shadowed undersides skylight blue.
+// The sky grade (see gradeSky): herb's cyan-cobalt, dense toward the zenith
+// and relaxing to a paler cyan toward the horizon, ramped by each pixel's
+// real elevation (the camera is rolled: the top-left corner is ~50 deg up,
+// the bottom-right ~6 deg); cloud warm-neutral where sunlit, its shadowed
+// undersides and flanks skylight blue.
 const SKY = {
-  // the film's curve lifts and spreads these a little: aimed so the print
-  // lands near #1F62A8 at the top edge and #5A9BD0 at the bottom
-  top: hex("#0E5AA2"),
-  low: hex("#5A9BD0"),
+  // the print (Pro-Mist veil, film curve, vignette, lifted black) moves
+  // these: aimed so it lands near rgb(10,85,147) (S > 0.9) at the zenith
+  // end and rgb(100,160,195) at the horizon end
+  top: hex("#00518A"),
+  low: hex("#82BADA"),
   curve: 1.0,
   cloud: [0.26, 0.6],
   // #F2F0EA, warmed against the film's cool highlight tint (.95, 1, 1.05)
   warm: lin(hex("#F2F0EA")).map((v, i) => v * [1.06, 1, 0.93][i]),
-  under: lin(hex("#A4C4E2")),
-  underRange: [0.5, 0.8, 0.9],
-  // The density of the graded sky, as an exponent on its linear light in
-  // the midtones (1 is the ramp as aimed, 0.84 takes ~16% of the density
-  // back): a negative's blue, not a phone's. Hue stays within a degree.
-  density: 0.84,
+  // skylight blue, saturated past what should print: the diffusion and the
+  // shoulder take most of it back off the cloud's shaded midtones
+  under: lin(hex("#64A2DE")),
+  underRange: [0.4, 0.92, 1.0],
+  // The density of the graded sky, as an exponent on its luminance in the
+  // midtones (1 is the ramp as aimed; below 1 lightens the blue back
+  // toward a phone's mid-blue). The ramp is aimed at the density wanted.
+  density: 1.0,
 };
 
 // The print: what happens to the whole composited frame (plate, moved
@@ -223,9 +228,11 @@ uniform vec2 uLayer;          // array layer size, px
 uniform float uShadow;
 uniform vec3 uSkylight;
 uniform float uSeed;
-uniform vec3 uSkyTop;         // sRGB, clear sky at the top edge
-uniform vec3 uSkyLow;         // and at the bottom edge (toward the horizon)
+uniform vec3 uSkyTop;         // sRGB, clear sky at the zenith end of the frame
+uniform vec3 uSkyLow;         // and at its horizon end
 uniform float uSkyCurve;
+uniform vec3 uUp;             // the vertical, camera space
+uniform vec2 uSkyElev;        // sin(elevation) at the frame's horizon end, at its zenith end
 uniform sampler2D uClear;     // the plate's clear-sky luminance x2 (coarse)
 uniform vec2 uCloudY;         // cloud starts this far above the clear sky; unmix contrast
 uniform vec3 uWarmCloud;      // linear, relative
@@ -287,7 +294,7 @@ vec3 toLin(vec3 c) {
 
 // The sky's own density, in place of a global saturation push: wherever the
 // plate is sky (the front layer's matte, the clean plate where it is empty),
-// the clear blue is rebuilt as a dense cobalt that deepens with height in the
+// the clear blue is rebuilt as a dense cobalt that deepens with elevation in the
 // frame, and the cloud keeps its luminance but goes warm-neutral, its
 // undersides lit by that blue. Steel, cable and the loose objects never pass
 // through here.
@@ -301,9 +308,14 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   float yCl = ySky + uCloudY.x;
   float w = clamp((Y - ySky) / (yCl - ySky), 0.0, 1.0);
   w = mix(w, w * w * (3.0 - 2.0 * w), uCloudY.y);
-  // clear sky: the ramp, deepest at the top, keeping a little of the plate's
-  // own modulation
-  vec3 tgt = toLin(mix(uSkyTop, uSkyLow, pow(uv.y, uSkyCurve)));
+  // clear sky: the ramp by elevation, not by frame row. The camera is
+  // rolled, so the zenith end is the top-left corner (~50 deg up) and the
+  // horizon end the bottom-right (~6 deg): cobalt overhead relaxing to a
+  // paler cyan toward the horizon, along the real sky's own gradient. It
+  // keeps a little of the plate's own modulation.
+  vec3 dir = normalize(vec3((uv * uSize - uC) / uF, 1.0));
+  float t = clamp((dot(dir, uUp) - uSkyElev.x) / (uSkyElev.y - uSkyElev.x), 0.0, 1.0);
+  vec3 tgt = toLin(mix(uSkyLow, uSkyTop, pow(t, uSkyCurve)));
   vec3 S = tgt * clamp(pow(Y / ySky, 0.6), 0.75, 1.0);
   // cloud at its own luminance (within the unmix range it is the dimmest
   // cloud), warm-neutral where lit, skylight blue in its shadowed undersides
@@ -314,9 +326,11 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   vec3 g = mix(S, C, w);
   // density held back in the midtones (the clear blue and the cloud's
   // shadowed undersides), the brightest cloud left where it is
-  float yg = dot(g, vec3(0.2126, 0.7152, 0.0722));
+  // (on luminance: a per-channel exponent would lift the cobalt's red and
+  // grey it)
+  float yg = max(dot(g, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
   float mid = smoothstep(0.01, 0.06, yg) * (1.0 - smoothstep(0.45, 0.8, yg));
-  return pow(max(g, 0.0), vec3(mix(1.0, uDensity, mid)));
+  return max(g, 0.0) * pow(yg, mix(1.0, uDensity, mid) - 1.0);
 }
 
 vec3 toSrgb(vec3 c) {
@@ -781,6 +795,14 @@ export async function createRearrange(host, { embedded = false } = {}) {
     SUN = [0, 1, 2].map((i) => Math.cos(el) * (Math.cos(az) * N[i] + Math.sin(az) * r[i]) + Math.sin(el) * UP[i]);
   }
   const SKYD = meta.skyD;
+  // the sky ramp's ends: the elevation of the frame's corners (see gradeSky)
+  const SKY_ELEV = (() => {
+    const e = [0, PW].flatMap((x) => [0, PH].map((y) => {
+      const r = [(x - CX) / F, (y - CY) / F, 1];
+      return (r[0] * UP[0] + r[1] * UP[1] + r[2] * UP[2]) / Math.hypot(...r);
+    }));
+    return [Math.min(...e), Math.max(...e)];
+  })();
 
   const [plateBm, frontBm, skyBm, ...objBms] = await Promise.all([
     loadBitmap(`${ASSET}plate.webp`),
@@ -1555,6 +1577,8 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform3fv(U.uSkyTop, SKY.top);
     gl.uniform3fv(U.uSkyLow, SKY.low);
     gl.uniform1f(U.uSkyCurve, SKY.curve);
+    gl.uniform3fv(U.uUp, UP);
+    gl.uniform2fv(U.uSkyElev, SKY_ELEV);
     gl.uniform2fv(U.uCloudY, SKY.cloud);
     gl.uniform3fv(U.uWarmCloud, SKY.warm);
     gl.uniform3fv(U.uUnderBlue, SKY.under);
