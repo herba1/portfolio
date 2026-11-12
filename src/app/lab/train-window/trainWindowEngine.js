@@ -5,17 +5,22 @@ import { POLE_GEOM, POLE_REGIONS, poleCells } from "./poleKeys";
 // Train Window: looking out of a local train on a summer day.
 //
 // The view is from a low seat, looking up and out through the window: a
-// worm's-eye look-up. The camera is pitched ~32° up, so the horizon sits at
-// the very bottom of the print (bowing up into its lower corners) and the sky
-// fills nearly all of it, through a 110° Panini lens with a stereographic
-// vertical squeeze. The line's poles stand right beside the track, so the one
-// passing the window is the picture's hero: its trunk climbs out of the tree
-// line and rushes up to a vanishing point overhead, its crossarms and
-// insulators foreshortened hard against the cumulus near the top of the print. Each pixel's ray is
+// worm's-eye look-up. The camera is pitched 64° up and turned 12° along the
+// line, so there is no horizon, no field and no tree line in the print, only
+// sky, and the zenith sits inside its top edge. The lens is a general Panini
+// (d = 0.55, 110° across) with full vertical squeeze: rectilinear up the
+// print, Panini across it, so the overhead wires run as straight lines
+// converging on their vanishing point out along the track, and the pole
+// converges on the zenith instead of reading as a rolled camera. The line's
+// poles stand right beside the track, so the one passing the window is the
+// picture's hero: its trunk rises out of the bottom of the print and rushes up
+// toward the zenith, its crossarms and insulators foreshortened hard against
+// the big cumulus behind it. Each pixel's ray is
 // levelled back into a square-out pinhole's image plane (tan of the angle,
 // horizon at y = 0, camera 1.7 m up), where the layers live. Moving along the track by s metres moves
 // everything at distance D by s / D in that plane, so each layer slides at its
-// own speed:
+// own speed (the low layers are still the scene, below the bottom of the
+// print at this pitch):
 //
 //  - the field is a flat plane: a row y below the horizon is at D = h / -y,
 //    so the ground is not one layer but a continuous shear, each row sliding
@@ -80,11 +85,18 @@ const POLE_JITTER = 10; // spacing varies by this much (m)
 const SHUTTER = 1 / 125; // a sunny-day speed: the pole beside the track smears, but keeps its core
 const V_MAX = 34; // m/s, a fast local
 const V_CRUISE = 2.4; // the crawl it coasts down to
+// The lens: a worm's-eye look-up through a general Panini with full vertical
+// squeeze (see the shader). LENS.d is the Panini compression (0 rectilinear,
+// 1 stereographic across); pitch and yaw aim the camera, in degrees.
 const HFOV = 110; // degrees across a landscape print
-const PAN_W = 4 * Math.tan(((HFOV / 4) * Math.PI) / 180); // Panini (d = 1) plane width
-const HORIZON = 0.98; // horizon height at the centre, as a share of the print from the top
-const TILT = 0.92; // share of the look-up done by pitching the camera (the rest is lens shift)
-const TOP_EL = 84; // highest elevation (deg) the print's top may reach (a tall portrait zooms in)
+const LENS = { d: 0.55, pitch: 64, yaw: 12, vMax: 1.0, lift: 0 };
+// Panini with full vertical squeeze, forward: the rectilinear (u = X/Z, v = Y/Z)
+// of a camera ray to the print plane. Only x is compressed, so the vertical
+// stays rectilinear and every straight line parallel to either axis stays
+// straight.
+const panX = (u, d) => ((d + 1) * u) / (d * Math.sqrt(1 + u * u) + 1);
+// ... and back: the print plane's x to the ray's azimuth in the camera.
+const panPhi = (x, d) => Math.atan2(x, d + 1) + Math.asin(clamp((x * d) / Math.hypot(d + 1, x), -1, 1));
 
 // Asset geometry (from the bake).
 const SKY = { el0: 90, el1: -2.5, yaw: -112 };
@@ -167,7 +179,9 @@ uniform vec4 uHedgeLv[${LEVELS}];
 
 uniform vec4 uView;     // x0, y0, w, h in Panini-plane units
 uniform vec2 uPitch;    // cos, sin of the camera's upward tilt
-uniform float uS;       // metres along the track
+uniform vec2 uYaw;      // cos, sin of its turn toward +x along the track
+uniform float uPanD;    // Panini compression
+uniform float uS;      // metres along the track
 uniform float uV;       // m/s
 uniform float uShutter;
 uniform float uSkyDrift;
@@ -281,31 +295,33 @@ vec4 poleAt(float kx, float lx, float y, float lenU, float dY) {
 }
 
 // A wire between two points (along track, height, depth from the camera, in
-// metres) sagging by 'sag' at mid-span, projected exactly: the pixel's x
-// fixes the point on the span (sag is vertical, so it leaves x alone), and
-// the coverage is the distance to the curve across it, widened by the
-// shutter's smear across the wire.
-float wire3(vec3 A, vec3 B, float sag, float x, float y, float pxY, float lenM) {
+// metres) sagging by 'sag' at mid-span, projected exactly from the pixel's
+// ray r (any direction, overhead included): the vertical half-plane holding
+// the ray fixes the point on the span (sag is vertical, so it stays in that
+// plane), and the coverage is the ray's angle off the great circle the wire's
+// tangent there sweeps from the lens, widened by the shutter's smear across
+// it (the same angle from either end of the lens's path). pa: one pixel, in
+// radians.
+float wire3(vec3 A, vec3 B, float sag, vec3 r, float pa, float lenM) {
   vec3 d = B - A;
-  float den = d.x - x * d.z;
-  if (abs(den) < 1e-5) return 0.0;
-  float t = (x * A.z - (A.x - uS)) / den;
+  float hl = length(r.xz);
+  if (hl < 1e-5) return 0.0;
+  vec2 hn = r.xz / hl;
+  float den = hn.y * d.x - hn.x * d.z;
+  if (abs(den) < 1e-6) return 0.0;
+  float t = (hn.x * A.z - hn.y * (A.x - uS)) / den;
   if (t < 0.0 || t > 1.0) return 0.0;
-  float z = A.z + d.z * t;
-  if (z < 0.4) return 0.0;
-  float yw = (A.y + d.y * t - sag * 4.0 * t * (1.0 - t) - H) / z;
-  // slope dy/dx on the image plane, from a neighbour a little along x
-  float e = 1e-3;
-  float t2 = ((x + e) * A.z - (A.x - uS)) / (d.x - (x + e) * d.z);
-  float z2 = max(A.z + d.z * t2, 0.05);
-  float y2 = (A.y + d.y * t2 - sag * 4.0 * t2 * (1.0 - t2) - H) / z2;
-  float m = (y2 - yw) / e;
-  float nrm = inversesqrt(1.0 + m * m);
-  float dist = abs(y - yw) * nrm;
-  float hw = 0.011 / z;
-  float smear = lenM / z * abs(m) * nrm;
-  float ee = max(hw, 0.5 * pxY) + 0.5 * smear;
-  return smoothstep(ee + 0.6 * pxY, ee - 0.6 * pxY, dist) * min(1.0, hw / ee);
+  vec3 V = A + d * t - vec3(uS, H + sag * 4.0 * t * (1.0 - t), 0.0);
+  if (dot(V.xz, hn) <= 0.0) return 0.0;
+  vec3 T = d - vec3(0.0, sag * 4.0 * (1.0 - 2.0 * t), 0.0);
+  vec3 sh = vec3(0.5 * lenM, 0.0, 0.0);
+  float sa = dot(r, normalize(cross(V - sh, T)));
+  float sb = dot(r, normalize(cross(V + sh, T)));
+  float dist = abs(0.5 * (sa + sb));
+  float smear = abs(sa - sb);
+  float hw = 0.011 / length(V);
+  float ee = max(hw, 0.5 * pa) + 0.5 * smear;
+  return smoothstep(ee + 0.6 * pa, ee - 0.6 * pa, dist) * min(1.0, hw / ee);
 }
 
 // The hedge is tiled H | mirror(H) | gap; every tap finds its own tile.
@@ -331,22 +347,31 @@ vec4 hedgeAt(float yawDeg, float v, float lenDeg, float lv) {
 float hash11(float n) { return fract(sin(n * 127.1) * 43758.5453); }
 
 void main() {
-  // Panini (d = 1) back to a ray, its vertical squeezed stereographically
-  // (qv = 2·tan(t/2) of the angle t above the lens's equator, so the arms at
-  // the top of a pole are not stretched the way a rectilinear 75° would),
-  // tilted up by the camera's pitch, then levelled into the square-out
-  // pinhole's image plane.
+  // The lens: a general Panini (compression uPanD) with full vertical
+  // squeeze. Across, the print's x is the Panini of the ray's azimuth, so the
+  // edges of a 110° print are not stretched the way a rectilinear one is; up
+  // the print, y is plain rectilinear (Y/Z), so a line parallel to the
+  // print's x stays straight and level, and every vertical, and every line
+  // through the centre, stays straight. Then the camera is pitched up and
+  // turned along the track: a worm's-eye look-up, the zenith in the print,
+  // the poles converging on it and the wires on their vanishing point out
+  // along the line. Each ray is then levelled into the square-out pinhole's
+  // image plane (x, y), where the poles and the low layers live.
   vec2 q = uView.xy + vUv * uView.zw;
-  float phi = 2.0 * atan(0.5 * q.x);
-  float qv = 0.5 * q.y * (1.0 + cos(phi));
-  vec3 rc = vec3(sin(phi), qv / (1.0 - 0.25 * qv * qv), cos(phi));
-  vec3 r = normalize(vec3(rc.x, rc.y * uPitch.x + rc.z * uPitch.y, rc.z * uPitch.x - rc.y * uPitch.y));
+  float pS = uPanD + 1.0;
+  float phi = atan(q.x, pS) + asin(clamp(q.x * uPanD / sqrt(pS * pS + q.x * q.x), -1.0, 1.0));
+  vec3 rc = vec3(tan(phi), q.y, 1.0);
+  vec3 rp = vec3(rc.x, rc.y * uPitch.x + rc.z * uPitch.y, rc.z * uPitch.x - rc.y * uPitch.y);
+  vec3 r = normalize(vec3(rp.x * uYaw.x + rp.z * uYaw.y, rp.y, rp.z * uYaw.x - rp.x * uYaw.y));
   float rz = max(r.z, 1e-3);
   float x = r.x / rz, y = r.y / rz;
-  float yaw = atan(r.x, rz) * DEG;
+  // azimuth off square-out, all the way round (past the zenith the print
+  // looks back over the carriage roof)
+  float yaw = atan(r.x, r.z) * DEG;
   float el = asin(clamp(r.y, -1.0, 1.0)) * DEG;
-  // one render pixel, in image-plane units, for the conductors' coverage
-  float pxY = max(length(vec2(dFdx(y), dFdy(y))), 1e-6);
+  // one render pixel: in radians for the wires, in image-plane units for the
+  // poles' rim
+  float pa = max(0.5 * (length(dFdx(r)) + length(dFdy(r))), 1e-6);
   float pxX = max(length(vec2(dFdx(x), dFdy(x))), 1e-6);
   float aV = abs(uV);
 
@@ -356,7 +381,13 @@ void main() {
   // The clear blue is read from a coarse mip (an 8-bit ramp has no business
   // showing its steps once the polariser deepens it); cloud edges, where the
   // fine and coarse reads disagree, stay sharp.
-  vec3 sf = texture(uSky, su).rgb;
+  // (explicit gradients: su.x wraps where the azimuth does, on the line
+  // through the zenith, and an implicit derivative there reads the coarsest
+  // mip as a seam)
+  vec2 gx = dFdx(su), gy = dFdy(su);
+  gx.x -= floor(gx.x + 0.5);
+  gy.x -= floor(gy.x + 0.5);
+  vec3 sf = textureGrad(uSky, su, gx, gy).rgb;
   vec3 sc = textureLod(uSky, su, 4.0).rgb;
   float edge = smoothstep(0.012, 0.035, length(sf - sc));
   vec3 col = dec(mix(sc, sf, edge));
@@ -466,13 +497,13 @@ void main() {
     if (i + 1 < uPoleN) {
       vec4 b = uPole[i + 1];
       float pxB = (b.x - uS) / ${D_POLE.toFixed(1)};
-      if (x > pxA - 0.4 && x < pxB + 0.4) {
+      if (r.z < 0.15 || (x > pxA - 0.4 && x < pxB + 0.4)) {
         for (int w = 0; w < ${CONDUCTORS.length}; w++) {
           vec2 c = uCond[w];
           float Dw = ${D_POLE.toFixed(1)} + c.x;
           vec3 A = vec3(a.x + a.y * ${PIN_X.toFixed(4)}, c.y, Dw);
           vec3 B = vec3(b.x + b.y * ${PIN_X.toFixed(4)}, c.y, Dw);
-          wireA = max(wireA, wire3(A, B, 0.018 * (B.x - A.x), x, y, pxY, lenM));
+          wireA = max(wireA, wire3(A, B, 0.018 * (B.x - A.x), r, pa, lenM));
         }
       }
     }
@@ -481,7 +512,7 @@ void main() {
       vec4 f = uDropFrom[k], t = uDropTo[k];
       vec3 A = vec3(a.x + a.y * f.x, f.y, ${D_POLE.toFixed(1)} + f.z);
       vec3 B = vec3(a.x + a.y * t.x, t.y, t.z);
-      wireA = max(wireA, wire3(A, B, t.w, x, y, pxY, lenM));
+      wireA = max(wireA, wire3(A, B, t.w, r, pa, lenM));
     }
   }
   col = mix(col, vec3(0.012, 0.013, 0.015), wireA * 0.92);
@@ -498,7 +529,7 @@ void main() {
     float lx = x - px;
     float reach = ${REACH[0].toFixed(3)} + ${REACH[1].toFixed(3)} * abs(px) + 0.5 * lenU;
     if (abs(lx) > reach) continue;
-    if (y < ${TRUNK.y0.toFixed(3)} || y > ${HEAD.y1.toFixed(3)}) continue;
+    if (r.z < 0.02 || y < ${TRUNK.y0.toFixed(3)} || y > ${HEAD.y1.toFixed(3)}) continue;
     // a mirrored pole is its mirror image's key, flipped
     float kx = pl.y * px, klx = pl.y * lx;
     vec4 pc = poleAt(kx, klx, y, lenU, 0.0);
@@ -932,50 +963,37 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
   };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
 
-  // The lens: 110° across a landscape print (Panini plane units); a portrait
-  // print keeps a little more height and narrows. The horizon sits HORIZON
-  // down the print at its centre, so the sky is the picture. On the centre
-  // line y = 2·tan(angle / 2) (the stereographic squeeze), so a pure tilt
-  // would be 2·atan((HORIZON - 0.5)·vh / 2); the camera pitches by TILT of
-  // that, a real look-up whose verticals rush to a vanishing point overhead,
-  // and a little rising front makes up the rest. A tall print would pitch
-  // past the zenith: it zooms in until its top edge stays under TOP_EL.
+  // The lens: 110° across a landscape print (print-plane units, LENS.d's
+  // Panini across, rectilinear up); a portrait print keeps at most ±45° of
+  // height and narrows. The camera is pitched LENS.pitch up and turned
+  // LENS.yaw along the track: no horizon, no field, the zenith inside the top
+  // of the print. LENS.lift shifts the frame up the plane (a rising front).
   const view = () => {
     const aspect = L.pw / L.ph;
-    let vw = PAN_W;
+    let vw = 2 * panX(Math.tan(((HFOV / 2) * Math.PI) / 180), LENS.d);
     let vh = vw / aspect;
-    if (vh > PAN_W / 1.15) {
-      vh = PAN_W / 1.15;
+    if (vh > 2 * LENS.vMax) {
+      vh = 2 * LENS.vMax;
       vw = vh * aspect;
     }
-    const at = (k) => {
-      const h = vh * k;
-      const pitch = TILT * 2 * Math.atan(((HORIZON - 0.5) * h) / 2);
-      const y0 = -2 * Math.tan(pitch / 2) - (1 - HORIZON) * h;
-      return { pitch, y0, top: pitch + 2 * Math.atan((y0 + h) / 2) };
-    };
-    let k = 1;
-    while (k > 0.3 && at(k).top > (TOP_EL * Math.PI) / 180) k *= 0.98;
-    const { pitch, y0 } = at(k);
-    return { vw: vw * k, vh: vh * k, pitch, y0 };
+    return { vw, vh, pitch: (LENS.pitch * Math.PI) / 180, y0: (LENS.lift - 0.5) * vh };
   };
+  const yawCS = [Math.cos((LENS.yaw * Math.PI) / 180), Math.sin((LENS.yaw * Math.PI) / 180)];
 
-  // A Panini-plane point to the level pinhole's image plane, for culling.
-  const toPlane = (qx, qy, pitch) => {
-    const phi = 2 * Math.atan(qx / 2);
-    const rx = Math.sin(phi);
-    const qv = (qy * (1 + Math.cos(phi))) / 2;
-    const ry = qv / (1 - (qv * qv) / 4);
-    const rz = Math.cos(phi);
+  // A print-plane point to its ray (x along the track, y up, z out of the
+  // window), as the shader does.
+  const rayAt = (qx, qy, pitch) => {
+    const u = Math.tan(panPhi(qx, LENS.d));
     const c = Math.cos(pitch);
     const sn = Math.sin(pitch);
-    const z = Math.max(1e-3, rz * c - ry * sn);
-    return [rx / z, (ry * c + rz * sn) / z];
+    const py = qy * c + sn;
+    const pz = c - qy * sn;
+    return [u * yawCS[0] + pz * yawCS[1], py, pz * yawCS[0] - u * yawCS[1]];
   };
 
   // Train state. s in metres along the track, v in m/s (+ = scenery moves
   // left, the train runs to the right of the view).
-  let s = startS != null ? startS : polePos(2) + 1.2;
+  let s = startS != null ? startS : polePos(2) - 0.5;
   let v = held ? clamp(heldV, -V_MAX, V_MAX) : reduce ? 0 : 13;
   let dir = Math.sign(v) || 1;
   let throttle = null; // { x0, v0 } while dragging
@@ -1027,21 +1045,20 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     const x0 = -vw / 2;
 
     // Poles that could touch the print this frame (with the shutter smear):
-    // the print is widest, in the image plane, along its top edge.
+    // the image-plane x range of the print where it looks below the top of
+    // the hardware, from a grid over the print (past the zenith, and above
+    // the poles, there is only sky).
     let xl = Infinity;
     let xr = -Infinity;
-    for (const [qx, qy] of [
-      [x0, y0],
-      [x0, y0 + vh / 2],
-      [x0, y0 + vh],
-      [-x0, y0],
-      [-x0, y0 + vh / 2],
-      [-x0, y0 + vh],
-    ]) {
-      const [px] = toPlane(qx, qy, pitch);
-      xl = Math.min(xl, px);
-      xr = Math.max(xr, px);
+    for (let j = 0; j <= 16; j++) {
+      for (let i = 0; i <= 24; i++) {
+        const [rx, ry, rz] = rayAt(x0 + (vw * i) / 24, y0 + (vh * j) / 16, pitch);
+        if (rz < 0.02 || ry / rz > HEAD.y1 + 0.4) continue;
+        xl = Math.min(xl, rx / rz);
+        xr = Math.max(xr, rx / rz);
+      }
     }
+    if (xl > xr) xl = xr = 0;
     const sL = s + (xl - 0.6) * D_POLE;
     const sR = s + (xr + 0.6) * D_POLE;
     let n0 = Math.floor(sL / POLE_CELL) - 1;
@@ -1079,6 +1096,8 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     gl.uniform4fv(u.uHedgeLv, hedge.lv);
     gl.uniform4f(u.uView, x0, y0, vw, vh);
     gl.uniform2f(u.uPitch, Math.cos(pitch), Math.sin(pitch));
+    gl.uniform2f(u.uYaw, yawCS[0], yawCS[1]);
+    gl.uniform1f(u.uPanD, LENS.d);
     gl.uniform1f(u.uS, s);
     gl.uniform1f(u.uV, v);
     gl.uniform1f(u.uShutter, SHUTTER);
