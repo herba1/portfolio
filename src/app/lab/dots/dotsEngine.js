@@ -5,75 +5,66 @@ import { createStage, clamp } from "../_kit/stage";
 // columns, a chequerboard, diagonals), never in where a dot sits, so a
 // pattern can sweep through the word while the word itself stays put.
 //
-// Glyphs are drawn as stroke skeletons (polylines with filleted corners) in
-// grid units; a dot is part of a letter when its centre lies within one unit
-// of the skeleton, which is exactly a two-dot stroke on straight runs.
+// The letters are drawn on the grid itself, not rasterised from outlines.
+// Each glyph is a bitmap of 2x2 dot modules: a stem is one module wide on an
+// even column, a bar one module tall on an even row, and every curve or
+// diagonal is a 45-degree stair of modules touching corner to corner. So a
+// stroke is exactly two dots across wherever you cut it, and taking away
+// every other row, every other column or every other diagonal always leaves
+// one continuous dot per cross-section: each style is still a typeface.
+//
+// One refinement keeps the chequerboard honest. A stair rising to the right
+// ("/") is drawn one dot to the right of the module grid, so both stair
+// directions keep a continuous line of single dots when alternate diagonals
+// go, instead of one direction breaking into ticks.
 
 const TITLE = ["DRIVE", "MY CAR"];
-const CAP = 12; // rows
-const GAP = 2; // columns between letters
-const SPACE = 6;
-const LEADING = 4; // rows between lines
+const MOD = 2; // dots per module
+const CAP = 9 * MOD; // rows
+const GAP = 1 * MOD; // columns between letters
+const SPACE = 3 * MOD;
+const LEADING = 2 * MOD; // rows between lines
 const DOT = 0.44; // radius as a share of the pitch
 
-// [width, strokes]; a stroke is a list of [x, y, filletRadius?] in units
-// where a stem's skeleton sits at x = 1 (dots 0 and 1).
+// One character per module, nine modules tall. # a module; / a module
+// shifted one dot right (rising stairs); + its left column only, - its
+// right column only (where a shifted stair meets a bar or junction).
+const CELL = { "#": [0, 1], "/": [1, 2], "+": [0], "-": [1] };
 const GLYPHS = {
-  D: [10, [[[1, 1], [9, 1, 4], [9, 11, 4], [1, 11], [1, 1]]]],
-  R: [10, [[[1, 11], [1, 1], [9, 1, 3], [9, 6, 3], [1, 6]], [[5, 6], [9, 10, 0], [9, 11]]]],
-  I: [2, [[[1, 1], [1, 11]]]],
-  V: [10, [[[1, 1], [1, 6, 3], [5, 11, 1], [9, 6, 3], [9, 1]]]],
-  E: [9, [[[8, 1], [1, 1], [1, 11], [8, 11]], [[1, 6], [7, 6]]]],
-  M: [14, [[[1, 11], [1, 1, 3], [13, 1, 3], [13, 11]], [[7, 1], [7, 11]]]],
-  Y: [10, [[[1, 1], [1, 6, 4], [9, 6, 4], [9, 1]], [[5, 6], [5, 11]]]],
-  C: [10, [[[9, 1], [1, 1, 4], [1, 11, 4], [9, 11]]]],
-  A: [10, [[[1, 11], [1, 1, 4], [9, 1, 4], [9, 11]], [[1, 7], [9, 7]]]],
+  D: ["####...", "#...#..", "#....#.", "#.....#", "#.....#", "#.....#", "#..../.", "#.../..", "####+.."],
+  R: ["#####..", "#....#.", "#.....#", "#..../.", "#####+.", "#..#...", "#...#..", "#....#.", "#.....#"],
+  I: ["#", "#", "#", "#", "#", "#", "#", "#", "#"],
+  V: ["#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", ".#.../.", "..#./..", "...#+.."],
+  E: ["######", "#.....", "#.....", "#.....", "#####.", "#.....", "#.....", "#.....", "######"],
+  M: ["#.......#", "##...../#", "#.#.../.#", "#..#./..#", "#...#+..#", "#.......#", "#.......#", "#.......#", "#.......#"],
+  Y: ["#.....#", "#.....#", ".#.../.", "..#./..", "...#+..", "...#...", "...#...", "...#...", "...#..."],
+  C: ["..-####", "./.....", "/......", "#......", "#......", "#......", ".#.....", "..#....", "...####"],
+  A: ["..-#+..", "./..#..", "/....#.", "#.....#", "#.....#", "#######", "#.....#", "#.....#", "#.....#"],
 };
 
-// Polyline with filleted corners, sampled into segments.
-function skeleton(points) {
+// Dot cells of one glyph, in grid units from its top left.
+function glyphCells(rows) {
+  const seen = new Set();
   const out = [];
-  for (let k = 0; k < points.length; k++) {
-    const [px, py, r = 0] = points[k];
-    if (k === 0 || k === points.length - 1 || !r) {
-      out.push([px, py]);
-      continue;
-    }
-    const [ax, ay] = points[k - 1];
-    const [bx, by] = points[k + 1];
-    let u1x = ax - px, u1y = ay - py, u2x = bx - px, u2y = by - py;
-    const l1 = Math.hypot(u1x, u1y), l2 = Math.hypot(u2x, u2y);
-    u1x /= l1; u1y /= l1; u2x /= l2; u2y /= l2;
-    const theta = Math.acos(clamp(u1x * u2x + u1y * u2y, -1, 1));
-    const t = r / Math.tan(theta / 2);
-    let bisx = u1x + u2x, bisy = u1y + u2y;
-    const bl = Math.hypot(bisx, bisy);
-    bisx /= bl; bisy /= bl;
-    const d = r / Math.sin(theta / 2);
-    const cx = px + bisx * d, cy = py + bisy * d;
-    const t1x = px + u1x * t, t1y = py + u1y * t;
-    const t2x = px + u2x * t, t2y = py + u2y * t;
-    let a0 = Math.atan2(t1y - cy, t1x - cx);
-    let a1 = Math.atan2(t2y - cy, t2x - cx);
-    let da = a1 - a0;
-    while (da > Math.PI) da -= 2 * Math.PI;
-    while (da < -Math.PI) da += 2 * Math.PI;
-    for (let s = 0; s <= 24; s++) {
-      const a = a0 + (da * s) / 24;
-      out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
-    }
-  }
+  rows.forEach((row, my) => {
+    [...row].forEach((ch, mx) => {
+      for (const o of CELL[ch] || []) {
+        for (let dy = 0; dy < MOD; dy++) {
+          const i = mx * MOD + o, j = my * MOD + dy;
+          const key = i * 64 + j;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push([i, j]);
+        }
+      }
+    });
+  });
   return out;
 }
 
-function segDist(x, y, ax, ay, bx, by) {
-  const dx = bx - ax, dy = by - ay;
-  const l = dx * dx + dy * dy;
-  const t = l ? clamp(((x - ax) * dx + (y - ay) * dy) / l, 0, 1) : 0;
-  return Math.hypot(x - ax - dx * t, y - ay - dy * t);
-}
-
 // Dot cells of the whole title, in grid units from the block's top left.
+// Every glyph starts on an even column and every line on an even row, so the
+// removal patterns meet each stroke in the same phase.
 function layout() {
   const cells = [];
   let width = 0;
@@ -85,22 +76,16 @@ function layout() {
         x += SPACE;
         continue;
       }
-      const [w, strokes] = GLYPHS[ch];
-      const segs = strokes.map(skeleton);
-      for (let j = 0; j < CAP; j++) {
-        for (let i = 0; i < w; i++) {
-          const cx = i + 0.5, cy = j + 0.5;
-          let d = Infinity;
-          for (const s of segs) for (let k = 1; k < s.length; k++) d = Math.min(d, segDist(cx, cy, s[k - 1][0], s[k - 1][1], s[k][0], s[k][1]));
-          if (d < 0.8) cells.push([x + i, top + j]);
-        }
-      }
-      x += w + GAP;
+      const rows = GLYPHS[ch];
+      for (const [i, j] of glyphCells(rows)) cells.push([x + i, top + j]);
+      x += rows[0].length * MOD + GAP;
     }
     width = Math.max(width, x - GAP);
   });
   return { cells, cols: width, rows: TITLE.length * CAP + (TITLE.length - 1) * LEADING };
 }
+
+const mod = (a, n) => ((a % n) + n) % n;
 
 // The styles, in sweep order. Each keeps the stroke form and removes a set.
 const PATTERNS = [
@@ -108,10 +93,9 @@ const PATTERNS = [
   (i, j) => j % 2 === 0, // alternate rows removed
   (i, j) => i % 2 === 0, // alternate columns removed
   (i, j) => (i + j) % 2 === 0, // chequerboard
-  (i, j) => ((i - j) % 3 + 3) % 3 !== 2, // diagonals
+  (i, j) => mod(i - j, 4) !== 3, // every fourth diagonal: at most one dot per module
 ];
 const N = PATTERNS.length;
-const mod = (a, n) => ((a % n) + n) % n;
 
 export function createDots(host) {
   const stage = createStage(host, { dpr: 2 });
