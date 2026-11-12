@@ -6,90 +6,71 @@ import { createStage, clamp } from "../_kit/stage";
 // pattern can sweep through the word while the word itself stays put.
 //
 // The letters are drawn on the grid itself, not rasterised from outlines.
-// Each glyph is a bitmap of 2x2 dot modules: a stem is one module wide on an
-// even column, a bar one module tall on an even row, and every curve or
-// diagonal is a 45-degree stair of modules touching corner to corner. So a
-// stroke is exactly two dots across wherever you cut it, and taking away
-// every other row, every other column or every other diagonal always leaves
-// one continuous dot per cross-section: each style is still a typeface.
-//
-// One refinement keeps the chequerboard honest. A stair rising to the right
-// ("/") is drawn one dot to the right of the module grid, so both stair
-// directions keep a continuous line of single dots when alternate diagonals
-// go, instead of one direction breaking into ticks.
+// Each glyph is a list of strokes, every one exactly two dots across: a stem
+// is two columns, a bar two rows, and every curve or diagonal is a 45-degree
+// band that steps one dot sideways per dot row (row j covers columns i and
+// i+1, row j+1 covers i+1 and i+2, and so on). So a diagonal is a solid,
+// unbroken stroke of the same colour as the stems, and taking away every
+// other row, every other column or every other diagonal still leaves one
+// continuous dot per cross-section: rows leave a stair of horizontal pairs,
+// columns a stair of vertical pairs, the chequerboard a single 45-degree
+// line. Each style is still a typeface.
 
 const TITLE = ["DRIVE", "MY CAR"];
-const MOD = 2; // dots per module
-const CAP = 9 * MOD; // rows
+const MOD = 2; // dots across a stroke
+const CAP = 18; // rows
 const DOT = 0.44; // radius as a share of the pitch
 
-// One character per module, nine modules tall. # a module; / a module
-// shifted one dot right (rising stairs); + its left column only, - its
-// right column only (where a shifted stair meets a bar or junction).
+// Strokes, in dots from the glyph's top left. Rows and columns are inclusive.
+//   ["|", x, y0, y1]  stem: columns x, x+1 from row y0 to y1
+//   ["-", y, x0, x1]  bar: rows y, y+1 from column x0 to x1
+//   ["\\", x, y0, y1] falling band: columns x, x+1 on row y0, one right per row
+//   ["/", x, y0, y1]  rising band: columns x, x+1 on row y0, one left per row
 //
-// V, M and Y are drawn with true 45-degree diagonals, one module across per
-// module down, straight from cap height: V's arms meet on the baseline, M's
-// vee reaches two thirds of the way down, Y's arms meet at mid-height and
-// centre. That makes V wide, as a real 45-degree V is.
-const CELL = { "#": [0, 1], "/": [1, 2], "+": [0], "-": [1] };
+// Where two diagonals meet (the V point, the M vee, the Y crotch, the A
+// apex) both bands land on the same two columns, so every one of them ends
+// in a single two-dot row, the width of the stroke. V, M and Y are true
+// 45-degree diagonals straight from cap height, which is what makes V wide.
 const GLYPHS = {
-  D: ["####...", "#...#..", "#....#.", "#.....#", "#.....#", "#.....#", "#..../.", "#.../..", "####+.."],
-  R: ["#####..", "#....#.", "#.....#", "#..../.", "#####+.", "#..#...", "#...#..", "#....#.", "#.....#"],
-  I: ["#", "#", "#", "#", "#", "#", "#", "#", "#"],
-  V: [
-    "#.............../",
-    ".#............./.",
-    "..#.........../..",
-    "...#........./...",
-    "....#......./....",
-    ".....#...../.....",
-    "......#.../......",
-    ".......#./.......",
-    "........#+.......",
-  ],
-  E: ["#######", "#......", "#......", "#......", "######.", "#......", "#......", "#......", "#######"],
-  M: [
-    "#.........#",
-    "##......./#",
-    "#.#...../.#",
-    "#..#.../..#",
-    "#...#./...#",
-    "#....#+...#",
-    "#.........#",
-    "#.........#",
-    "#.........#",
-  ],
-  Y: ["#......./", ".#...../.", "..#.../..", "...#./...", "....#+...", "....#....", "....#....", "....#....", "....#...."],
-  C: ["..-####", "./.....", "/......", "#......", "#......", "#......", ".#.....", "..#....", "...####"],
-  A: ["..-#+..", "./..#..", "/....#.", "#.....#", "#.....#", "#######", "#.....#", "#.....#", "#.....#"],
+  D: [["|", 0, 0, 17], ["-", 0, 0, 7], ["\\", 7, 1, 6], ["|", 12, 6, 11], ["/", 12, 11, 16], ["-", 16, 0, 7]],
+  R: [["|", 0, 0, 17], ["-", 0, 0, 9], ["\\", 9, 1, 4], ["|", 12, 4, 5], ["/", 12, 5, 9], ["-", 8, 0, 9], ["\\", 5, 10, 17]],
+  I: [["|", 0, 0, 17]],
+  V: [["\\", 0, 0, 17], ["/", 34, 0, 17]],
+  E: [["|", 0, 0, 17], ["-", 0, 0, 13], ["-", 8, 0, 11], ["-", 16, 0, 13]],
+  M: [["|", 0, 0, 17], ["|", 20, 0, 17], ["\\", 0, 0, 10], ["/", 20, 0, 10]],
+  Y: [["\\", 0, 0, 8], ["/", 16, 0, 8], ["|", 8, 8, 17]],
+  C: [["-", 0, 5, 13], ["/", 4, 1, 5], ["|", 0, 5, 12], ["\\", 0, 12, 16], ["-", 16, 5, 13]],
+  A: [["/", 6, 0, 6], ["\\", 6, 0, 6], ["|", 0, 6, 17], ["|", 12, 6, 17], ["-", 10, 0, 13]],
 };
 
 // Side bearings. Each side of a glyph is a straight stem (s) or a round,
-// diagonal or open side (o). Two stems face each other at two modules; any
-// round or diagonal side sits one module from its neighbour. Distances are
+// diagonal or open side (o). Two stems face each other at four dots; any
+// round or diagonal side sits two dots from its neighbour. Distances are
 // measured ink to ink, then pushed to the next even column so every glyph
-// keeps its module phase.
+// keeps the same column phase.
 const SIDES = { D: "so", R: "ss", I: "ss", V: "oo", E: "so", M: "ss", Y: "oo", C: "oo", A: "ss" };
 const fit = (a, b) => (SIDES[a][1] === "s" && SIDES[b][0] === "s" ? 2 * MOD : MOD);
 const SPACE = 3; // dots, ink to ink, before rounding to an even column
 
 // Dot cells of one glyph, in grid units from its top left.
-function glyphCells(rows) {
+function glyphCells(strokes) {
   const seen = new Set();
   const out = [];
-  rows.forEach((row, my) => {
-    [...row].forEach((ch, mx) => {
-      for (const o of CELL[ch] || []) {
-        for (let dy = 0; dy < MOD; dy++) {
-          const i = mx * MOD + o, j = my * MOD + dy;
-          const key = i * 64 + j;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          out.push([i, j]);
-        }
-      }
-    });
-  });
+  const add = (i, j) => {
+    const key = i * 64 + j;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push([i, j]);
+  };
+  for (const [kind, a, b, c] of strokes) {
+    if (kind === "-") {
+      for (let i = b; i <= c; i++) for (let d = 0; d < MOD; d++) add(i, a + d);
+      continue;
+    }
+    // Stems and bands: one row at a time, two dots across.
+    const step = kind === "\\" ? 1 : kind === "/" ? -1 : 0;
+    for (let j = b; j <= c; j++) for (let d = 0; d < MOD; d++) add(a + step * (j - b) + d, j);
+  }
   return out;
 }
 

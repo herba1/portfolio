@@ -1,6 +1,6 @@
 {
   "title": "Dots",
-  "description": "A song title set as a dot-matrix poster: every letter is drawn straight onto one strict grid of round dots, each stroke exactly two dots across, with curves and diagonals as 45-degree stairs of two-by-two blocks. Drag across it and a removal pattern sweeps through the word, alternate rows, then columns, then a chequerboard, then diagonals, each dot shrinking away or swelling back on its own spring as the front passes. The letters never move a dot; only which dots are present changes. Whatever is removed, one dot of every stroke survives, so each state is still a typeface. Let go and the pattern holds.",
+  "description": "A song title set as a dot-matrix poster: every letter is drawn straight onto one strict grid of round dots, each stroke exactly two dots across, with curves and diagonals as solid 45-degree bands that step one dot sideways per dot row. Drag across it and a removal pattern sweeps through the word, alternate rows, then columns, then a chequerboard, then diagonals, each dot shrinking away or swelling back on its own spring as the front passes. The letters never move a dot; only which dots are present changes. Whatever is removed, one dot of every stroke survives, so each state is still a typeface. Let go and the pattern holds.",
   "tags": ["Canvas", "Type", "Grid"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
