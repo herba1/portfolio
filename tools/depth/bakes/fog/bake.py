@@ -2,9 +2,10 @@
 #
 #   plate.webp  the composite in display sRGB: the canary-wharf towers under the
 #               docklands cumulus, the sky graded to the natsu targets (a radial
-#               cobalt, pale where it meets the towers; the cumulus lit by their
-#               thickness and the sun, cream tops over skylight-blue shade, see
-#               clouds.py) with a shoulder so nothing reaches 255.
+#               cobalt, pale where it meets the towers; the cumulus lit across
+#               their thickness and toward the sun, skylight-blue shade to cream
+#               bodies under the capture's own folds, see clouds.py) with a
+#               shoulder so nothing reaches 255.
 #   aux.png     R  log distance in metres, D_MIN..D_MAX (sky = D_MAX)
 #               G  sky matte (white = sky): the source of the air's colour
 #               B  the ray's elevation above the horizon, 0..90 degrees

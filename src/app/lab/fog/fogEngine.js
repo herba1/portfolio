@@ -566,12 +566,14 @@ void main() {
   // skylight blue and the brightest toward cream #FFF1E2 (a tint at the
   // pixel's own luminance, lifting nothing), weighted by how much of the light
   // is the air's and of that how much is the sun's. A veiled top still lands
-  // warm instead of on the air's cyan; a clear cloud keeps its own light.
+  // warm instead of on the air's cyan; a clear cloud keeps its own light. The
+  // ramps are wide, like the plate's own terminator: a narrow one picks out
+  // the brightest folds as hard-edged cream islands.
   float share = luma(sun) / (luma(sun) + luma(air) + 1e-4);
   vec3 skyD = pow(max(sky, 0.0), vec3(1.0 / 2.2));
   float sl = luma(skyD);
-  vec3 st = mix(vec3(${tint("#A2BDD3")}), vec3(${tint("#D2DDE4")}), smoothstep(0.6, 0.76, sl));
-  st = mix(st, vec3(${tint("#FFF1E2")}), smoothstep(0.8, 0.93, sl));
+  vec3 st = mix(vec3(${tint("#A2BDD3")}), vec3(${tint("#D2DDE4")}), smoothstep(0.56, 0.8, sl));
+  st = mix(st, vec3(${tint("#FFF1E2")}), smoothstep(0.74, 0.97, sl));
   sky = pow(mix(skyD, sl * st, cloud * (1.0 - own) * mix(0.1, 1.0, share) * 0.95), vec3(2.2));
   vec3 col = mix(tower, sky, cov);
   // How much of this pixel's light is a cloud's or the sun's, for the film
