@@ -3,8 +3,9 @@
 //
 //   scene radiance (HDR, sun included)
 //   -> camera: lens glare, complementary-mosaic CCD wells, overflow bloom,
-//      vertical-register smear, retained overflow (lag), gamma, knee, a hot
-//      super-white clip (reference white is a quarter of the well)
+//      vertical-register smear, retained overflow (lag), gamma, a soft-shoulder
+//      knee into a hot super-white clip (reference white is a quarter of the
+//      well)
 //   -> encoder: Y 4.2 MHz, I 1.3 MHz, Q 0.4 MHz, 3.58 MHz subcarrier, sync, burst
 //   -> VCR record: luma trap + LPF, chroma synchronously demodulated to a
 //      +/-500 kHz colour-under band, RC pre-emphasis and clip, FM modulator
@@ -209,7 +210,9 @@ void main(){
   vec3 sx = vec3(wx.x + wx.z - wx.y, wx.x + wx.y - wx.z, wx.y + wx.z - wx.x);
   // the colour-difference path never sees the luma's knee or white clip (no
   // highlight chroma suppression on a cheap camera), so the false colour
-  // rides out of the blown edge at full strength
+  // rides out of the blown edge at the matrix's own gain. It is only a few
+  // samples wide here; the encoder's narrow I/Q and the colour-under band
+  // are what spread it, and the colour-under tank rings it off to the right
   vec3 fd = sx - s;
   fd -= dot(fd, vec3(0.3, 0.59, 0.11));
   // shot and amplifier noise: a few electrons' worth, not a texture
@@ -219,9 +222,13 @@ void main(){
   float ly = dot(s, vec3(0.3, 0.59, 0.11));
   // reference white is a quarter of the well: only the sun fills one
   vec3 v = max((ly + (s - ly) * 1.35) * 4.3, 0.0);
-  // gamma with a linear toe (0.45), then the knee and a hot white clip
+  // gamma with a linear toe (0.45), then the knee: a soft shoulder that
+  // leaves the curve at 0.8 with its slope intact and bends over toward the
+  // hot white clip, so the bloom climbs into the blown core in a smooth roll
+  // instead of a step. Only the sun's well-filling core gets near the clip.
   vec3 g = mix(4.5 * v, 1.099 * pow(v, vec3(0.45)) - 0.099, step(0.018, v));
-  g = mix(g, 0.86 + (g - 0.86) * 0.32, step(0.86, g));
+  vec3 kn = max(g - 0.8, 0.0);
+  g = min(g, 0.8 + kn / (1.0 + kn / (uWhite - 0.8)));
   g = min(g, vec3(uWhite)) + uFalse * fd;
   o = vec4(g, 1.0);
   o2 = vec4(min(max(q - 1.0, 0.0), vec3(uLagCap)) * uLag, 1.0);
@@ -343,7 +350,7 @@ void main(){
 // Head, tape and FM discriminator.
 const FS_TAPE = `${HEAD}
 uniform sampler2D uPhi; uniform sampler2D uP; uniform sampler2D uOff;
-uniform float uHR; uniform float uCNoise; uniform float uCDelay;
+uniform float uHR; uniform float uCNoise; uniform float uCDelay; uniform float uHead;
 uniform vec2 uEdge; uniform float uLim; uniform float uFlutter; uniform float uAsp;
 vec4 par(int c, int row){ return texelFetch(uP, ivec2(c, row), 0); }
 float dropMul(float x, vec4 d, float dep0, float dep1){
@@ -455,23 +462,55 @@ void main(){
   float th = p1.y + p1.z * float(x);
   float ct = cos(th), st = sin(th);
   vec2 rot = vec2(uv.x * ct - uv.y * st, uv.y * ct + uv.x * st);
-  float flag = dm < 0.1 ? 1.0 : 0.0;
-  o = vec4(Y, rot, flag);
+  // the deck's input stage clips the composite at its headroom, so chroma
+  // riding on a super-white loses the tops of its swing; the share torn off
+  // is what the colour-under record amplifier cannot carry straight (see
+  // FS_POST). Read off the recorded signal, not the playback.
+  float yr = (fAvg(row, xc) - 3.4) * 140.0 - 40.0;
+  float cr = length(uvO);
+  float ov = max(0.0, 1.0 - max(uHead - yr, 0.0) / max(cr, 1e-6));
+  // alpha carries the dropout flag (2) or the overload share (0..1)
+  o = vec4(Y, rot, dm < 0.1 ? 2.0 : ov);
 }`;
 
 // Playback luma LPF and trap, then de-emphasis. De-emphasis is the inverse RC
 // shelf, so it is causal too: a click leaves a tail running off to the right.
+// The colour-under chroma comes back through a narrow LC band-pass whose
+// centre sits a little off the 629 kHz carrier. At baseband that is a complex
+// one-pole, trimmed to unity at the carrier, so colour the deck carried
+// cleanly passes as it was. The share torn off by the input clip (chroma
+// riding on a super-white, flagged by FS_TAPE) arrives as a burst of
+// distortion instead, and kicks the tank: it rings at its own frequency, a
+// transient that decays to the right while its phase walks against the
+// carrier. Only the sun's blown rim trails a streaked fan of hues off to the
+// right; grass and leaves never reach the clip.
 const FS_POST = `${HEAD}
 uniform sampler2D uT; uniform float uKP[96]; uniform float uKCp[33];
+uniform vec4 uRing; uniform vec2 uRingN;
+vec2 cmul(vec2 a, vec2 b){ return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+// the share of a sample's chroma the input clip tore off (none in a dropout)
+vec2 over(vec4 t){ return t.a > 1.5 ? vec2(0.0) : t.gb * t.a; }
 void main(){
   int x = int(gl_FragCoord.x); int row = int(gl_FragCoord.y);
-  float Y = 0.0; vec2 uv = vec2(0.0); float fl = 0.0;
+  float Y = 0.0; vec2 uv = vec2(0.0); vec2 uvo = vec2(0.0); float fl = 0.0;
   for (int j = 0; j < 96; j++) Y += uKP[j] * texelFetch(uT, ivec2(clamp(x + 16 - j, 0, LW - 1), row), 0).r;
   for (int k = -16; k <= 16; k++) {
-    vec4 t = texelFetch(uT, ivec2(clamp(x + k, 0, LW - 1), row), 0);
+    int i = clamp(x + k, 0, LW - 1);
+    vec4 t = texelFetch(uT, ivec2(i, row), 0);
     uv += uKCp[k + 16] * t.gb;
-    if (k >= -8 && k <= -3) fl = max(fl, t.a);
+    uvo += uKCp[k + 16] * over(t);
+    if (k >= -8 && k <= -3) fl = max(fl, step(1.5, t.a));
   }
+  // the overload kicks the tank: its ringing is the tank's response less
+  // the part that would have passed straight
+  vec2 tank = vec2(0.0);
+  vec2 pole = uRing.x * vec2(cos(uRing.y), sin(uRing.y));
+  vec2 w = vec2(1.0 - uRing.x, 0.0);
+  for (int k = 0; k < 96; k++) {
+    tank += cmul(w, over(texelFetch(uT, ivec2(clamp(x - k, 0, LW - 1), row), 0)));
+    w = cmul(w, pole);
+  }
+  uv += uRing.w * (cmul(tank, uRingN) - uvo);
   Y = clamp(Y, -60.0, 135.0);
   o = vec4(Y, uv, fl);
 }`;
@@ -559,20 +598,39 @@ export async function createSignal(host, { embedded = false } = {}) {
   const stillT = parseFloat(query.get("t") || "4");
   const raw = query.has("raw");
   const glare = parseFloat(query.get("glare") || "0.08");
-  // The over-white failure, as numbers. The camcorder clips white at 114%
-  // (super-white); the record side clips the pre-emphasised luma again at
-  // 120 IRE, as real decks do, so no carrier is ever driven far past the top
-  // of the channel; the camera's colour-difference gain at a blown edge; the top of
-  // the playback channel (MHz) and how steeply it closes; and the limiter's
+  // The over-white failure, as numbers. The camcorder's knee leans toward a
+  // 110% clip (super-white) and only the sun's core gets near it; the record
+  // side clips the pre-emphasised luma again at 120 IRE, as real decks do, so
+  // no carrier is ever driven far past the top of the channel; the camera's
+  // colour-difference gain at a blown edge; the top of the playback channel (MHz) and how steeply it closes; and the limiter's
   // slicing level against the RF the AGC expects. Together they keep the
-  // sun's parked super-white carrier about three times clear of the slicing
-  // level, so the disc plays back blown white. Only the clipped overshoot at
-  // its rim, and the moments where an asperity, flutter or crosstalk dips the
-  // carrier, take it under: short black comets that de-emphasis drags off to
-  // the right. 100 IRE white stays six times clear.
-  const WHITE = 1.14;
+  // sun's super-white carrier about five times clear of the slicing level,
+  // close to plain white, so the disc plays back as blown light, not a hole.
+  // Only the clipped overshoot at its rim, and the moments where an asperity,
+  // flutter or crosstalk dips the carrier, take it under: short black comets
+  // that de-emphasis drags off to the right. 100 IRE white stays six times
+  // clear. The camera's false colour is kept near the matrix's own gain: a
+  // thin seam at the blown edge that only the colour-under path spreads.
+  const WHITE = 1.1;
   const REC_WHITE = 120;
-  const FALSE_C = 10;
+  const FALSE_C = 2;
+  // colour-under: the deck's input headroom (IRE of luma plus chroma swing),
+  // how hard the torn-off share kicks the playback tank, and the tank's pole
+  // radius and phase walk per sample (radians; ~190 kHz off the carrier)
+  const CU_HEAD = 110;
+  const RING_G = 4;
+  const RING_R = 0.98;
+  const RING_W = 0.085;
+  const ringNorm = (() => {
+    let re = 0;
+    let im = 0;
+    for (let k = 0, w = 1 - RING_R; k < 96; k++, w *= RING_R) {
+      re += w * Math.cos(RING_W * k);
+      im += w * Math.sin(RING_W * k);
+    }
+    const m = re * re + im * im;
+    return [re / m, -im / m];
+  })();
   const EDGE_F = 4.46;
   const EDGE_N = 16;
   const LIM = 0.12;
@@ -932,11 +990,14 @@ export async function createSignal(host, { embedded = false } = {}) {
       a.f("uHR", 0.3 + 0.85 * wearS);
       a.f("uCNoise", 1.2 * g);
       a.f("uCDelay", 7 + 2.5 * (g - 1));
+      a.f("uHead", CU_HEAD);
     });
     run(P.post, [S[1]], (a) => {
       a.t("uT", S[0]);
       a.f("uKP", wk.P);
       a.f("uKCp", wk.Cp);
+      a.f("uRing", RING_R, RING_W, 0, RING_G);
+      a.f("uRingN", ...ringNorm);
     });
     run(P.play, [S[2]], (a) => a.t("uPost", S[1]));
     run(P.tv, [tvTex], (a) => {
