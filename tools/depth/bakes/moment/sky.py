@@ -3,47 +3,55 @@
     python3 -I sky.py <frames dir> <work dir> <public/lab/moment>
 
 Replaces the sky layer export.py wrote (sky.webp only; every other layer is
-left as it is). The first bake took the sky from the one clean plate and
-gave each clipped cloud core a soft dome; at the page the domes read as flat
-grey-cream smears, and the birds Telea had painted out and the wires' ghosts
-showed through them as dark-blue flecks. This one goes back to the source:
+left as it is). Needs matte.py's behind.npy and near_export.webp in the work
+dir (the sky behind the birch), and keeps the first export's sky as
+sky_export.webp there (its open blue is kept).
 
-1. Highlight recovery. Frames 0-112 (after that he lands on the lens and the
-   GoPro's exposure moves), registered to the middle shutter frame by phase
-   correlation on the hotel facade, as plate.py does. A frame may lend a
-   pixel unless something dark passes in front of it there (him, a bird):
-   darker than 0.8 of that pixel's 85th-percentile brightness over the clip,
-   grown 4 px. Of what is left, each pixel is taken from its least-clipped
-   frames: every frame is weighted by how far its hottest channel stays
-   under 255, so where the drifting cloud let one frame see into a core
-   that frame alone speaks, and elsewhere the frames average (which also
-   takes the GoPro's noise and block edges out of the cloud), nearest the
-   shutter frames first. Exposure is locked for the whole span (the facade
-   and the open sky agree to 0.5 %), so the frames merge as they are. About
-   5 % of the sky is at 255 in every frame; those cores stay at the clip,
-   and only the shoulder below shapes them.
+The bake before this one averaged every frame of the clip into each pixel,
+weighted towards the middle, then despeckled and median-smoothed the cloud.
+The cumulus drift about 9 px across the clip, so that average was a smear,
+and the smoothing on top made it wax: posterised blobs with no billow. This
+one keeps the drawing:
 
-2. Despeckle, limited to the cloud: anything darker than its 9 px median by
-   more than the noise (a bird's last trace, a wire's ghost, a JPEG block)
-   takes the median, and a guided filter on the cloud's own luminance
-   smooths the 8-bit steps the shoulder would otherwise stretch.
+1. Merge, at full resolution, with no spatial filter. Frames 0-112 (after
+   that he lands on the lens and the exposure moves), registered on the
+   cloud itself (its drift against the facade, measured by phase
+   correlation and fitted as a smooth path, is taken out), so a frame's
+   cloud lands on the middle frame's cloud. A frame may lend a pixel unless
+   something dark passes in front of it there (him, a bird): darker than 0.8
+   of that pixel's 85th-percentile brightness over the clip, grown 4 px.
+   - Body: a short temporal median, the 9 usable frames nearest the middle
+     shutter frame, trimmed to the middle five and averaged (noise and the
+     GoPro's blocks go, the cloud does not move under it, and the average
+     keeps sub-8-bit steps so the shoulder below cannot band them).
+   - Cores: where that is near the clip, each pixel comes from the single
+     least-clipped frame round it (its hottest channel furthest under 255
+     over a 5 px neighbourhood, ties to the nearest the middle), with that
+     frame's two neighbours as a three-frame median. About 5 % of the sky is
+     at 255 in every frame; those cores stay at the clip and only the
+     shoulder shapes them.
 
-3. Local contrast and a filmic shoulder, on the cloud only: the cloud's log
-   luminance against a ~28 px gaussian of itself (amount 0.45) puts the
-   cauliflower relief back; then a shoulder that keeps the body (linear up
-   to 0.42) and rolls everything above it off towards a warm-neutral white
-   (R >= G >= B, about 248/245/238), never pure white, so the cores glow
-   and keep their edge instead of plateauing.
+2. The cloud graded as its own pass (key: bright and nearly neutral, soft
+   into the skirt):
+   - local contrast: log luminance against a ~28 px gaussian of itself
+     (amount 0.4) puts the cauliflower relief back;
+   - a filmic shoulder: linear to 0.42, then rolled off towards a ceiling
+     set so the warmest top lands at about 245 on its hottest channel,
+     never paper white;
+   - a luminance-keyed split tone: the sunlit tops to warm-neutral #F4EEE4,
+     the skylit undersides and folds to about hue 205 (#9FB6CF), the body
+     between keeping a little of its own colour.
 
-4. Split tone by luminance inside the cloud: the sunlit tops lean warm
-   white, the shaded undersides take the sky's own blue (hue ~205 deg,
-   desaturated, as skylight fills them), the body neutral between.
+3. The blue: as export.py had it (a third of a stop down, deepened towards
+   the top, a touch of cyan), then a radial zenith gradient centred above
+   the frame: deeper and more saturated towards the top, paler and softer
+   towards the horizon, as film renders a summer sky. Dithered on output.
 
-5. The blue sky as export.py had it: a third of a stop down (the page
-   brings it back), deepened towards the zenith, a touch of cyan. Then the
-   sky is pushed in under everything that is not sky (push-pull), as
-   before. The sky matte is the near layer's own alpha (near.webp), so the
-   two layers still meet where they met.
+4. As before, the sky is pushed in under everything that is not sky. The
+   sky matte is the near layer's own alpha (near.webp), so the two layers
+   still meet where they met; the overhead wires (thin, long pieces of that
+   matte) are widened by 5 px, so no ghost of them stays in the sky layer
+   beside the near layer's own.
 """
 import os, shutil, sys
 import numpy as np
@@ -55,8 +63,10 @@ import kit  # noqa: E402
 FRAMES, WORK, OUT = sys.argv[1:4]
 os.makedirs(WORK, exist_ok=True)
 CROP_H = 1066
+W = 1600
 MID = 84
 IDS = list(range(0, 113))
+K = 9  # frames in the body's temporal median
 GAIN = 0.79  # a third of a stop down, in linear light (as export.py)
 LUMA = np.float32([0.2126, 0.7152, 0.0722])
 
@@ -70,48 +80,100 @@ def enc(c):
     return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055).astype(np.float32)
 
 
+def hexlin(h):
+    return lin(np.float32([int(h[i : i + 2], 16) for i in (0, 2, 4)]) / 255)
+
+
 LUT = lin(np.arange(256, dtype=np.float32) / 255)
 
 # ---------------------------------------------------------------- 1. merge
-cache = f"{WORK}/sky_merge.npz"
+cache = f"{WORK}/sky_merge2.npz"
 if os.path.exists(cache):
     z = np.load(cache)
     hdr, hot = z["hdr"], z["hot"]
 else:
-    ref = cv2.imread(f"{FRAMES}/f{MID:03d}.jpg").astype(np.float32).mean(2)
-    x0, x1, y0, y1 = 1000, 1560, 300, 900
-    win = cv2.createHanningWindow((x1 - x0, y1 - y0), cv2.CV_32F)
-    stack = np.empty((len(IDS), CROP_H, 1600, 3), np.uint8)
-    for i, n in enumerate(IDS):
-        im = cv2.imread(f"{FRAMES}/f{n:03d}.jpg")
-        (dx, dy), _ = cv2.phaseCorrelate(ref[y0:y1, x0:x1], im.astype(np.float32).mean(2)[y0:y1, x0:x1], win)
-        im = cv2.warpAffine(im, np.float32([[1, 0, -dx], [0, 1, -dy]]), (im.shape[1], im.shape[0]), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)
-        stack[i] = im[:CROP_H, :, ::-1]
-    tw = np.exp(-0.5 * ((np.float32(IDS) - MID) / 30.0) ** 2).astype(np.float32)
-    hdr = np.zeros((CROP_H, 1600, 3), np.float32)
-    hot = np.zeros((CROP_H, 1600), np.float32)
+    raw = [cv2.imread(f"{FRAMES}/f{n:03d}.jpg") for n in IDS]
+    gray = [im.astype(np.float32).mean(2) for im in raw]
+    ref = gray[IDS.index(MID)]
+    # the facade (as plate.py) and the cloud (upper left, clear of him)
+    fac = (300, 900, 1000, 1560)
+    cld = (0, 420, 250, 750)
+
+    def shift(box, im):
+        y0, y1, x0, x1 = box
+        win = cv2.createHanningWindow((x1 - x0, y1 - y0), cv2.CV_32F)
+        (dx, dy), resp = cv2.phaseCorrelate(ref[y0:y1, x0:x1], im[y0:y1, x0:x1], win)
+        return dx, dy, resp
+
+    cs = np.float32([shift(cld, g) for g in gray])
+    ok = cs[:, 2] > 0.25
+    n = np.float32(IDS)
+    px = np.polyfit(n[ok], cs[ok, 0], 2)
+    py = np.polyfit(n[ok], cs[ok, 1], 2)
+    cdx, cdy = np.polyval(px, n) - np.polyval(px, MID), np.polyval(py, n) - np.polyval(py, MID)
+    print("cloud drift, frame 0 vs middle:", round(float(cdx[0]), 2), round(float(cdy[0]), 2), "px")
+    stack = np.empty((len(IDS), CROP_H, W, 3), np.uint8)
+    for i, im in enumerate(raw):
+        stack[i] = cv2.warpAffine(im, np.float32([[1, 0, -cdx[i]], [0, 1, -cdy[i]]]), (W, im.shape[0]), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)[:CROP_H, :, ::-1]
+    del raw, gray
+
     grow = kit.disk(4)
-    R = 82
+    order = np.argsort(np.abs(n - MID), kind="stable")
+    valid = np.empty((len(IDS), CROP_H, W), bool)
+    hdr = np.zeros((CROP_H, W, 3), np.float32)
+    R = 41
     for r0 in range(0, CROP_H, R):
         s = stack[:, r0 : r0 + R]
         L = s.astype(np.float32) @ LUMA
         ref85 = np.percentile(L, 85, axis=0)
         occ = L < 0.8 * ref85[None] - 12  # the -12: noise in the dark (leaves, windows) is no occluder
-        valid = np.stack([~cv2.dilate(o.astype(np.uint8), grow).astype(bool) for o in occ]).astype(np.float32)
-        mx = s.max(3).astype(np.float32) / 255
-        un = 1 - kit.smoothstep(0.9, 0.985, mx)  # how far its hottest channel stays under the clip
-        w = valid * tw[:, None, None]
-        wu = w * (un**2 + 1e-4)
-        rgb = LUT[s]
-        m = (wu[..., None] * rgb).sum(0) / np.maximum(wu.sum(0), 1e-8)[..., None]
-        # share of the frames that could see this pixel which were clipped there
-        h = 1 - (w * un).sum(0) / np.maximum(w.sum(0), 1e-6)
-        none = w.sum(0) < 1e-3  # no frame clear of him: the middle frame
-        hdr[r0 : r0 + R] = np.where(none[..., None], rgb[IDS.index(MID)], m)
-        hot[r0 : r0 + R] = np.where(none, (mx[IDS.index(MID)] > 0.985).astype(np.float32), h)
-    del stack
+        valid[:, r0 : r0 + R] = occ
+    # grown on the whole frame, so no occluder is cut at a chunk's edge
+    for i in range(len(IDS)):
+        valid[i] = ~cv2.dilate(valid[i].astype(np.uint8), grow).astype(bool)
+    for r0 in range(0, CROP_H, R):
+        s = stack[:, r0 : r0 + R]
+        v = valid[:, r0 : r0 + R]
+        vo = v[order]
+        sel = np.zeros_like(v)
+        sel[order] = vo & (np.cumsum(vo, 0) <= K)
+        vals = np.where(sel[..., None], s.astype(np.float32), np.nan)
+        vals = np.sort(vals, 0)[:K]  # the chosen frames' values, sorted, NaN after
+        c = sel.sum(0)[..., None]
+        idx = np.arange(K, dtype=np.int32)[:, None, None, None]
+        keep = (idx >= c // 4) & (idx < c - c // 4)
+        m = np.where(keep, np.nan_to_num(vals), 0).sum(0) / np.maximum(keep.sum(0), 1)
+        none = c[..., 0] == 0  # no frame clear of him: the middle frame
+        m = np.where(none[..., None], s[IDS.index(MID)].astype(np.float32), m)
+        hdr[r0 : r0 + R] = lin(m / 255)
+    print("body merged")
+
+    # cores: the least-clipped frame round each pixel
+    best = np.full((CROP_H, W), -1e9, np.float32)
+    bi = np.full((CROP_H, W), IDS.index(MID), np.int32)
+    for i in range(len(IDS)):
+        mx = stack[i].max(2).astype(np.float32) / 255
+        u = 1 - kit.smoothstep(0.92, 0.995, mx)
+        sc = cv2.GaussianBlur(u * valid[i], (0, 0), 2.5) - 0.0015 * abs(IDS[i] - MID) - 2 * (~valid[i])
+        b = sc > best
+        best[b] = sc[b]
+        bi[b] = i
+    lo, hi = np.clip(bi - 1, 0, len(IDS) - 1), np.clip(bi + 1, 0, len(IDS) - 1)
+    yy, xx = np.mgrid[0:CROP_H, 0:W]
+    trio = []
+    for j in (lo, bi, hi):
+        ok = valid[j, yy, xx]
+        trio.append(np.where(ok[..., None], stack[j, yy, xx], stack[bi, yy, xx]).astype(np.float32))
+    pick = lin(np.median(np.stack(trio), 0) / 255)
+    del trio, stack, valid
+    near = kit.smoothstep(0.93, 0.985, enc(hdr).max(2))
+    near = cv2.GaussianBlur(near.astype(np.float32), (0, 0), 1.5)
+    # only where the pick is darker (less clipped); never brighten
+    use = near * (pick.max(2) < hdr.max(2))
+    hdr = hdr * (1 - use[..., None]) + pick * use[..., None]
+    hot = cv2.GaussianBlur((enc(hdr).max(2) > 0.985).astype(np.float32), (0, 0), 1.0)
     np.savez(cache, hdr=hdr, hot=hot)
-print("merged; clipped in every frame:", round(float((hot > 0.99).mean()), 4))
+print("merged; still clipped:", round(float((hot > 0.5).mean()), 4))
 
 # ---------------------------------------------------------------- the sky matte
 na = cv2.imread(f"{OUT}/near.webp", cv2.IMREAD_UNCHANGED)
@@ -148,36 +210,28 @@ if os.path.exists(ne) and os.path.exists(bf):
 clear_w = kit.erode(clear, 2) | under
 clear = clear | under
 
-# ---------------------------------------------------------------- 2. the cloud, despeckled
+# ---------------------------------------------------------------- 2. the cloud, graded as its own pass
 g = hdr * GAIN
-Y = g @ LUMA
+Y = np.maximum(g @ LUMA, 1e-5)
 mx, mn = g.max(2), g.min(2)
 chroma = (mx - mn) / np.maximum(mx, 1e-4)
 # cloud: bright and nearly neutral; a soft key so the skirt where cloud
 # thins to blue takes part of every step below
 cloud = (1 - kit.smoothstep(0.16, 0.34, chroma)) * kit.smoothstep(0.12, 0.26, Y)
 cloud = kit.blur(cloud.astype(np.float32), 1.5)
-cm = cloud > 0.05
-Y8 = np.clip(enc(Y) * 255, 0, 255).astype(np.uint8)
-med = cv2.medianBlur(Y8, 9).astype(np.float32) / 255
-spk = (enc(Y) < med - 0.035) & cm
-spk = kit.dilate(spk, 1) & cm
-gm = cv2.medianBlur(np.clip(enc(g) * 255, 0, 255).astype(np.uint8), 9).astype(np.float32) / 255
-g = np.where(spk[..., None], lin(gm), g)
-# guided smoothing of the cloud's colour on its own luminance: keeps every
-# edge of the relief, loses the 8-bit steps and the block chroma
-sm = kit.guided(np.repeat(enc(g @ LUMA)[..., None], 3, -1), enc(g), 4, 2e-4)
-g = np.where(cm[..., None], lin(np.clip(sm, 0, 1)) * cloud[..., None] + g * (1 - cloud[..., None]), g)
-print("despeckled px", int(spk.sum()))
 
-# ---------------------------------------------------------------- 3. local contrast + shoulder
-Y = np.maximum(g @ LUMA, 1e-5)
+# local contrast, in log luminance against a ~28 px gaussian of itself
 lY = np.log2(Y)
 base = kit.blur(lY.astype(np.float32), 28)
-lY2 = lY + 0.7 * cloud * np.clip(lY - base, -1.2, 1.2)
-EXPO = 1.0  # the page's own cloud pass lifts the body; the bake leaves it room
-Yc = (2.0**lY2) * EXPO
-KNEE, WHITE = 0.42, 0.93  # linear: body kept below the knee; ceiling ~ 248 display
+Yc = 2.0 ** (lY + 0.4 * cloud * np.clip(lY - base, -1.0, 1.0))
+
+# the ceiling: the warm top's hottest channel at 245, no higher
+TOP = hexlin("F4EEE4")
+UNDER = hexlin("9FB6CF")
+top_r = TOP / (TOP @ LUMA)
+under_r = UNDER / (UNDER @ LUMA)
+WHITE = float(lin(np.float32(245 / 255)) / top_r.max())
+KNEE = 0.42
 
 
 def shoulder(y):
@@ -186,33 +240,35 @@ def shoulder(y):
 
 
 Yo = shoulder(Yc)
-# hot cores (clipped in every frame) lift a little more inside their edge,
-# by distance, so they are the brightest thing in the cloud without a plateau
-core = (hot > 0.97).astype(np.uint8)
+# cores clipped in every frame (nothing left to recover) glow from inside
+# their edge, by distance, so they are the brightest thing in the cloud and
+# round off instead of standing as a flat plateau
+core = (hot > 0.5).astype(np.uint8)
 dist = cv2.distanceTransform(core, cv2.DIST_L2, 5)
-lift = kit.blur((1 - np.exp(-dist / 40.0)).astype(np.float32), 4)
-Yo = Yo + (WHITE - Yo) * 0.3 * lift
-ratio = (Yo / Y)[..., None]
-cl = g * ratio
-# toward the top the colour rolls to warm-neutral (sunlit), not to the
-# cool grey a clip leaves
-top = kit.smoothstep(0.5, 0.9, Yo)[..., None]
-warm = np.float32([1.012, 1.0, 0.965])
-cl = cl * (1 - top) + Yo[..., None] * warm * top
+lift = kit.blur((1 - np.exp(-dist / 30.0)).astype(np.float32), 3)
+Yo = Yo + (WHITE - Yo) * 0.6 * lift
 
-# ---------------------------------------------------------------- 4. split tone
-# relative to the cloud's own neighbourhood and its absolute level: the
-# shaded folds and undersides take skylight blue, the tops warm white
-Yd = enc(Yo)
+# split tone, keyed on the developed luminance (display) and on how much
+# darker a pixel is than the cloud round it: undersides and folds take the
+# skylight, the sunlit tops the warm white, the body keeps its own colour
+# The key is read from the luminance at the scale of the cloud's form (a
+# 4 px gaussian), not of its texture, and so is the cloud's own colour: the
+# drawing is carried by luminance at full resolution, the hue changes only
+# from fold to fold, as dye clouds do (keyed per pixel, the GoPro's chroma
+# noise and the texture itself break into blue mottle at the page).
+Yd = enc(kit.blur(Yo.astype(np.float32), 4))
 loc = kit.blur(Yd.astype(np.float32), 22)
-shade = np.clip(kit.smoothstep(0.8, 0.56, Yd) * 0.8 + np.clip((loc - Yd) * 5, 0, 1) * 0.4, 0, 1)
-sun = kit.smoothstep(0.8, 0.93, Yd)
-blue = np.float32([0.85, 1.01, 1.13])  # ~ hue 205, as a ratio to luminance
-tone = 1 + shade[..., None] * (blue - 1) * 0.85 + sun[..., None] * (np.float32([1.02, 1.0, 0.96]) - 1)
-cl = cl / np.maximum(cl @ LUMA, 1e-5)[..., None] * Yo[..., None] * tone
+shade = np.clip(kit.smoothstep(0.8, 0.6, Yd) * 0.85 + np.clip((loc - Yd) * 4, 0, 1) * 0.3, 0, 1)
+sun = kit.smoothstep(0.76, 0.87, Yd) * (1 - shade)
+own = kit.blur((g / Y[..., None]).astype(np.float32), 3)
+own = 1 + (own - 1) * 0.5  # the GoPro's own cast, mostly kept out
+ratio = own * (1 - shade - sun)[..., None] + under_r * shade[..., None] + top_r * sun[..., None]
+ratio = ratio / np.maximum(ratio @ LUMA, 1e-5)[..., None]
+cl = Yo[..., None] * ratio
+cl = np.minimum(cl, lin(np.float32(245 / 255)))
 g = cl * cloud[..., None] + g * (1 - cloud[..., None])
 
-# ---------------------------------------------------------------- 5. blue sky, as export.py
+# ---------------------------------------------------------------- 3. blue sky, as export.py
 e = enc(g)
 mx, mn = e.max(2), e.min(2)
 H = e.shape[0]
@@ -246,11 +302,20 @@ dark = (bh > 0.035).astype(np.uint8)
 k, lab, st, _ = cv2.connectedComponentsWithStats(dark & ((cloud < 0.25) & clear).astype(np.uint8), connectivity=8)
 small = np.zeros(k, bool)
 small[1:] = st[1:, cv2.CC_STAT_AREA] < 150
+# inside the cloud only a hard, compact dark spot goes (a bird the merge
+# kept, a leaf's trace at the birch's rim): darker than its closing by more
+# than any fold of the cloud is, and under 100 px. The cloud's own drawing
+# is softer and larger and stays exactly as merged.
+dc = (bh > 0.07).astype(np.uint8) & ((cloud >= 0.25) & clear).astype(np.uint8)
+k2, lab2, st2, _ = cv2.connectedComponentsWithStats(dc, connectivity=8)
+small2 = np.zeros(k2, bool)
+small2[1:] = st2[1:, cv2.CC_STAT_AREA] < 100
+print("dark spots in the cloud", int(small2[1:].sum()))
 # and under the birch, whatever is not sky-coloured (bright, or clearly
 # blue) is a leaf the estimate could not see past
 ge = enc(g)
 skylike = (Yb > 0.55) | ((ge[..., 2] - ge[..., 0] > 0.15) & (Yb > 0.3))
-fleck = kit.dilate(small[lab] | (dark.astype(bool) & under), 2) | kit.dilate(under & ~skylike, 1)
+fleck = kit.dilate(small[lab] | small2[lab2] | (dark.astype(bool) & under), 2) | kit.dilate(under & ~skylike, 1)
 clear &= ~fleck
 clear_w &= ~fleck
 # under the birch every kept pixel is also held to the sky round it: one
@@ -266,11 +331,47 @@ if under.any():
     fleck |= leafy
 print("flecks pushed over", int(fleck.sum()), "px")
 
+# the overhead wires: thin, long pieces of the near layer's matte. The frames
+# all hold them (they never move), so the merge does too, and the jpeg's
+# ring round each line reaches past the matte: 5 px more is pushed in.
+solid = kit.dilate(kit.erode(alpha > 0.3, 4), 4)
+thin = ((alpha > 0.03) & ~solid).astype(np.uint8)
+k, lab, st, _ = cv2.connectedComponentsWithStats(thin, connectivity=8)
+long_ = np.zeros(k, bool)
+long_[1:] = np.hypot(st[1:, cv2.CC_STAT_WIDTH], st[1:, cv2.CC_STAT_HEIGHT]) > 150
+wire = kit.dilate(long_[lab] & ~under, 5)
+clear &= ~wire
+clear_w &= ~wire
+print("wire ghost px", int(wire.sum()))
+
 w = clear_w.astype(np.float32)
 sky = kit.pushpull(g, w)
 sky = np.where(clear[..., None], g, sky)
-out = np.clip(np.round(enc(sky) * 255), 0, 255).astype(np.uint8)[:, :, ::-1]
-cv2.imwrite(f"{OUT}/sky.webp", out, [cv2.IMWRITE_WEBP_QUALITY, 88])
+
+# ---------------------------------------------------------------- 4. zenith
+# radial, centred above the frame (the camera looks nearly straight up, the
+# zenith a little past the top edge): towards the top the blue deepens and
+# saturates, towards the horizon it pales and softens, as a summer sky on
+# film. Keyed on blueness, so the cloud and its skirt keep their own grade.
+e = enc(sky)
+mx, mn = e.max(2), e.min(2)
+blue = kit.smoothstep(0.2, 0.5, (mx - mn) / (mx + 1e-4)) * kit.smoothstep(0.03, 0.12, e[..., 2] - e[..., 0])
+blue = kit.blur(blue.astype(np.float32), 2)[..., None]
+Hh, Ww = e.shape[:2]
+yy, xx = np.mgrid[0:Hh, 0:Ww].astype(np.float32)
+d = np.hypot((xx - 0.55 * Ww) / Hh, (yy + 0.75 * Hh) / Hh)  # top centre ~0.75, bottom corners ~1.9
+t = kit.smoothstep(0.75, 1.85, d)[..., None]
+Ys = (sky @ LUMA)[..., None]
+sat = 1.18 - 0.36 * t  # saturated at the top, paler below
+lift_ = 0.74 + 0.5 * t  # deeper at the top, lighter below
+zen = np.maximum(Ys + (sky - Ys) * sat, 0) * lift_
+sky = sky * (1 - blue) + zen * blue
+
+# dithered on output, so the long gradient cannot band
+rng = np.random.default_rng(84)
+dith = (rng.random(sky.shape, np.float32) + rng.random(sky.shape, np.float32) - 1)
+out = np.clip(np.round(enc(sky) * 255 + dith), 0, 255).astype(np.uint8)[:, :, ::-1]
+cv2.imwrite(f"{OUT}/sky.webp", out, [cv2.IMWRITE_WEBP_QUALITY, 90])
 c = enc(sky)[clear & (cloud > 0.5)]
 print("cloud display p50/p90/p99.9 luma", np.percentile(c @ LUMA, [50, 90, 99.9]).round(3), "max channel", c.max().round(3))
 print("sky.webp", os.path.getsize(f"{OUT}/sky.webp") // 1024, "KB")

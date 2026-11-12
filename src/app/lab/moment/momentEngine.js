@@ -63,8 +63,11 @@ const SKY_GRID = 48;
 // Summer film, with the halation kept to a thin warm ring (a GoPro frame
 // has dark leaves and birds against white cloud everywhere, and the default
 // amount turns every one of them orange) and less scan softness, so the
-// leaves keep their drawing.
-const FILM = { ...FILM_PRESETS.summer, halation: 0.2, halationLocal: 1, softness: 0.35, whitePoint: 1.45 };
+// leaves keep their drawing. The blue's depth is the bake's (a radial zenith
+// gradient, deep at the top and pale towards the horizon), so the film's own
+// blue deepening is eased off: at full strength it flattened that gradient
+// to one cobalt and crushed the thin veils of cloud into dark-blue blots.
+const FILM = { ...FILM_PRESETS.summer, halation: 0.2, halationLocal: 1, softness: 0.35, whitePoint: 1.45, blueDepth: 0.4 };
 const NEAR_STEP = 8; // plate px per near-layer cell
 const SUBJ_STEP = 4; // plate px per jumper cell
 
@@ -270,7 +273,10 @@ void main() {
 //     white, so the brightest cloud keeps its texture;
 //   - colour by tier: the cores warm-neutral (sunlit, R at least B), the
 //     body neutral, and the darker half of the cloud the cyan of the
-//     skylight that fills it (about 160/184/195), not violet-blue.
+//     skylight that fills it (about 160/184/195), not violet-blue; mostly
+//     the bake's own split tone, the tiers only steady it.
+// The body and the thin skirt take their tones from the bake rather than
+// from the film (see yt below).
 const GRADE_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -279,18 +285,21 @@ uniform sampler2D uSky;   // the sky layer alone, as projected (before film, mip
 uniform sampler2D uScene; // the scene before film; alpha: what stands in front of the sky
 uniform vec2 uTexel;      // 1 / target px
 uniform float uPx;        // device px per CSS px
+uniform float uOver;      // 0..1: the reveal's overexposure, 1 at its start
 out vec4 outColor;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // shoulder on display luma: 0.5 stays (the key's edge), the body lifts and
 // the top rolls off towards 0.968, so no channel of a core reaches 255
-float shoulder(float y) {
-  if (y <= 0.5) return y;
-  float s = y - 0.5;
-  float g = 0.5 + s * 1.65 / (1.0 + 1.311 * s);
-  // soft ceiling
+// soft ceiling
+float ceiling(float g) {
   float top = 0.968;
   float k = 0.035;
   return g < top - k ? g : top - k * exp(-(g - (top - k)) / k);
+}
+float shoulder(float y) {
+  if (y <= 0.5) return y;
+  float s = y - 0.5;
+  return ceiling(0.5 + s * 1.65 / (1.0 + 1.311 * s));
 }
 void main() {
   vec3 col = texture(uFilm, vUv).rgb;
@@ -310,7 +319,7 @@ void main() {
   // softer reach into the thin skirt where cloud turns to sky, so that
   // fringe takes the skylight too instead of staying violet
   float inner = (1.0 - smoothstep(0.15, 0.22, chroma)) * smoothstep(0.5, 0.58, dot(sky, LUMA));
-  float skirt = (1.0 - smoothstep(0.22, 0.4, chroma)) * smoothstep(0.38, 0.55, dot(sky, LUMA));
+  float skirt = (1.0 - smoothstep(0.22, 0.45, chroma)) * smoothstep(0.34, 0.55, dot(sky, LUMA));
   float key = max(inner, 0.9 * skirt) * (1.0 - front);
   if (key < 1e-3) {
     outColor = vec4(col, 1.0);
@@ -335,7 +344,19 @@ void main() {
   blur /= wsum;
   float y0 = dot(col, LUMA);
   float y = y0 + clamp(0.3 * (dot(sky, LUMA) - blur), -0.05, 0.05);
-  float yo = shoulder(y);
+  // The bake developed the cloud already (its own merge, shoulder and split
+  // tone, tops ~240, undersides ~180): the film's curve squeezes that range
+  // into a grey 190-215 and the shoulder above would have to stretch it back,
+  // which posterises it. So the body of the cloud takes the bake's own
+  // tones, opened a little round mid grey, with the film's fine detail
+  // (grain, dye-cloud texture) added back as a high-pass of the film.
+  // During the reveal the film's overexposure leads, as everywhere else.
+  float yb = dot(sky, LUMA);
+  vec2 t1 = 1.5 * uTexel;
+  float yn = 0.25 * (dot(texture(uFilm, vUv + vec2(t1.x, 0.0)).rgb, LUMA) + dot(texture(uFilm, vUv - vec2(t1.x, 0.0)).rgb, LUMA)
+    + dot(texture(uFilm, vUv + vec2(0.0, t1.y)).rgb, LUMA) + dot(texture(uFilm, vUv - vec2(0.0, t1.y)).rgb, LUMA));
+  float yt = ceiling(0.5 + (yb - 0.5) * 1.15 + clamp(0.3 * (yb - blur), -0.04, 0.04)) + (y0 - yn);
+  float yo = mix(shoulder(y), yt, smoothstep(0.36, 0.6, yb) * (1.0 - uOver));
   // colour by tier, as a ratio to luma
   vec3 shade = vec3(0.875, 1.025, 1.1);   // skylit fold, ~(160, 184, 195)
   vec3 body = vec3(0.974, 1.007, 1.007);  // ~(205, 212, 212)
@@ -345,10 +366,10 @@ void main() {
   // the sky layer carries its own split tone from the bake (warm tops,
   // skylit undersides): most of the hue is its, the tiers only steady it
   vec3 baked = sky / max(dot(sky, LUMA), 1e-3);
-  tint = mix(tint, baked, 0.6);
+  tint = mix(tint, baked, 0.85);
   // a little of the cloud's own colour survives, so the folds keep their drawing
   vec3 own = (col - y0) * (yo / max(y0, 1e-3));
-  vec3 graded = yo * tint + own * mix(0.2, 0.15, smoothstep(0.6, 0.85, yo));
+  vec3 graded = yo * tint + own * mix(0.12, 0.06, smoothstep(0.6, 0.85, yo));
   outColor = vec4(mix(col, graded, key), 1.0);
 }`;
 
@@ -852,6 +873,7 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.uniform1i(progGrade.u.uScene, 2);
     gl.uniform2f(progGrade.u.uTexel, 1 / pw, 1 / ph);
     gl.uniform1f(progGrade.u.uPx, dpr);
+    gl.uniform1f(progGrade.u.uOver, clamp((exposure - 0.12) / 2.4, 0, 1));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
 
