@@ -33,7 +33,10 @@ export default function Piece() {
   const rowRef = useRef(null);
   const inkRef = useRef(null);
   const tabRefs = useRef([]);
-  const geo = useRef({ tabs: [], w: 0, h: 0 });
+  // tabs: edges in row space. ox: the row's left edge in root space, and
+  // W: the root's width, so the column's clip can be written against the
+  // whole canvas while the springs keep working in row coordinates.
+  const geo = useRef({ tabs: [], w: 0, h: 0, ox: 0, W: 0 });
   const springs = useRef({ l: { x: 0, v: 0 }, r: { x: 0, v: 0 } });
   const target = useRef({ l: 0, r: 0, drag: false });
   const drag = useRef(null);
@@ -46,11 +49,13 @@ export default function Piece() {
   const paint = useCallback(() => {
     const ink = inkRef.current;
     if (!ink) return;
-    const { w } = geo.current;
+    const { ox, W } = geo.current;
     const { l, r } = springs.current;
-    const L = Math.round(l.x * 100) / 100;
-    const R = Math.round((w - r.x) * 100) / 100;
-    ink.style.clipPath = `inset(0px ${R}px 0px ${L}px round var(--it-radius))`;
+    // The ink layer is the whole canvas; the clip only bites left and right,
+    // so the highlight is a square-edged column running top to bottom.
+    const L = Math.round((ox + l.x) * 100) / 100;
+    const R = Math.round((W - ox - r.x) * 100) / 100;
+    ink.style.clipPath = `inset(0px ${R}px 0px ${L}px)`;
   }, []);
 
   // Geometry of the highlight at a fractional tab index: edges interpolate
@@ -167,7 +172,13 @@ export default function Piece() {
       root.style.setProperty("--it-fit", String(fit));
       return; // the size change re-fires the ResizeObserver
     }
+    // Sub-pixel offset of the row inside the root, in layout pixels (the
+    // box may be scaled by its container, so divide the transform back out).
+    const rb = root.getBoundingClientRect();
+    const k = root.offsetWidth ? rb.width / root.offsetWidth : 1;
     geo.current = {
+      ox: (row.getBoundingClientRect().left - rb.left) / k,
+      W: root.offsetWidth,
       w: row.offsetWidth,
       h: row.offsetHeight,
       tabs: tabRefs.current.map((el) => ({ l: el.offsetLeft, r: el.offsetLeft + el.offsetWidth })),
@@ -189,6 +200,7 @@ export default function Piece() {
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(rowRef.current);
+    ro.observe(rootRef.current);
     document.fonts?.ready.then(measure);
     return () => {
       ro.disconnect();
@@ -297,7 +309,12 @@ export default function Piece() {
             </button>
           ))}
         </div>
-        <div ref={inkRef} className="it-row it-row--ink" aria-hidden="true">
+      </div>
+      {/* The ink field: a full-canvas copy of the row set on black, laid out
+          the same way as the live row so the words register exactly, then
+          clipped to a vertical band. Not interactive; the row is the hit area. */}
+      <div ref={inkRef} className="it-ink" aria-hidden="true">
+        <div className="it-row">
           {TABS.map((label) => (
             <span key={label} className="it-tab">
               {label}

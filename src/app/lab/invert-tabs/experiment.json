@@ -1,10 +1,10 @@
 {
   "title": "Invert Tabs",
-  "description": "Four words set edge to edge at display scale on warm white: Albums, Singles, Live, Demos. A black slab springs between them, and the labels invert exactly where it covers them; with only a word-space between tabs its edges are always cutting through letters, so in flight a glyph is half black and half white. The leading edge runs on a stiffer spring than the trailing one, so the slab stretches as it travels and closes up as it lands. Drag along the row to scrub it; let go and it snaps to the nearest word with the speed you threw it at.",
+  "description": "Four words set edge to edge at display scale on warm white: Albums, Singles, Live, Demos. A square-edged column of black runs the full height of the frame and springs between them, and the labels invert exactly where it crosses them; with only a word-space between tabs its edges are always cutting through letters, so in flight a glyph is half black and half white. The leading edge runs on a stiffer spring than the trailing one, so the column stretches as it travels and closes up as it lands. Drag along the row to scrub it; let go and it snaps to the nearest word with the speed you threw it at.",
   "tags": ["Type", "Interface", "Motion"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
-  "intent": "Take the exclusion-tabs technique from https://paco.me/craft/tabs (a duplicated, inverted label row clipped to the highlight, so colour flips at the highlight's edge rather than per label) and make the split glyph the poster: display type fitted to the canvas, no track, tabs closed to a word-space, and the still frozen mid-flight so the lead/trail stretch shows.",
+  "intent": "Take the exclusion-tabs technique from https://paco.me/craft/tabs (a duplicated, inverted label row clipped to the highlight, so colour flips at the highlight's edge rather than per label) and make the split glyph the poster: display type fitted to the canvas, no track, tabs closed to a word-space, the highlight opened into a full-height colour field that slides across the poster, and the still frozen mid-flight so the lead/trail stretch shows.",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".it-bar", "from": [0.15, 0.5], "to": [0.85, 0.5] },
   "sources": ["https://paco.me/craft/tabs"]
