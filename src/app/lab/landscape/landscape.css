@@ -1,10 +1,20 @@
 /* Landscape: real text on planes in one perspective space.
    Every plane is set at the size it reads at when the camera frames it, so
-   tracking follows the law for that size: -0.043 x (size - 12). */
+   tracking follows the law for that size: -0.043 x (size - 12).
+
+   Depth after Cooper: every level of the hierarchy is one flat ink, and the
+   planes are composited with multiply, so where layers cross they darken
+   into each other like overlapping transparencies instead of fading out.
+     level 0  title     a light vermilion tint, a wash behind everything
+     level 1  chapters  full ink
+     level 2  entries   ultramarine
+     level 3  notes     vermilion, the red pencil in the margin */
 
 .ls {
   --ls-ground: #f2f0eb;
   --ls-ink: #141413;
+  --ls-tint: #f59a7f;
+  --ls-blue: #2238c4;
   --ls-accent: #d4391d;
   --font-weight-body: 460;
 
@@ -64,6 +74,7 @@
   transform-origin: 0 0;
   visibility: hidden;
   backface-visibility: hidden;
+  mix-blend-mode: multiply;
 }
 
 .ls-plane p,
@@ -89,7 +100,6 @@
   line-height: 28px;
   letter-spacing: -0.0172em;
   font-weight: var(--font-weight-strong);
-  color: var(--ls-accent);
 }
 
 .ls-title-h {
@@ -98,6 +108,7 @@
   line-height: 128px;
   letter-spacing: -0.039em;
   font-weight: var(--font-weight-semibold);
+  color: var(--ls-tint);
 }
 
 .ls-sub {
@@ -120,7 +131,6 @@
   letter-spacing: -0.17px;
   font-weight: var(--font-weight-body);
   font-variant-numeric: tabular-nums;
-  color: var(--ls-accent);
 }
 
 .ls-n {
@@ -147,6 +157,7 @@
 /* Level 2: dated entries. */
 .ls-entry {
   width: 360px;
+  color: var(--ls-blue);
 }
 
 .ls-date {
@@ -155,7 +166,6 @@
   letter-spacing: -0.09px;
   font-weight: var(--font-weight-meta);
   font-variant-numeric: tabular-nums;
-  color: var(--ls-accent);
 }
 
 .ls-entry-h {
@@ -178,7 +188,8 @@
 .ls-note {
   width: 240px;
   padding-left: 12px;
-  border-left: 1px solid var(--ls-accent);
+  border-left: 1px solid currentColor;
+  color: var(--ls-accent);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 20px;

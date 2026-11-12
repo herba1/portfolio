@@ -183,18 +183,15 @@ export function createLandscape(root, { embedded = false } = {}) {
       const wc = wAt(p.w / 2, p.h / 2);
       const wMin = Math.min(wAt(0, 0), wAt(p.w, 0), wAt(0, p.h), wAt(p.w, p.h));
       const st = p.last;
-      // depth of the plane centre is DIST x wc; r is how far it sits from
+      // depth of the plane centre is DIST x wc; lr is how far it sits from
       // the distance at which it reads at true size (log2, 0 = true size).
       const lr = Math.log2(wc / p.s);
+      // Depth is not fading: every plane keeps its flat ink at any distance,
+      // and recession reads as scale, foreshortening and multiply overlap.
+      // Only a plane the camera is about to pass through clears out of the
+      // way, and a plane shrunk past legibility to a speck is dropped.
       let op = 0;
-      if (wMin > 0.04 * s && wc > 0) {
-        op = lr < 0 ? smooth(-1.3, -0.15, lr) : 1 - 0.76 * smooth(0.08, 2.4, lr);
-        op *= 1 - smooth(4.6, 6.4, lr);
-      }
-      // out-of-focus layers also thin out, as Cooper's distant planes did
-      // circle of confusion, softer in front of focus than behind it
-      const coc = Math.min(10, (wc < s ? 4 : 7) * Math.abs(1 - s / wc));
-      op *= 1 - 0.55 * smooth(1.2, 7, coc);
+      if (wMin > 0.04 * s && wc > 0) op = smooth(-1.5, -0.8, lr) * (1 - smooth(4.4, 5.4, lr));
       if (op < 0.01) {
         if (st.vis !== "hidden") p.el.style.visibility = st.vis = "hidden";
         continue;
@@ -215,11 +212,14 @@ export function createLandscape(root, { embedded = false } = {}) {
       const opS = op > 0.995 ? "" : op.toFixed(3);
       if (st.op !== opS) p.el.style.opacity = st.op = opS;
 
-      // Depth of field around the camera's focus distance, in screen px,
+      // A light depth of field around the camera's focus distance, capped at
+      // 3 screen px so it softens an edge without turning type to mush;
       // converted to the plane's own px for the filter.
       const sc = (p.s / wc) * fit;
+      // Small, far type keeps its edge: the cap also shrinks with the plane.
+      const coc = Math.min(3, 1.5 * sc, 1.2 * Math.abs(Math.log2(wc / s)));
       let fl = "";
-      if (coc > 0.3 && sc > 0.06) fl = `blur(${Math.min(40, coc / sc).toFixed(2)}px)`;
+      if (coc > 0.35) fl = `blur(${(coc / sc).toFixed(2)}px)`;
       if (st.fl !== fl) p.el.style.filter = st.fl = fl;
 
       order.push([wc, p]);
