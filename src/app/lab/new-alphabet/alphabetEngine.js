@@ -154,15 +154,16 @@ function setWord(glyphs, n) {
   return { at, total };
 }
 
-// Lay out a word in cells around the raster's centre dot.
+// Lay out a word in cells from the raster's origin, which is the word's
+// own corner: the first stem on x = 0 and the baseline on y = 0, so the cap
+// line is always row -n. Those three never move with the raster; only the
+// vertices between them do.
 function layout(word, n) {
   const c = cutFor(n);
   const glyphs = [...word].map((ch) => parsed[ch]);
   const { at: starts, total } = setWord(glyphs, n);
-  const placed = glyphs.map((g, i) => ({ g, at: starts[i] }));
-  const ox = -Math.floor(total / 2);
-  const oy = -Math.floor(n / 2);
-  return placed.map(({ g, at }) => resolve(g, n, c).map((s) => ({ closed: s.closed, pts: s.pts.map(([px, py]) => [px + at + ox, py + oy]) })));
+  const letters = glyphs.map((g, i) => resolve(g, n, c).map((s) => ({ closed: s.closed, pts: s.pts.map(([px, py]) => [px + starts[i], py - n]) })));
+  return { letters, total };
 }
 
 // Width of a word in cap heights, for fitting it to the box.
@@ -201,10 +202,18 @@ export async function createAlphabet(host, { embedded = false } = {}) {
 
   // Live strokes: one per stroke of each glyph, keyed by slot and letter so
   // a retyped letter is a new set of strokes and an unchanged one moves.
-  // Points and targets are in px from the centre dot (cells x capH / n), so
-  // the word holds its cap height through a change of raster and the springs
-  // carry only the snap from each old dot to its new one.
+  // Points and targets are in px from the word's origin, its first stem on
+  // its baseline (cells x capH / n), so the word holds its cap height through
+  // a change of raster and the springs carry only the snap from each old dot
+  // to its new one. The baseline is pinned half a cap height below the
+  // screen's centre, so cap line and baseline never move.
   let strokes = [];
+  // The origin's distance left of the screen's centre: half the word's ink.
+  // A new raster rounds the word a little wider or narrower, and the origin
+  // glides there as one piece, dots and letters together, so that drift is
+  // never sprung letter by letter.
+  let orgX = 0;
+  let orgT = 0;
 
   const fit = () => {
     const W = stage.width;
@@ -215,6 +224,8 @@ export async function createAlphabet(host, { embedded = false } = {}) {
     // change of size and not something the springs have to animate.
     const k = capH / was;
     pitch *= k;
+    orgX *= k;
+    orgT *= k;
     for (const st of strokes) {
       for (const p of st.pts) Object.assign(p, { x: p.x * k, y: p.y * k, vx: p.vx * k, vy: p.vy * k });
       st.target = st.target.map(([x, y]) => [x * k, y * k]);
@@ -222,8 +233,10 @@ export async function createAlphabet(host, { embedded = false } = {}) {
   };
 
   const retarget = (spawn = false, immediate = false) => {
-    const lay = layout(word, n);
+    const { letters: lay, total } = layout(word, n);
     const cell = capH / n;
+    orgT = (-total * cell) / 2;
+    if (immediate) orgX = orgT;
     const next = [];
     // The word reseats letter by letter, and a letter's strokes always move
     // together, so its joins stay registered all the way.
@@ -239,7 +252,9 @@ export async function createAlphabet(host, { embedded = false } = {}) {
         return [st, target];
       }),
     );
-    // Which way each letter travels across the line to its new dots.
+    // Which way each letter travels along the line to its new dots, against
+    // the word's origin. The origin carries the word as a whole, so this is
+    // only the change of spacing, and that is what can crowd a neighbour.
     const shift = letters.map((live) => {
       let d = 0;
       let k = 0;
@@ -253,10 +268,10 @@ export async function createAlphabet(host, { embedded = false } = {}) {
       return k ? d / k : 0;
     });
     // The order follows the spacing: a letter never moves into the white of
-    // a neighbour that is still to go. As a word opens out, the ends leave
-    // first and each letter follows the one it would crowd; as it closes up,
-    // the letters next to the centre go first. A typed word is set left to
-    // right, as it is read.
+    // a neighbour that is still to go. The first stem holds, so as a word
+    // opens out the far end leaves first and each letter follows the one it
+    // would crowd; as it closes up, the letters next to the first go first.
+    // A typed word is set left to right, as it is read.
     const rank = [];
     const rankOf = (i) => {
       if (rank[i] !== undefined) return rank[i];
@@ -352,6 +367,7 @@ export async function createAlphabet(host, { embedded = false } = {}) {
   const D = 2 * Math.sqrt(K) * 0.82;
   function simulate(dt) {
     time += dt;
+    orgX = damp(orgX, orgT, 11, dt);
     for (const st of strokes) {
       if (time < st.due) continue;
       if (!st.born) {
@@ -406,23 +422,25 @@ export async function createAlphabet(host, { embedded = false } = {}) {
     ctx.setTransform(stage.dpr, 0, 0, stage.dpr, 0, 0);
     ctx.fillStyle = "#f2f0eb";
     ctx.fillRect(0, 0, W, H);
-    const cx = Math.round(W / 2);
-    const cy = Math.round(H / 2);
+    // The raster's origin is the word's: its first stem, on its baseline.
+    const x0 = Math.round(W / 2) + orgX;
+    const y0 = Math.round(H / 2) + capH / 2;
     const p = pitch;
 
-    // The raster.
+    // The raster, in rows up from the baseline and columns out from the
+    // first stem, so both always stand on a line of dots, even mid-drag.
     const r = clamp(p * 0.06, 0.75, 2.2);
     ctx.fillStyle = "rgba(24, 22, 20, 0.2)";
     const round = p > 14;
     ctx.beginPath();
-    const i0 = -Math.ceil(cx / p);
-    const i1 = Math.ceil((W - cx) / p);
-    const j0 = -Math.ceil(cy / p);
-    const j1 = Math.ceil((H - cy) / p);
+    const i0 = -Math.ceil(x0 / p);
+    const i1 = Math.ceil((W - x0) / p);
+    const j0 = -Math.ceil((H - y0) / p);
+    const j1 = Math.ceil(y0 / p);
     for (let j = j0; j <= j1; j++) {
-      const y = cy + j * p;
+      const y = y0 - j * p;
       for (let i = i0; i <= i1; i++) {
-        const x = cx + i * p;
+        const x = x0 + i * p;
         if (round) {
           ctx.moveTo(x + r, y);
           ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -453,17 +471,17 @@ export async function createAlphabet(host, { embedded = false } = {}) {
       const dx = a.x - b.x;
       const dy = a.y - b.y;
       const l = Math.hypot(dx, dy);
-      if (l < 1e-2) return [cx + a.x, cy + a.y];
+      if (l < 1e-2) return [x0 + a.x, y0 + a.y];
       const e = Math.min(Math.abs(dx), Math.abs(dy)) > l * 0.2 ? 0.2 : 0.5;
-      return [cx + a.x + (dx / l) * sw * e, cy + a.y + (dy / l) * sw * e];
+      return [x0 + a.x + (dx / l) * sw * e, y0 + a.y + (dy / l) * sw * e];
     };
     for (const st of strokes) {
       if (!st.born) continue;
       const P = st.pts;
       const L = P.length;
       for (let i = 0; i < L; i++) {
-        let x = cx + P[i].x;
-        let y = cy + P[i].y;
+        let x = x0 + P[i].x;
+        let y = y0 + P[i].y;
         if (!st.closed && i === 0 && L > 1) [x, y] = ext(P, 0, 1);
         if (!st.closed && i === L - 1 && L > 1) [x, y] = ext(P, L - 1, -1);
         if (i === 0) ctx.moveTo(x, y);
