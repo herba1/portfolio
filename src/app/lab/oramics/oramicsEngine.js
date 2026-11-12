@@ -23,9 +23,13 @@ import { createOramicsSound } from "./oramicsSound";
 // lays dense ink that pools where it lingers and at its ends and dries to a
 // darker rim; a quick one starves its bristles and leaves dry-brush streaks,
 // each bristle running out in its own places (seeded per stroke, so a mark
-// never changes once laid). What you see is that density as light through
-// the clear base; what the cells hear is the same light through a narrow
-// slit at the reader.
+// never changes once laid). The loops lie on a lightbox, black where there
+// is no film: what you see is the lamp through the clear base, cut by the
+// dye as 10^-D, so a pool goes black, a thin wash passes amber and the gaps
+// a dry brush leaves between its bristles let the lamp through. What the
+// cells hear is the same light through one hard slit at the reader, which
+// is drawn as that light: white through clear base, cut or coloured by
+// whatever ink crosses it.
 //
 // The reader also prints what the machine plays, onto a fifth loop below
 // the four, a wide print stock run in step with them and given over almost
@@ -37,16 +41,19 @@ import { createOramicsSound } from "./oramicsSound";
 // prints as the shape the timbre strip draws, swelled by the amplitude
 // strip, so a change of drawing is a change of print. The loop keeps its
 // print, so the track upstream of the reader is last lap's until the reader
-// writes over it; it arrives already printed by the lap before.
+// writes over it; it arrives already printed by the lap before. Fresh from
+// the head the print is crisp, dense black; last lap's has gone to a duller
+// grey-black, so the reader is the line where the new print begins.
 
-const GROUND = "#f2f0eb";
-const BASE = "#e5e6e0";
-const EDGE = "#a9a79f";
-const PERF_EDGE = "#b1afa7";
-const PRINT = "#97928a";
-const READER = "#6d6961";
-const TRACK = "#1e1b17"; // the printed black of the soundtrack
-const CLEAR = "#f4f3ee"; // its clear, modulated area
+// The loops lie on a lightbox: black where there is no film, and the film
+// lit from beneath, so everything on it is seen as transmitted light.
+const GROUND = "#090807";
+const LAMP = [255, 238, 208]; // the lightbox, a warm white
+const BASE_T = 0.9; // the clear base's own transmission
+const TRACK = "#060504"; // the printed black of the soundtrack, fresh
+const STALE = [44, 41, 38]; // the same black a lap on, gone dull
+const STALE_CLEAR = [192, 184, 170]; // and its clear, multiplied down
+const SLIT_K = 96; // device px either side of the slit its light reaches
 
 const STRIPS = 4;
 const PITCH = 0;
@@ -69,6 +76,7 @@ const VCA_FLOOR = 0.1; // clear film on the amplitude strip still leaks a little
 const HARM = 32; // harmonics read off the waveform strip
 const WAVE_N = 128; // samples down the strip for one cycle
 const TABLE_N = 256;
+const BLEED = 6; // device px a wet edge's dye can wick past it
 const PRINT_CYCLE = 224; // device px of film per cycle of the bottom note, in the print
 
 const frac = (x) => x - Math.floor(x);
@@ -102,10 +110,10 @@ const vn2 = (x, y) => {
   return a + (b - a) * fx + (c - a + (a - b - c + d) * fx) * fy;
 };
 
-// The dye: a warm black that holds back blue a little more than red, so
-// thin ink reads umber and heavy ink goes to black. Transmission per
-// channel for a density, as a lookup.
-const DYE = [1.62, 1.85, 2.15];
+// The dye: a warm black that holds back blue more than red, so a thin wash
+// passes amber and a pool goes to black. Its optical density D transmits
+// 10^-(D k) per channel, as a lookup.
+const DYE = [1.15, 1.5, 2.2];
 const CELL = 1.85; // the photocell's response to the same density
 const LUT_N = 2048;
 const LUT_S = LUT_N / 5;
@@ -114,9 +122,9 @@ const LUT_G = new Uint8ClampedArray(LUT_N);
 const LUT_B = new Uint8ClampedArray(LUT_N);
 for (let q = 0; q < LUT_N; q += 1) {
   const D = q / LUT_S;
-  LUT_R[q] = 255 * Math.exp(-D * DYE[0]);
-  LUT_G[q] = 255 * Math.exp(-D * DYE[1]);
-  LUT_B[q] = 255 * Math.exp(-D * DYE[2]);
+  LUT_R[q] = 255 * Math.pow(10, -D * DYE[0]);
+  LUT_G[q] = 255 * Math.pow(10, -D * DYE[1]);
+  LUT_B[q] = 255 * Math.pow(10, -D * DYE[2]);
 }
 
 // Height to pitch, pulled gently onto the pentatonic scale: flat plateaus
@@ -213,6 +221,7 @@ export function createOramics(host) {
     }
     resizePrint(Math.max(64, Math.round(L * dpr)));
     resizeInk();
+    gradients();
     // The reader's place is kept in laps; a new size moves it on screen, so
     // pick the reading up from wherever it now is rather than print the jump.
     readAt = null;
@@ -451,7 +460,15 @@ export function createOramics(host) {
     // A dry brush's edge is ragged, not cut.
     const rag = dry > 0.02 ? dry * 1.6 * (vn1(a / 3.1, s.seed ^ 0x51ed) - 0.5) * (d < 0 ? 1 : -1) : 0;
     const cov = clamp(0.5 - e + rag, 0, 1);
-    if (cov <= 0) return 0;
+    // A wet edge wicks a little dye out into the base, unevenly along it:
+    // a faint fringe the lamp shows as a warm halo round the mark.
+    const wet = (1 - dry) * ld;
+    let bleed = 0;
+    if (wet > 0.05 && e > -1) {
+      const bw = 0.7 + 1.7 * wet;
+      bleed = 0.075 * wet * Math.exp(-Math.max(0, e) / bw) * (0.45 + vn1(a / 11 + (d < 0 ? 57 : 0), s.seed ^ 0x6b1));
+    }
+    if (cov <= 0) return bleed;
     // The wet body: heavier with load, heavier still where it pooled, and
     // as it dries the dye migrates from the middle out to a darker rim.
     const pc = Math.min(1, pl);
@@ -478,11 +495,18 @@ export function createOramics(host) {
       const sf = Math.sin(Math.PI * f);
       D *= (rest + (1 - rest) * m) * (1 - 0.5 * dg * (1 - sf * sf));
     }
-    // The emulsion's own grain and the dye's clumping, fixed to the film.
+    // The hairs of the brush comb the dye into lanes along the stroke, a
+    // little more or less in each and changing slowly down it; a pool
+    // floods them level. Then the dye's slow clumping and the emulsion's
+    // grain, fixed to the film.
+    const sl = (d + 96) / 1.7;
+    const sj = Math.floor(sl);
+    const n0 = vn1(a / (22 + 34 * hash1(s.seed + sj * 31)), s.seed + sj * 113);
+    const n1 = vn1(a / (22 + 34 * hash1(s.seed + sj * 31 + 31)), s.seed + sj * 113 + 113);
+    const streak = n0 + (n1 - n0) * smooth(sl - sj) - 0.5;
     const cx = ((gx % N) + N) % N;
-    // Mostly in clumps and a slow mottle, only a little per pixel.
-    const grain = 1 + (0.14 - 0.08 * ld) * (hash2(cx, gy) - 0.5) + 0.34 * (vn2(cx / 5.3, gy / 5.3) - 0.5) + 0.26 * (vn2(cx / 31 + 7.1, gy / 23) - 0.5);
-    return cov * D * grain;
+    const grain = 1 + 0.1 * (hash2(cx, gy) - 0.5) + (0.42 - 0.3 * pc) * streak + 0.18 * (vn2(cx / 31 + 7.1, gy / 23) - 0.5);
+    return cov * D * grain + (1 - cov) * bleed;
   };
 
   // Lay stroke segments from `from` on into its tile. `full` starts over.
@@ -501,7 +525,7 @@ export function createOramics(host) {
       let y0 = Infinity;
       let y1 = -Infinity;
       for (let i = 0; i < m; i += 1) {
-        const r = Rr(i) + 2;
+        const r = Rr(i) + BLEED + 1;
         x0 = Math.min(x0, X(i) - r);
         x1 = Math.max(x1, X(i) + r);
         y0 = Math.min(y0, Y(i) - r);
@@ -518,10 +542,10 @@ export function createOramics(host) {
       const by = Y(i2);
       const ra = Rr(i);
       const rb = Rr(i2);
-      const bx0 = Math.floor(Math.min(ax - ra, bx - rb) - 2);
-      const bx1 = Math.ceil(Math.max(ax + ra, bx + rb) + 2);
-      const by0 = Math.floor(Math.min(ay - ra, by - rb) - 2);
-      const by1 = Math.ceil(Math.max(ay + ra, by + rb) + 2);
+      const bx0 = Math.floor(Math.min(ax - ra, bx - rb) - BLEED - 1);
+      const bx1 = Math.ceil(Math.max(ax + ra, bx + rb) + BLEED + 1);
+      const by0 = Math.floor(Math.min(ay - ra, by - rb) - BLEED - 1);
+      const by1 = Math.ceil(Math.max(ay + ra, by + rb) + BLEED + 1);
       if (!tileFit(s, bx0, by0, bx1, by1)) continue;
       const t = s.tile;
       const ex = bx - ax;
@@ -541,7 +565,7 @@ export function createOramics(host) {
           const dist = Math.sqrt(dx * dx + dy * dy);
           const r = ra + (rb - ra) * tt;
           const e = dist - r;
-          if (e > 1.4) continue;
+          if (e > BLEED) continue;
           const idx = row + x;
           if (e >= t.edge[idx]) continue;
           t.edge[idx] = e;
@@ -1189,59 +1213,67 @@ export function createOramics(host) {
   // strips and the print below them.
   const films = () => [...strips.map((st) => [st.y0, h]), [printY0, printH]];
 
+  // The lightbox under the film: a warm white, brightest under the reader's
+  // housing and falling away a little toward either end of the bed.
+  const illum = (x) => 0.8 + 0.2 * Math.exp(-(((x - rx) / (W * 0.34)) ** 2));
+  const rgb = (c) => `rgb(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0})`;
+  // The print loses its edge with time: how stale the print under screen x
+  // is, from just written (0) to a whole lap old (1). Downstream of the
+  // reader it was printed this lap, upstream it is last lap's.
+  const staleAt = (x) => {
+    const age = x < rx ? (rx - x) / L : 1 - (x - rx) / L;
+    return smoothstep(0.08, 1, age);
+  };
+  let baseFill = GROUND;
+  let staleMul = "#fff";
+  let staleLift = "#000";
+  const gradients = () => {
+    baseFill = g.createLinearGradient(0, 0, W, 0);
+    staleMul = g.createLinearGradient(0, 0, W, 0);
+    staleLift = g.createLinearGradient(0, 0, W, 0);
+    const n = 48;
+    const stops = [];
+    for (let i = 0; i <= n; i += 1) stops.push(i / n);
+    const cut = rx / W;
+    stops.push(cut - 1e-4, cut);
+    stops.sort((p, q) => p - q);
+    for (const f of stops) {
+      const x = f * W;
+      const li = illum(x) * BASE_T;
+      baseFill.addColorStop(f, rgb(LAMP.map((c) => c * li)));
+      const x2 = f >= cut ? Math.max(x, rx + 0.01) : Math.min(x, rx - 0.01);
+      const st = staleAt(x2);
+      staleMul.addColorStop(f, rgb(STALE_CLEAR.map((c) => 255 + (c - 255) * st)));
+      staleLift.addColorStop(f, rgb(STALE.map((c) => c * st)));
+    }
+  };
+
+  // The film on the box: clear base, lit. Its perforations are holes, so
+  // the bare lamp shows through them, a shade brighter than the base.
   const drawFilm = () => {
     const P = L / perfs;
     const pw = 1.98 * mm;
     const ph = 2.79 * mm;
     const r = 0.5 * mm;
     const off = frac(phase) * L;
-    const offS = frac(phase - seamU) * L;
     const first = Math.floor(off / P) - 1;
-    const line = 1 / dpr;
-    g.lineWidth = line;
     for (const [y0, fh] of films()) {
-      g.fillStyle = BASE;
+      g.fillStyle = baseFill;
       g.fillRect(0, y0, W, fh);
-      // The splice that makes it a loop: a butt cut under clear tape. All
-      // four loops were cut to one length and spliced in register.
-      for (const seam of [-offS, L - offS]) {
-        if (seam < -P * 2 || seam > W + P * 2) continue;
-        const tw = P * 2;
-        g.fillStyle = "rgba(206, 196, 164, 0.08)";
-        g.fillRect(seam - tw / 2, y0, tw, fh);
-        g.fillStyle = "rgba(150, 144, 128, 0.28)";
-        g.fillRect(Math.round((seam - tw / 2) * dpr) / dpr, y0, line, fh);
-        g.fillRect(Math.round((seam + tw / 2) * dpr) / dpr, y0, line, fh);
-        g.fillStyle = EDGE;
-        g.fillRect(Math.round(seam * dpr) / dpr, y0, line, fh);
-      }
-      // Perforations: clear holes, so the ground shows through them.
+      g.beginPath();
       for (let i = first; i <= first + perfs + 2; i += 1) {
         const x = i * P - off + (P - pw) / 2;
         if (x > W || x + pw < 0) continue;
-        for (const top of [y0 + 2.01 * mm, y0 + fh - 2.01 * mm - ph]) {
-          g.beginPath();
-          g.roundRect(x, top, pw, ph, r);
-          g.fillStyle = GROUND;
-          g.fill();
-          g.strokeStyle = PERF_EDGE;
-          g.stroke();
-        }
+        g.roundRect(x, y0 + 2.01 * mm, pw, ph, r);
+        g.roundRect(x, y0 + fh - 2.01 * mm - ph, pw, ph, r);
       }
-      // Edge print: a frame tick every four perforations.
-      g.fillStyle = PRINT;
-      const tickY = y0 + 0.55 * mm;
-      for (let i = first; i <= first + perfs + 2; i += 1) {
-        const idx = ((i % perfs) + perfs) % perfs;
-        const x = i * P - off;
-        if (x < -10 || x > W + 10) continue;
-        if (idx % 4 === 0) g.fillRect(Math.round(x * dpr) / dpr, tickY, line, 0.9 * mm);
-      }
+      g.fillStyle = "rgba(255, 248, 232, 0.17)";
+      g.fill();
     }
   };
 
-  // The ink as the eye gets it: lamp light through the base, darkened by the
-  // dye. Multiplied onto the film one device pixel to one film pixel.
+  // The ink as the eye gets it: the lamp through the base, cut by the dye.
+  // Multiplied onto the film one device pixel to one film pixel.
   const drawInk = () => {
     if (!inkCanvas) return;
     g.save();
@@ -1255,8 +1287,10 @@ export function createOramics(host) {
     g.restore();
   };
 
-  // The printed soundtrack: black where printed, opened by the signal in a
-  // clear slit mirrored about the track's centre line.
+  // The printed soundtrack: opaque where printed, opened by the signal in a
+  // clear slit mirrored about the track's centre line. Fresh from the head
+  // it is crisp, dense black against lit base; a lap on it has gone to a
+  // duller grey-black.
   const drawTrack = () => {
     const mid = trackTop + trackH / 2;
     const half = (trackH / 2) * 0.94;
@@ -1264,9 +1298,9 @@ export function createOramics(host) {
     const cFirst = Math.floor(base) - 1;
     const cLast = Math.ceil(base + W * dpr) + 1;
     const X = (c) => (c + 0.5 - base) / dpr;
+    const at = (k) => ((k % N) + N) % N;
     let c = cFirst;
     while (c <= cLast) {
-      const at = (k) => ((k % N) + N) % N;
       if (!printed[at(c)]) {
         c += 1;
         continue;
@@ -1285,89 +1319,119 @@ export function createOramics(host) {
       for (let k = e; k >= c; k -= 1) g.lineTo(X(k), mid + print[at(k)] * half);
       g.lineTo(x0, mid + print[at(c)] * half);
       g.closePath();
-      g.fillStyle = CLEAR;
+      g.fillStyle = baseFill;
       g.fill();
       c = e + 1;
     }
-  };
-
-  // Warm light blooming either side of the line, over a span of it.
-  const bloom = (top, span, a, reach) => {
-    g.globalCompositeOperation = "screen";
-    const glow = g.createLinearGradient(rx - reach, 0, rx + reach, 0);
-    glow.addColorStop(0, "rgba(255, 170, 90, 0)");
-    glow.addColorStop(0.5, `rgba(255, 186, 110, ${0.62 * a})`);
-    glow.addColorStop(1, "rgba(255, 170, 90, 0)");
-    g.fillStyle = glow;
-    g.fillRect(rx - reach, top - 1, reach * 2, span + 2);
+    g.globalCompositeOperation = "multiply";
+    g.fillStyle = staleMul;
+    g.fillRect(0, trackTop, W, trackH);
+    g.globalCompositeOperation = "lighten";
+    g.fillStyle = staleLift;
+    g.fillRect(0, trackTop, W, trackH);
     g.globalCompositeOperation = "source-over";
   };
 
-  const drawReader = () => {
+  // The reader: one slit of hard light under the whole transport. It is
+  // the lamp concentrated, so the film over it is lit many times brighter
+  // than the box, and what shows is that light through whatever is there:
+  // white-hot through clear base and in the gaps between the loops, amber
+  // through a thin wash, cut dead by a pool. Its spill reaches either side
+  // of the slit, through the same ink. On the print loop it is the exposing
+  // beam, through the opening the head is writing.
+  let slitCanvas = null;
+  let slitCtx = null;
+  let slitImg = null;
+  const SW = SLIT_K * 2 + 1;
+  const core = new Float32Array(SW);
+  const halo = new Float32Array(SW);
+  // On the print, the track just exposed still glows downstream of the
+  // head for a moment: the newest few millimetres of this lap's print.
+  const after = new Float32Array(SW);
+  for (let i = 0; i < SW; i += 1) {
+    after[i] = i < SLIT_K ? 0.3 * Math.exp(-(SLIT_K - i) / 30) : 0;
+    const dx = Math.abs(i - SLIT_K);
+    core[i] = dx === 0 ? 2.8 : dx === 1 ? 1.9 : dx === 2 ? 0.45 : 0;
+    halo[i] = 0.4 * Math.exp(-dx / 3.4) + 0.15 * Math.exp(-dx / 20);
+  }
+  const CORE_C = [255, 253, 248];
+  const HALO_C = [255, 214, 158];
+  const drawSlit = () => {
+    const Hd = Math.round(H * dpr);
+    if (!slitCanvas) {
+      slitCanvas = document.createElement("canvas");
+      slitCtx = slitCanvas.getContext("2d");
+    }
+    if (slitCanvas.height !== Hd) {
+      slitCanvas.width = SW;
+      slitCanvas.height = Hd;
+      slitImg = slitCtx.createImageData(SW, Hd);
+    }
+    const data = slitImg.data;
+    const px0 = Math.floor(rx * dpr);
+    const xo = Math.round(-frac(phase) * N);
+    const cInk = px0 - xo - SLIT_K;
+    const cTrk = Math.floor(px0 + phase * N) - SLIT_K;
     const ext = Math.max(4, Math.round(pad * 0.7));
-    const line = 1 / dpr;
-    const yTop = strips[0].y0 - ext;
-    const yBot = printY0 + printH + ext;
-    g.fillStyle = READER;
-    g.fillRect(rx - line / 2, yTop, line, yBot - yTop);
-    const tick = 2.4 * mm;
-    g.fillRect(rx - tick / 2, yTop, tick, line);
-    g.fillRect(rx - tick / 2, yBot - line, tick, line);
-
-    // The lamp's line across every strip: a faint wash on the clear base
-    // either side of the slit, so it reads as light and not a rule.
-    for (const [y0, fh] of films()) bloom(y0 + 0.2 * mm, fh - 0.4 * mm, 0.16, 0.9 * mm);
-
-    // The line of light on the film, row by row, as the cells see it:
-    // bright through clear base, cut by the ink, leaking through its gaps.
-    const c = Math.floor((phase + rx / L) * N + 1e-6);
-    const cm = ((c % N) + N) % N;
-    const rowH = 1 / dpr;
-    for (let y = 0; y < R; y += 1) {
-      const T = Math.exp(-comp[y * N + cm] * CELL);
-      if (T > 0.985) continue;
-      g.fillStyle = `rgba(255, 238, 205, ${0.2 + 0.75 * Math.sqrt(T)})`;
-      g.fillRect(rx - 1, rowTop + y * rowH, 2, rowH);
-    }
-    // Where it sounds, the light blooms warm around the shadow it crossed:
-    // each voice on the pitch strip, and on the control strips as hard as
-    // that stage is working.
-    for (const v of voices) {
-      if (v.lv < 0.01) continue;
-      bloom(v.y - v.span / 2, v.span, clamp(v.lv / 0.55, 0, 1), 1.6 * mm);
-    }
-    const work = [
-      [AMP, (shaped.env - VCA_FLOOR) / (1 - VCA_FLOOR)],
-      [WAVE, 0.55],
-      [VIB, 0.25 + 0.75 * shaped.vib],
-    ];
-    for (const [k, a] of work) {
-      const st = strips[k];
-      let lo = -1;
-      let hi = -1;
-      for (let y = st.bA; y < st.bB; y += 1) {
-        if (comp[y * N + cm] * CELL > 0.105) {
-          if (lo < 0) lo = y;
-          hi = y;
+    const yA = strips[0].y0 - ext;
+    const yB = printY0 + printH + ext;
+    const mid = trackTop + trackH / 2;
+    const half = (trackH / 2) * 0.94;
+    const fl = films();
+    for (let yd = 0; yd < Hd; yd += 1) {
+      const y = (yd + 0.5) / dpr;
+      const o0 = yd * SW * 4;
+      // Where this row of the slit is: off the bed, a gap between loops,
+      // a control strip (with ink), or the print.
+      let kind = 0;
+      let fade = 1;
+      if (y >= yA && y <= yB) {
+        kind = 1;
+        for (let f = 0; f < fl.length; f += 1) {
+          if (y >= fl[f][0] && y < fl[f][0] + fl[f][1]) kind = f < STRIPS ? 2 : 3;
         }
+        if (kind === 1) fade = smoothstep(yA, strips[0].y0, y) * smoothstep(yB, printY0 + printH, y);
       }
-      if (lo >= 0 && a > 0.02) bloom(rowTop + lo / dpr, (hi - lo + 1) / dpr, a, 1.6 * mm);
+      if (kind === 0 || fade <= 0) {
+        data.fill(0, o0, o0 + SW * 4);
+        continue;
+      }
+      const iy = Math.floor((y - rowTop) * dpr);
+      const inInk = kind === 2 && iy >= 0 && iy < R;
+      const inTrack = kind === 3 && y >= trackTop && y < trackTop + trackH;
+      const dy = Math.abs(y - mid);
+      for (let i = 0; i < SW; i += 1) {
+        let tr = fade;
+        let tg = fade;
+        let tb = fade;
+        if (kind > 1) {
+          tr = tg = tb = BASE_T;
+          if (inInk) {
+            const cc = (((cInk + i) % N) + N) % N;
+            const q = Math.min(LUT_N - 1, (comp[iy * N + cc] * LUT_S) | 0);
+            tr *= LUT_R[q] / 255;
+            tg *= LUT_G[q] / 255;
+            tb *= LUT_B[q] / 255;
+          } else if (inTrack) {
+            const cc = (((cTrk + i) % N) + N) % N;
+            if (printed[cc] && dy > print[cc] * half) tr = tg = tb = 0.004;
+          }
+        }
+        const pc = core[i];
+        const ph = inTrack ? halo[i] + after[i] : halo[i];
+        const o = o0 + i * 4;
+        data[o] = tr * (pc * CORE_C[0] + ph * HALO_C[0]);
+        data[o + 1] = tg * (pc * CORE_C[1] + ph * HALO_C[1]);
+        data[o + 2] = tb * (pc * CORE_C[2] + ph * HALO_C[2]);
+        data[o + 3] = 255;
+      }
     }
-    // And the print head, exposing the track at this instant.
-    if (readAt !== null && printed[((Math.floor(readAt * N) % N) + N) % N]) {
-      const open = Math.max(1, head * (trackH / 2) * 0.94);
-      const mid = trackTop + trackH / 2;
-      // The lamp's spill on the film around the head, so it reads on clear base too.
-      const sr = trackH * 0.36;
-      const spill = g.createRadialGradient(rx, mid, 0, rx, mid, sr);
-      spill.addColorStop(0, "rgba(232, 150, 70, 0.34)");
-      spill.addColorStop(1, "rgba(232, 150, 70, 0)");
-      g.fillStyle = spill;
-      g.fillRect(rx - sr, mid - sr, sr * 2, sr * 2);
-      bloom(mid - open, open * 2, 1, 1.1 * mm);
-      g.fillStyle = "rgba(255, 245, 222, 1)";
-      g.fillRect(rx - 1, mid - open, 2, open * 2);
-    }
+    slitCtx.putImageData(slitImg, 0, 0);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = "lighter";
+    g.drawImage(slitCanvas, px0 - SLIT_K, 0);
+    g.restore();
   };
 
   const draw = () => {
@@ -1377,13 +1441,7 @@ export function createOramics(host) {
     drawFilm();
     drawInk();
     drawTrack();
-    g.fillStyle = EDGE;
-    const line = 1 / dpr;
-    for (const [y0, fh] of films()) {
-      g.fillRect(0, y0, W, line);
-      g.fillRect(0, y0 + fh - line, W, line);
-    }
-    drawReader();
+    drawSlit();
   };
 
   // --- frame -------------------------------------------------------------
