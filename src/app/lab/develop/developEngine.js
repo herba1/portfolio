@@ -39,8 +39,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    insulators never pick them up;
 //  - the strata lifted towards you in z (a scale about the principal point
 //    in proportion to nearness), held clean by the fill behind them.
-// On the structure the front is a thin band of light, which the film's
-// halation turns warm. On the sky it is a soft band (an eighth of the sky's
+// On the structure the front is the film's halation: a thin warm ring on
+// the steel's rim as it passes, never a fill across a member's face. On the sky it is a soft band (an eighth of the sky's
 // key, never narrower on screen than a few dozen pixels where the key is
 // steep) with no light of its own, only a faint amber halation in its middle
 // where it crosses cloud, so the edge glows instead of being drawn. Release
@@ -69,6 +69,7 @@ const SIGMA = 0.016; // structure band half-width in key units
 const SKY_BAND = 0.12; // sky band width, in the sky's own key (0..1)
 const SKY_PX = 80; // ...and never narrower on screen than this, in print px
 const HALO = 0.07; // amber halation in the middle of the sky's band, linear
+const HALO_FG = 0.3; // ...and on the steel's rim as the front crosses it
 const F_START = -0.1;
 const F_END = 1.06;
 
@@ -267,11 +268,11 @@ const float SKY_BAND = ${f(SKY_BAND)};
 const float SKY_PX = ${f(SKY_PX)};
 const float BAND = ${f(BAND)};
 const float HALO = ${f(HALO)};
+const float HALO_FG = ${f(HALO_FG)};
 // The cool white-blue an overexposed sky washes out to (linear).
 const vec3 WASH = vec3(0.66, 0.77, 0.92);
 // The level the latent sky's blue is lifted towards (linear luminance).
 const float SKY_LAT = 0.2;
-const vec3 LEAK = vec3(1.0, 0.8, 0.58);
 // Halation: the red layer's glow, amber-orange (linear).
 const vec3 AMBER = vec3(1.0, 0.5, 0.12);
 const vec3 WARM = vec3(1.04, 0.9, 0.66); // its filter on the light under it
@@ -409,19 +410,36 @@ vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   return r + AMBER * (g * HALO);
 }
 
+// The front on the steel is halation, not light: a thin warm ring on the
+// steel's rim where the developer meets it. Each member's key is nearly
+// constant, so a band in key units alone lights a whole member at once (a
+// flat cream cut-out); the band is held to a screen-space width (frontOn)
+// and then to the rim, a few pixels either side of the matte's edge, so it
+// never fills a face. It is the red layer's glow: it filters what is under it
+// warm and adds a little amber (halate), and never comes up past the cloud
+// round it (cap), so the nearest, darkest steel comes up dark, ringed.
+float frontOn(float d, vec2 iuv) {
+  float sig = uSig;
+  // trailing a little behind; never under a pixel and a half wide
+  float w = max(0.35 * sig, 1.5 * fwidth(d)) * (d >= 0.0 ? 1.0 : 1.3);
+  float leak = 0.78 + 0.22 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
+  return exp(-(d * d) / (w * w)) * (uBand / BAND) * leak;
+}
+vec3 halate(vec3 r, float g, float cap) {
+  vec3 h = mix(r, r * WARM, g) + AMBER * (g * HALO_FG);
+  float l0 = dot(r, LUMA);
+  float l1 = dot(h, LUMA);
+  float top = max(cap, l0);
+  return l1 > top ? r + (h - r) * clamp((top - l0) / max(l1 - l0, 1e-4), 0.0, 1.0) : h;
+}
+
 // The structure at key distance d past the front (d < 0: developed).
-vec3 develop(vec3 c, float d, vec2 iuv, float cap, vec3 wash) {
+vec3 develop(vec3 c, float d, vec2 iuv, float cap, vec3 wash, float rim) {
   float sig = uSig;
   float dev = 1.0 - smoothstep(-0.3 * sig, 0.7 * sig, d);
   // the latent steel may come up towards the sky's tone, never past it
   vec3 r = liftUnder(c, latent(c, d, dev, wash), cap);
-  // The front: light where developer meets paper, trailing a little behind.
-  float w = d >= 0.0 ? sig : sig * 1.3;
-  float b = exp(-(d * d) / (w * w));
-  float leak = 0.78 + 0.22 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
-  // Light adds, but the paper is near white already: let it roll off there.
-  float room = 1.0 - 0.5 * smoothstep(0.5, 1.1, dot(r, LUMA));
-  return r + LEAK * (b * uBand * leak * room);
+  return halate(r, frontOn(d, iuv) * rim, cap);
 }
 
 void main() {
@@ -433,9 +451,14 @@ void main() {
   vec3 pm = max(texture(uPlate, q).rgb - (1.0 - a) * texture(uFill, q).rgb, 0.0);
   pm = min(pm, vec3(a)) * step(0.004, a);
   float dF = ahead(toFg(texture(uKey, q).r));
-  vec4 fg = mix(vec4(pm, a), texture(uFgBlur, vUv), smoothstep(0.25, 1.25, cocOf(dF)));
-  // where the structure is on screen and where it was baked, dilated
-  float cov = max(cover(q), cover(iuv));
+  float mF = smoothstep(0.25, 1.25, cocOf(dF));
+  vec4 fg = mix(vec4(pm, a), texture(uFgBlur, vUv), mF);
+  // Where the structure is on screen and where it was baked, dilated. Where
+  // the steel is defocused it covers the sky only as far as its disc does:
+  // held to the sharp matte, the sky's latent lift stopped at the steel's
+  // in-focus silhouette, a hard second contour inside the soft one, and the
+  // wires' paths showed through the latent truss as seams.
+  float cov = mix(max(cover(q), cover(iuv)), clamp(1.5 * fg.a, 0.0, 1.0), mF);
 
   // Sky, as the lens sees it. The cap, for the latent steel: the developed
   // cloud's luminance here, the brightest the finished print reaches round
@@ -453,7 +476,14 @@ void main() {
   // a negative, light-on-blue, once the sky went deep).
   vec3 skyHere = gradeSky(textureLod(uFill, iuv, 4.0).rgb, iuv);
   vec3 wash = 1.15 * mix(skyHere, WASH * dot(skyHere, LUMA) / dot(WASH, LUMA), 0.3);
-  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap, wash) * fg.a;
+  // The steel's rim: its silhouette on screen, and a few pixels inside the
+  // matte's edge (where a coarser mip of it falls off).
+  float aM = textureLod(uAlpha, q, 2.5).r;
+  float rim = max(smoothstep(0.0, 0.15, fwidth(fg.a)), smoothstep(0.03, 0.3, a - aM));
+  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap, wash, rim) * fg.a;
+  // ...and the glow spills a little past the silhouette onto the sky.
+  float spill = smoothstep(0.02, 0.3, aM - a) * (1.0 - fg.a);
+  sky = halate(sky, 0.4 * frontOn(dF, iuv) * spill, cap);
   o = vec4(fgP + sky * (1.0 - fg.a), 1.0);
 }`;
 
