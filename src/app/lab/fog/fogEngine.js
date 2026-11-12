@@ -36,8 +36,13 @@ import { createStage, clamp } from "../_kit/stage";
 //                  airmass, with the clouds' local detail kept through the veil;
 //                  plus the sun's light scattered forward (Henyey-Greenstein,
 //                  g 0.6, warm-white), strong toward the sun past the top edge
-//                  and next to nothing in the low sky, which looks away from it;
-//                  held off the deepest shadows of what is still clearly seen
+//                  and next to nothing in the low sky, which looks away from it
+//   towers         a transmittance, not a veil: each tower's light mixes
+//                  toward the air's by fogAmt = 1 - T, and the air's light is
+//                  multiplied by the tower's own build (its light against its
+//                  local mean), so darks scale toward the sky's blue instead
+//                  of lifting to it; clear air takes the near glass's shadows
+//                  to the print's black point, the anchor the haze recedes from
 //   cumulus        lit in the plate (clouds.py); here their cover is only read
 //                  back, against the open blue under them
 //   split grade    over the air the haze lays on a cloud, by the luminance it
@@ -70,10 +75,10 @@ const AIRMASS_FLOOR = 0.15;
 const HAZE_COL = "#8FB8D4";
 const HAZE_TOP = [26, 58]; // degrees: horizon haze below, the sky's own light above
 // The air in the canyon sees less of the sky than the open column does (the
-// towers hide most of it), so the light it scatters in front of a tower is a
-// little dimmer than the sky's veil at the same elevation: a tower lost in the
-// haze sits just under the sky behind it, a silhouette, never a lighter slab.
-const CANYON = 0.82;
+// towers hide most of it), so the light it scatters in front of a tower is
+// well under the sky's veil at the same elevation: a tower lost in the haze
+// sits under the sky behind it, a worm's-eye silhouette, never a lighter slab.
+const CANYON = 0.62;
 // And it is bluer than the open column's veil: the canyon's air is lit by the
 // open blue overhead, not by the long horizon column, so low down it sits this
 // far from the horizon haze toward the open sky's own blue at its elevation,
@@ -156,7 +161,7 @@ const visibility = (() => {
 // keeps over 90% and its black point.
 const STREET_MID = [2.3, 30, 60]; // density (x the column's), and its ramp in x, metres
 const STREET_BANK = [3.2, 150, 250]; // the bank down the street, past the canyon
-const HS_STREET = 70;
+const HS_STREET = 120;
 // Only the last stretch of the drag, the arrival's white-blue field, closes
 // the clear pocket: full haze from the eye, so the near glass goes last.
 const CLOSE = [0.82, 1];
@@ -177,15 +182,19 @@ const LEVELS = 6;
 // veil that kept only part of them read as a blurrier plate behind the glass).
 const DETAIL_W = [0, 0, 0, 1];
 const DETAIL_K = 1.0;
-// A tower the haze takes keeps its build the same way: its floors and mullions
-// (the plate less a normalised blur of the tower pixels alone, at the scale of
-// its floors, ~30 plate px on the far tower) come back over the in-scatter at
-// the square root of the transmittance, never under a fifth, so at fog 0.5
-// the far tower is a sky-tinted version of itself, faint cobalt on cobalt,
-// not a flat slab. Tower-only, so no sky bleeds in as a rim at the silhouette.
-const FLOORS_LOD = 3; // 480 x 320, then one 13-tap step down to 240 x 160
-const FLOORS_POW = 0.5;
-const FLOORS_MIN = 0.22;
+// A tower the haze takes keeps its build: the air's light in front of it is
+// multiplied by the tower's light against its local mean (the plate's tower
+// pixels alone, a normalised blur a little wider than its floors, ~120 plate
+// px), so its floors and mullions and shadowed bays scale the air
+// instead of vanishing under it. Bright glints are held to BUILD_MAX of the
+// mean, and deep in the haze the build softens toward BUILD_FAR as an exponent,
+// faint cobalt on cobalt, never a flat slab. Tower-only, so no sky bleeds in
+// as a rim at the silhouette.
+const FLOORS_LOD = 3; // 480 x 320, then 13-tap steps down to 120 x 80
+const MASS_LEVEL = 2; // 120 x 80: the mean a tower's build is read against
+const BUILD_MAX = 2.5;
+const BUILD_FAR = 0.85;
+const BUILD_SOFT = 0.35;
 // And it sits under what is behind it: the air light in front of a tower is
 // held under this share of the hazed sky's luminance next to its silhouette
 // (the cumulus' and the gaps' light at the scale of their forms, through the
@@ -228,11 +237,11 @@ const SUN_G = 0.6;
 const SUN_COL = "#FFF1E2";
 const SUN_K = 0.13; // the lobe's strength against the sky's light (its mean over the sphere)
 const SUN_SKY = 0.4; // over the open sky, in the sky's own colour
-// The deepest shadows keep their black: the air's light is held off what is
-// darker than this (linear) on a solid that is still clearly seen, so the
-// near glass keeps its blacks while a far tower still fades to the sky.
-const SHADOW_LIN = 0.18;
-const SHADOW_K = 0.9;
+// Clear air keeps its blacks: on a solid still clearly seen, light under
+// TOE_TOP (linear) is taken down toward TOE of itself, so the near glass's
+// deepest reflections print under about 35 of 255 and anchor the frame.
+const TOE = 0.4;
+const TOE_TOP = 0.1;
 // The sun's direction in the plate's camera frame (x right, y down, z forward).
 const sunDir = () => {
   const r = Math.PI / 180;
@@ -338,7 +347,7 @@ uniform sampler2D uColor;
 uniform sampler2D uAux;
 uniform float uLod;
 uniform float uOpen; // 1: the open gaps between the clouds only
-uniform float uSolid; // 1: the towers' light instead, for their floors' blur
+uniform float uSolid; // 1: the towers' light instead, for the mean their build is read against
 void main() {
   vec3 c = textureLod(uColor, vUv, uLod).rgb;
   float m = textureLod(uAux, vUv, 0.0).g;
@@ -406,7 +415,7 @@ uniform sampler2D uColor;
 uniform sampler2D uAir;
 uniform sampler2D uDetail; // the sky's light at the scale of the cumulus' forms
 uniform sampler2D uGap;    // the open gaps' light alone, filled in under the clouds
-uniform sampler2D uFloors; // the towers' light alone at the scale of their floors
+uniform sampler2D uMass;   // the towers' light alone, a normalised blur wider than their floors
 uniform vec4 uRect;    // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uSkyMean;  // display-encoded, the fallback where the blur saw no sky
@@ -463,7 +472,8 @@ void main() {
   // The sky behind the haze is veiled by the in-scatter below, never blurred
   // (convolving the clouds reads as a lens, not as air).
   float soft = (1.0 - Tt.g) * (1.0 - Tt.g) * (1.0 - cov);
-  vec3 scene = plate(uv, soft * ${(1.6 + Math.log2(PLATE_W / 2400)).toFixed(3)});
+  float softLod = soft * ${(1.6 + Math.log2(PLATE_W / 2400)).toFixed(3)};
+  vec3 scene = plate(uv, softLod);
 
   // How much of this pixel is cumulus: its cover, read against the open blue
   // under the clouds (how much of that blueness is gone). The plate's clouds
@@ -520,10 +530,6 @@ void main() {
   vec3 sunSky = mix(air / max(luma(air), 1e-3) * lobe * ${SUN_SKY.toFixed(2)}, sun, cloud);
   vec3 sunTower = open / max(luma(open), 1e-3) * lobe * ${SUN_SKY.toFixed(2)} * ${CANYON.toFixed(2)};
 
-  // The deepest shadows of a solid still clearly seen keep their black: the
-  // air's light is held off them (the near glass stays inked; a far tower,
-  // its transmittance gone, still fades whole into the haze).
-  float deep = (1.0 - smoothstep(0.0, ${SHADOW_LIN.toFixed(3)}, luma(scene))) * Tt.g;
   vec4 dtl = texture(uDetail, uv);
   vec3 forms = pow(dtl.rgb / max(dtl.a, 1e-3), vec3(2.2));
   // The tower's air sits under the sky beside it: what the sky next to the
@@ -535,18 +541,31 @@ void main() {
   vec3 airT = open + sunTower;
   float cap = ${UNDER_SKY.toFixed(2)} * luma(behind) / max(luma(airT), 1e-4);
   airT *= mix(1.0, min(1.0, cap), smoothstep(0.05, 0.3, dtl.a));
-  vec3 tower = scene * Tt + airT * (1.0 - Tt) * (1.0 - ${SHADOW_K.toFixed(2)} * deep);
-  // And keeps its build: the plate's floors and mullions (the plate less the
-  // towers' own light blurred at the scale of their floors) come back over
-  // the in-scatter at the transmittance's square root, never under
-  // ${FLOORS_MIN.toFixed(2)}, so a fogged tower is a sky-tinted version of itself.
-  vec4 fl = texture(uFloors, uv);
-  // Display-encoded, as the eye reads the lines: the same share of their
-  // contrast survives on the pale haze as on the dark glass.
-  vec3 floors = fl.rgb / max(fl.a, 1e-3);
-  vec3 lines = pow(plate(uv, 0.0), vec3(1.0 / 2.2)) - floors;
-  vec3 keepF = max(pow(Tt, vec3(${FLOORS_POW.toFixed(2)})), vec3(${FLOORS_MIN.toFixed(2)})) - Tt;
-  tower = pow(max(pow(max(tower, 0.0), vec3(1.0 / 2.2)) + lines * keepF * smoothstep(0.15, 0.5, fl.a), 0.0), vec3(2.2));
+  // The tower through its air: fogAmt = 1 - T, by its distance (the far
+  // tower and the crowns far up a receding face go first, the near glass and
+  // the bases last), and the tower's light mixed toward the air's by it. The
+  // air's light is multiplied by the tower's own build, not laid over it: its
+  // light against its local mean (the towers' own light, blurred a little
+  // wider than their floors), so a window, a mullion or a shadowed bay a fifth of its
+  // neighbours' light takes a fifth of the air's too. Darks scale toward the
+  // air's blue instead of lifting to it: a far tower recedes into blue air as
+  // a sky-tinted version of itself, a near one keeps its inked shadows.
+  vec3 fogAmt = 1.0 - Tt;
+  vec4 fl = texture(uMass, uv);
+  vec3 mean = pow(fl.rgb / max(fl.a, 1e-3), vec3(2.2));
+  // The build is read sharper than the forward scatter softens the tower's
+  // own light (a third of its blur): a scatter-blurred window has already
+  // gone to its mean, and would scale nothing.
+  float build = mix(1.0, clamp(luma(plate(uv, softLod * ${BUILD_SOFT.toFixed(2)})) / max(luma(mean), 1e-4), 0.0, ${BUILD_MAX.toFixed(1)}), smoothstep(0.15, 0.5, fl.a));
+  // Deep in the haze the build itself softens a little, never to a slab.
+  build = pow(build, mix(1.0, ${BUILD_FAR.toFixed(2)}, fogAmt.g));
+  // Clear air keeps the blacks: on a solid still clearly seen the shadows
+  // are taken down to the print's black point (the glass's deepest reflections
+  // under about 35 of 255), easing out by the transmittance, so the near
+  // glass is the sharp, inked anchor the haze recedes from.
+  float clear = Tt.g * Tt.g;
+  vec3 base = scene * mix(1.0, mix(${TOE.toFixed(2)}, 1.0, smoothstep(0.0, ${TOE_TOP.toFixed(2)}, luma(scene))), clear);
+  vec3 tower = base * Tt + airT * fogAmt * build;
   vec3 sky = scene * Ts + (air + sunSky) * (1.0 - Ts);
   // The veil over the sky keeps the cumulus' forms: their local detail (the
   // plate less its blur at the scale of a cloud's forms) comes back over the
@@ -598,6 +617,7 @@ void main() {
 // toward cream #FFF1E2 at its own (slightly compressed) luminance, so the
 // brightest cumulus tops and glints print cream, never neutral paper-white.
 const SHOULDER_COL = "#FFF1E2";
+const DIFFUSE_DARK = 0.3; // the diffusion's share in the deepest shadows
 const TONE = `
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // lift: how much the upper range opens. None on a cumulus, whose light the
@@ -680,7 +700,11 @@ void main() {
   // Diffusion: the emulsion and the scanner both spread a little light, so the
   // image sits in a faint glow of itself and the finest edges go soft.
   vec3 bloom = texture(uBloom, vUv).rgb / uNorm.y;
-  lin = mix(lin, bloom, 0.12) + max(bloom - lin, 0.0) * 0.1;
+  // It spreads into the darks much less than into the mids: a glow over the
+  // shadows of a tower against a bright sky lifts them to a grey veil, the
+  // flat milk the haze itself no longer lays there.
+  float spread = mix(${DIFFUSE_DARK.toFixed(2)}, 1.0, smoothstep(0.0, 0.18, luma(lin)));
+  lin = mix(lin, bloom, 0.12 * spread) + max(bloom - lin, 0.0) * 0.1 * spread;
   vec3 c = pow(lin, vec3(1.0 / 2.2));
 
   // Glass, in its midtones, away from the sky's blue toward a cool green; its
@@ -900,8 +924,8 @@ export async function createFog(host, { embedded = false } = {}) {
   const upDetail = [];
   const gapDown = [];
   const gapUp = [];
-  // The towers' own light at the scale of their floors, for the build the haze keeps.
-  const floorsDown = [target(PLATE_W >> FLOORS_LOD, (PLATE_W / ASPECT) >> FLOORS_LOD), target(PLATE_W >> (FLOORS_LOD + 1), (PLATE_W / ASPECT) >> (FLOORS_LOD + 1))];
+  // The towers' own light, blurred a little wider than their floors: the mean their build is read against.
+  const floorsDown = [0, 1, 2].map((i) => target(PLATE_W >> (FLOORS_LOD + i), (PLATE_W / ASPECT) >> (FLOORS_LOD + i)));
   {
     let bw = 600;
     let bh = 400;
@@ -1070,7 +1094,7 @@ export async function createFog(host, { embedded = false } = {}) {
   gl.uniform1f(P.air.u.uLod, Math.log2(colorImg.naturalHeight / floorsDown[0].h));
   quadDraw(floorsDown[0]);
   descend(floorsDown);
-  const floors = floorsDown[1];
+  const mass = floorsDown[MASS_LEVEL];
 
   // The film finish works on the whole frame, so its targets follow the canvas:
   // the scene at full size, and a pyramid from half size for the halation
@@ -1116,10 +1140,10 @@ export async function createFog(host, { embedded = false } = {}) {
     bind(2, air.tex);
     bind(3, detail.tex);
     bind(4, gap.tex);
-    bind(5, floors.tex);
+    bind(5, mass.tex);
     const cu = P.composite.u;
     gl.uniform1i(cu.uGap, 4);
-    gl.uniform1i(cu.uFloors, 5);
+    gl.uniform1i(cu.uMass, 5);
     gl.uniform1i(cu.uColor, 0);
     gl.uniform1i(cu.uAux, 1);
     gl.uniform1i(cu.uAir, 2);
