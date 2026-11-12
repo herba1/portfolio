@@ -1,4 +1,4 @@
-import { BUNDLED_ROOT, CLIP_NAME_RE, DEFAULT_CLIP, EXPORTS_ROOT, HYBRID, RGBD, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
+import { BUNDLED_ROOT, CLIP_NAME_RE, DEFAULT_CLIP, EXPORTS_ROOT, HYBRID, RGBD, TEXTURE_WIDTH, clipKind, readRemap } from "./splatVideoParams";
 
 const EVALUATION_PREFIX = "eval-";
 
@@ -294,6 +294,7 @@ function validateMeta(meta, clip) {
       aspect: meta.camera.aspect > 0 ? meta.camera.aspect : 16 / 9,
       pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : Math.max(0.5, (minZ + maxZ) / 2),
       aperture: meta.camera.aperture >= 0 ? meta.camera.aperture : undefined,
+      remap: readRemap(meta.camera.remap),
     },
   };
 }

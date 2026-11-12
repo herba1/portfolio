@@ -1,6 +1,31 @@
 import * as THREE from "three";
 
-import { RENDER, TEXTURE_WIDTH, isFlipbook } from "./splatVideoParams";
+import { RENDER, TEXTURE_WIDTH, isFlipbook, stereoScale } from "./splatVideoParams";
+
+// The analytic sky, shared by the splats (the far sky plane takes its colour
+// outright) and the film pass (which draws it behind them, past the source's
+// edges). Elevation is measured against the remapped zenith. From the source's
+// top edge up the blue darkens and saturates on the plate's own hue toward the
+// zenith, flat-topped there; below that edge it eases toward the plate's paler
+// low sky.
+export const SKY_GLSL = `
+uniform vec3 uZenith;
+uniform float uSkyHorizon;
+uniform vec3 uSkyTop;
+uniform vec3 uSkyZenith;
+uniform vec3 uSkyLow;
+uniform float uSkyEase;
+uniform float uSkyLowSpan;
+
+vec3 skyColor(vec3 ray) {
+  float lift = dot(ray, uZenith);
+  float t = (lift - uSkyHorizon) / max(1.0 - uSkyHorizon, 1e-3);
+  float deepen = pow(clamp(t, 0.0, 1.0), uSkyEase);
+  float below = asin(clamp(uSkyHorizon, -1.0, 1.0)) - asin(clamp(lift, -1.0, 1.0));
+  float pale = smoothstep(0.0, uSkyLowSpan, below);
+  return max(mix(mix(uSkyTop, uSkyLow, pale), uSkyZenith, deepen), 0.0);
+}
+`;
 
 const SPLAT_HEADER = `
 precision highp float;
@@ -10,6 +35,12 @@ uniform vec2 uViewport;
 uniform float uLowPass;
 uniform float uAperture;
 uniform float uFocusDepth;
+uniform float uStereo;
+uniform vec2 uTopFade;
+uniform vec2 uSideFade;
+uniform float uNearDepth;
+uniform float uNearBand;
+uniform float uSkyDepth;
 
 in float aSplat;
 
@@ -21,6 +52,7 @@ const float MAX_AXIS = 1024.0;
 const float MIN_DEPTH = 0.02;
 const float FRUSTUM_GUARD = 1.2;
 const float UNIT16 = 1.0 / 65535.0;
+${SKY_GLSL}
 
 ivec2 texelFor(int index) {
   return ivec2(index % TEXTURE_WIDTH, index / TEXTURE_WIDTH);
@@ -41,13 +73,64 @@ void main() {
   float opacity;
   readPoint(index, center, opacity);
 
+  // The far sky plane takes the analytic sky's colour outright, so the photo's
+  // sky and the new upper sky are one gradient. Cloud splats past the source's
+  // top and side edges blend toward it too: by colour, never opacity, since
+  // the resolve renormalises coverage and a fading opacity would still end in
+  // a hard line. The near silhouette instead thins out over a short band in
+  // front of the sky plane, so the gantry ends crisply rather than smearing.
+  vec2 sourceTan = center.xy / max(center.z, MIN_DEPTH);
+  float own = smoothstep(uTopFade.x, uTopFade.y, sourceTan.y) * (1.0 - smoothstep(uSideFade.x, uSideFade.y, abs(sourceTan.x)));
+  if (center.z > uSkyDepth) own = 0.0;
+  if (center.z < uNearDepth) {
+    opacity *= smoothstep(uTopFade.x, mix(uTopFade.x, uTopFade.y, uNearBand), sourceTan.y);
+    own = 1.0;
+  }
+
   vec4 viewCenter = modelViewMatrix * vec4(center, 1.0);
   float depth = -viewCenter.z;
-  vec4 clipCenter = projectionMatrix * viewCenter;
-  float guard = FRUSTUM_GUARD * clipCenter.w;
-  if (depth < MIN_DEPTH || opacity < 0.004 || abs(clipCenter.x) > guard || abs(clipCenter.y) > guard) {
-    cull();
-    return;
+  vec2 ndcCenter;
+  mat3 jacobian;
+  float inverseDepth = 1.0 / max(depth, MIN_DEPTH);
+  if (uStereo > 0.0) {
+    // Stereographic: p = 2 v.xy / (|v| - v.z), radius 2 tan(theta / 2). The
+    // jacobian is its derivative, so each splat bends with the lens.
+    vec3 v = viewCenter.xyz;
+    float len = length(v);
+    float s = len - v.z;
+    if (len < MIN_DEPTH || s < 0.05 * len || opacity < 0.004) {
+      cull();
+      return;
+    }
+    vec2 p = 2.0 * v.xy / s;
+    float aspect = uViewport.x / uViewport.y;
+    ndcCenter = p / vec2(uStereo * aspect, uStereo);
+    if (abs(ndcCenter.x) > FRUSTUM_GUARD || abs(ndcCenter.y) > FRUSTUM_GUARD) {
+      cull();
+      return;
+    }
+    float scale = uViewport.y / (uStereo * s);
+    vec3 g = v / len - vec3(0.0, 0.0, 1.0);
+    jacobian = mat3(
+      scale * (1.0 - v.x * g.x / s), scale * (-v.y * g.x / s), 0.0,
+      scale * (-v.x * g.y / s), scale * (1.0 - v.y * g.y / s), 0.0,
+      scale * (-v.x * g.z / s), scale * (-v.y * g.z / s), 0.0
+    );
+  } else {
+    vec4 clipCenter = projectionMatrix * viewCenter;
+    float guard = FRUSTUM_GUARD * clipCenter.w;
+    if (depth < MIN_DEPTH || opacity < 0.004 || abs(clipCenter.x) > guard || abs(clipCenter.y) > guard) {
+      cull();
+      return;
+    }
+    ndcCenter = clipCenter.xy / clipCenter.w;
+    vec2 focal = vec2(projectionMatrix[0][0], projectionMatrix[1][1]) * 0.5 * uViewport;
+    float inverseDepth2 = inverseDepth * inverseDepth;
+    jacobian = mat3(
+      focal.x * inverseDepth, 0.0, 0.0,
+      0.0, focal.y * inverseDepth, 0.0,
+      focal.x * viewCenter.x * inverseDepth2, focal.y * viewCenter.y * inverseDepth2, 0.0
+    );
   }
 
   float covScale;
@@ -61,14 +144,6 @@ void main() {
     xzYy.x, yzZz.x, yzZz.y
   ) / covScale;
 
-  vec2 focal = vec2(projectionMatrix[0][0], projectionMatrix[1][1]) * 0.5 * uViewport;
-  float inverseDepth = 1.0 / depth;
-  float inverseDepth2 = inverseDepth * inverseDepth;
-  mat3 jacobian = mat3(
-    focal.x * inverseDepth, 0.0, 0.0,
-    0.0, focal.y * inverseDepth, 0.0,
-    focal.x * viewCenter.x * inverseDepth2, focal.y * viewCenter.y * inverseDepth2, 0.0
-  );
   mat3 toScreen = jacobian * mat3(modelViewMatrix);
   mat3 projected = toScreen * covariance * transpose(toScreen);
 
@@ -94,16 +169,19 @@ void main() {
   vec2 minorAxis = min(sqrt(2.0 * lambda2), MAX_AXIS) * vec2(-axis.y, axis.x);
 
   vec2 offsetPixels = position.x * majorAxis + position.y * minorAxis;
-  vec2 ndcCenter = clipCenter.xy / clipCenter.w;
   gl_Position = vec4(ndcCenter + offsetPixels * 2.0 / uViewport, 0.0, 1.0);
 
   uint rgba = base.w;
-  vColor = vec4(
+  vec3 color = vec3(
     float(rgba & 255u) / 255.0,
     float((rgba >> 8u) & 255u) / 255.0,
-    float((rgba >> 16u) & 255u) / 255.0,
-    opacity
+    float((rgba >> 16u) & 255u) / 255.0
   );
+  if (own < 1.0) {
+    vec3 ray = normalize((modelMatrix * vec4(center, 1.0)).xyz - cameraPosition);
+    color = mix(skyColor(ray), color, own);
+  }
+  vColor = vec4(color, opacity);
   vPosition = position.xy;
 }
 `;
@@ -356,8 +434,58 @@ export function createSplatMaterial(textures, meta) {
       uLowPass: { value: RENDER.lowPass },
       uAperture: { value: 0 },
       uFocusDepth: { value: 1 },
+      ...remapUniforms(),
     },
   });
+}
+
+// No remap: rectilinear projection, and the fade sits far outside any frame.
+export function skyUniforms() {
+  return {
+    uZenith: { value: new THREE.Vector3(0, 1, 0) },
+    uSkyHorizon: { value: 0 },
+    uSkyTop: { value: new THREE.Vector3() },
+    uSkyZenith: { value: new THREE.Vector3() },
+    uSkyLow: { value: new THREE.Vector3() },
+    uSkyEase: { value: 1 },
+    uSkyLowSpan: { value: 1 },
+  };
+}
+
+export function bindSky(uniforms, sky) {
+  uniforms.uZenith.value.copy(sky.zenith);
+  uniforms.uSkyHorizon.value = sky.horizon;
+  uniforms.uSkyTop.value.fromArray(sky.skyTop);
+  uniforms.uSkyZenith.value.fromArray(sky.skyZenith);
+  uniforms.uSkyEase.value = sky.skyEase;
+  uniforms.uSkyLow.value.fromArray(sky.skyLow);
+  uniforms.uSkyLowSpan.value = sky.skyLowSpan;
+}
+
+const NO_FADE = [-1e6, -1e6 + 1];
+
+function remapUniforms() {
+  return {
+    uStereo: { value: 0 },
+    uTopFade: { value: new THREE.Vector2(...NO_FADE) },
+    uSideFade: { value: new THREE.Vector2(-NO_FADE[1], -NO_FADE[0]) },
+    uNearDepth: { value: 0 },
+    uNearBand: { value: 1 },
+    uSkyDepth: { value: 1e9 },
+    ...skyUniforms(),
+  };
+}
+
+// sky is the scene's remap runtime (zenith, horizon, colours), or null.
+export function bindRemap(material, remap, sky) {
+  const { uniforms } = material;
+  uniforms.uStereo.value = remap ? stereoScale(remap) : 0;
+  uniforms.uTopFade.value.fromArray(remap ? remap.fade.top : NO_FADE);
+  uniforms.uSideFade.value.fromArray(remap ? remap.fade.side : [-NO_FADE[1], -NO_FADE[0]]);
+  uniforms.uNearDepth.value = remap ? remap.fade.nearDepth : 0;
+  uniforms.uNearBand.value = remap ? remap.fade.nearBand : 1;
+  uniforms.uSkyDepth.value = remap ? remap.fade.skyDepth : 1e9;
+  if (sky) bindSky(uniforms, sky);
 }
 
 export function createPairTextures(set) {
@@ -418,6 +546,7 @@ export function createStreamMaterial(staticPair, staticSet) {
       uLowPass: { value: RENDER.lowPass },
       uAperture: { value: 0 },
       uFocusDepth: { value: 1 },
+      ...remapUniforms(),
     },
   });
 }

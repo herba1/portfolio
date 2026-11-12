@@ -52,6 +52,17 @@ FRAMES = 5
 DURATION = 6.0
 
 APERTURE = 0.0015          # lean depth of field: a phone lens, the sky stays nearly sharp
+
+# The player's worm's-eye remap (meta.camera.remap, read by splatVideoParams
+# readRemap). The splats stay in the phone's frame; the player re-reads every
+# source ray through a wider, keystoned lens (stretch, keystone: z' = z - k*y),
+# rests the camera pitched further up and draws a ~105 degree stereographic
+# view on a near-square stage, leaning round the post's base (pivot, OpenCV,
+# from the silhouette plane at photo pixel 340, 1067). Past the source's top
+# and side edges (fade, in source tan) the sky plane hands over to an analytic
+# sky that deepens from the plate's top-row blue toward the remapped zenith.
+REMAP = {"stretch": 3.0, "keystone": 1.2, "pitchDeg": 20, "yawDeg": 4, "rollDeg": 0, "lean": 0.75, "vfovDeg": 105, "aspect": 1.2, "pivot": [-1.8, 2.08, 5.64], "fade": {"top": [-0.37, -0.29], "side": [0.62, 0.7], "nearDepth": 15, "nearBand": 0.3, "skyDepth": 37}, "sky": {"top": [6, 66, 138], "zenith": [3, 34, 94], "low": [28, 104, 176], "topTan": 0.33, "lowSpanDeg": 35, "ease": 0.75}}
+
 Z_SKY = 40.0
 Z_CLOUD = 30.0
 CLOUD_RELIEF = 5.0
@@ -436,7 +447,7 @@ meta = {
     "bounds": {"min": [float(x) for x in bmin], "max": [float(x) for x in bmax]},
     "covScale": cov_scale,
     "coords": "opencv-camera0",
-    "camera": {"vfovDeg": VIEW_VFOV_DEG, "aspect": 1.5, "pivotDepth": Z_PIVOT, "aperture": APERTURE},
+    "camera": {"vfovDeg": VIEW_VFOV_DEG, "aspect": 1.5, "pivotDepth": Z_PIVOT, "aperture": APERTURE, "remap": REMAP},
     "source": {
         "clip": "signal-cumulonimbus",
         "width": W,

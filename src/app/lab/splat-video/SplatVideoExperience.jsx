@@ -21,6 +21,7 @@ import {
   LOOKS,
   ORBIT,
   clamp,
+  frameAspect,
   isHybrid,
   isRgbd,
   isStream,
@@ -353,7 +354,7 @@ export default function SplatVideoExperience() {
   );
 
   const meta = ready ? load.data.meta : null;
-  const aspect = meta ? meta.camera.aspect : 16 / 9;
+  const aspect = meta ? frameAspect(meta) : 16 / 9;
   const streaming = Boolean(meta && isStream(meta));
   const summary = summaryFor(load);
 

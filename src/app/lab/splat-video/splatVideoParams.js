@@ -136,6 +136,98 @@ export const LOOK_LABELS = {
   video: "Video",
 };
 
+// A worm's-eye remap of the source frame (meta.camera.remap). The phone saw
+// the signal through a 40 degree lens pitched gently up; the player instead
+// re-reads every source ray through a wider, keystoned lens (stretch widens
+// the angles, keystone tips the upper rows away so the post converges on a
+// zenith inside the frame), rests the camera pitched further up, and draws a
+// stereographic view of ~105 degrees. Above the photo's top edge the splats
+// fade into an analytic sky that keeps deepening toward that zenith.
+export const REMAP_LIMITS = {
+  stretch: [1, 4],
+  keystone: [0, 3],
+  pitchDeg: [0, 45],
+  yawDeg: [-20, 20],
+  rollDeg: [-30, 30],
+  lean: [0, 1],
+  vfovDeg: [60, 140],
+  aspect: [0.5, 2],
+};
+
+function inRange(value, [low, high]) {
+  return Number.isFinite(value) && value >= low && value <= high;
+}
+
+function isColor(value) {
+  return Array.isArray(value) && value.length === 3 && value.every((c) => Number.isFinite(c) && c >= 0 && c <= 255);
+}
+
+export function readRemap(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const fields = ["stretch", "keystone", "pitchDeg", "yawDeg", "rollDeg", "lean", "vfovDeg", "aspect"];
+  if (!fields.every((name) => inRange(raw[name], REMAP_LIMITS[name]))) return null;
+  if (!isVector3(raw.pivot) || !(raw.pivot[2] > 0)) return null;
+  if (!isRamp(raw.fade?.top) || !isRamp(raw.fade?.side)) return null;
+  const { nearDepth, nearBand, skyDepth } = raw.fade;
+  if (!(nearDepth >= 0) || !(nearBand > 0 && nearBand <= 1) || !(skyDepth > nearDepth)) return null;
+  const sky = raw.sky;
+  if (!sky || !isColor(sky.top) || !isColor(sky.zenith) || !isColor(sky.low) || !Number.isFinite(sky.topTan) || !(sky.lowSpanDeg > 0)) return null;
+  return {
+    stretch: raw.stretch,
+    keystone: raw.keystone,
+    pitchDeg: raw.pitchDeg,
+    yawDeg: raw.yawDeg,
+    rollDeg: raw.rollDeg,
+    lean: raw.lean,
+    vfovDeg: raw.vfovDeg,
+    aspect: raw.aspect,
+    pivot: raw.pivot.slice(),
+    fade: { top: raw.fade.top.slice(), side: raw.fade.side.slice(), nearDepth, nearBand, skyDepth },
+    sky: {
+      top: sky.top.slice(),
+      zenith: sky.zenith.slice(),
+      low: sky.low.slice(),
+      topTan: sky.topTan,
+      lowSpanDeg: sky.lowSpanDeg,
+      ease: sky.ease > 0 ? sky.ease : 1,
+    },
+  };
+}
+
+function isRamp(value) {
+  return Array.isArray(value) && value.length === 2 && value.every(Number.isFinite) && value[0] < value[1];
+}
+
+function isVector3(value) {
+  return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+}
+
+export function frameAspect(meta) {
+  return meta.camera.remap?.aspect ?? meta.camera.aspect;
+}
+
+// Stereographic scale: the image-plane radius 2 tan(theta / 2) that lands on
+// the top edge of the frame.
+export function stereoScale(remap) {
+  return 2 * Math.tan((remap.vfovDeg * Math.PI) / 720);
+}
+
+// OpenCV camera0 (x right, y down, z forward) into the three.js world: the
+// stretch widens every ray, the keystone pushes the upper rows further away
+// (z' = z - keystone * y, y is negative upward), then y and z flip.
+export function sourceMatrix(meta, target) {
+  const remap = meta.camera.remap;
+  const k = remap ? remap.stretch : 1;
+  const c = remap ? remap.keystone : 0;
+  return target.set(k, 0, 0, 0, 0, -k, 0, 0, 0, c, -1, 0, 0, 0, 0, 1);
+}
+
+// Where world "up" points once the source is remapped: the signal post's own
+// direction, so its vanishing point and the sky's zenith are the same place.
+export function remapZenith(remap, target) {
+  return target.set(0, remap.stretch, -remap.keystone).normalize();
+}
+
 export function viewFov(meta) {
   return meta.camera.viewFovDeg ?? meta.camera.vfovDeg;
 }

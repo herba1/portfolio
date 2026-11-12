@@ -25,7 +25,55 @@
     "vfovDeg": 33.0,
     "aspect": 1.5,
     "pivotDepth": 5.453823955910403,
-    "aperture": 0.0015
+    "aperture": 0.0015,
+    "remap": {
+      "stretch": 3.0,
+      "keystone": 1.2,
+      "pitchDeg": 20,
+      "yawDeg": 4,
+      "rollDeg": 0,
+      "lean": 0.75,
+      "vfovDeg": 105,
+      "aspect": 1.2,
+      "pivot": [
+        -1.8,
+        2.08,
+        5.64
+      ],
+      "fade": {
+        "top": [
+          -0.37,
+          -0.29
+        ],
+        "side": [
+          0.62,
+          0.7
+        ],
+        "nearDepth": 15,
+        "nearBand": 0.3,
+        "skyDepth": 37
+      },
+      "sky": {
+        "top": [
+          6,
+          66,
+          138
+        ],
+        "zenith": [
+          3,
+          34,
+          94
+        ],
+        "low": [
+          28,
+          104,
+          176
+        ],
+        "topTan": 0.33,
+        "lowSpanDeg": 35,
+        "ease": 0.75
+      }
+    }
   },
   "source": {
     "clip": "signal-cumulonimbus",

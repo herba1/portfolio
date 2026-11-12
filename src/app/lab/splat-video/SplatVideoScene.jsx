@@ -9,6 +9,7 @@ import OrbitStage, { aimCamera } from "./OrbitStage";
 import { createSoundClock } from "./soundClock";
 import {
   bindMoments,
+  bindRemap,
   blendMoments,
   createResolvePass,
   createSplatGeometry,
@@ -31,8 +32,13 @@ import {
   momentBlend,
   momentPlan,
   momentTime,
+  remapZenith,
   sortCapacity,
+  sourceMatrix,
+  stereoScale,
 } from "./splatVideoParams";
+
+const DEG = Math.PI / 180;
 
 export function applyDepthOfField(uniforms, engine, meta) {
   const { aperture, focusDepth } = depthOfField(engine, meta);
@@ -137,13 +143,52 @@ export function createSplatRuntime(clip) {
   };
 }
 
-export function createScratch(meta) {
+// Everything the worm's-eye remap needs per frame, worked out once: the rest
+// orientation, the zenith the lean turns round and the sky deepens toward,
+// and the elevation of the source's top edge where the analytic sky takes over.
+function remapRuntime(meta, source) {
+  const remap = meta.camera.remap;
+  if (!remap) return null;
+  const zenith = remapZenith(remap, new THREE.Vector3());
+  const rest = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(remap.pitchDeg * DEG, remap.yawDeg * DEG, remap.rollDeg * DEG, "YXZ"),
+  );
+  const top = new THREE.Vector3(0, -remap.sky.topTan, 1).applyMatrix4(source).normalize();
   return {
-    pivot: new THREE.Vector3(0, 0, -meta.camera.pivotDepth),
+    vfovDeg: remap.vfovDeg,
+    lean: remap.lean,
+    stereo: stereoScale(remap),
+    rest,
+    zenith,
+    horizon: top.dot(zenith),
+    skyTop: remap.sky.top.map((c) => c / 255),
+    skyZenith: remap.sky.zenith.map((c) => c / 255),
+    skyLow: remap.sky.low.map((c) => c / 255),
+    skyLowSpan: remap.sky.lowSpanDeg * DEG,
+    skyEase: remap.sky.ease,
+  };
+}
+
+export function createScratch(meta) {
+  const source = sourceMatrix(meta, new THREE.Matrix4());
+  const remap = remapRuntime(meta, source);
+  const pivot = remap
+    ? new THREE.Vector3(...meta.camera.remap.pivot).applyMatrix4(source)
+    : new THREE.Vector3(0, 0, -meta.camera.pivotDepth);
+  return {
+    pivot,
+    source,
+    remap,
     modelView: new THREE.Matrix4(),
     viewport: new THREE.Vector2(),
     lens: new THREE.Matrix4(),
   };
+}
+
+function placeSource(group, scratch) {
+  group.matrixAutoUpdate = false;
+  group.matrix.copy(scratch.source);
+  group.matrixWorldNeedsUpdate = true;
 }
 
 // A slow GPU (software GL, an old phone) is never handed a new frame before it
@@ -189,6 +234,8 @@ function useResolvedRender(resolveRef, scratchRef, engineRef) {
           time: state.clock.elapsedTime,
           still: Boolean(engineRef.current?.reducedMotion),
           pixelRatio: state.gl.getPixelRatio(),
+          sky: scratch.remap,
+          camera: state.camera,
         });
       }
     }
@@ -202,7 +249,7 @@ function useResolvedRender(resolveRef, scratchRef, engineRef) {
 export function aimAndMeasure(state, engine, meta, delta, scratch, group) {
   const camera = state.camera;
   const base = hasLensPath(meta) ? lensMatrix(meta, engine.time, scratch.lens) : null;
-  aimCamera(camera, engine, meta, delta, scratch.pivot, base);
+  aimCamera(camera, engine, meta, delta, scratch.pivot, base, scratch.remap);
   group.updateMatrixWorld();
   scratch.modelView.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);
   state.gl.getDrawingBufferSize(scratch.viewport);
@@ -220,10 +267,13 @@ function SplatField({ clip, engineRef }) {
     const group = groupRef.current;
     const runtime = createSplatRuntime(clip);
     const resolve = createResolvePass();
+    const scratch = createScratch(clip.meta);
+    placeSource(group, scratch);
+    bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;
-    scratchRef.current = createScratch(clip.meta);
+    scratchRef.current = scratch;
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
@@ -265,7 +315,7 @@ function SplatField({ clip, engineRef }) {
 
   useResolvedRender(resolveRef, scratchRef, engineRef);
 
-  return <group ref={groupRef} rotation-x={Math.PI} />;
+  return <group ref={groupRef} matrixAutoUpdate={false} />;
 }
 
 function StreamField({ clip, engineRef }) {
@@ -283,11 +333,14 @@ function StreamField({ clip, engineRef }) {
     const sound = clip.audioUrl ? createSoundClock(clip.audioUrl, clip.meta.duration) : null;
     const controls = sound ? { gesture: () => sound.sync(engineRef.current, true) } : null;
     engine.sound = controls;
+    const scratch = createScratch(clip.meta);
+    placeSource(group, scratch);
+    bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;
     soundRef.current = sound;
-    scratchRef.current = createScratch(clip.meta);
+    scratchRef.current = scratch;
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
@@ -333,7 +386,7 @@ function StreamField({ clip, engineRef }) {
 
   useResolvedRender(resolveRef, scratchRef, engineRef);
 
-  return <group ref={groupRef} rotation-x={Math.PI} />;
+  return <group ref={groupRef} matrixAutoUpdate={false} />;
 }
 
 export default function SplatVideoScene({ clip, engineRef, isMobile }) {

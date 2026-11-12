@@ -542,6 +542,20 @@
   }
 }
 
+/* The near-square worm's-eye stage leaves the row narrower than the old 3:2
+   card did: below 760px the frame count and the duration step aside so the
+   elapsed time keeps one caption-tier item next to the scrubber. */
+.splat-video-controls {
+  container: splat-video-controls / inline-size;
+}
+
+@container splat-video-controls (max-width: 760px) {
+  .splat-video-controls__frame,
+  .splat-video-controls__of {
+    display: none;
+  }
+}
+
 @media (max-width: 899px) {
   .splat-video {
     --splat-video-width: 100%;

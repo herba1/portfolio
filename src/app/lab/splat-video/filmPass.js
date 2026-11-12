@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { RESOLVE_VERTEX } from "./splatMaterial";
+import { RESOLVE_VERTEX, SKY_GLSL, bindSky, skyUniforms } from "./splatMaterial";
 import { FILM } from "./splatVideoParams";
 
 const LUMA = "const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);";
@@ -75,7 +75,11 @@ uniform float uGrain;
 uniform float uGrainFloor;
 uniform float uGrainFrame;
 uniform float uGrainCell;
-
+uniform float uSkyOn;
+uniform float uStereo;
+uniform float uAspect;
+uniform mat3 uCameraBasis;
+${SKY_GLSL}
 in vec2 vUv;
 out vec4 fragColor;
 
@@ -119,8 +123,18 @@ vec3 shoulder(vec3 c) {
   return mix(c, rolled, step(uShoulder, c));
 }
 
+// The analytic sky behind the splats, along each pixel's ray through the same
+// stereographic lens.
+vec3 skyAt(vec2 uv) {
+  vec2 p = (uv * 2.0 - 1.0) * vec2(uAspect, 1.0) * uStereo;
+  float r2 = dot(p, p);
+  vec3 local = vec3(4.0 * p, r2 - 4.0) / (4.0 + r2);
+  return skyColor(normalize(uCameraBasis * local));
+}
+
 void main() {
   vec4 scene = texture(uScene, vUv);
+  if (uSkyOn > 0.5) scene = vec4(scene.rgb + skyAt(vUv) * (1.0 - scene.a), 1.0);
   if (scene.a <= 0.0) {
     fragColor = vec4(0.0);
     return;
@@ -205,6 +219,11 @@ export function createFilmPass() {
     uGrainFloor: { value: FILM.grainFloor },
     uGrainFrame: { value: 0 },
     uGrainCell: { value: 1 },
+    uSkyOn: { value: 0 },
+    uStereo: { value: 1 },
+    uAspect: { value: 1 },
+    uCameraBasis: { value: new THREE.Matrix3() },
+    ...skyUniforms(),
   });
 
   const geometry = new THREE.BufferGeometry();
@@ -224,7 +243,7 @@ export function createFilmPass() {
 
   return {
     // drawScene renders the resolved splats into whatever target is bound.
-    render(gl, drawScene, width, height, { time, still, pixelRatio }) {
+    render(gl, drawScene, width, height, { time, still, pixelRatio, sky = null, camera = null }) {
       const haloWidth = Math.max(1, Math.ceil(width / FILM.haloScale));
       const haloHeight = Math.max(1, Math.ceil(height / FILM.haloScale));
       if (sceneTarget.width !== width || sceneTarget.height !== height) sceneTarget.setSize(width, height);
@@ -254,6 +273,13 @@ export function createFilmPass() {
       const { uniforms } = composite;
       uniforms.uGrainFrame.value = still ? 0 : Math.floor(time * FILM.grainFps) % 65536;
       uniforms.uGrainCell.value = Math.max(1, FILM.grainCell * pixelRatio);
+      uniforms.uSkyOn.value = sky && camera ? 1 : 0;
+      if (sky && camera) {
+        uniforms.uStereo.value = sky.stereo;
+        uniforms.uAspect.value = width / height;
+        uniforms.uCameraBasis.value.setFromMatrix4(camera.matrixWorld);
+        bindSky(uniforms, sky);
+      }
       gl.setRenderTarget(previousTarget);
       gl.setClearColor(clearColor, previousAlpha);
       gl.clear(true, false, false);
