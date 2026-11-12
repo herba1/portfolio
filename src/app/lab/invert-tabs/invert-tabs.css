@@ -1,16 +1,15 @@
 .it {
+  /* Two colours and nothing between them: the ink is the highlight, the
+     ground is the inverted label. No track, no third tone. */
   --it-ground: #f2f0eb;
-  --it-track: #e7e4dd;
   --it-ink: #0d0d0c;
-  --it-paper: #f7f5f0;
 
-  /* One step of the scale, swapped whole by the container queries below. */
-  --it-size: var(--text-title-xl);
-  --it-leading: var(--text-title-xl--line-height);
-  --it-tracking: var(--text-title-xl--letter-spacing);
-  --it-pad-y: 16px;
-  --it-pad-x: 28px;
-  --it-inset: 8px;
+  /* Display scale, fitted: the row spans the canvas edge to edge.
+     --it-fit is the row's width in em, measured once the face has loaded
+     (Piece.jsx); 12.4 is close enough for the first paint. */
+  --it-gutter: max(16px, 3cqw);
+  --it-fit: 12.4;
+  --it-size: calc((100cqw - 2 * var(--it-gutter)) / var(--it-fit));
 
   position: relative;
   display: grid;
@@ -30,44 +29,8 @@
   -webkit-user-select: none;
 }
 
-@container (max-width: 860px) {
-  .it {
-    --it-size: var(--text-title-lg);
-    --it-leading: var(--text-title-lg--line-height);
-    --it-tracking: var(--text-title-lg--letter-spacing);
-    --it-pad-y: 12px;
-    --it-pad-x: 22px;
-    --it-inset: 8px;
-  }
-}
-
-@container (max-width: 600px) {
-  .it {
-    --it-size: var(--text-title);
-    --it-leading: var(--text-title--line-height);
-    --it-tracking: var(--text-title--letter-spacing);
-    --it-pad-y: 12px;
-    --it-pad-x: 16px;
-    --it-inset: 4px;
-  }
-}
-
-@container (max-width: 400px) {
-  .it {
-    --it-size: var(--text-title-sm);
-    --it-leading: var(--text-title-sm--line-height);
-    --it-tracking: var(--text-title-sm--letter-spacing);
-    --it-pad-y: 8px;
-    --it-pad-x: 12px;
-    --it-inset: 4px;
-  }
-}
-
 .it-bar {
   position: relative;
-  padding: var(--it-inset);
-  border-radius: 999px;
-  background: var(--it-track);
   touch-action: none;
   cursor: default;
 }
@@ -79,13 +42,25 @@
 .it-row {
   display: flex;
   position: relative;
+  font-size: var(--it-size);
+  /* The display step's leading, snapped to the 4px grid. */
+  line-height: round(nearest, calc(1em * var(--text-display--line-height)), 4px);
+  /* Fluid type has no fixed step to borrow tracking from, so the row
+     carries the law itself: -0.043 x (size - 12px), in em so it scales. */
+  letter-spacing: calc(-0.043 * (1em - 12px));
+  font-weight: var(--text-display--font-weight);
+  /* One word-space between words, split across the two tabs that meet:
+     the highlight's edge is always inside a word, never over air. */
+  --it-pad-x: 0.12em;
+  --it-pad-y: round(nearest, 0.04em, 4px);
+  --it-radius: 0.14em;
 }
 
 .it-row--ink {
   position: absolute;
-  inset: var(--it-inset);
+  inset: 0;
   background: var(--it-ink);
-  color: var(--it-paper);
+  color: var(--it-ground);
   pointer-events: none;
   will-change: clip-path;
 }
@@ -95,14 +70,11 @@
   margin: 0;
   padding: var(--it-pad-y) var(--it-pad-x);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--it-radius);
   background: none;
   color: inherit;
   font: inherit;
-  font-size: var(--it-size);
-  line-height: var(--it-leading);
-  letter-spacing: var(--it-tracking);
-  font-weight: var(--font-weight-strong);
+  letter-spacing: inherit;
   white-space: nowrap;
   cursor: inherit;
   outline: none;

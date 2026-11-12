@@ -27,6 +27,8 @@ function step(s, target, { k, zeta }, dt) {
 }
 
 export default function Piece() {
+  const rootRef = useRef(null);
+  const fitRef = useRef(0);
   const barRef = useRef(null);
   const rowRef = useRef(null);
   const inkRef = useRef(null);
@@ -48,7 +50,7 @@ export default function Piece() {
     const { l, r } = springs.current;
     const L = Math.round(l.x * 100) / 100;
     const R = Math.round((w - r.x) * 100) / 100;
-    ink.style.clipPath = `inset(0px ${R}px 0px ${L}px round 999px)`;
+    ink.style.clipPath = `inset(0px ${R}px 0px ${L}px round var(--it-radius))`;
   }, []);
 
   // Geometry of the highlight at a fractional tab index: edges interpolate
@@ -62,6 +64,31 @@ export default function Piece() {
     const b = tabs[j];
     return { l: a.l + (b.l - a.l) * f, r: a.r + (b.r - a.r) * f };
   }, []);
+
+  // The highlight caught in flight. A hold at a fractional index runs the
+  // real lead/trail springs from the tab behind it toward the tab ahead and
+  // stops the clock when the centre crosses that index, so a still shows
+  // the leading edge out in front and the trailing edge still catching up,
+  // not a pill with matched edges.
+  const flight = useCallback(
+    (t) => {
+      const { tabs } = geo.current;
+      const i = clamp(Math.floor(t), 0, tabs.length - 1);
+      if (t - i < 1e-3 || i >= tabs.length - 1) return at(t);
+      const from = at(i);
+      const to = at(i + 1);
+      const goal = at(t);
+      const cGoal = (goal.l + goal.r) / 2;
+      const l = { x: from.l, v: 0 };
+      const r = { x: from.r, v: 0 };
+      for (let n = 0; n < 2400 && (l.x + r.x) / 2 < cGoal; n += 1) {
+        step(l, to.l, TRAIL, 1 / 960);
+        step(r, to.r, LEAD, 1 / 960);
+      }
+      return { l: l.x, r: r.x };
+    },
+    [at],
+  );
 
   // Inverse: which fractional index sits under a centre x.
   const indexAt = useCallback((cx) => {
@@ -129,20 +156,32 @@ export default function Piece() {
   const measure = useCallback(() => {
     const row = rowRef.current;
     if (!row) return;
+    // Fit the row to the canvas. Everything in it (glyphs, tracking, tab
+    // padding) is in em, so its width per em is a constant of the face:
+    // hand that to CSS once and let cqw carry the size through resizes.
+    const size = parseFloat(getComputedStyle(row).fontSize);
+    const fit = size ? Math.round((row.offsetWidth / size) * 1000) / 1000 : 0;
+    const root = rootRef.current;
+    if (fit && root && Math.abs(fit - fitRef.current) > 0.002) {
+      fitRef.current = fit;
+      root.style.setProperty("--it-fit", String(fit));
+      return; // the size change re-fires the ResizeObserver
+    }
     geo.current = {
       w: row.offsetWidth,
       h: row.offsetHeight,
       tabs: tabRefs.current.map((el) => ({ l: el.offsetLeft, r: el.offsetLeft + el.offsetWidth })),
     };
     const t = hold.current ?? activeRef.current;
-    const g = at(t);
+    const g = hold.current != null ? flight(t) : at(t);
     target.current = { l: g.l, r: g.r, drag: false };
     springs.current = { l: { x: g.l, v: 0 }, r: { x: g.r, v: 0 } };
     paint();
-  }, [at, paint]);
+  }, [at, flight, paint]);
 
   useLayoutEffect(() => {
-    // ?t=1.6 holds the highlight between tabs, for a still of the moment.
+    // ?t=1.6 holds the highlight in flight from Singles toward Live, for a
+    // still of the moment.
     try {
       const t = parseFloat(new URLSearchParams(window.location.search).get("t"));
       if (Number.isFinite(t)) hold.current = clamp(t, 0, TABS.length - 1);
@@ -232,7 +271,7 @@ export default function Piece() {
   };
 
   return (
-    <div className="it">
+    <div ref={rootRef} className="it">
       <div
         ref={barRef}
         className="it-bar"
