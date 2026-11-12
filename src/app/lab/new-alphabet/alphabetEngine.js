@@ -12,7 +12,14 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // T (0), M (n/2, rounded down) or B (n); either can carry a whole-cell
 // offset (C-1, M+1). A point marked * gets the house corner cut; one marked
 // # is cut as far as its two strokes allow, which is how diagonals are made.
-// Strokes are separated by |, and a stroke ending in z is closed.
+// A corner can carry a lowercase name (RM*j), and a later stroke can start
+// from where that corner was resolved: j< is the end of its cut on the way
+// in, j> the end on the way out, j the corner itself. That is how a branch
+// leaves on a vertex of the stroke it grows from (R's leg, K's arms) rather
+// than somewhere inside it. Strokes are separated by |, and a stroke ending
+// in z is closed. A stroke starting with ? is a mark inside a counter (the
+// bar of 0): it is drawn only where it clears every side of the letter by a
+// whole cell, since on a coarser raster it could only leave slivers.
 //
 // After the strokes come the left and right sidebearings, as a share of the
 // house bearing: 1 beside a straight full-height stem (H, E's left, N, M),
@@ -32,14 +39,14 @@ const GLYPHS = {
   H: [0.62, "LT LB | RT RB | LM RM", 1, 1],
   I: [0, "CT CB", 0.8, 0.8],
   J: [0.5, "RT RB* LB* L,M+1", 0.35, 1],
-  K: [0.6, "LT LB | LM RM# RT | LM RM# RB", 1, 0.45],
+  K: [0.6, "LT LB | LM RM#k RT | k< RM# RB", 1, 0.45],
   L: [0.52, "LT LB RB", 1, 0.25],
   M: [0.86, "LB LT* RT* RB | CT CB", 1, 1],
   N: [0.62, "LB LT* RT* RB", 1, 1],
   O: [0.66, "LT* RT* RB* LB* z", 0.9, 0.9],
   P: [0.6, "LB LT RT* RM* LM", 1, 0.5],
   Q: [0.66, "RB LB* LT* RT* RB | RB R+1,B", 0.9, 0.7],
-  R: [0.6, "LB LT RT* RM* LM | CM RM# RB", 1, 0.85],
+  R: [0.6, "LB LT RT* RM*j LM | j> RM# RB", 1, 0.9],
   S: [0.6, "RT LT* LM* RM* RB* LB", 0.8, 0.8],
   T: [0.62, "LT RT | CT CB", 0.2, 0.2],
   U: [0.62, "LT LB* RB* RT", 1, 1],
@@ -48,7 +55,7 @@ const GLYPHS = {
   X: [0.62, "LT LM# RM# RT | LB LM# RM# RB", 0.45, 0.45],
   Y: [0.62, "LT LM# RM# RT | CM CB", 0.3, 0.3],
   Z: [0.6, "LT RT RM# LM# LB RB", 0.6, 0.6],
-  0: [0.54, "LT* RT* RB* LB* z | CM-1 CM+1", 0.9, 0.9],
+  0: [0.54, "LT* RT* RB* LB* z | ? CM-1 CM+1", 0.9, 0.9],
   1: [0.4, "LT CT# CB", 0.4, 0.8],
   2: [0.58, "LT RT* RM* LM* LB RB", 0.75, 0.75],
   3: [0.58, "LT RT* RB* LB | CM RM", 0.5, 0.85],
@@ -62,22 +69,30 @@ const GLYPHS = {
 
 const parsed = {};
 for (const [ch, [ratio, src, lsb, rsb]] of Object.entries(GLYPHS)) {
-  parsed[ch] = {
-    ratio,
-    lsb,
-    rsb,
-    strokes: src.split("|").map((s) => {
-      const toks = s.trim().split(/\s+/);
-      const closed = toks[toks.length - 1] === "z";
-      if (closed) toks.pop();
-      const pts = toks.map((t) => {
-        const m = /^([LCR])([+-]\d+)?([TMB])([+-]\d+)?([*#])?$/.exec(t.replace(",", ""));
-        if (!m) throw new Error(`bad glyph point ${ch}:${t}`);
-        return { x: m[1], dx: +(m[2] || 0), y: m[3], dy: +(m[4] || 0), cut: m[5] || "" };
-      });
-      return { pts, closed };
-    }),
-  };
+  const named = new Set();
+  const strokes = src.split("|").map((s) => {
+    const toks = s.trim().split(/\s+/);
+    const closed = toks[toks.length - 1] === "z";
+    if (closed) toks.pop();
+    const optional = toks[0] === "?";
+    if (optional) toks.shift();
+    const pts = toks.map((t) => {
+      const r = /^([a-y])([<>])?$/.exec(t);
+      if (r) {
+        if (!named.has(r[1])) throw new Error(`glyph ${ch}: ${t} names no earlier corner`);
+        return { ref: r[1], side: r[2] || "", cut: "" };
+      }
+      const m = /^([LCR])([+-]\d+)?([TMB])([+-]\d+)?([*#])?([a-y])?$/.exec(t.replace(",", ""));
+      if (!m) throw new Error(`bad glyph point ${ch}:${t}`);
+      if (m[6]) named.add(m[6]);
+      return { x: m[1], dx: +(m[2] || 0), y: m[3], dy: +(m[4] || 0), cut: m[5] || "", name: m[6] || "" };
+    });
+    return { pts, closed, optional };
+  });
+  // A corner something grows from holds its cut when a flat is short.
+  const held = new Set(strokes.flatMap((s) => s.pts.filter((p) => p.ref).map((p) => p.ref)));
+  for (const s of strokes) for (const p of s.pts) p.held = !!p.name && held.has(p.name);
+  parsed[ch] = { ratio, lsb, rsb, strokes };
 }
 
 const glyphWidth = (g, n) => (g.ratio === 0 ? 0 : Math.max(2, Math.round(n * g.ratio)));
@@ -86,33 +101,91 @@ const glyphWidth = (g, n) => (g.ratio === 0 ? 0 : Math.max(2, Math.round(n * g.r
 // whole-cell points. The number of points per stroke depends only on the
 // glyph, never on the raster, so a stroke can always spring from one
 // resolution to the next point for point.
+//
+// The plain cuts are hinted, because on a coarse raster a sliver narrower
+// than the stroke is what makes letters look like rasterised paths. Every
+// bend keeps a flat: where the cuts at the two ends of a segment would
+// leave less than a whole cell of straight between them, the smaller one
+// comes down a cell, again until there is a cell or it is gone, so two
+// house cuts never meet in a point that the miter turns into a sliver of
+// white (S's left side, the P, B and R bowls, 0 on four rows). A tie gives
+// way at the corner nearer the letter's middle, an inner join before an
+// outer corner, then at the later one; a corner something grows from gives
+// way last. The # cuts are exempt: they are the letter's diagonals, and
+// where two meet it is an apex (V, X, Y) by design. Branches then start on
+// the vertices the hint left behind, so they grow out of a stroke's corner
+// with no stair-step.
 function resolve(g, n, c) {
   const w = glyphWidth(g, n);
   const X = { L: 0, C: Math.floor(w / 2), R: w };
   const Y = { T: 0, M: Math.floor(n / 2), B: n };
-  return g.strokes.map(({ pts, closed }) => {
-    const P = pts.map((p) => [X[p.x] + p.dx, Y[p.y] + p.dy]);
+  const named = {};
+  return g.strokes.map(({ pts, closed, optional }) => {
+    const P = pts.map((p) => (p.ref ? named[p.ref][p.side] : [X[p.x] + p.dx, Y[p.y] + p.dy]));
+    // A mark too close to the sides folds away onto its first point, so it
+    // keeps its points to spring from and draws nothing.
+    if (optional && P.some(([x, y]) => x < 2 || x > w - 2 || y < 2 || y > n - 2)) return { pts: P.map(() => P[0]), closed };
     const N = P.length;
     const corner = (i) => (closed || (i > 0 && i < N - 1)) && pts[i].cut;
+    const dist = (i, j) => Math.abs(P[j][0] - P[i][0]) + Math.abs(P[j][1] - P[i][1]);
     // How far a corner may cut into a segment: all of it, or half when the
     // far end is cut too.
-    const avail = (i, j) => {
-      const len = Math.abs(P[j][0] - P[i][0]) + Math.abs(P[j][1] - P[i][1]);
-      return corner(j) ? len / 2 : len;
+    const avail = (i, j) => (corner(j) ? dist(i, j) / 2 : dist(i, j));
+    const cut = P.map((_, i) => {
+      if (!corner(i)) return 0;
+      const lim = Math.min(avail(i, (i - 1 + N) % N), avail(i, (i + 1) % N));
+      return Math.floor(pts[i].cut === "#" ? lim : Math.min(c, lim));
+    });
+    // Two diagonals running on in the same direction (Z) are one diagonal:
+    // across an odd width the halves would leave a one-cell stair in it, so
+    // the corner with more room takes the odd cell and they meet on a dot.
+    const dir = (i) => {
+      const a = P[(i - 1 + N) % N];
+      const b = P[(i + 1) % N];
+      return [Math.sign(P[i][0] - a[0]) + Math.sign(b[0] - P[i][0]), Math.sign(P[i][1] - a[1]) + Math.sign(b[1] - P[i][1])];
     };
+    for (let i = 0; i < (closed ? N : N - 1); i++) {
+      const j = (i + 1) % N;
+      if (pts[i].cut !== "#" || pts[j].cut !== "#" || !corner(i) || !corner(j)) continue;
+      if (dist(i, j) - cut[i] - cut[j] !== 1 || dir(i).join() !== dir(j).join()) continue;
+      const room = (k, far) => dist(k, far) - cut[k];
+      const ri = room(i, (i - 1 + N) % N);
+      const rj = room(j, (j + 1) % N);
+      if (Math.max(ri, rj) >= 1) cut[rj >= ri ? j : i]++;
+    }
+    // The minimum flat.
+    const inner = (i, j) => (P[i][0] === P[j][0] ? Math.abs(2 * P[i][1] - n) : Math.abs(2 * P[i][0] - w));
+    const segs = closed ? N : N - 1;
+    for (let pass = 0, moved = true; moved && pass < 4 * N * c + 4; pass++) {
+      moved = false;
+      for (let s = 0; s < segs; s++) {
+        const i = s;
+        const j = (s + 1) % N;
+        const len = dist(i, j);
+        if (len === 0 || len - cut[i] - cut[j] >= 1) continue;
+        const soft = [i, j].filter((k) => cut[k] > 0 && pts[k].cut === "*");
+        if (!soft.length) continue;
+        soft.sort((a, b) => pts[a].held - pts[b].held || cut[a] - cut[b] || inner(a, a === i ? j : i) - inner(b, b === i ? j : i) || (b === j) - (a === j));
+        cut[soft[0]]--;
+        moved = true;
+      }
+    }
     const out = [];
     for (let i = 0; i < N; i++) {
       if (!corner(i)) {
         out.push(P[i]);
+        if (pts[i].name) named[pts[i].name] = { "": P[i], "<": P[i], ">": P[i] };
         continue;
       }
       const a = (i - 1 + N) % N;
       const b = (i + 1) % N;
-      const lim = Math.min(avail(i, a), avail(i, b));
-      const k = Math.floor(pts[i].cut === "#" ? lim : Math.min(c, lim));
+      const k = cut[i];
       const din = [Math.sign(P[i][0] - P[a][0]), Math.sign(P[i][1] - P[a][1])];
       const dout = [Math.sign(P[b][0] - P[i][0]), Math.sign(P[b][1] - P[i][1])];
-      out.push([P[i][0] - din[0] * k, P[i][1] - din[1] * k], [P[i][0] + dout[0] * k, P[i][1] + dout[1] * k]);
+      const before = [P[i][0] - din[0] * k, P[i][1] - din[1] * k];
+      const after = [P[i][0] + dout[0] * k, P[i][1] + dout[1] * k];
+      out.push(before, after);
+      if (pts[i].name) named[pts[i].name] = { "": P[i], "<": before, ">": after };
     }
     return { pts: out, closed };
   });
