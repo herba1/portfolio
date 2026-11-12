@@ -1,6 +1,6 @@
 {
   "title": "Raster",
-  "description": "A song title set in letters drawn only from horizontal and vertical strokes with 45-degree corners, sitting on the dot raster they are built from. Drag up or down and the raster refines or coarsens, from five cells across a letter to twenty, and every stroke slides on a spring to the nearest cells of the new grid, so the word rebuilds itself and stays readable at every resolution. Type to change the title.",
+  "description": "A song title set in letters drawn only from horizontal and vertical strokes with 45-degree corners, and rendered only by the dot raster: a cell turns black when its centre falls inside a stroke, and nothing else is drawn. Drag up or down and the raster refines or coarsens, from five cells across a letter, a stair-stepped bitmap, to twenty, a fine screen. At every step the word breaks up into the dot field and each cell fades back on its own spring as the strokes sweep across it, so the word rebuilds itself from the grid. Type to change the title.",
   "tags": ["Type", "Grid", "Canvas"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
