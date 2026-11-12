@@ -7,22 +7,26 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // Query: ?x=0.5 split, ?preset=summer|dusk|night, ?motion=1 moving grain, and
 // any numeric film param to override the preset (?halation=0.6&bloom=0.3).
 
-const SRC = "/lab/film-test/street.jpg";
+const SRC = "/lab/film-test/cumulus-wires.jpg";
 
-// Summer, re-tuned for this photograph's backlit cumulus. The kit's summer
-// spreads all the light (threshold 0), cools the highlights and puts paper
-// white above the cloud, so the cloud developed into a flat grey veil. Here
-// only light past the knee scatters, so the cloud keeps its own lobes; the
-// highlights roll off warm-neutral, and the brightest cloud lands near paper
-// white instead of a stop under it. This cloud is bright but not clipped in
-// the photo, so less headroom: at the kit's 1.4 the scattered light pushed a
-// fifth of the cloud's red and green into 255 and flattened its tops.
+// Summer, re-tuned for this photograph: a towering cumulus shot straight up
+// past three power lines, its lobes drawn by a soft high sun and a hazy blue.
+// The kit's summer spreads all the light (threshold 0) and cools the
+// highlights, which turns a cloud into a flat grey veil. Here only light past
+// the knee scatters, so every lobe keeps its own drawing; the highlights roll
+// off warm-neutral. The photo is a touch under (cloud median 194 of 255, tops
+// near 216), so a fifth of a stop more light, paper white pulled down to 0.95
+// and a steeper mid slope put the sunlit tops near paper white while the sky
+// stays deep and the blue-grey undersides keep their weight. Light headroom:
+// nothing in the cloud is clipped, so it does not need to glow past itself.
 const SUMMER = {
   ...FILM_PRESETS.summer,
+  exposure: 0.2,
+  contrast: 1.32,
   headroom: 0.8,
   bloomThreshold: 0.6,
   highlightTint: [1.03, 1, 0.95],
-  whitePoint: 1.1,
+  whitePoint: 0.95,
 };
 const PRESETS = { ...FILM_PRESETS, summer: SUMMER };
 

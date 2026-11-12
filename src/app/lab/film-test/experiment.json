@@ -1,6 +1,6 @@
 {
   "title": "Film test",
-  "description": "A test bench for the lab's shared film look. One photograph of cumulus over a narrow street, raw on the left of the split and developed on the right: halation, Pro-Mist diffusion, dye-cloud colour bleed, a film curve that lets the cloud glow instead of clip, a deeper summer blue, fine grain and an optical vignette. Drag sideways to move the split.",
+  "description": "A test bench for the lab's shared film look. One photograph of a towering summer cumulus, looking straight up past three power lines, raw on the left of the split and developed on the right: halation, Pro-Mist diffusion, dye-cloud colour bleed, a film curve that lets the cloud glow instead of clip, a deeper summer blue, fine grain and an optical vignette. Drag sideways to move the split.",
   "tags": ["WebGL", "Photography", "Film"],
   "status": "draft",
   "createdAt": "2026-11-06T18:10:00.000Z",
@@ -8,12 +8,12 @@
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.7, 0.5] },
   "photo": {
-    "name": "Ritam Baishya, Buildings framing a bright blue sky with clouds (Unsplash)",
-    "url": "https://unsplash.com/photos/buildings-framing-a-bright-blue-sky-with-clouds-QosaFM2Ds84"
+    "name": "Yasuo Ogiuchi, cumulus congestus and power lines, 2013 (CC BY 3.0, via Wikimedia Commons)",
+    "url": "https://commons.wikimedia.org/wiki/File:500px_photo_(44011304).jpeg"
   },
   "sources": [
-    "https://unsplash.com/photos/buildings-framing-a-bright-blue-sky-with-clouds-QosaFM2Ds84",
-    "https://unsplash.com/@ritambaishya",
+    "https://commons.wikimedia.org/wiki/File:500px_photo_(44011304).jpeg",
+    "https://creativecommons.org/licenses/by/3.0/",
     "https://en.wikipedia.org/wiki/Halation",
     "https://www.cinestill.com/",
     "https://gpuopen.com/wp-content/uploads/2016/03/GdcVdrLottes.pdf"
