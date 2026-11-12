@@ -22,8 +22,10 @@ import { createCloth, project, PX, ROPE } from "./cloth";
 //
 // The sun: each frame samples how much of the disc the cloth leaves in view.
 // That share scales a lens veil over everything, lights the rims of the dress
-// and the black-and-white top that face it, and pulls the exposure down a
-// quarter stop on a spring, so a gust that uncovers it flares, then adapts.
+// and the black-and-white top that face it, and pulls the exposure down most
+// of a stop on a spring, so a gust that uncovers it flares, the garments
+// sink toward rim-lit silhouettes against it, and the exposure breathes back
+// as the dress covers it again.
 //
 // Query: ?gust=0..1 holds a steady gust (with ?dir=-1|1 and ?t=seconds of it,
 // default 2.4), simulated deterministically and frozen, for stills.
@@ -93,7 +95,7 @@ const HALO = new Float32Array([
 ]);
 const DISC = 20; // px, the disc the coverage is sampled over
 const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the lens
-const ADAPT = 0.25; // stops the exposure gives back with the disc in clear view
+const ADAPT = 0.7; // stops the exposure gives back with the disc in clear view
 const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
 const EDGE_GLOW = 1; // every garment's clean edge, lit warm from the sun behind it
 const VS = 7; // floats per cloth vertex
@@ -116,15 +118,23 @@ vec3 encode(vec3 c) {
 }`;
 
 // Lens veil: flare scattered in the lens, over the sky and the cloth alike, in
-// proportion to how much of the disc the cloth leaves in view. A broad pale
-// cyan lobe about a third of the frame across, and a tighter, whiter one.
+// proportion to how much of the disc the cloth leaves in view. Behind the
+// dress the sun is a soft patch of lit fabric, and its veil is the small one:
+// a pale cyan lobe about a third of the frame across and a tighter, whiter
+// one. Uncovered, it is the sun itself, and the veil is the lens's: warm-
+// neutral, most of the frame across with a long 1/(1+r^2) skirt, so the
+// whole upper middle lifts and greys out and the cloth beside the disc loses
+// its contrast and wraps in glare, as squinting into it does.
 const SUN_GLSL = `
 uniform vec2 uSun;    // image px
 uniform float uGlare; // the disc in view, the dress counting for a little
+uniform float uOpen;  // the share of the disc in clear view
 vec3 veil(vec2 p) {
   vec2 d = p - uSun;
   float r2 = dot(d, d);
-  return uGlare * (vec3(0.13, 0.25, 0.29) * exp(-r2 / (240.0 * 240.0)) + vec3(0.06, 0.08, 0.075) * exp(-r2 / (64.0 * 64.0)));
+  vec3 soft = vec3(0.13, 0.25, 0.29) * exp(-r2 / (240.0 * 240.0)) + vec3(0.06, 0.08, 0.075) * exp(-r2 / (64.0 * 64.0));
+  vec3 lens = vec3(0.30, 0.30, 0.27) * (exp(-r2 / (420.0 * 420.0)) + 0.5 / (1.0 + r2 / (260.0 * 260.0)));
+  return uGlare * mix(soft, lens, uOpen);
 }`;
 
 const PLATE_F = `#version 300 es
@@ -150,16 +160,20 @@ void main() {
   // the sky with the photograph's grey veil lifted off
   vec3 c = max(texture(uPlate, uv).rgb - h, 0.0);
   // the aureole put back: the same falloff, pale cyan, eased off close in so
-  // the disc stands out of it
-  c += h.g * mix(0.45, 1.0, smoothstep(24.0, 360.0, r)) * vec3(0.5, 1.0, 1.1);
-  // the disc: warm-neutral, blown out to about 20 px, rolling off through a
-  // hot shoulder; a thin warm ring at its foot, where the sky is too bright
-  // for the film's own halation to show
-  c += vec3(1.0, 0.93, 0.8) * 2.4 * exp(-r * r / (15.0 * 15.0));
+  // the disc stands out of it; in clear view the lens veil whitens it
+  c += h.g * mix(mix(0.45, 0.2, uOpen), 1.0, smoothstep(24.0, 360.0, r)) * mix(vec3(0.5, 1.0, 1.1), vec3(0.8, 0.95, 0.95), uOpen);
+  // the disc: warm-neutral, rolling off through a hot shoulder. Seen through
+  // the dress it is a hard dot about 15 px across; in clear view it is the
+  // sun, blown out to about 40 px and still falling away, never a flat plate.
+  // A thin warm ring at its foot, where the sky is too bright for the film's
+  // own halation to show.
+  float core = mix(15.0, 24.0, uOpen);
+  c += mix(vec3(1.0, 0.93, 0.8), vec3(1.0, 0.95, 0.86), uOpen) * (2.4 + 5.0 * uOpen) * exp(-r * r / (core * core));
   c += vec3(1.0, 0.8, 0.6) * 1.1 / (1.0 + r * r / (20.0 * 20.0));
-  float ring = (r - 30.0) / 7.0;
+  c += vec3(1.0, 0.95, 0.86) * 0.6 * uOpen / (1.0 + r * r / (40.0 * 40.0));
+  float ring = (r - mix(30.0, 72.0, uOpen)) / mix(7.0, 20.0, uOpen);
   float wr = exp(-ring * ring);
-  c = mix(c, c * vec3(1.0, 0.84, 0.7) + vec3(0.1, 0.035, 0.0), 0.75 * wr);
+  c = mix(c, c * vec3(1.0, 0.84, 0.7) + vec3(0.1, 0.035, 0.0), mix(0.75, 0.35, uOpen) * wr);
   c += veil(p);
   o = vec4(encode(c), 1.0);
 }`;
@@ -169,18 +183,31 @@ precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uTex;
+uniform sampler2D uScene; // the scene before the film
 uniform vec2 uSunUv;  // the disc, in the print's uv
 uniform vec2 uRes;    // the print, device px
 uniform float uScale; // device px per image px
 uniform float uBlow;  // 0 for the raw view
+uniform float uOpen;  // the disc in clear view: the blown core is wider
 // The negative's shoulder: the disc is a hundred thousand times the sky, so
 // whatever the grade leaves near white at the sun goes to paper white, warm.
+// In clear view the exposure pulls down most of a stop, which would print the
+// disc a flat grey: so where the scene itself ran past white, it is still
+// the sun, and goes to paper white whatever the exposure, through a warm-
+// neutral shoulder at its edge.
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
   float d = length((vUv - uSunUv) * uRes) / uScale;
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float blow = smoothstep(0.76, 0.97, l) * (1.0 - smoothstep(20.0, 40.0, d)) * uBlow;
-  o = vec4(mix(c, vec3(1.0, 0.982, 0.95), blow), 1.0);
+  float blow = smoothstep(0.76, 0.97, l) * (1.0 - smoothstep(20.0, 40.0, d));
+  // the sun's own shoulder: white to about 40 px, then a long fall, held
+  // back wherever the scene there is not bright (cloth across it)
+  float sl = dot(texture(uScene, vUv).rgb, vec3(0.2126, 0.7152, 0.0722));
+  float x = max(d - 34.0, 0.0) / 48.0;
+  float sun = smoothstep(0.55, 0.97, sl) / (1.0 + x * x);
+  blow = max(blow, uOpen * sun) * uBlow;
+  vec3 hot = mix(vec3(1.0, 0.95, 0.86), vec3(1.0, 0.982, 0.95), smoothstep(0.75, 1.0, blow));
+  o = vec4(mix(c, hot, blow), 1.0);
 }`;
 
 // Cloth and rope: drawn where they are now, textured from where they were.
@@ -214,7 +241,6 @@ uniform vec3 uTau;
 uniform vec2 uBand; // mirror width past the left and right frame edge, 0 = not cut there
 uniform float uRim;  // how strongly this garment's edge catches the sun
 uniform float uEdge; // the thin warm rim on a garment's clean edge, 0 for the rope
-uniform float uOpen; // the share of the disc in clear view
 uniform int uPass;   // 0 the cloth, 1 the second layer of a sheer fold, multiplied in
 uniform vec4 uTie;   // a strip whose square-cut matte is rounded, in photograph px
 ${SUN_GLSL}
@@ -738,6 +764,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.uniform2f(plateP.u.uSize, IW, IH);
     gl.uniform2f(plateP.u.uSun, sunPx[0], sunPx[1]);
     gl.uniform1f(plateP.u.uGlare, glare);
+    gl.uniform1f(plateP.u.uOpen, open);
     gl.uniform3fv(plateP.u["uHalo[0]"], HALO);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -824,10 +851,15 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, rawView ? scene.tex : developed.tex);
     gl.uniform1i(blitP.u.uTex, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+    gl.uniform1i(blitP.u.uScene, 1);
+    gl.activeTexture(gl.TEXTURE0);
     gl.uniform2f(blitP.u.uSunUv, sunPx[0] / IW, 1 - sunPx[1] / IH);
     gl.uniform2f(blitP.u.uRes, rect.w, rect.h);
     gl.uniform1f(blitP.u.uScale, rect.w / IW);
     gl.uniform1f(blitP.u.uBlow, rawView ? 0 : 1);
+    gl.uniform1f(blitP.u.uOpen, open);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
