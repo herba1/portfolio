@@ -7,10 +7,10 @@ import { albumById, loadCover } from "../_kit/covers";
 // rotation, so its normal sweeps through the room's lights on the way. One
 // side is matte charcoal; the other is a coloured mirror whose tint is the
 // album cover at that sequin's place on the swatch. The room is dark but for
-// a few small, very hot softboxes, so a mirror is either catching one (and
-// blows out white, with bloom) or it is near-black: a stroke fires a wake of
-// flashes as each turning disc sweeps its normal through the boxes, and the
-// settled picture breaks into hot and dead discs.
+// a few small, very hot softboxes. Each mirror is coloured metal: what it
+// throws back of a box is the box times its own tint, so a pale disc flares
+// hot and white, a sky-blue one flares cyan, and a black one only glows a
+// dim, deep version of itself. The glitter is the picture's own highlights.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aLocal;
@@ -119,7 +119,35 @@ vec3 boxes(vec3 d){
   }
   return c;
 }
-vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+`;
+
+// The softboxes as a mirror sees them, against the reflectance that clips to
+// white: a disc whose tint is brighter than WHITE_F0 blows out, anything
+// darker keeps its colour however hot the light. A glint mostly lives on the
+// curled rim, which with the boxes' soft edges and the shingle shadow sees
+// about 15 of a box's 24, so the knee is set for that.
+const LIGHT = 0.3;
+const WHITE_F0 = 0.6;
+const KNEE = (15 * LIGHT * WHITE_F0).toFixed(3);
+
+// Tone curve on brightness alone, so a hot cyan glint stays cyan instead of
+// washing out channel by channel. Only light past the knee, which only the
+// palest discs reach, runs to white.
+const TONE = `
+float aces1(float x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+vec3 aces3(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+vec3 tone(vec3 x){
+  float L = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+  float T = aces1(L);
+  vec3 h = x * (T / L);
+  float m = max(h.r, max(h.g, h.b));
+  h = min(h, vec3(1.0)) + (1.0 - min(h, vec3(1.0))) * clamp((m - 1.0) * 0.6, 0.0, 1.0);
+  // A little of the per-channel curve back, so a mid green glints as green
+  // metal rather than a lit sign.
+  h = mix(h, aces3(x), 0.3);
+  // Past the knee the flare runs to white, keeping a breath of its tint.
+  return mix(h, vec3(max(T, m)), 0.88 * smoothstep(${KNEE} * 0.8, ${KNEE} * 1.15, L));
+}
 `;
 
 const FS = `#version 300 es
@@ -129,6 +157,7 @@ flat in mat3 vB; flat in vec2 vShape;
 uniform vec3 uEye; uniform float uR; uniform float uCup; uniform vec2 uNb0; uniform vec2 uNb1; uniform float uExposure; uniform float uHdr;
 out vec4 o;
 ${ENV}
+${TONE}
 void main(){
   bool front = vFace > 0.0;
   float vRho = length(vL);
@@ -153,11 +182,11 @@ void main(){
     float sheen = pow(max(dot(R, key), 0.0), 5.0) * 0.5 + pow(max(dot(R, normalize(vec3(-0.17, -0.2, 0.965))), 0.0), 24.0) * 0.4;
     col = alb * irr + vec3(0.95, 0.93, 0.9) * sheen * (0.2 + 0.8 * fr) * 0.035 + boxes(R) * 0.0008;
   } else {
-    // A tinted mirror. What it sees of the dim room comes back in the
-    // cover's colour; a softbox comes back nearly white and blows out.
-    vec3 hot = boxes(R);
-    vec3 F = mix(vC, vec3(1.0), fr);
-    col = sky(R) * F * 2.2 + hot * mix(vC, vec3(1.0), 0.3 + 0.7 * fr) + vC * 0.012;
+    // Coloured metal: F0 is the cover's tint, and everything it reflects,
+    // the dim room and the hot boxes alike, comes back multiplied by it.
+    // Only at true grazing does Schlick lift it toward white.
+    vec3 F = vC + (1.0 - vC) * fr;
+    col = (sky(R) * 2.2 + boxes(R) * ${LIGHT}) * F + vC * 0.012;
   }
   // The pressed rim and the punched hole catch a little less light.
   col *= mix(1.0, 0.72, smoothstep(0.84, 1.0, vRho));
@@ -168,7 +197,7 @@ void main(){
   float sh = smoothstep(0.0, uR * 0.55, min(d0, d1));
   col *= mix(1.0, mix(0.55, 1.0, sh), 1.0 - vLift);
   if (uHdr > 0.5) { o = vec4(col, 1.0); return; }
-  vec3 m = aces(col * uExposure);
+  vec3 m = tone(col * uExposure);
   o = vec4(pow(m, vec3(1.0 / 2.2)), 1.0);
 }`;
 
@@ -213,7 +242,8 @@ const BRIGHT_FS = `#version 300 es
 precision highp float;
 in vec2 vUv; uniform sampler2D uTex; uniform vec2 uTexel; uniform float uExposure; uniform float uThresh;
 out vec4 o;
-vec3 tap(vec2 uv){ vec4 s = texture(uTex, uv); vec3 c = s.rgb * s.a * uExposure; float l = max(c.r, max(c.g, c.b)); return c * max(l - uThresh, 0.0) / (l + 1e-4); }
+// Keyed on luminance, at the white knee: only discs pale enough to blow out bloom.
+vec3 tap(vec2 uv){ vec4 s = texture(uTex, uv); vec3 c = s.rgb * s.a * uExposure; float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return c * max(l - uThresh, 0.0) / (l + 1e-4); }
 void main(){
   vec2 h = uTexel * 0.5;
   o = vec4((tap(vUv + vec2(-h.x, -h.y)) + tap(vUv + vec2(h.x, -h.y)) + tap(vUv + vec2(-h.x, h.y)) + tap(vUv + vec2(h.x, h.y))) * 0.25, 1.0);
@@ -245,10 +275,10 @@ in vec2 vUv;
 uniform sampler2D uScene; uniform sampler2D uB0; uniform sampler2D uB1; uniform sampler2D uB2;
 uniform float uExposure; uniform float uBloom;
 out vec4 o;
-vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+${TONE}
 void main(){
   vec4 s = texture(uScene, vUv);
-  vec3 lin = mix(s.rgb, aces(s.rgb * uExposure), s.a);
+  vec3 lin = mix(s.rgb, tone(s.rgb * uExposure), s.a);
   vec3 b = texture(uB0, vUv).rgb * 0.55 + texture(uB1, vUv).rgb * 0.35 + texture(uB2, vUv).rgb * 0.3;
   b *= uBloom;
   lin += b / (1.0 + 0.35 * b);
@@ -337,10 +367,12 @@ export async function createSequin(host, { embedded = false } = {}) {
       }
     }
     r /= n; g /= n; b /= n;
-    // A mirror tint reads darker than paper; lift it and keep its hue.
+    // The tint is the mirror's reflectance, so black stays near-black: a
+    // little more saturation, and only a hair of floor so a dark disc
+    // still answers a softbox with a deep glow of its own colour.
     const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     const sat = 1.15;
-    const f = (c) => clamp((l + (c - l) * sat) * 0.88 + 0.03, 0, 1);
+    const f = (c) => clamp((l + (c - l) * sat) * 0.92 + 0.006, 0, 1);
     return [f(r), f(g), f(b)];
   };
 
@@ -470,7 +502,7 @@ export async function createSequin(host, { embedded = false } = {}) {
     gl.uniform1i(bright.u.uTex, 0);
     gl.uniform2f(bright.u.uTexel, 1 / scene.w, 1 / scene.h);
     gl.uniform1f(bright.u.uExposure, EXPOSURE);
-    gl.uniform1f(bright.u.uThresh, 1.1);
+    gl.uniform1f(bright.u.uThresh, KNEE * 0.9);
     quad(a.f, a.w, a.h);
     for (let k = 0; k < levels.length; k++) {
       [a, b] = levels[k];
@@ -501,7 +533,7 @@ export async function createSequin(host, { embedded = false } = {}) {
     gl.uniform1i(comp.u.uB1, 2);
     gl.uniform1i(comp.u.uB2, 3);
     gl.uniform1f(comp.u.uExposure, EXPOSURE);
-    gl.uniform1f(comp.u.uBloom, 0.22);
+    gl.uniform1f(comp.u.uBloom, 0.42);
     quad(null, scene.w, scene.h);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(null);
