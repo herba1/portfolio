@@ -5,9 +5,13 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // Stations live on a grid (in grid units). Every edge between two stations
 // is routed octilinearly in the current geometry: a straight stub, a 45°
-// run, a straight stub. Lines that share an edge are offset from its
-// centreline in a fixed lane order, so bundles stay parallel; bends are arcs
-// on a common centre, so the bundle turns concentrically. Dragging a station
+// run, a straight stub when there is room, otherwise one straight run and
+// one 45° run, and every bend is an arc of one radius. While the network
+// moves, stations are drawn where a ruling hand would put them, so a small
+// offset never becomes a tight S. Lines that share an edge (or leave a
+// station along the same run) are offset from its centreline in a fixed lane
+// order, so bundles stay parallel; bends are arcs on a common centre, so the
+// bundle turns concentrically. Dragging a station
 // moves it freely; the routing keeps everything octilinear on the way. On
 // release a small search puts every station back on whole grid points, in
 // the cleanest octilinear layout near where the hand left it, and springs
@@ -91,8 +95,14 @@ export function createOctilinear(host) {
   const Y = (y) => oy + y * u;
 
   // ---- routing --------------------------------------------------------
-  // Centreline of one edge in px: stub, 45° run, stub.
-  function route(ax, ay, bx, by) {
+  // Centreline of one edge: stub, 45° run, stub, when both stubs and the run
+  // have room for a full-radius bend. Otherwise (a small offset, or stubs
+  // shorter than the radius) it is one straight stub plus one 45° run, with
+  // the run anchored at one end (anchor -1: at a, +1: at b; chooseAnchors
+  // picks it, by default the end nearer the hand), so a nudge costs one bend
+  // of radius R instead of a tight S. anchor 0 asks for the symmetric form
+  // (the tidy search works in grid units).
+  function route(ax, ay, bx, by, anchor = 0, rad = 0) {
     const dx = bx - ax;
     const dy = by - ay;
     const adx = Math.abs(dx);
@@ -100,7 +110,7 @@ export function createOctilinear(host) {
     const sx = Math.sign(dx);
     const sy = Math.sign(dy);
     const d = Math.min(adx, ady);
-    const half = (Math.max(adx, ady) - d) / 2;
+    const rest = Math.max(adx, ady) - d;
     const pts = [[ax, ay]];
     let px = ax;
     let py = ay;
@@ -109,37 +119,343 @@ export function createOctilinear(host) {
       px = x;
       py = y;
     };
-    if (adx >= ady) push(ax + sx * half, ay);
-    else push(ax, ay + sy * half);
-    push(px + sx * d, py + sy * d);
+    const straight = (len) => (adx >= ady ? push(px + sx * len, py) : push(px, py + sy * len));
+    const diagonal = () => push(px + sx * d, py + sy * d);
+    const short = rad > 0 && (d < 2 * rad || rest / 2 < rad);
+    if (anchor === 0 && short) anchor = 1;
+    if (anchor === 1 && short) {
+      straight(rest);
+      diagonal();
+    } else if (anchor === -1 && short) {
+      diagonal();
+      straight(rest);
+    } else {
+      straight(rest / 2);
+      diagonal();
+    }
     if (Math.hypot(bx - px, by - py) > 0.05) pts.push([bx, by]);
     else if (pts.length > 1) pts[pts.length - 1] = [bx, by];
     else pts.push([bx + 0.05, by]);
     return pts;
   }
 
+  // ---- the ruled hand ---------------------------------------------------
+  // Stations are drawn where the hand would rule them, not where the springs
+  // happen to hold them. Working outward-in from the far side of the map, a
+  // station whose offset from an already ruled neighbour is too small to hold
+  // a full-radius 45° bend is set flush with that neighbour (or onto its
+  // diagonal), within a radius-sized reach. So every edge is either exactly
+  // straight or has room for its bends at R, and no frame shows a sub-radius
+  // S. A change of mind (a new alignment) glides over a few frames.
+  let near = Object.fromEntries(ids.map((id) => [id, 0]));
+  const dp = {};
+  const ruled = new Set();
+  const snapSig = {};
+  const resid = {};
+  const tidyEdge = (dx, dy, tau) => {
+    const a = Math.abs(dx);
+    const b = Math.abs(dy);
+    const mi = Math.min(a, b);
+    const ma = Math.max(a, b) - mi;
+    return (mi < 0.5 || mi >= tau * 0.75) && (ma < 0.5 || ma >= tau);
+  };
+  function rule(dt) {
+    const tau = R;
+    const k = 1 - Math.exp(-dt * 26);
+    ruled.clear();
+    // Stations standing still at home are the ruled world, and the station in
+    // the hand stays under the hand; the rest are ruled growing out from the
+    // world, farthest from the hand first, so every station has a ruled
+    // neighbour to align to when its turn comes.
+    const order = [];
+    const left = new Set(ids);
+    for (const id of ids) {
+      const s = st[id];
+      if (drag?.id === id || (Math.abs(s.x - s.hx) * u < 0.5 && Math.abs(s.y - s.hy) * u < 0.5)) {
+        order.push(id);
+        left.delete(id);
+      }
+    }
+    while (left.size) {
+      let pick = null;
+      let tie = -1;
+      for (const id of left) {
+        let t = 0;
+        for (const n of st[id].adj) if (!left.has(n)) t++;
+        if (order.length && !t) continue;
+        if (pick == null || near[id] > near[pick] || (near[id] === near[pick] && t > tie)) {
+          pick = id;
+          tie = t;
+        }
+      }
+      pick ??= left.values().next().value;
+      order.push(pick);
+      left.delete(pick);
+    }
+    for (const id of order) {
+      const s = st[id];
+      const px = X(s.x);
+      const py = Y(s.y);
+      const N = [];
+      // The station in the hand is ruled first, against its neighbours' home
+      // positions, with a short reach: a light magnet that lets it leave the
+      // grid cleanly and never strays far from the pointer.
+      const hand = drag?.id === id;
+      const reach = hand ? tau * 0.5 : tau;
+      for (const n of s.adj) {
+        if (hand) N.push({ x: X(st[n].hx), y: Y(st[n].hy) });
+        else if (ruled.has(n)) N.push(dp[n]);
+      }
+      let bx = px;
+      let by = py;
+      let sig = "pp";
+      if (N.length) {
+        const xs = [[px, "p"]];
+        const ys = [[py, "p"]];
+        N.forEach((n, i) => {
+          xs.push([n.x, `x${i}`]);
+          ys.push([n.y, `y${i}`]);
+        });
+        const xb = xs.slice();
+        const yb = ys.slice();
+        N.forEach((n, i) => {
+          for (const [y] of yb) {
+            const d = Math.abs(y - n.y);
+            xs.push([n.x + d, `d${i}+`], [n.x - d, `d${i}-`]);
+          }
+          for (const [x] of xb) {
+            const d = Math.abs(x - n.x);
+            ys.push([n.y + d, `d${i}+`], [n.y - d, `d${i}-`]);
+          }
+        });
+        let best = Infinity;
+        for (const [x, lx] of xs) {
+          if (Math.abs(x - px) > reach) continue;
+          for (const [y, ly] of ys) {
+            if (Math.abs(y - py) > reach) continue;
+            let bad = 0;
+            for (const n of N) if (!tidyEdge(x - n.x, y - n.y, tau)) bad++;
+            // Hold the current alignment unless another is clearly nearer.
+            const c = bad * 1e4 + Math.hypot(x - px, y - py) - (lx + ly === snapSig[id] ? 4 : 0);
+            if (c < best) {
+              best = c;
+              bx = x;
+              by = y;
+              sig = lx + ly;
+            }
+          }
+        }
+      }
+      const r = (resid[id] ||= [0, 0]);
+      if (dp[id] && snapSig[id] !== undefined && snapSig[id] !== sig) {
+        r[0] = dp[id].x - bx;
+        r[1] = dp[id].y - by;
+      }
+      snapSig[id] = sig;
+      r[0] *= 1 - k;
+      r[1] *= 1 - k;
+      if (Math.hypot(r[0], r[1]) < 0.1) r[0] = r[1] = 0;
+      dp[id] = { x: bx + r[0], y: by + r[1] };
+      ruled.add(id);
+    }
+  }
+  // Which end of each short edge carries its 45° run, chosen for the whole
+  // network at once. Lines are charged for turning harder at a station than
+  // the design asks (a line that ran straight through keeps running straight
+  // through; a right angle may stay a right angle; anything sharper, and
+  // above all a hairpin, is expensive), and every end is charged a little for
+  // leaving its station off the design heading. Ties go to the end nearer
+  // the hand, and a choice holds unless another is clearly better, so the
+  // routing does not flicker under a moving hand.
+  const unit = (x, y) => [Math.sign(Math.round(x * 1000)), Math.sign(Math.round(y * 1000))];
+  const designOut = (e, id) => (e.from === id ? unit(e.design[0], e.design[1]) : unit(-e.design[0], -e.design[1]));
+  const choice = new Map();
+  const heads = new Map();
+  const turnPenalty = (t, t0) => Math.max(0, t - t0) ** 2 + (t >= 3 && t > t0 ? 4 : 0) + (t === 4 ? 20 : 0);
+  const headAt = (k, id) => {
+    const h = heads.get(k);
+    return h.opts[choice.get(k)][edges.get(k).from === id ? 0 : 1];
+  };
+  function stationTurns(id) {
+    let c = 0;
+    for (const li of st[id].lines) {
+      const s = LINES[li].stops;
+      const i = s.indexOf(id);
+      if (i <= 0 || i >= s.length - 1) continue;
+      const ka = key(s[i - 1], id);
+      const kb = key(id, s[i + 1]);
+      const ha = headAt(ka, id);
+      const hb = headAt(kb, id);
+      const da = designOut(edges.get(ka), id);
+      const db = designOut(edges.get(kb), id);
+      c += turnPenalty(4 - octDiff(ha[0], ha[1], hb[0], hb[1]), 4 - octDiff(da[0], da[1], db[0], db[1]));
+    }
+    return c;
+  }
+  function endCost(k, prev) {
+    const e = edges.get(k);
+    let c = 0;
+    for (const id of [e.from, e.to]) {
+      const h = headAt(k, id);
+      const d = designOut(e, id);
+      c += 0.3 * e.members.length * octDiff(h[0], h[1], d[0], d[1]);
+    }
+    const diagEnd = choice.get(k) === 1 ? e.to : e.from;
+    return c + 0.01 * near[diagEnd] + (prev.get(k) !== choice.get(k) ? 0.4 : 0);
+  }
+  // A run must hold the tangents of the bends at both its ends at radius R.
+  const TAN = [0, Math.tan(Math.PI / 8), 1, Math.tan((3 * Math.PI) / 8), 4];
+  function roomCost(k) {
+    const h = heads.get(k);
+    if (!h.free) return 0;
+    const e = edges.get(k);
+    const c = choice.get(k);
+    let cost = 0;
+    for (const id of [e.from, e.to]) {
+      // Length of this edge's run at that station: the straight or the 45°.
+      const diagHere = (c === 1) === (id === e.to);
+      const len = diagHere ? h.d * Math.SQRT2 : h.rest;
+      const mine = headAt(k, id);
+      let turn = 0;
+      for (const li of e.members) {
+        const s = LINES[li].stops;
+        const i = s.indexOf(id);
+        for (const j of [i - 1, i + 1]) {
+          const nb = s[j];
+          if (nb == null || key(id, nb) === k) continue;
+          const o = headAt(key(id, nb), id);
+          turn = Math.max(turn, 4 - octDiff(mine[0], mine[1], o[0], o[1]));
+        }
+      }
+      const need = R * (TAN[1] + TAN[turn]);
+      if (len < need * 0.97) cost += 3 * Math.min(1, (need - len) / need + 0.3);
+    }
+    return cost;
+  }
+  function chooseAnchors() {
+    const prev = new Map(choice);
+    const free = [];
+    for (const [k, e] of edges) {
+      const a = dp[e.from];
+      const b = dp[e.to];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+      const sx = Math.sign(dx);
+      const sy = Math.sign(dy);
+      const d = Math.min(adx, ady);
+      const rest = Math.max(adx, ady) - d;
+      const axis = adx >= ady ? [sx, 0] : [0, sy];
+      const diag = [sx, sy];
+      const neg = (v) => [-v[0], -v[1]];
+      const short = d < 2 * R || rest / 2 < R;
+      let opts;
+      if (d < 0.5) opts = { 1: [axis, neg(axis)], [-1]: [axis, neg(axis)] };
+      else if (rest < 0.5) opts = { 1: [diag, neg(diag)], [-1]: [diag, neg(diag)] };
+      else if (!short) opts = { 1: [axis, neg(axis)], [-1]: [axis, neg(axis)] };
+      else {
+        opts = { 1: [axis, neg(diag)], [-1]: [diag, neg(axis)] };
+        free.push(k);
+      }
+      heads.set(k, { opts, free: free.at(-1) === k, d, rest });
+      if (!choice.has(k)) choice.set(k, near[e.from] < near[e.to] ? -1 : 1);
+    }
+    const local = (k) => {
+      const e = edges.get(k);
+      let c = stationTurns(e.from) + stationTurns(e.to) + endCost(k, prev);
+      for (const id of [e.from, e.to]) for (const n of st[id].adj) c += roomCost(key(id, n));
+      return c;
+    };
+    for (let sweep = 0; sweep < 4; sweep++) {
+      let flipped = false;
+      for (const k of free) {
+        const c0 = local(k);
+        choice.set(k, -choice.get(k));
+        if (local(k) < c0 - 1e-6) flipped = true;
+        else choice.set(k, -choice.get(k));
+      }
+      if (!flipped) break;
+    }
+  }
+
   // Build every line's offset polyline with per-vertex radii, plus where each
   // line passes each of its stations.
-  function build() {
+  // Lane offsets at each end of each edge, eased so a bundle that gains or
+  // loses a neighbour slides over rather than jumping.
+  const portEase = new Map();
+  function build(dt) {
+    rule(dt);
+    chooseAnchors();
     const cl = new Map();
     for (const [k, e] of edges) {
-      const a = st[e.from];
-      const b = st[e.to];
-      cl.set(k, route(X(a.x), Y(a.y), X(b.x), Y(b.y)));
+      const a = dp[e.from];
+      const b = dp[e.to];
+      cl.set(k, route(a.x, a.y, b.x, b.y, choice.get(k), R));
     }
+    // Edges that leave a station on the same heading share that run, so they
+    // share one lane set there: every line through the port gets its own
+    // lane, ordered by which way its edge goes on to turn.
+    const portOff = new Map();
+    for (const id of ids) {
+      const outs = [];
+      for (const nb of st[id].adj) {
+        const k = key(id, nb);
+        const e = edges.get(k);
+        const pts = cl.get(k);
+        const fwd = e.from === id;
+        const p0 = fwd ? pts[0] : pts[pts.length - 1];
+        const p1 = fwd ? pts[1] : pts[pts.length - 2];
+        const far = fwd ? pts[pts.length - 1] : pts[0];
+        const l = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+        outs.push({ k, e, fwd, p0, far, tx: (p1[0] - p0[0]) / l, ty: (p1[1] - p0[1]) / l });
+      }
+      const seen = new Set();
+      for (const g of outs) {
+        if (seen.has(g)) continue;
+        const group = outs.filter((h) => !seen.has(h) && g.tx * h.tx + g.ty * h.ty > 0.999);
+        group.forEach((h) => seen.add(h));
+        if (group.length < 2) continue;
+        const side = (h) => (h.far[0] - h.p0[0]) * -g.ty + (h.far[1] - h.p0[1]) * g.tx;
+        group.sort((p, q) => side(p) - side(q));
+        const list = group.flatMap((h) => (h.fwd ? h.e.members : h.e.members.slice().reverse()).map((li) => [h, li]));
+        list.forEach(([h, li], i) => {
+          const p = (i - (list.length - 1) / 2) * lane;
+          const pk = `${h.k}|${h.fwd ? 0 : 1}`;
+          if (!portOff.has(pk)) portOff.set(pk, new Map());
+          portOff.get(pk).set(li, h.fwd ? p : -p);
+        });
+      }
+    }
+    const ke = 1 - Math.exp(-dt * 14);
+    const portAt = (k, end, li, base) => {
+      const pk = `${k}|${end}`;
+      const target = portOff.get(pk)?.get(li) ?? base;
+      const ek = `${pk}|${li}`;
+      const cur = portEase.has(ek) ? portEase.get(ek) : target;
+      const v = Math.abs(target - cur) < 0.02 ? target : cur + (target - cur) * ke;
+      portEase.set(ek, v);
+      return v;
+    };
     const marks = {};
     const paths = LINES.map((line, li) => {
       const segs = [];
       for (let i = 1; i < line.stops.length; i++) {
         const a = line.stops[i - 1];
         const b = line.stops[i];
-        const e = edges.get(key(a, b));
+        const k = key(a, b);
+        const e = edges.get(k);
         const n = e.members.length;
-        let o = (e.members.indexOf(li) - (n - 1) / 2) * lane;
-        let pts = cl.get(key(a, b));
+        const base = (e.members.indexOf(li) - (n - 1) / 2) * lane;
+        let pts = cl.get(k);
+        const oFrom = portAt(k, 0, li, base);
+        const oTo = portAt(k, 1, li, base);
+        // Canonical offsets per segment: the port lane on each end's run.
+        let offs = [];
+        for (let j = 1; j < pts.length; j++) offs.push(j === 1 && oFrom !== base ? oFrom : j === pts.length - 1 ? oTo : base);
         if (e.from !== a) {
           pts = pts.slice().reverse();
-          o = -o;
+          offs = offs.reverse().map((v) => -v);
         }
         for (let j = 1; j < pts.length; j++) {
           const [px, py] = pts[j - 1];
@@ -147,7 +463,7 @@ export function createOctilinear(host) {
           const len = Math.hypot(qx - px, qy - py) || 1e-6;
           const dx = (qx - px) / len;
           const dy = (qy - py) / len;
-          segs.push({ px, py, qx, qy, dx, dy, nx: -dy, ny: dx, o, len, startStop: j === 1 ? a : null, endStop: j === pts.length - 1 ? b : null });
+          segs.push({ px, py, qx, qy, dx, dy, nx: -dy, ny: dx, o: offs[j - 1], len, startStop: j === 1 ? a : null, endStop: j === pts.length - 1 ? b : null });
         }
       }
       // Vertices: {x, y, r, tan, stop}
@@ -181,7 +497,7 @@ export function createOctilinear(host) {
         const t = ((bx - ax) * s2.dy - (by - ay) * s2.dx) / cross;
         const theta = Math.acos(clamp(dot, -1, 1));
         const tan = Math.tan(theta / 2);
-        const rc = Math.min(R, (Math.min(s1.len, s2.len) * 0.5) / tan);
+        const rc = R;
         const om = (s1.o + s2.o) / 2;
         const r = Math.max(0, cross > 0 ? rc - om : rc + om);
         vs.push({ x: ax + s1.dx * t, y: ay + s1.dy * t, r, tan, theta, d1: [s1.dx, s1.dy], d2: [s2.dx, s2.dy], stop });
@@ -190,15 +506,24 @@ export function createOctilinear(host) {
       vs.push({ x: sl.qx + sl.nx * sl.o, y: sl.qy + sl.ny * sl.o, r: 0, stop: line.stops[line.stops.length - 1], end: true });
 
       // Clamp radii to the room on the offset segments.
+      // Each run is shared by the bends at its two ends in proportion to what
+      // they need; with the ruled positions this is a safety net, not a rule.
       const real = vs.filter((v) => !v.mark);
-      for (let i = 1; i < real.length - 1; i++) {
-        const v = real[i];
-        if (!v.r) continue;
-        const p = real[i - 1];
-        const q = real[i + 1];
-        const room = Math.min(Math.hypot(v.x - p.x, v.y - p.y) * (p.r ? 0.5 : 1), Math.hypot(q.x - v.x, q.y - v.y) * (q.r ? 0.5 : 1));
-        if (v.r * v.tan > room) v.r = room / v.tan;
+      const need = real.map((v) => (v.r ? v.r * v.tan : 0));
+      const fit = real.map(() => 1);
+      for (let i = 1; i < real.length; i++) {
+        const tot = need[i - 1] + need[i];
+        if (!tot) continue;
+        const len = Math.hypot(real[i].x - real[i - 1].x, real[i].y - real[i - 1].y);
+        if (tot > len) {
+          const f = len / tot;
+          fit[i - 1] = Math.min(fit[i - 1], f);
+          fit[i] = Math.min(fit[i], f);
+        }
       }
+      real.forEach((v, i) => {
+        if (v.r) v.r *= fit[i];
+      });
       // Where the line actually passes each station: on the arc, not the corner.
       for (const v of vs) {
         if (!v.stop) continue;
@@ -220,12 +545,12 @@ export function createOctilinear(host) {
   }
 
   // ---- drawing --------------------------------------------------------
-  function draw() {
+  function draw(dt) {
     const dpr = stage.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, stage.width, stage.height);
-    const { paths, marks, cl } = build();
+    const { paths, marks, cl } = build(dt);
 
     ctx.lineJoin = "round";
     ctx.lineCap = "butt";
@@ -470,6 +795,7 @@ export function createOctilinear(host) {
   const begin = (id, gx, gy) => {
     const s = st[id];
     drag = { id, hop: hops(id), ox: s.x - gx, oy: s.y - gy, gx: s.x, gy: s.y };
+    near = Object.fromEntries(ids.map((n) => [n, drag.hop[n] ?? 99]));
   };
   const end = () => {
     if (!drag) return;
@@ -555,7 +881,7 @@ export function createOctilinear(host) {
   stage.onFrame((dt) => {
     const sub = 2;
     for (let i = 0; i < sub; i++) step(dt / sub, performance.now());
-    draw();
+    draw(Math.min(dt, 0.1));
   });
 
   return { destroy: () => stage.destroy() };
