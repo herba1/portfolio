@@ -110,16 +110,18 @@ export async function createChromeLines(host, { embedded = false } = {}) {
 
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) && q.get(k) !== "" && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
-  const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 3.5)];
+  const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 5.25)];
   const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   // The knuckle swells (the per-ball undulation and the slow relief) are
-  // kept below the broad body (reach and height), which carries the form,
-  // so the pool reads as one heavy liquid; but enough of them stays to
-  // break the hard studio into islands.
-  const K2 = [num("H2", 0.03), num("Hr", 0.06), num("bw", 0.42), num("Hb", 0.12)];
-  // The studio's edge (near binary), the ripples' slope and scale, and how
-  // far the reflected ray turns the screen.
-  const E = [num("ew", 0.008), num("rip", 0.34), num("kx", 7), num("rk", 56)];
+  // kept well below the broad body (reach and height), which carries the
+  // form, so the pool reads as one heavy liquid with a few large sweeping
+  // reflections and calm between them, not a scatter of islands.
+  const K2 = [num("H2", 0.015), num("Hr", 0.03), num("bw", 0.42), num("Hb", 0.12)];
+  // The studio's edge (graded, so the tone is a gradient the line width
+  // carries), the ripples' slope, how far the reflected ray turns the
+  // screen, and the ripples' scale. The screen's pitch (sp, css px) is
+  // coarse enough to hold a hairline in the lights at 1x.
+  const E = [num("ew", 0.15), num("rip", 0.15), num("kx", 7), num("rk", 56)];
   // The neck: kernel radius at its waist before it thins (scale units), and
   // how fast it drains while a stretched drop is held.
   const TH = [num("waist", 0.036), num("drain", 0.6)];

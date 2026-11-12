@@ -37,6 +37,11 @@ uniform vec4 uK2;           // body height per unit field, swell height, reach o
 uniform vec4 uS;            // relief amount, height (scale units), profile softness, threshold
 uniform vec4 uE;            // studio edge width (stereographic units), ripple slope, screen turn by the reflection, ripple scale
 out vec4 o;
+// The carrier: the one fixed direction the screen climbs in (css px, y down).
+// Lines run diagonally, falling to the right, across the pool's flow, so they
+// cross the forms instead of following their contours, and the surface only
+// bends and bunches them.
+const vec2 N0 = vec2(-0.4819, 0.8762);
 `;
 
 const COMMON = `
@@ -85,9 +90,11 @@ vec3 relief(vec2 q){
 // across the zenith so even the flat tops catch black), and thin white
 // softbox slits cut into the black, so a black reflection is an island
 // with white holes in it. The floor past the horizon is black too, cut by
-// slits, so every rim goes black and breaks. Edges are cut over uE.x plus
-// what one sample spans: the reflected tone is near binary over most
-// normals. soft widens every edge (the displacement reads a soft copy).
+// slits, so every rim goes black and breaks. Edges are graded over uE.x
+// plus what one sample spans: wide enough that the reflected tone is a real
+// gradient, which the print turns into line width, so a board reads as
+// strokes swelling into it, not a cut-out. soft widens every edge further
+// (the displacement reads a softer copy).
 float cut(float d, float ew){ return smoothstep(ew, -ew, d); }
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
@@ -310,7 +317,7 @@ vec4 surface(vec2 p){
   // It eases off toward the rim, where the ray swings fastest: there the
   // turn would only rule the lines finer than the print can hold.
   vec2 rs = r0.xy / (1.0 + max(r0.z, 0.0));
-  float Dsp = uK.y * 14.4 * dot(n.xy, vec2(0.35, 1.0)) + uE.z * 14.4 * rs.x * smoothstep(0.0, 0.5, x) + uK.z * 3.6 * Ls;
+  float Dsp = uK.y * 15.3 * dot(n.xy, N0) + uE.z * 14.4 * rs.x * smoothstep(0.0, 0.5, x) + uK.z * 3.6 * Ls;
   float tf = 380.0 + 260.0 * (h / (H + Hb)) + 120.0 * n.z;
   return vec4(clamp(sd, -64.0, 64.0), Dsp, L, tf);
 }
@@ -324,18 +331,20 @@ vec3 printAt(vec2 p, vec4 sf){
   float tf = sf.w;
   float alpha = clamp(sd * uDpr + 0.5, 0.0, 1.0);
   float S = uK.w;
-  vec2 N0 = normalize(vec2(0.24, 1.0));
   float D = sf.y;
   float phi = (dot(p, N0) + D) / S;
   vec2 gp = vec2(dFdx(phi), dFdy(phi));
   float fpx = max(length(gp), 1e-4);
 
-  // Width is the only tone carrier, and it never clips: a hairline on the
-  // white that still prints, swelling to 0.8 of the period across a board,
-  // so a black field is cut by white channels and never fuses into a block.
-  // The moire is where the width or the displacement changes fast.
+  // Width is the only tone carrier, continuously. The studio is soft (its
+  // edges graded over uE.x), so its luminance is a real gradient, and the
+  // stroke swells with it: a hairline of about a twelfth of the period on a
+  // softbox, through every width, to fat strokes nine tenths of the period
+  // across a board, which merge with a thread of white between them. The
+  // darks are lines, never a painted fill, and the gradient lives in them.
   float T = 1.0 - L;
-  float w = mix(0.14, 0.84, smoothstep(0.04, 0.9, T));
+  float tone = smoothstep(0.05, 0.86, T);
+  float w = mix(0.08, 0.9, tone * (0.6 + 0.4 * tone));
 
   // Two plates: the black key, and a lavender plate printed a hair out of
   // register, which only shows on the light.
@@ -377,7 +386,6 @@ void main(){
   vec4 sf = surface(p);
   // Without the ironing pass, a local stand-in: where the screen would fold
   // (dD/dy, from the quad, below -(1 - floor)), ease the displacement down.
-  vec2 N0 = normalize(vec2(0.24, 1.0));
   float x = max(-(dFdx(sf.y) * N0.x - dFdy(sf.y) * N0.y) * uDpr, 0.0) / (1.0 - uK.x);
   sf.y *= pow(1.0 + x * x * x * x, -0.25);
   o = vec4(printAt(p, sf), 1.0);
@@ -415,7 +423,6 @@ void main(){
   const float STEP = 2.0;               // css px
   const float TAU = 3.0;                // softness of the max, css px
   float c = 1.0 - uK.x;
-  vec2 N0 = normalize(vec2(0.24, 1.0));
   vec2 du = vec2(-N0.x, N0.y) * STEP / uSurfRes;   // one step up the screen
   // Online log-sum-exp of X(y - k) - X(y), and of the same for flat chrome.
   // The reach ends, softly, where it leaves the chrome: past the rim there
