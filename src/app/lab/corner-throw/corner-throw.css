@@ -29,21 +29,61 @@
   visibility: hidden;
 }
 
-/* The landing corner: a faint well, not an outline. */
+/* The landing corner: a solid rule in secondary ink, so it reads as a target. */
 .ct-ghost {
-  background: rgb(60 48 30 / 0.045);
-  box-shadow: inset 0 0 0 1px rgb(60 48 30 / 0.05);
+  box-shadow: inset 0 0 0 1px var(--color-ink-secondary);
+  background: #f2f0eb;
   opacity: 0;
   scale: 0.94;
   transition:
-    transform 380ms var(--ct-ease),
-    opacity 240ms var(--ct-ease),
-    scale 380ms var(--ct-ease);
+    transform 180ms var(--ct-ease),
+    opacity 200ms var(--ct-ease),
+    scale 280ms var(--ct-ease);
 }
 
 .ct-ghost[data-show] {
   opacity: 1;
   scale: 1;
+}
+
+/* The projection: where the hand is (or let go) to where the momentum lands. */
+.ct-trace {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--color-ink);
+  stroke-width: 1px;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.ct-root[data-tracing] .ct-trace {
+  opacity: 1;
+  transition: none;
+}
+
+/* A paper knockout under the rule, so it cuts cleanly across the type. */
+.ct-halo {
+  stroke: #f2f0eb;
+  stroke-width: 3px;
+}
+
+.ct-hand circle {
+  fill: #f2f0eb;
+}
+
+.ct-knock {
+  stroke: #f2f0eb;
+  stroke-width: 3px;
+}
+
+/* While held, the hand is the tile: no release mark yet. */
+.ct-root[data-dragging] .ct-hand {
+  display: none;
 }
 
 .ct-tile {
@@ -155,5 +195,119 @@
   .ct-progress span {
     animation: none;
     transform: scaleX(0.32);
+  }
+}
+
+/* The sleeve underneath: a tracklist set from the scale, kept out of the corners. */
+.ct-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 32px calc(var(--ct-size, 144px) + 64px);
+  color: var(--color-ink);
+}
+
+.ct-head,
+.ct-sides {
+  width: 100%;
+  max-width: 816px;
+}
+
+.ct-artist,
+.ct-meta,
+.ct-n,
+.ct-len,
+.ct-notes {
+  color: var(--color-ink-secondary);
+}
+
+.ct-title {
+  margin-top: 4px;
+  text-wrap: balance;
+}
+
+.ct-meta {
+  margin-top: 8px;
+}
+
+.ct-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 32px;
+  margin-top: 48px;
+  align-items: start;
+}
+
+.ct-side-name {
+  padding-bottom: 8px;
+  text-wrap: balance;
+  box-shadow: inset 0 -1px 0 var(--color-ink);
+}
+
+.ct-tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ct-track {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  min-height: 32px;
+  column-gap: 8px;
+  box-shadow: inset 0 -1px 0 rgb(40 30 15 / 0.12);
+}
+
+.ct-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ct-track[data-now] .ct-name {
+  font-weight: var(--font-weight-strong);
+}
+
+.ct-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-ink);
+}
+
+.ct-notes {
+  margin-top: 24px;
+  max-width: 320px;
+}
+
+@container (max-width: 760px) {
+  .ct-sides {
+    grid-template-columns: 1fr;
+  }
+
+  .ct-side + .ct-side,
+  .ct-notes {
+    display: none;
+  }
+}
+
+/* Short boxes (an index tile): keep the title and the top of side one. */
+@container (max-height: 560px) {
+  .ct-meta,
+  .ct-notes {
+    display: none;
+  }
+
+  .ct-sides {
+    margin-top: 24px;
+  }
+
+  .ct-track:nth-child(n + 4) {
+    display: none;
   }
 }

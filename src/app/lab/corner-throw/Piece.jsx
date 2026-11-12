@@ -20,6 +20,51 @@ const STEP = 1 / 240;
 const INSET = 32;
 const ALBUM = albumById("abbey-road");
 
+// The sleeve the window floats over. Side one starts with what is playing.
+const SIDES = [
+  {
+    name: "Side one",
+    tracks: [
+      ["Come Together", "4:20"],
+      ["Something", "3:03"],
+      ["Maxwell’s Silver Hammer", "3:27"],
+      ["Oh! Darling", "3:27"],
+      ["Octopus’s Garden", "2:51"],
+      ["I Want You (She’s So Heavy)", "7:47"],
+    ],
+  },
+  {
+    name: "Side two",
+    tracks: [
+      ["Here Comes the Sun", "3:05"],
+      ["Because", "2:45"],
+      ["You Never Give Me Your Money", "4:02"],
+      ["Sun King", "2:26"],
+      ["Mean Mr. Mustard", "1:06"],
+      ["Polythene Pam", "1:12"],
+      ["She Came In Through the Bathroom Window", "1:57"],
+      ["Golden Slumbers", "1:31"],
+      ["Carry That Weight", "1:36"],
+      ["The End", "2:19"],
+      ["Her Majesty", "0:23"],
+    ],
+  },
+];
+
+// The projection is drawn, clipped to the page with this much margin.
+const EDGE = 12;
+const clipTo = (x0, y0, x1, y1, w, h) => {
+  const lo = EDGE, hx = w - EDGE, hy = h - EDGE;
+  let t = 1;
+  const dx = x1 - x0, dy = y1 - y0;
+  if (dx > 0 && x1 > hx) t = Math.min(t, (hx - x0) / dx);
+  if (dx < 0 && x1 < lo) t = Math.min(t, (lo - x0) / dx);
+  if (dy > 0 && y1 > hy) t = Math.min(t, (hy - y0) / dy);
+  if (dy < 0 && y1 < lo) t = Math.min(t, (lo - y0) / dy);
+  t = Math.max(0, t);
+  return [x0 + dx * t, y0 + dy * t, t < 1];
+};
+
 // iOS-style rubber band past the edge: resistance grows with distance.
 const rubber = (x, d) => (1 - 1 / ((x * 0.55) / d + 1)) * d;
 const band = (v, lo, hi, d) => (v < lo ? lo - rubber(lo - v, d) : v > hi ? hi + rubber(v - hi, d) : v);
@@ -28,11 +73,21 @@ export default function Piece() {
   const rootRef = useRef(null);
   const tileRef = useRef(null);
   const ghostRef = useRef(null);
+  const lineRef = useRef(null);
+  const haloRef = useRef(null);
+  const crossRef = useRef(null);
+  const edgeRef = useRef(null);
+  const handRef = useRef(null);
 
   useEffect(() => {
     const root = rootRef.current;
     const tile = tileRef.current;
     const ghost = ghostRef.current;
+    const line = lineRef.current;
+    const halo = haloRef.current;
+    const cross = crossRef.current;
+    const edge = edgeRef.current;
+    const hand = handRef.current;
     const box = root.closest(".piece-box") || root;
     const params = new URLSearchParams(window.location.search);
     const still = params.has("t") ? Math.max(0, +params.get("t") || 0) : null;
@@ -46,6 +101,9 @@ export default function Piece() {
       grab: { dx: 0, dy: 0 },
       samples: [],
       raf: 0, last: 0,
+      // What is drawn: from (ax, ay) to the projected end (px, py).
+      // While held, (ax, ay) is the tile; once thrown, it is where the hand let go.
+      trace: { ax: 0, ay: 0, px: 0, py: 0, shown: false },
     };
 
     const corners = () => {
@@ -76,6 +134,44 @@ export default function Piece() {
       s.ghostCorner = i;
     };
 
+    const drawTrace = () => {
+      const { ax, ay, px, py } = s.trace;
+      const [ex, ey, clipped] = clipTo(ax, ay, px, py, s.w, s.h);
+      for (const l of [halo, line]) {
+        l.setAttribute("x1", ax);
+        l.setAttribute("y1", ay);
+        l.setAttribute("x2", ex);
+        l.setAttribute("y2", ey);
+      }
+      hand.setAttribute("transform", `translate(${ax} ${ay})`);
+      if (clipped) {
+        // The momentum runs off the page: end on a tick across the line.
+        const a = (Math.atan2(py - ay, px - ax) * 180) / Math.PI;
+        edge.setAttribute("transform", `translate(${ex} ${ey}) rotate(${a})`);
+        edge.style.display = "";
+        cross.style.display = "none";
+      } else {
+        cross.setAttribute("transform", `translate(${ex} ${ey})`);
+        // While held, a projection still inside the tile has nothing to show.
+        const inside = s.mode === "drag" && Math.hypot(ex - ax, ey - ay) < s.size * 0.6;
+        cross.style.display = inside ? "none" : "";
+        edge.style.display = "none";
+      }
+    };
+    const showTrace = (on) => {
+      s.trace.shown = on;
+      if (on) root.dataset.tracing = "";
+      else delete root.dataset.tracing;
+    };
+    const aimTrace = (vx, vy, smooth) => {
+      const t = s.trace;
+      const px = s.x + project(vx), py = s.y + project(vy);
+      t.ax = s.x; t.ay = s.y;
+      if (smooth >= 1 || !t.shown) { t.px = px; t.py = py; }
+      else { t.px += (px - t.px) * smooth; t.py += (py - t.py) * smooth; }
+      drawTrace();
+    };
+
     const measure = () => {
       const r = box.getBoundingClientRect();
       const k = box.offsetWidth ? r.width / box.offsetWidth : 1;
@@ -90,6 +186,7 @@ export default function Piece() {
         paint();
       }
       placeGhost(s.ghostCorner, ghost.dataset.show !== undefined);
+      if (s.trace.shown) drawTrace();
     };
 
     const point = (e) => {
@@ -117,6 +214,12 @@ export default function Piece() {
         paint();
         if (s.mode === "fly") s.raf = requestAnimationFrame(tick);
         else s.raf = 0;
+      } else if (s.mode === "drag") {
+        // Held still, the momentum drains and the line pulls back into the tile.
+        const [vx, vy] = velocity();
+        aimTrace(vx, vy, 1 - Math.exp(-dt / 0.045));
+        placeGhost(projectedCorner(vx, vy), true);
+        s.raf = requestAnimationFrame(tick);
       } else s.raf = 0;
     };
     const advance = (dt) => {
@@ -129,7 +232,10 @@ export default function Piece() {
         s.y += s.vy * h;
       }
       const near = Math.hypot(s.x - tx, s.y - ty) < 0.25 && Math.hypot(s.vx, s.vy) < 4;
-      if (Math.hypot(s.x - tx, s.y - ty) < s.size * 0.35) placeGhost(s.corner, false);
+      if (Math.hypot(s.x - tx, s.y - ty) < s.size * 0.35) {
+        placeGhost(s.corner, false);
+        if (s.trace.shown) showTrace(false);
+      }
       if (near) {
         s.x = tx; s.y = ty; s.vx = s.vy = 0;
         s.mode = "rest";
@@ -157,7 +263,12 @@ export default function Piece() {
       s.samples = [{ x: s.x, y: s.y, t: performance.now() }];
       root.dataset.dragging = "";
       delete root.dataset.flying;
-      placeGhost(s.corner, false);
+      placeGhost(s.corner, true);
+      s.trace.px = s.x; s.trace.py = s.y;
+      aimTrace(0, 0, 1);
+      showTrace(true);
+      s.last = performance.now();
+      s.raf = requestAnimationFrame(tick);
     };
     const onMove = (e) => {
       if (s.mode !== "drag") return;
@@ -178,6 +289,8 @@ export default function Piece() {
       delete root.dataset.dragging;
       const c = projectedCorner(vx, vy);
       placeGhost(c, true);
+      // Freeze the line where the hand let go, ending exactly where the momentum lands.
+      aimTrace(vx, vy, 1);
       fly(vx, vy, c);
     };
     const onKey = (e) => {
@@ -188,7 +301,10 @@ export default function Piece() {
       let c = s.corner;
       if (d[0]) c = (c & 2) | (d[0] > 0 ? 1 : 0);
       if (d[1]) c = (c & 1) | (d[1] > 0 ? 2 : 0);
-      if (c !== s.corner || s.mode === "fly") fly(s.vx + d[0] * 600, s.vy + d[1] * 600, c);
+      if (c !== s.corner || s.mode === "fly") {
+        showTrace(false);
+        fly(s.vx + d[0] * 600, s.vy + d[1] * 600, c);
+      }
     };
 
     const ro = new ResizeObserver(measure);
@@ -201,6 +317,8 @@ export default function Piece() {
       s.y = corners()[2][1] - s.h * 0.2;
       const vx = 1250, vy = -980;
       const c = projectedCorner(vx, vy);
+      aimTrace(vx, vy, 1);
+      showTrace(true);
       if (stillDrag) {
         root.dataset.dragging = "";
         placeGhost(c, true);
@@ -235,7 +353,44 @@ export default function Piece() {
 
   return (
     <div ref={rootRef} className="ct-root">
+      <article className="ct-page">
+        <div className="ct-head">
+          <p className="ct-artist text-ui-lg">{ALBUM.artist}</p>
+          <h1 className="ct-title text-title-xl">{ALBUM.title}</h1>
+          <p className="ct-meta text-ui-lg tabular-nums">Apple Records PCS 7088 · 26 September 1969 · 47:03</p>
+        </div>
+        <div className="ct-sides">
+          {SIDES.map((side, si) => (
+            <section key={side.name} className="ct-side">
+              <h2 className="ct-side-name text-heading-sm">{side.name}</h2>
+              <ol className="ct-tracks">
+                {side.tracks.map(([name, length], i) => {
+                  const n = si * SIDES[0].tracks.length + i + 1;
+                  const now = n === 1;
+                  return (
+                    <li key={name} className="ct-track text-ui-lg" data-now={now ? "" : undefined}>
+                      <span className="ct-n tabular-nums">{now ? <i className="ct-dot" aria-label="Now playing" /> : n}</span>
+                      <span className="ct-name">{name}</span>
+                      <span className="ct-len tabular-nums">{length}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+              {si === 0 && (
+                <p className="ct-notes text-ui-lg">
+                  Recorded at EMI Studios, Abbey Road, February to August 1969. Produced by George Martin.
+                  Engineered by Geoff Emerick and Phil McDonald.
+                </p>
+              )}
+            </section>
+          ))}
+        </div>
+      </article>
       <div ref={ghostRef} className="ct-ghost" aria-hidden="true" />
+      <svg className="ct-trace" aria-hidden="true">
+        <line ref={haloRef} className="ct-halo" />
+        <line ref={lineRef} className="ct-line" />
+      </svg>
       <div
         ref={tileRef}
         className="ct-tile"
@@ -250,6 +405,21 @@ export default function Piece() {
           </div>
         </div>
       </div>
+      {/* The two ends sit above the tile, so the landing mark shows even as the cover flies over it. */}
+      <svg className="ct-trace ct-marks" aria-hidden="true">
+        <g ref={handRef} className="ct-hand">
+          <circle className="ct-knock" r="3.5" />
+          <circle r="3.5" />
+        </g>
+        <g ref={crossRef} className="ct-cross">
+          <path className="ct-knock" d="M-8 0H-2.5M2.5 0H8M0 -8V-2.5M0 2.5V8" />
+          <path d="M-8 0H-2.5M2.5 0H8M0 -8V-2.5M0 2.5V8" />
+        </g>
+        <g ref={edgeRef} className="ct-edge" style={{ display: "none" }}>
+          <path className="ct-knock" d="M0 -6V6" />
+          <path d="M0 -6V6" />
+        </g>
+      </svg>
     </div>
   );
 }
