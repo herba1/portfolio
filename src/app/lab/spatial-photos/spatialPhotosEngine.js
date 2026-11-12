@@ -35,9 +35,15 @@ const HUE = {};
 const GAIN = {};
 
 const GAP = 24; // css px between photos, as Photos leaves between pages
-const ZOOM = 1.06; // crop, the room the orbit moves in (Spatial Scenes crops in too)
 const ORBIT = 0.024; // parallax across the full depth range at full tilt, x frame long side
 const PIVOT = 0.38; // depth that stays put while orbiting
+// The farthest any plane moves at full tilt, as a fraction of the frame's long
+// side: the room the overscan has to leave around the screen.
+const REACH = ORBIT * Math.max(PIVOT, 1 - PIVOT);
+const BLEED = 0.004; // a hair more, so a resampled edge never shows
+// The ground behind and between the photos: the set's deep zenith, so the
+// seam in a swipe reads as more sky, not as a black gutter.
+const GROUND = [8 / 255, 54 / 255, 116 / 255];
 const LAG = 0.14; // how far the sky trails the frame through the screen edge
 const GRID = 160;
 
@@ -311,18 +317,23 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
     film.resize(box.pw, box.ph);
     dirty = true;
   });
+  // Each photo is a page the size of the screen, GAP apart, and fills it
+  // edge to edge: a sky has no letterbox.
   const pageW = () => box.w + GAP;
-  // Frame of photo i in css px: contained in the box, as Photos shows it.
+  const pageOf = (i) => ({ x: (i - pos) * pageW(), y: 0, w: box.w, h: box.h });
+  // Frame of photo i in css px: covering its page, centred, with the zoom the
+  // planes are drawn at so that, shifted by the full orbit, every plane still
+  // runs past the page on all four sides.
   const frameOf = (i) => {
     const a = scenes[i].aspect;
-    let fw = box.w;
-    let fh = fw / a;
-    if (fh > box.h) {
-      fh = box.h;
-      fw = fh * a;
-    }
-    const x = (box.w - fw) / 2 + (i - pos) * pageW();
-    return { x, y: (box.h - fh) / 2, w: fw, h: fh };
+    const fw = Math.max(box.w, box.h * a);
+    const fh = fw / a;
+    const long = Math.max(fw, fh);
+    const rx = (REACH * long) / fw + BLEED; // uv
+    const ry = (REACH * long) / fh + BLEED;
+    const zoom = Math.max(box.w / fw / (1 - 2 * rx), box.h / fh / (1 - 2 * ry));
+    const pg = pageOf(i);
+    return { x: pg.x + (box.w - fw) / 2, y: (box.h - fh) / 2, w: fw, h: fh, zoom, page: pg };
   };
 
   // ---- input
@@ -337,7 +348,7 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
   stage.on("move", (p) => {
     if (!drag) {
       // hover orbit, never 1:1
-      const f = frameOf(Math.round(pos));
+      const f = pageOf(Math.round(pos));
       tilt.tx = clamp((p.x - (f.x + f.w / 2)) / (f.w / 2), -1, 1);
       tilt.ty = clamp((p.y - (f.y + f.h / 2)) / (f.h / 2), -1, 1);
       dirty = true;
@@ -427,29 +438,32 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
   const drawScene = (i) => {
     const s = scenes[i];
     const f = frameOf(i);
+    const pg = f.page;
     const dpr = box.dpr;
-    // the part of this frame that has crossed the screen edge
-    const cutL = Math.max(0, -f.x);
-    const cutR = Math.max(0, f.x + f.w - box.w);
-    // far content lags the frame by LAG of what has crossed: shifted right
+    // the part of this page that has crossed the screen edge
+    const cutL = Math.max(0, -pg.x);
+    const cutR = Math.max(0, pg.x + pg.w - box.w);
+    // far content lags the page by LAG of what has crossed: shifted right
     // (towards where it came from) when leaving left, left when coming in
-    // from the right. In uv before the crop zoom.
+    // from the right. The edge it opens is always inside the part that has
+    // already crossed, so it is never on screen. In uv before the zoom.
     const lagPx = (cutL - cutR) * LAG;
-    const lag = lagPx / f.w / ZOOM;
+    const lag = lagPx / f.w / f.zoom;
     const long = Math.max(f.w, f.h);
     const ox = (-tilt.x * ORBIT * long) / f.w;
     const oy = (-tilt.y * ORBIT * long) / f.h;
-    const x0 = Math.max(0, Math.floor(f.x * dpr));
-    const x1 = Math.min(box.pw, Math.ceil((f.x + f.w) * dpr));
-    const y0 = Math.max(0, Math.floor(f.y * dpr));
-    const y1 = Math.min(box.ph, Math.ceil((f.y + f.h) * dpr));
+    // drawn only inside its own page: the overscan runs past it, unseen
+    const x0 = Math.max(0, Math.round(pg.x * dpr));
+    const x1 = Math.min(box.pw, Math.round((pg.x + pg.w) * dpr));
+    const y0 = 0;
+    const y1 = box.ph;
     if (x1 <= x0 || y1 <= y0) return;
     gl.scissor(x0, box.ph - y1, x1 - x0, y1 - y0);
     const u = prog.u;
     gl.uniform4f(u.uFrame, f.x * dpr, f.y * dpr, f.w * dpr, f.h * dpr);
     gl.uniform2f(u.uOrbit, ox, oy);
     gl.uniform1f(u.uLag, lag);
-    gl.uniform1f(u.uZoom, ZOOM);
+    gl.uniform1f(u.uZoom, f.zoom);
     gl.uniform1f(u.uPivot, PIVOT);
     gl.uniform1f(u.uHue, ((HUE[s.slug] || 0) * Math.PI) / 180);
     gl.uniform1f(u.uGain, GAIN[s.slug] || 1);
@@ -486,7 +500,7 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, box.pw, box.ph);
     gl.disable(gl.SCISSOR_TEST);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(GROUND[0], GROUND[1], GROUND[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(prog.p);
     gl.bindVertexArray(vao);
@@ -498,12 +512,12 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
     gl.enable(gl.SCISSOR_TEST);
     const lo = Math.max(0, Math.floor(pos - 1));
     const hi = Math.min(N - 1, Math.ceil(pos + 1));
-    const frames = [];
+    const pages = [];
     for (let i = lo; i <= hi; i++) {
-      const f = frameOf(i);
-      if (f.x + f.w <= 0 || f.x >= box.w) continue;
+      const pg = pageOf(i);
+      if (pg.x + pg.w <= 0 || pg.x >= box.w) continue;
       drawScene(i);
-      frames.push(f);
+      pages.push(pg);
     }
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
@@ -516,18 +530,17 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
     const exposure = reduce ? 0 : 2.4 * (1 - ease);
     film.render(sceneT.tex, { ...FILM_PRESETS.summer, exposure, grainSeed });
 
-    // The ground between and around the photos is clean black: the film's
-    // veil and lifted toe belong to the prints, not to the screen.
+    // The ground between the pages (the seam of a swipe, the rubber band
+    // past either end) is the flat zenith blue: the film's veil and lifted
+    // toe belong to the prints, not to the screen.
     gl.enable(gl.SCISSOR_TEST);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(GROUND[0], GROUND[1], GROUND[2], 1);
     const dpr = box.dpr;
     const rects = [];
-    const xs = frames.map((f) => [Math.max(0, Math.round(f.x * dpr)), Math.min(box.pw, Math.round((f.x + f.w) * dpr)), Math.round(f.y * dpr), Math.round((f.y + f.h) * dpr)]).sort((a, b) => a[0] - b[0]);
+    const xs = pages.map((pg) => [Math.max(0, Math.round(pg.x * dpr)), Math.min(box.pw, Math.round((pg.x + pg.w) * dpr))]).sort((a, b) => a[0] - b[0]);
     let cx = 0;
-    for (const [a, b, ya, yb] of xs) {
+    for (const [a, b] of xs) {
       if (a > cx) rects.push([cx, 0, a - cx, box.ph]);
-      if (ya > 0) rects.push([a, 0, b - a, ya]);
-      if (yb < box.ph) rects.push([a, yb, b - a, box.ph - yb]);
       cx = Math.max(cx, b);
     }
     if (cx < box.pw) rects.push([cx, 0, box.pw - cx, box.ph]);
