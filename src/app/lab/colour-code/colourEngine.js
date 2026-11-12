@@ -1,7 +1,8 @@
 // Colour Code: a line of type encoded as flat printed squares, one colour per
 // letter, and a card decoder wheel that reads them back. The lower disc is
-// printed with the colour ring, a scale, the alphabet and its numbers; a
-// black die-cut cover held on a rivet shows one letter through its window.
+// printed with a flush colour ring; a solid black die-cut cover, pinned at
+// the centre, frames one segment and shows its letter and number through a
+// wide window.
 //
 // The disc turns on a spring with a detent potential, so it clicks through
 // every letter on the way and seats in the notch it was sent to.
@@ -70,28 +71,6 @@ function codeOf(ch) {
 
 const sanitize = (s) => s.toUpperCase().replace(/[^A-Z0-9 ]/g, "").replace(/ {2,}/g, " ").slice(0, 48);
 
-/* ---------- paper grain ---------- */
-
-function makeGrain(seed, lo, hi) {
-  const c = document.createElement("canvas");
-  c.width = 160;
-  c.height = 160;
-  const g = c.getContext("2d");
-  const img = g.createImageData(160, 160);
-  let x = seed;
-  for (let i = 0; i < img.data.length; i += 4) {
-    x = (x * 1664525 + 1013904223) >>> 0;
-    const r = x / 4294967296;
-    const v = Math.round((lo + (hi - lo) * r * r) * 255);
-    img.data[i] = v;
-    img.data[i + 1] = v;
-    img.data[i + 2] = v;
-    img.data[i + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-  return c;
-}
-
 /* ---------- engine ---------- */
 
 export async function createColourCode({ root, canvas, input, embedded = false }) {
@@ -110,10 +89,9 @@ export async function createColourCode({ root, canvas, input, embedded = false }
     /* fall back to whatever is there */
   }
 
-  const grainPaper = ctx.createPattern(makeGrain(7, 0.9, 1), "repeat");
-
-  // Tracking law, px, for canvas text.
+  // Tracking law, for canvas text: px below 20px, em from 20px up.
   const track = (size) => -0.043 * (size - 12);
+  const tracking = (size) => (size < 20 ? `${track(size).toFixed(2)}px` : `${(track(size) / size).toFixed(4)}em`);
 
   /* ----- state ----- */
   let W = 1;
@@ -176,29 +154,54 @@ export async function createColourCode({ root, canvas, input, embedded = false }
     return { lines, gap, space };
   }
 
+  // The wheel's proportions, as fractions of its radius. The colour ring
+  // runs flush from the cover's edge to the rim; a strip square is cut to
+  // the same depth as a ring segment, so the line and the key share a unit.
+  const RING_IN = 0.76;
+  const UNIT = 1 - RING_IN;
+
+  function lineWidth(size) {
+    const { lines, gap } = wrap(size, Infinity);
+    const line = lines[0];
+    const tail = line[line.length - 1];
+    if (!tail) return 0;
+    return tail.x + (tail.it.code < 0 ? 0 : size + gap) - gap;
+  }
+
   function layout() {
     const portrait = W < H * 1.15;
     let maxStrip;
     let stripX;
     let stripCy;
     if (!portrait) {
-      R = Math.min(H * 0.3, W * 0.19);
-      const gapG = Math.max(48, W * 0.06);
-      maxStrip = W * 0.86 - 2 * R - gapG;
-      const left = (W - (maxStrip + gapG + 2 * R)) / 2;
+      // Largest wheel, down to three quarters of it, that lets the whole
+      // line sit on one row beside it; past that the line wraps.
+      const gapG = Math.max(56, Math.round(W * 0.06));
+      const room = W * 0.88;
+      const R0 = Math.min(H * 0.33, W * 0.2);
+      R = R0;
+      for (let r = R0; r >= R0 * 0.74; r -= 2) {
+        R = r;
+        const size = Math.round(r * UNIT);
+        // wrap() measures a word with its trailing gap, so allow for it
+        if (lineWidth(size) + Math.max(2, Math.round(size * 0.14)) <= room - 2 * r - gapG) break;
+      }
+      maxStrip = room - 2 * R - gapG;
+      const size = Math.round(R * UNIT);
+      const used = Math.min(maxStrip, lineWidth(size));
+      const left = Math.round((W - (used + gapG + 2 * R)) / 2);
       stripX = left;
-      wcx = left + maxStrip + gapG + R;
-      wcy = H / 2;
-      stripCy = H / 2;
+      wcx = Math.round(left + used + gapG + R);
+      wcy = Math.round(H / 2);
+      stripCy = wcy;
     } else {
-      R = Math.min(W * 0.36, H * 0.25);
-      wcx = W / 2;
-      wcy = H * 0.38;
+      R = Math.min(W * 0.4, H * 0.27);
+      wcx = Math.round(W / 2);
+      wcy = Math.round(H * 0.38);
       maxStrip = W - 2 * Math.max(16, W * 0.08);
-      stripX = (W - maxStrip) / 2;
-      stripCy = wcy + R + Math.max(48, (H - wcy - R) * 0.32);
+      stripCy = wcy + R + Math.max(48, (H - wcy - R) * 0.36);
     }
-    let size = Math.round(Math.min(30, Math.max(12, R * 0.12)));
+    let size = Math.round(R * UNIT);
     let res = wrap(size, maxStrip);
     while (res.lines.length > 3 && size > 8) {
       size -= 1;
@@ -206,7 +209,16 @@ export async function createColourCode({ root, canvas, input, embedded = false }
     }
     S = size;
     G = res.gap;
-    const lineGap = Math.round(S * 0.6);
+    if (portrait) {
+      // centre the widest row under the wheel
+      let widest = 0;
+      for (const line of res.lines) {
+        const tail = line[line.length - 1];
+        if (tail) widest = Math.max(widest, tail.x + (tail.it.code < 0 ? 0 : S));
+      }
+      stripX = Math.round((W - widest) / 2);
+    }
+    const lineGap = Math.max(8, Math.round((S * 0.6) / 4) * 4);
     const blockH = res.lines.length * S + (res.lines.length - 1) * lineGap;
     const top = Math.round(stripCy - blockH / 2);
     res.lines.forEach((line, li) => {
@@ -357,238 +369,139 @@ export async function createColourCode({ root, canvas, input, embedded = false }
 
   /* ----- drawing ----- */
 
-  const INK = "rgb(30 28 26)";
+  // Two inks on a sleeve stock: the colour set and a dense black. Nothing
+  // is lit, shaded or textured; the wheel is a printed and die-cut object.
+  const GROUND = "rgb(242 240 235)";
+  const INK = "rgb(24 23 22)";
   const CARD = "rgb(249 247 242)";
-  const COVER = "rgb(228 223 213)";
-  const COVER_INK = "rgb(30 28 26)";
-  const pt = (a, r) => [Math.sin(a) * r, -Math.cos(a) * r];
 
-  function sector(a0, a1, r0, r1, gap) {
-    const o = gap / (2 * r1);
-    const i = gap / (2 * r0);
-    ctx.beginPath();
-    ctx.arc(0, 0, r1, a0 + o - Math.PI / 2, a1 - o - Math.PI / 2);
-    ctx.arc(0, 0, r0, a1 - i - Math.PI / 2, a0 + i - Math.PI / 2, true);
-    ctx.closePath();
+  // Annular sector centred on twelve o'clock, angles measured from the top.
+  function sectorPath(path, a0, a1, r0, r1) {
+    const q = -Math.PI / 2;
+    path.moveTo(Math.cos(q + a0) * r0, Math.sin(q + a0) * r0);
+    path.arc(0, 0, r1, q + a0, q + a1);
+    path.arc(0, 0, r0, q + a1, q + a0, true);
+    path.closePath();
+    return path;
   }
 
-  // The window is a sector of the ring, cut to the disc's own geometry, so
-  // it shows exactly one letter and its number and nothing of the neighbours.
-  const WIN = { r0: 0.36, r1: 0.685, half: 0.47 };
-  function windowPath(path) {
+  // The window: a wide die-cut slot in the cover, a sector so it reads as
+  // part of the wheel's geometry. Its letter sits on an inner disc that
+  // advances one whole window per detent, so exactly one letter is shown
+  // at rest and the next one turns in as the last one turns out.
+  const WIN = { r0: 0.18, r1: 0.69, half: 0.45 };
+  const PITCH = WIN.half * 2;
+
+  function drawRing() {
+    const rot = -wheel.theta * STEP;
+    const r0 = R * RING_IN - 1;
+    const r1 = R;
+    ctx.save();
+    ctx.rotate(rot);
+    // Flush segments: each one runs a hair past its seam and the next one
+    // covers it, so no ground shows through between neighbours.
+    const over = 1.2 / R;
+    for (let i = 0; i < N; i += 1) {
+      ctx.fillStyle = PALETTE[i];
+      ctx.fill(sectorPath(new Path2D(), (i - 0.5) * STEP, (i + 0.5) * STEP + over, r0, r1));
+    }
+    ctx.fillStyle = PALETTE[0];
+    ctx.fill(sectorPath(new Path2D(), -0.5 * STEP, -0.5 * STEP + over, r0, r1));
+    ctx.restore();
+  }
+
+  function drawWindow() {
     const r0 = R * WIN.r0;
     const r1 = R * WIN.r1;
-    const a = WIN.half * STEP;
-    const top = -Math.PI / 2;
-    path.moveTo(Math.cos(top - a) * r0, Math.sin(top - a) * r0);
-    path.arc(0, 0, r1, top - a, top + a);
-    path.arc(0, 0, r0, top + a, top - a, true);
-    path.closePath();
-    return { r0, r1, a };
+    const win = sectorPath(new Path2D(), -WIN.half, WIN.half, r0, r1);
+    ctx.save();
+    ctx.clip(win);
+    ctx.fillStyle = CARD;
+    ctx.fillRect(-r1, -r1, 2 * r1, r1);
+
+    const gSize = Math.round(R * 0.36);
+    const nSize = Math.max(10, Math.round(R * 0.068));
+    const rGlyph = R * 0.355; // baseline radius of the letter
+    const rNum = R * 0.235; // baseline radius of the number
+    // Intermittent drive, like a Geneva wheel: the letter disc dwells
+    // upright through the middle of each detent and flips across between
+    // them, so the window always reads as a letter or a click, never a tilt.
+    const base = Math.floor(wheel.theta);
+    const u = Math.min(1, Math.max(0, (wheel.theta - base - 0.22) / 0.56));
+    const shown = base + u * u * (3 - 2 * u);
+    ctx.fillStyle = INK;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    for (let i = 0; i < N; i += 1) {
+      let d = (i - shown) % N;
+      if (d > N / 2) d -= N;
+      if (d < -N / 2) d += N;
+      if (Math.abs(d) > 1.6) continue;
+      ctx.save();
+      ctx.rotate(d * PITCH);
+      ctx.font = `${wGlyph} ${gSize}px ${sans}`;
+      ctx.letterSpacing = tracking(gSize);
+      // canvas adds tracking after the last glyph too; take half of it back
+      ctx.fillText(ALPHA[i], -track(gSize) / 2, -rGlyph);
+      ctx.font = `${wNum} ${nSize}px ${mono}`;
+      ctx.letterSpacing = tracking(nSize);
+      ctx.fillText(String(i + 1).padStart(2, "0"), -track(nSize) / 2, -rNum);
+      ctx.restore();
+    }
+    ctx.letterSpacing = "0px";
+    ctx.restore();
+    return win;
   }
 
-  function drawLowerDisc() {
-    const rot = -wheel.theta * STEP;
-    // shadow on the ground: a wide soft one and a tight contact one
-    ctx.save();
-    ctx.shadowColor = "rgb(60 44 24 / 0.16)";
-    ctx.shadowBlur = R * 0.09 * dpr;
-    ctx.shadowOffsetY = R * 0.035 * dpr;
-    ctx.shadowOffsetX = R * 0.012 * dpr;
-    ctx.beginPath();
-    ctx.arc(0, 0, R, 0, TAU);
-    ctx.fillStyle = CARD;
-    ctx.fill();
-    ctx.shadowColor = "rgb(40 30 20 / 0.18)";
-    ctx.shadowBlur = 1.5 * dpr;
-    ctx.shadowOffsetY = 0.75 * dpr;
-    ctx.shadowOffsetX = 0;
-    ctx.fill();
-    ctx.restore();
+  function drawCover(win) {
+    const rc = R * RING_IN;
+    // the black disc, window cut out
+    const cover = new Path2D();
+    cover.arc(0, 0, rc, 0, TAU);
+    cover.addPath(win);
+    ctx.fillStyle = INK;
+    ctx.fill(cover, "evenodd");
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, R, 0, TAU);
-    ctx.clip();
-    ctx.rotate(rot);
+    // A tongue of the same black reaches over the ring at twelve o'clock and
+    // frames exactly one segment: the colour that belongs to the letter.
+    const b = R * 0.03;
+    const half = STEP / 2;
+    const frame = new Path2D();
+    sectorPath(frame, -half - b / R, half + b / R, rc - 2, R + b);
+    sectorPath(frame, -half, half, rc - 2, R);
+    ctx.fill(frame, "evenodd");
 
-    // colour ring
-    const r0 = R * 0.755;
-    const r1 = R * 0.93;
-    const gap = Math.max(1.5, R * 0.011);
-    for (let i = 0; i < N; i += 1) {
-      sector((i - 0.5) * STEP, (i + 0.5) * STEP, r0, r1, gap);
-      ctx.fillStyle = PALETTE[i];
-      ctx.fill();
-    }
-
-    // printed scale at the rim
-    ctx.strokeStyle = INK;
+    // printed on the cover in the stock colour: a detent mark per letter
+    ctx.strokeStyle = CARD;
+    ctx.lineWidth = Math.max(1, R * 0.006);
     ctx.lineCap = "butt";
-    const rs = R * 0.95;
-    ctx.lineWidth = 0.6;
-    ctx.beginPath();
-    ctx.arc(0, 0, rs, 0, TAU);
-    ctx.stroke();
-    for (let k = 0; k < N * 4; k += 1) {
-      const a = (k / 4) * STEP;
-      const major = k % 4 === 0;
-      const half = k % 4 === 2;
-      const len = major ? R * 0.034 : half ? R * 0.022 : R * 0.012;
-      ctx.lineWidth = major ? 1 : 0.6;
-      const [x0, y0] = pt(a, rs);
-      const [x1, y1] = pt(a, rs + len);
+    for (let k = 0; k < N; k += 1) {
+      const a = k * STEP;
+      if (Math.min(a, TAU - a) < WIN.half + 0.06) continue;
+      const [x0, y0] = pt(a, rc - R * 0.06);
+      const [x1, y1] = pt(a, rc - R * 0.025);
       ctx.beginPath();
       ctx.moveTo(x0, y0);
       ctx.lineTo(x1, y1);
       ctx.stroke();
     }
 
-    // alphabet and numbers, radial, upright at twelve o'clock
-    const gSize = R * 0.16;
-    const nSize = Math.max(8, R * 0.05);
-    ctx.fillStyle = INK;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    for (let i = 0; i < N; i += 1) {
-      ctx.save();
-      ctx.rotate(i * STEP);
-      ctx.font = `${wGlyph} ${gSize}px ${sans}`;
-      ctx.letterSpacing = "0px";
-      ctx.fillText(ALPHA[i], 0, -R * 0.5);
-      ctx.font = `${wNum} ${nSize}px ${mono}`;
-      ctx.letterSpacing = `${track(nSize).toFixed(2)}px`;
-      ctx.fillText(String(i + 1).padStart(2, "0"), 0, -R * 0.405);
-      ctx.restore();
-    }
-    ctx.letterSpacing = "0px";
-
-    // registration hairlines under the cover
-    ctx.lineWidth = 0.6;
+    // the pin: a flat punched eyelet, stock showing through
     ctx.beginPath();
-    ctx.arc(0, 0, R * 0.7, 0, TAU);
-    ctx.stroke();
-
-    // paper grain, turning with the disc
-    ctx.globalCompositeOperation = "multiply";
-    ctx.fillStyle = grainPaper;
-    ctx.globalAlpha = 0.5;
-    ctx.fillRect(-R, -R, 2 * R, 2 * R);
-    ctx.restore();
-
-    // a whisper of edge where the card was cut
-    ctx.beginPath();
-    ctx.arc(0, 0, R - 0.25, 0, TAU);
-    ctx.lineWidth = 0.5;
-    ctx.strokeStyle = "rgb(0 0 0 / 0.08)";
-    ctx.stroke();
-  }
-
-  function drawCover() {
-    const rc = R * 0.72;
-    const path = new Path2D();
-    path.arc(0, 0, rc, 0, TAU);
-    const win = new Path2D();
-    const { r0, a } = windowPath(win);
-    path.addPath(win);
-
-    // the cover's shadow falls on the disc, and into its own window
-    ctx.save();
-    ctx.shadowColor = "rgb(50 36 20 / 0.26)";
-    ctx.shadowBlur = R * 0.026 * dpr;
-    ctx.shadowOffsetY = R * 0.012 * dpr;
-    ctx.shadowOffsetX = R * 0.004 * dpr;
-    ctx.fillStyle = COVER;
-    ctx.fill(path, "evenodd");
-    ctx.restore();
-
-    ctx.save();
-    ctx.clip(path, "evenodd");
-    ctx.globalCompositeOperation = "multiply";
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = grainPaper;
-    ctx.fillRect(-rc, -rc, 2 * rc, 2 * rc);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-
-    // printed in warm white: index, a ring of ticks, a hairline
-    ctx.fillStyle = COVER_INK;
-    ctx.strokeStyle = COVER_INK;
-    ctx.lineWidth = 0.75;
-    for (let i = 1; i < N; i += 1) {
-      const a = i * STEP;
-      const [x0, yy0] = pt(a, rc - R * 0.04);
-      const [x1, yy1] = pt(a, rc - R * 0.012);
-      ctx.beginPath();
-      ctx.moveTo(x0, yy0);
-      ctx.lineTo(x1, yy1);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // the cut faces of the window: the lower wall catches the light
-    ctx.save();
-    ctx.clip(win);
-    ctx.strokeStyle = "rgb(255 252 246 / 0.9)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(0, 0, r0 + 0.5, -Math.PI / 2 - a, -Math.PI / 2 + a);
-    ctx.stroke();
-    ctx.restore();
-
-    // cover rim, a thin catch of light along the top edge
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(0, 0, rc - 0.4, Math.PI * 1.08, Math.PI * 1.92);
-    ctx.strokeStyle = "rgb(255 255 255 / 0.7)";
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawRivet() {
-    const rr = Math.max(6, R * 0.052);
-    ctx.save();
-    ctx.shadowColor = "rgb(0 0 0 / 0.45)";
-    ctx.shadowBlur = rr * 0.35 * dpr;
-    ctx.shadowOffsetY = rr * 0.16 * dpr;
-    const body = ctx.createRadialGradient(-rr * 0.35, -rr * 0.45, rr * 0.05, 0, 0, rr);
-    body.addColorStop(0, "rgb(244 242 236)");
-    body.addColorStop(0.55, "rgb(186 182 174)");
-    body.addColorStop(1, "rgb(128 124 117)");
-    ctx.beginPath();
-    ctx.arc(0, 0, rr, 0, TAU);
-    ctx.fillStyle = body;
+    ctx.arc(0, 0, Math.max(3, R * 0.022), 0, TAU);
+    ctx.fillStyle = GROUND;
     ctx.fill();
-    ctx.restore();
-    // rolled lip and the hollow
-    const hole = ctx.createRadialGradient(rr * 0.08, rr * 0.12, 0, 0, 0, rr * 0.4);
-    hole.addColorStop(0, "rgb(150 146 138)");
-    hole.addColorStop(0.7, "rgb(96 92 86)");
-    hole.addColorStop(1, "rgb(70 67 62)");
-    ctx.beginPath();
-    ctx.arc(0, 0, rr * 0.4, 0, TAU);
-    ctx.fillStyle = hole;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(0, 0, rr * 0.4, Math.PI * 0.1, Math.PI * 0.9);
-    ctx.strokeStyle = "rgb(255 255 255 / 0.35)";
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(0, 0, rr - 0.3, 0, TAU);
-    ctx.strokeStyle = "rgb(0 0 0 / 0.25)";
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
   }
+
+  const pt = (a, r) => [Math.sin(a) * r, -Math.cos(a) * r];
 
   function drawStrip(t) {
     for (const it of items) {
       if (it.code < 0 || it.a < 0.005 || it.delay > 0) continue;
       const s = S * Math.max(0, it.sc);
-      const settled = Math.abs(it.x - it.tx) < 0.05 && Math.abs(it.y - it.ty) < 0.05 && Math.abs(it.sc - 1) < 0.002 && it.lift < 0.002;
+      const settled = Math.abs(it.x - it.tx) < 0.05 && Math.abs(it.y - it.ty) < 0.05 && Math.abs(it.sc - 1) < 0.002;
       let x = it.x + (S - s) / 2;
-      let y = it.y + (S - s) / 2 - it.lift * S * 0.24;
+      let y = it.y + (S - s) / 2;
       let sz = s;
       if (settled) {
         x = Math.round(x * dpr) / dpr;
@@ -598,27 +511,35 @@ export async function createColourCode({ root, canvas, input, embedded = false }
       ctx.globalAlpha = Math.min(1, it.a);
       ctx.fillStyle = PALETTE[it.code];
       ctx.fillRect(x, y, sz, sz);
+      // the square being read gets a rule in the cover's black, the same
+      // ink that frames its segment on the wheel
+      if (it.lift > 0.01 && !it.dying) {
+        const w = S * Math.min(1, it.lift);
+        const h = Math.max(2, Math.round(S * 0.08));
+        ctx.fillStyle = INK;
+        ctx.fillRect(Math.round(it.tx + (S - w) / 2), it.ty + S + Math.max(4, Math.round(S * 0.16)), w, h);
+      }
     }
     ctx.globalAlpha = 1;
     if (document.activeElement === input && !embedded) {
       const on = (t * 1000 - lastType) % 1060 < 600 || t * 1000 - lastType < 500;
       if (on) {
         ctx.fillStyle = INK;
-        ctx.fillRect(caret.x, caret.y, 1.5, S);
+        ctx.fillRect(caret.x, caret.y, 2, S);
       }
     }
   }
 
   function draw(t) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "rgb(242 240 235)";
+    ctx.fillStyle = GROUND;
     ctx.fillRect(0, 0, W, H);
     drawStrip(t);
     ctx.save();
     ctx.translate(wcx, wcy);
-    drawLowerDisc();
-    drawCover();
-    drawRivet();
+    drawRing();
+    const win = drawWindow();
+    drawCover(win);
     ctx.restore();
   }
 
@@ -628,7 +549,7 @@ export async function createColourCode({ root, canvas, input, embedded = false }
     const pad = G / 2 + 1;
     for (const it of items) {
       if (it.dying || it.code < 0) continue;
-      if (x >= it.tx - pad && x <= it.tx + S + pad && y >= it.ty - pad - S * 0.24 && y <= it.ty + S + pad) return it;
+      if (x >= it.tx - pad && x <= it.tx + S + pad && y >= it.ty - pad && y <= it.ty + S + pad) return it;
     }
     return null;
   };
