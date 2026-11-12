@@ -1,7 +1,7 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createModal } from "./modal";
-import { orientation, skyField, createSpace, strokes as layStrokes, P, META } from "./engrave";
+import { orientation, skyField, tone, createSpace, strokes as layStrokes, P, META } from "./engrave";
 
 // Poke: a still frame of a tree against a summer sky that you can pull.
 //
@@ -25,7 +25,8 @@ import { orientation, skyField, createSpace, strokes as layStrokes, P, META } fr
 // The modes are also the image. No photograph is drawn: the whole print is
 // one line engraving on a cobalt-shadow ground. The crown's lines are cut
 // along the contours of the leaves' light (engrave.js), each as wide as the
-// light under it; the sky (filled and regraded offline behind the matted
+// tone under it (the light at clump scale, locally equalised), a line
+// halftone running from hairlines in the voids to solid lit masses; the sky (filled and regraded offline behind the matted
 // tree) is ruled with the same renderer at the same pitch, long nearly level
 // lines that drift with its falloff, finer than the crown's, swelling and
 // closing up where a cloud brightens. The two hatchings share one
@@ -58,14 +59,17 @@ const HAND = 48; // plate px: radius of the patch of crown a hand takes hold of
 const TILT = 2; // modal mass tilt toward the slow, crown-wide modes (see modal.js)
 const BREEZE = 0.45; // idle forcing, in units of each mode's static response
 const LINE = 6.5; // target px at DPR 2: separation of the engraving's lines
-const WIDTH = 0.42; // widest stroke half-width, as a share of the separation
 const TRAIL = 0.6; // share of the displacement a stroke's trailing end lags by
 const TRAIL_CAP = 1.5; // longest lag, in line separations: an end draws out, the line is never smeared
 const TRAIL_RAMP = 4; // how far along a stroke its trailing end's lag eases out, in separations
 const CROWN_RUN = [14, 36]; // the crown's lines are cut into strokes this long, in separations
 const CROWN_SHORTEST = 8; // a crown streamline shorter than this (separations) is not laid
-const LUM = [0.04, 0.5]; // leaf light (sRGB luma) that starts and fills a stroke
-const SHADE = 0.16; // the crown's hairline in deep shadow, as a share of its widest
+// The crown is a line halftone: each line is as wide as the crown's tone
+// (engrave.js tone(): the leaves' light at clump scale, locally equalised),
+// so the share of plate its lines cover is the tone itself.
+const TONE = [0.14, 0.82]; // equalised tone at which a crown line is a hairline, and full
+const CROWN_W = [0.08, 1.06]; // the crown line's width there, as a share of the pitch (full: neighbours merge)
+const CLUMP = 4; // the crown's tone is blurred over this many line pitches, to its clumps
 const SPECK = 0.25; // a crown line on less matte than this (softened) is a speck in the sky: not laid
 const SKY_WIDTH = 0.3; // the sky's widest half-width, as a share of the separation
 const SKY_LUM = [0.36, 0.74]; // sky light (sRGB luma, softened) from its finest line to its widest
@@ -129,13 +133,14 @@ uniform vec4 uView;
 uniform vec2 uPlate;
 uniform vec2 uRes;      // target px
 uniform vec2 uRef;      // reference direction for the phase
-uniform float uHalf;    // widest half-width, target px
+uniform float uHalf;    // half the line pitch, target px
+uniform sampler2D uTone; // the crown's tone, clump scale, locally equalised
 uniform float uLod;
 uniform float uTrail;   // share of the displacement the trailing end lags by
 uniform float uCap;     // longest lag, plate px
 uniform float uRamp;    // how far along the stroke the lag eases out, plate px
-uniform vec2 uLum;      // luminance that starts and fills a stroke
-uniform float uFloor;   // the crown's finest line in shadow, as a share of its widest
+uniform vec2 uLum;      // tone at which a crown line is a hairline, and full
+uniform vec2 uWidth;    // the crown line's width there, as a share of the pitch
 uniform float uSkyHalf; // the sky's widest half-width, target px
 uniform vec3 uSkyLight; // sky light of its finest and widest line, finest share
 uniform float uCapLen;  // a sky line's taper, plate px
@@ -265,19 +270,22 @@ void main() {
     float c = min(meta.z > 0.5 ? s0 : 1e6, meta.w > 0.5 ? s1 : 1e6) / uCapLen;
     hw = uSkyHalf * w * pow(clamp(c, 0.0, 1.0), 0.6);
   } else {
-    // width: the leaves' own light at this spine point's rest position
+    // width: the crown's tone at this spine point's rest position, so the
+    // lines cover as much of the plate as the light there: hairlines in the
+    // shadow voids, ruled midtones, and in the top of the light lines as wide
+    // as their pitch, so neighbours run together into solid lit masses
     vec4 t = textureLod(uTree, b / uPlate, uLod);
-    // and a hairline floor inside the matte, so the crown's shadow is fine
-    // lines on the ground rather than a hole cut out of the sky's ruling
     float cov = smoothstep(0.25, 0.7, t.a);
-    float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * cov;
-    light = clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0);
-    float w = max(pow(light, 0.6), uFloor * cov);
-    // tapered over a fixed length at each end, however long the line runs
+    float tn = texture(uTone, b / uPlate).r;
+    light = clamp((tn - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0);
+    float w = mix(uWidth.x, uWidth.y, light) * mix(0.5, 1.0, cov);
+    // tapered over a fixed length at each end, however long the line runs,
+    // except in the full light, where the ends would notch a solid mass
     float taper = pow(clamp(min(tp, 1.0 - tp) * meta.y / uCapLen, 0.0, 1.0), 0.6);
-    // (in the cover pass every line is as wide as the cover reaches, unless
-    // it is barely there itself)
-    hw = uCover > 0.0 ? uCover * smoothstep(0.0, 0.3, w) : uHalf * w * taper;
+    taper = mix(taper, 1.0, smoothstep(0.55, 0.95, light));
+    // (in the cover pass every line inside the matte is as wide as the cover
+    // reaches, so the sky never shows through the crown's shadow)
+    hw = uCover > 0.0 ? uCover * cov : uHalf * w * taper;
   }
   float e = hw + 1.0;
   vec2 px = p + nrm * side * e;
@@ -295,7 +303,7 @@ void main() {
   // Lightness is the leaves' light at the rest position, whatever the pull:
   // near-white cream in the lit clumps falling to the hairline shadow ink, so
   // the print's light and shadow survive a hard pull intact.
-  float L = mix(uInk.x, uInk.y, pow(light, 0.75));
+  float L = mix(uInk.x, uInk.y, light);
   // the phase in the frame of the pull picks the hue
   vec2 perp = vec2(-uRef.y, uRef.x);
   vec2 zr = F.xy;
@@ -306,9 +314,10 @@ void main() {
   // chroma is low and scales with light times amplitude: the highlights stay
   // almost white and the shadows dark, a cool/warm cast through an intact
   // engraving rather than a colour map. At rest the ink is a warm paper white.
-  // (easing off again in the brightest light, so a lit clump's crest reads
-  // as white paper with a breath of colour, not as a pastel)
-  float lc = mix(0.35, 1.0, light) * (1.0 - 0.5 * smoothstep(0.7, 1.0, light));
+  // (easing off again in the light, so a lit mass, where the lines run
+  // together, reads as solid paper cream with a breath of colour, not as a
+  // pastel)
+  float lc = mix(0.35, 1.0, light) * (1.0 - 0.8 * smoothstep(0.45, 0.95, light));
   vec2 ab = lc * ((1.0 - amp) * uInk.z * vec2(cos(uPaperHue), sin(uPaperHue))
     + amp * uChroma * vec2(cos(1.66 + th), sin(1.66 + th)));
   vCol = oklch(L, length(ab), atan(ab.y, ab.x));
@@ -600,7 +609,7 @@ export async function createPoke(host, { embedded = false } = {}) {
     const space = createSpace(PW, PH, sep);
     const crown = layStrokes(orient, sep, mulberry(23), {
       space,
-      lumLo: SHADE > 0 ? -1 : LUM[0],
+      lumLo: -1,
       solidMin: SPECK,
       cut: CROWN_RUN,
       shortest: CROWN_SHORTEST,
@@ -614,6 +623,21 @@ export async function createPoke(host, { embedded = false } = {}) {
       shortest: 8,
       under: SKY_UNDER,
     });
+    {
+      // the crown's tone at the scale of its clumps, for this pitch
+      const tn = tone(orient, sep, { pitches: CLUMP });
+      const b = new Uint8Array(tn.length);
+      for (let i = 0; i < tn.length; i++) b[i] = Math.round(clamp(tn[i], 0, 1) * 255);
+      if (!tex.tone) tex.tone = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex.tone);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, orient.W, orient.H, 0, gl.RED, gl.UNSIGNED_BYTE, b);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
     const count = crown.count + sky.count;
     const rows = Math.max(1, Math.ceil(count / SPR));
     const spine = new Float32Array(SPR * (P / 2) * rows * 4);
@@ -841,13 +865,16 @@ export async function createPoke(host, { embedded = false } = {}) {
       gl.uniform2f(su.uPlate, PW, PH);
       gl.uniform2f(su.uRes, rw, rh);
       gl.uniform2f(su.uRef, ref[0], ref[1]);
-      gl.uniform1f(su.uHalf, sep * WIDTH);
+      gl.uniform1f(su.uHalf, sep * 0.5);
+      gl.activeTexture(gl.TEXTURE8);
+      gl.bindTexture(gl.TEXTURE_2D, tex.tone);
+      gl.uniform1i(su.uTone, 8);
       gl.uniform1f(su.uLod, Math.log2(Math.max(1, (sep / k) * 0.35)));
       gl.uniform1f(su.uTrail, TRAIL);
       gl.uniform1f(su.uCap, (sep / k) * TRAIL_CAP);
       gl.uniform1f(su.uRamp, (sep / k) * TRAIL_RAMP);
-      gl.uniform2f(su.uLum, LUM[0], LUM[1]);
-      gl.uniform1f(su.uFloor, SHADE);
+      gl.uniform2f(su.uLum, TONE[0], TONE[1]);
+      gl.uniform2f(su.uWidth, CROWN_W[0], CROWN_W[1]);
       gl.uniform1f(su.uSkyHalf, sep * SKY_WIDTH);
       gl.uniform3f(su.uSkyLight, SKY_LUM[0], SKY_LUM[1], SKY_THIN);
       gl.uniform1f(su.uCapLen, (sep / k) * 1.5);

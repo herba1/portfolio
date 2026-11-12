@@ -26,6 +26,9 @@
 //    and drift with the polariser falloff, and a density that closes the
 //    lines up where a cloud brightens, so a cloud is lines swelling and
 //    bunching rather than a soft patch.
+// 4. tone(): the crown's light at the scale of its clumps, locally
+//    equalised, which the renderer turns into line width, so the crown is a
+//    line halftone whose coverage is its tone.
 // Both are laid into one shared separation grid (createSpace), the crown
 // first, so the sky's lines run up to the crown's and stop at the
 // separation distance from them: the two meet the way two hatchings do on
@@ -139,6 +142,128 @@ export function orientation(bmp, PW, PH, { R = 7 } = {}) {
   // how deep inside the matte each spot is, to tell a speck from a twig
   const solid = gauss(alpha, W, H, 5);
   return { W, H, PW, PH, lum, alpha, solid, c2, s2 };
+}
+
+// The crown's tone, at the scale of its clumps rather than its leaves, laid
+// out as a line halftone: the leaves' light blurred over a few line pitches
+// (normalised by the matte, so the rim doesn't darken), so single-leaf glints
+// fold into the lit masses they belong to; then equalised locally (CLAHE,
+// contrast-limited adaptive histogram equalisation) over tiles of the
+// matte's bounding box, bilinearly between tile centres, with a share of the
+// whole crown's own equalisation mixed in so the big lit/shadow relations
+// survive. The result (0..1, uniform over the matte) is what each crown line
+// is as wide as, so the share of plate the lines cover is the tone.
+export function tone(F, sep, { pitches = 4, tiles = [8, 5], bins = 128, clip = 3, whole = 0.3 } = {}) {
+  const { W, H, PW, lum, alpha } = F;
+  const r = Math.max(2, Math.round((pitches * sep * W) / PW));
+  const a = gauss(alpha, W, H, r);
+  const l = gauss(lum, W, H, r);
+  const v = new Float32Array(W * H);
+  let x0 = W;
+  let y0 = H;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      v[i] = a[i] > 1e-3 ? Math.min(1, l[i] / a[i]) : 0;
+      if (alpha[i] > 0.3) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  const out = new Float32Array(W * H);
+  if (x1 < x0) return out;
+  const [TX, TY] = tiles;
+  const tw = (x1 - x0 + 1) / TX;
+  const th = (y1 - y0 + 1) / TY;
+  const hist = new Float32Array(TX * TY * bins);
+  const glob = new Float32Array(bins);
+  const bin = (t) => Math.min(bins - 1, Math.max(0, Math.floor(t * bins)));
+  // a curve read between bin middles, so the tone has no steps in it
+  const at = (c, t) => {
+    const f = Math.min(bins - 1, Math.max(0, t * bins - 0.5));
+    const b = Math.min(bins - 2, Math.floor(f));
+    return c[b] + (c[b + 1] - c[b]) * (f - b);
+  };
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++) {
+      const i = y * W + x;
+      if (alpha[i] <= 0.3) continue;
+      const b = bin(v[i]);
+      const t = Math.min(TY - 1, Math.floor((y - y0) / th)) * TX + Math.min(TX - 1, Math.floor((x - x0) / tw));
+      hist[t * bins + b] += 1;
+      glob[b] += 1;
+    }
+  // a histogram's clipped cumulative distribution, read at the middle of
+  // each bin; what the clip takes off is spread back over the tones the tile
+  // actually has (not over empty ones, which would keep its lightest leaves
+  // from ever reaching the top of the light)
+  const cdf = (h, off, lim) => {
+    let n = 0;
+    let lo = bins;
+    let hi = -1;
+    for (let b = 0; b < bins; b++) {
+      n += h[off + b];
+      if (h[off + b] > 0) {
+        lo = Math.min(lo, b);
+        hi = b;
+      }
+    }
+    const c = new Float32Array(bins);
+    if (n < 1) return { c, n };
+    let ex = 0;
+    const occupied = (h, b) => h[off + b] > 0 || (b > lo && b < hi);
+    let span = 0;
+    for (let b = 0; b < bins; b++) span += occupied(h, b) ? 1 : 0;
+    const cap = (lim * n) / span;
+    const hh = new Float32Array(bins);
+    for (let b = 0; b < bins; b++) {
+      hh[b] = Math.min(h[off + b], cap);
+      ex += h[off + b] - hh[b];
+    }
+    let cum = 0;
+    for (let b = 0; b < bins; b++) {
+      const k = hh[b] + (occupied(h, b) ? ex / span : 0);
+      c[b] = (cum + k * 0.5) / n;
+      cum += k;
+    }
+    // below and above the tile's tones the curve runs on to 0 and 1
+    for (let b = 0; b < lo; b++) c[b] = (c[lo] * (b + 0.5)) / (lo + 0.5);
+    for (let b = hi + 1; b < bins; b++) c[b] = c[hi] + ((1 - c[hi]) * (b - hi)) / (bins - hi);
+    return { c, n };
+  };
+  const G = cdf(glob, 0, 1e9).c;
+  // a tile with little matte in it leans on the whole crown's distribution
+  const T = [];
+  for (let t = 0; t < TX * TY; t++) {
+    const { c, n } = cdf(hist, t * bins, clip);
+    const w = Math.min(1, n / (0.25 * tw * th));
+    for (let b = 0; b < bins; b++) c[b] = G[b] + (c[b] - G[b]) * w;
+    T.push(c);
+  }
+  for (let y = y0; y <= y1; y++) {
+    const fy = Math.min(TY - 1, Math.max(0, (y - y0) / th - 0.5));
+    const ty0 = Math.min(TY - 2, Math.floor(fy));
+    const ay = TY > 1 ? fy - Math.max(0, ty0) : 0;
+    const r0 = Math.max(0, ty0);
+    const r1 = Math.min(TY - 1, r0 + 1);
+    for (let x = x0; x <= x1; x++) {
+      const i = y * W + x;
+      if (alpha[i] <= 0.02) continue;
+      const fx = Math.min(TX - 1, Math.max(0, (x - x0) / tw - 0.5));
+      const tx0 = Math.max(0, Math.min(TX - 2, Math.floor(fx)));
+      const ax = TX > 1 ? fx - tx0 : 0;
+      const c1 = Math.min(TX - 1, tx0 + 1);
+      const t = v[i];
+      const top = at(T[r0 * TX + tx0], t) * (1 - ax) + at(T[r0 * TX + c1], t) * ax;
+      const bot = at(T[r1 * TX + tx0], t) * (1 - ax) + at(T[r1 * TX + c1], t) * ax;
+      out[i] = (top * (1 - ay) + bot * ay) * (1 - whole) + at(G, t) * whole;
+    }
+  }
+  return out;
 }
 
 // The sky: its light softened past the fill's leftover specks, its contours
