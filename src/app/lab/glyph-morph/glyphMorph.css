@@ -65,7 +65,7 @@
   left: 0;
   font-kerning: none;
   letter-spacing: 0;
-  will-change: transform, opacity, filter;
+  will-change: transform, clip-path;
 }
 
 .gm-meter {
