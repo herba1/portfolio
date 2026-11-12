@@ -171,16 +171,14 @@ const PLATE_IN = 0.55; // share of the pull over which the plate inks up
 // The sheet is a two-colour (then three-, four-colour) print. The pen draws
 // the key in near-black; when it comes down on a new figure, the one it
 // finished is pulled into the sheet as an impression in the next spot ink,
-// at full strength and overprinted (multiply), each plate about a
-// millimetre out of register with the key, as a riso or a jobbing
-// letterpress lays it, and each tint screened at its own angle so stacked
-// plates rosette instead of beating. The key always prints last, over every
-// spot.
+// at full strength and overprinted (multiply), each plate a pixel or two
+// out of register with the key, as a riso or a jobbing letterpress lays it.
+// The key always prints last, over every spot.
 const SPOTS = [
-  { rgb: [232, 78, 44], mx: 3.5, my: -2.6, screen: 15 }, // vermilion
-  { rgb: [0, 112, 186], mx: -3, my: 3.3, screen: 75 }, // process blue
-  { rgb: [255, 76, 150], mx: 2.8, my: 3.5, screen: 45 }, // fluorescent pink
-  { rgb: [0, 128, 120], mx: -3.7, my: -2.8, screen: 0 }, // teal
+  { rgb: [232, 78, 44], mx: 1.5, my: -1 }, // vermilion
+  { rgb: [0, 112, 186], mx: -1, my: 1.5 }, // process blue
+  { rgb: [255, 76, 150], mx: 1.5, my: 1 }, // fluorescent pink
+  { rgb: [0, 128, 120], mx: -1.5, my: -1 }, // teal
 ];
 const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
@@ -370,21 +368,27 @@ export async function createHarmonograph(host) {
   };
   const inks = () => [curCtx];
 
-  // The key of a finished figure, as a plate in spot ink. The plate is not
-  // a second pen line: it is the figure's density. The path is replayed into
-  // a coarse field as ink laid per unit of paper (line length per square
-  // pixel, so its reciprocal is the spacing between turns), averaged over a
-  // few millimetres, and the plate is cut from that field the way a printer
-  // would make it from a drawing: solid where the turns crowd closer than
-  // SOLID, open paper where they spread past OPEN, and between the two a
-  // coarse halftone screen at the ink's own angle, so the tint fades into
-  // the sheet as dots, not as a wash. Nothing of the line survives in it;
-  // the near-black key is the only linework on the sheet.
-  const CELL = 2; // CSS px per field cell
-  const SPREAD = 4; // CSS px, the radius the density is averaged over
-  const SOLID = 0.0022; // turn spacing, share of the sheet's side, for solid
-  const OPEN = 0.0075; // ... and for open paper
-  const SCREEN = 3.2; // CSS px, the halftone's pitch
+  // The key of a finished figure, as a plate in spot ink: the figure's
+  // letterpress shadow. The path is replayed into a fine field as ink laid
+  // per unit of paper (line length per square pixel, so its reciprocal is
+  // the spacing between turns), averaged over little more than the width of
+  // a turn, and the plate is cut from that field the way a block is cut from
+  // a drawing: a hard edge, solid where the turns crowd closer than a pen
+  // width or two, open paper everywhere else. The cut is set so the plate
+  // never takes more than COVER of the sheet, whatever the figure; only its
+  // last fraction of a millimetre, a narrow band at the edge, is screened, at
+  // one fixed angle and a fine ruling, so the solid steps down into the paper
+  // as dots rather than a wash. Nothing of the line itself survives in it;
+  // the near-black key is the only linework on the sheet, and where the two
+  // meet the plate's misregistration shows as a sliver of paper on one side
+  // of a bundle's edge and of red on the other.
+  const CELL = 1; // CSS px per field cell
+  const SPREAD = 6.5; // CSS px, the radius the density is averaged over
+  const CLOSE = 2.6; // CSS px: turns closer than this may print
+  const COVER = 0.2; // the most of the sheet a plate may cover
+  const BAND = 4; // CSS px, the width of the screened band at the edge
+  const SCREEN = 2; // CSS px, the halftone's pitch
+  const SCREEN_ANGLE = 15; // degrees, every plate
   const field = () => {
     const g = Math.max(8, Math.round(side / CELL));
     const cell = side / g; // CSS px
@@ -441,18 +445,36 @@ export async function createHarmonograph(host) {
     // Line per square pixel.
     const area = cell * cell;
     for (let i = 0; i < F.length; i++) F[i] /= area;
-    return { F, g };
+    // The cut: the closest-packed turns, never past COVER of the sheet.
+    let lo = 1 / CLOSE;
+    let n = 0;
+    for (let i = 0; i < F.length; i++) if (F[i] > lo) n++;
+    const cap = Math.floor(COVER * F.length);
+    if (n > cap) {
+      const v = new Float32Array(n);
+      for (let i = 0, j = 0; i < F.length; i++) if (F[i] > lo) v[j++] = F[i];
+      v.sort();
+      lo = v[n - cap];
+    }
+    // The field's slope, so the screened band can be held to a fixed width
+    // across the paper however steeply or slowly the density climbs.
+    const G = new Float32Array(g * g);
+    for (let y = 1; y < g - 1; y++) {
+      for (let x = 1, o = y * g + 1; x < g - 1; x++, o++) {
+        G[o] = Math.hypot(F[o + 1] - F[o - 1], F[o + g] - F[o - g]) / (2 * cell);
+      }
+    }
+    return { F, G, g, lo };
   };
 
   const tint = () => {
     const n = spot.width;
-    const { F, g } = field();
-    const lo = 1 / (OPEN * side);
+    const { F, G, g, lo } = field();
     const out = spotCtx.createImageData(n, n);
     const d = out.data;
     const [r, gr, bl] = pulling.rgb;
     const grain = inkGrain(n);
-    const ang = (pulling.screen * Math.PI) / 180;
+    const ang = (SCREEN_ANGLE * Math.PI) / 180;
     const pitch = SCREEN * dpr;
     const cu = (Math.cos(ang) * TAU) / pitch;
     const su = (Math.sin(ang) * TAU) / pitch;
@@ -469,7 +491,7 @@ export async function createHarmonograph(host) {
     };
     const [cXu, sXu] = wave(cu);
     const [cXs, sXs] = wave(su);
-    const aa = 1.2 / pitch; // the spot function's slope: about one device px of edge
+    const aa = 1 / pitch; // the spot function's slope: about one device px of edge
     const fs = g / n;
     for (let y = 0, p = 0; y < n; y++) {
       const gy = clamp((y + 0.5) * fs - 0.5, 0, g - 1.001);
@@ -482,14 +504,14 @@ export async function createHarmonograph(host) {
         const o = iy * g + ix;
         const dens = (F[o] * (1 - tx) + F[o + 1] * tx) * (1 - ty) + (F[o + g] * (1 - tx) + F[o + g + 1] * tx) * ty;
         if (dens <= lo) continue;
-        // Tone on the reciprocal (spacing) scale, so the edge of the solid
-        // follows the turns, not the raw sum.
-        const tone = smooth(OPEN * side, SOLID * side, 1 / dens);
         let ink;
-        if (tone >= 0.985) ink = 1;
+        // How far inside the cut this pixel lies, CSS px.
+        const slope = (G[o] * (1 - tx) + G[o + 1] * tx) * (1 - ty) + (G[o + g] * (1 - tx) + G[o + g + 1] * tx) * ty;
+        const tone = (dens - lo) / (Math.max(1e-6, slope) * BAND);
+        if (tone >= 1) ink = 1;
         else {
-          // A round-dot screen: dots in the light tint, a chequer at half,
-          // holes in the shadow.
+          // A round-dot screen across the band: dots at the plate's outer
+          // edge, a chequer at half, holes where it closes up to the solid.
           const cosU = cXu[x] * cXs[y] - sXu[x] * sXs[y];
           const cosV = cXu[y] * cXs[x] + sXu[y] * sXs[x];
           const spotFn = 0.5 + 0.25 * (cosU + cosV);
@@ -950,11 +972,11 @@ export async function createHarmonograph(host) {
     layout(w, h, d);
     if (first) {
       if (preGhost) {
-        // A figure already drawn and settled into the sheet.
-        applySet(1);
-        preset(1);
+        // A figure already drawn and pulled into the sheet as its plate, and
+        // the pen set going on the same swing again, so the key comes down
+        // on its own impression, a hair out of register.
+        preset();
         for (let t = 0; t < 70; t += 1 / 30) simulate(1 / 30);
-        applySet(setIndex);
         settle();
         bake();
         pen = "up";
