@@ -111,17 +111,20 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) && q.get(k) !== "" && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
   const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 5.25)];
-  const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
+  const SH = [num("rel", 0.05), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   // The knuckle swells (the per-ball undulation and the slow relief) are
   // kept well below the broad body (reach and height), which carries the
   // form, so the pool reads as one heavy liquid with a few large sweeping
   // reflections and calm between them, not a scatter of islands.
-  const K2 = [num("H2", 0.015), num("Hr", 0.03), num("bw", 0.42), num("Hb", 0.12)];
-  // The studio's edge (graded, so the tone is a gradient the line width
-  // carries), the ripples' slope, how far the reflected ray turns the
+  const K2 = [num("H2", 0.015), num("Hr", 0.015), num("bw", 0.42), num("Hb", 0.12)];
+  // (unused), the ripples' slope, how far the reflected ray turns the
   // screen, and the ripples' scale. The screen's pitch (sp, css px) is
   // coarse enough to hold a hairline in the lights at 1x.
-  const E = [num("ew", 0.15), num("rip", 0.15), num("kx", 7), num("rk", 56)];
+  const E = [0, num("rip", 0.05), num("kx", 7), num("rk", 56)];
+  // The studio: how far every normal leans out from the pool's middle (one
+  // dome under the whole body), the horizon's tilt (radians) and offset,
+  // and the width of every edge in it: a step, not a falloff.
+  const G = [num("dome", 0.4), num("htilt", -0.22), num("hoff", 0.06), num("ew", 0.02)];
   // The neck: kernel radius at its waist before it thins (scale units), and
   // how fast it drains while a stretched drop is held.
   const TH = [num("waist", 0.036), num("drain", 0.6)];
@@ -134,7 +137,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // Two passes where a half-float target is renderable (nearly everywhere),
   // else one pass that does the surface per device pixel.
   const twoPass = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
-  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uSurfRes", "uSurf"];
+  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uG", "uSurfRes", "uSurf"];
   const make = (fs) => {
     const p = program(gl, VS, fs);
     const u = {};
@@ -546,6 +549,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       gl.uniform4f(u.uK2, K2[0], K2[1], K2[2], K2[3]);
       gl.uniform4f(u.uS, SH[0], SH[1], SH[2], SH[3]);
       gl.uniform4f(u.uE, E[0], E[1], E[2], E[3]);
+      gl.uniform4f(u.uG, G[0], G[1], G[2], G[3]);
       return u;
     };
     gl.bindVertexArray(vao);

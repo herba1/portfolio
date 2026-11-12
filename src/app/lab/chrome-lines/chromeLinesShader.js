@@ -35,7 +35,8 @@ uniform float uEnvRot;
 uniform vec4 uK;            // least line density (monotone floor), displacement by reflection, by tone; spacing (css px)
 uniform vec4 uK2;           // body height per unit field, swell height, reach of the broad body (scale units), its height
 uniform vec4 uS;            // relief amount, height (scale units), profile softness, threshold
-uniform vec4 uE;            // studio edge width (stereographic units), ripple slope, screen turn by the reflection, ripple scale
+uniform vec4 uE;            // (unused), ripple slope, screen turn by the reflection, ripple scale
+uniform vec4 uG;            // dome slope (per scale unit off the pool's middle), horizon tilt (rad), horizon offset, studio edge (stereographic units)
 out vec4 o;
 // The carrier: the one fixed direction the screen climbs in (css px, y down).
 // Lines run diagonally, falling to the right, across the pool's flow, so they
@@ -83,62 +84,44 @@ vec3 relief(vec2 q){
 }
 
 // The studio, seen from the chrome. Stereographic coordinates around the
-// zenith: |s| = 1 is the horizon. A hard studio, cut not graded: white
-// diffuser overhead, a black ground coming up to a sharp, bowed horizon
-// below the zenith (the lower flanks of every form), three black boards
-// standing in the white (a tall flag up left, a board right, a narrow bar
-// across the zenith so even the flat tops catch black), and thin white
-// softbox slits cut into the black, so a black reflection is an island
-// with white holes in it. The floor past the horizon is black too, cut by
-// slits, so every rim goes black and breaks. Edges are graded over uE.x
-// plus what one sample spans: wide enough that the reflected tone is a real
-// gradient, which the print turns into line width, so a board reads as
-// strokes swelling into it, not a cut-out. soft widens every edge further
-// (the displacement reads a softer copy).
+// ray straight back at the viewer: |s| = 1 is a quarter turn off it. Graphic,
+// not graded: a horizon cut straight across, a touch off level, with a
+// near-black floor below it and a bright sky above; two hard-edged softboxes
+// (one standing up out of the floor across the horizon, one long strip lying
+// in the floor) and a broad one overhead; and one thin black window bar
+// standing in the sky. Every edge is a step uG.w wide (plus what one sample
+// spans), so the chrome carries bold black shapes with clean edges that
+// wrap and pinch with the surface, and the print, whose stroke width is the
+// tone, draws those edges as fat lines stopping dead on hairlines. soft
+// widens every edge (the displacement reads a softer copy). The floor runs
+// on past the quarter turn all round, so the rims go black.
 float cut(float d, float ew){ return smoothstep(ew, -ew, d); }
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
   float ls = length(s);
   // Anti-aliasing only: what one sample of the surface spans in s.
   float aa = min(0.5 * length(fwidth(s)), 0.12);
-  float ew = uE.x + soft + aa;
-  // The diffuser: white, a touch darker toward the horizon.
-  float L = 0.97 - 0.06 * smoothstep(0.4, 1.0, ls);
-  float d;
-  // The ground, up to a sharp horizon bowed across below the zenith.
-  d = 2.08 - length(s - vec2(0.1, -1.7));
-  L = mix(L, 0.02, cut(d, ew));
-  // The flag: a tall black board up and left.
-  d = sdBox(rot(s - vec2(-0.5, -0.22), 0.32), vec2(0.06, 0.37)) - 0.03;
+  float ew = uG.w + soft + aa;
+  // The sky: bright over the horizon, and a step down to a grey vault high
+  // up, so the overhead softbox has something to stand in.
+  vec2 hn = vec2(-sin(uG.y), cos(uG.y));      // down, off level by the tilt
+  float hy = dot(s, hn) - uG.z;               // > 0 below the horizon
+  float L = mix(0.92, 0.66, cut(-0.36 - hy, ew));
+  // The floor, below the horizon, and past the quarter turn all round.
+  L = mix(L, 0.03, cut(-hy, ew));
+  L = mix(L, 0.03, cut(1.02 - ls, ew));
+  // Softboxes: a tall one standing up out of the floor through the horizon,
+  // a long strip lying in the floor, and a broad one overhead.
+  vec2 sh = vec2(dot(s, vec2(hn.y, -hn.x)), hy);   // along the horizon, depth below it
+  float d = sdBox(sh - vec2(-0.42, -0.02), vec2(0.075, 0.2));
+  L = mix(L, 1.0, cut(d, ew));
+  d = sdBox(sh - vec2(0.22, 0.34), vec2(0.36, 0.035));
+  L = mix(L, 1.0, cut(d, ew));
+  d = sdBox(sh - vec2(0.36, -0.58), vec2(0.2, 0.11));
+  L = mix(L, 1.0, cut(d, ew));
+  // The window bar: one thin black upright standing on the horizon.
+  d = sdBox(sh - vec2(0.02, -0.55), vec2(0.028, 0.55));
   L = mix(L, 0.03, cut(d, ew));
-  // A board on the right, leaning the other way.
-  d = sdBox(rot(s - vec2(0.56, -0.18), -0.24), vec2(0.045, 0.31)) - 0.03;
-  L = mix(L, 0.03, cut(d, ew));
-  // Two narrow boards crossing over the zenith, so the flat tops catch
-  // black wherever the ripples tip them.
-  d = sdBox(rot(s - vec2(0.04, -0.1), 0.95), vec2(0.05, 0.2)) - 0.05;
-  L = mix(L, 0.03, cut(d, ew));
-  d = sdBox(rot(s - vec2(-0.16, 0.17), -0.5), vec2(0.04, 0.12)) - 0.05;
-  L = mix(L, 0.03, cut(d, ew));
-  // The floor past the horizon: black all round.
-  L = mix(L, 0.02, cut(0.97 - ls, ew));
-  // Softbox slits cut into the black: two long ones lying in the ground,
-  // one standing in the flag, one in the right board, and radial ones in the
-  // floor, so black rims break into islands with white holes.
-  float wl = 0.96;
-  d = sdBox(rot(s - vec2(-0.22, 0.58), 0.12), vec2(0.26, 0.022));
-  L = mix(L, wl, cut(d, ew));
-  d = sdBox(rot(s - vec2(0.42, 0.7), -0.2), vec2(0.15, 0.016));
-  L = mix(L, wl, cut(d, ew));
-  d = sdBox(rot(s - vec2(-0.47, -0.3), 0.32), vec2(0.016, 0.26));
-  L = mix(L, wl, cut(d, ew));
-  d = sdBox(rot(s - vec2(0.58, -0.12), -0.24), vec2(0.012, 0.2));
-  L = mix(L, wl, cut(d, ew));
-  // The floor: the white sweep of the studio wall seen past the horizon,
-  // a thin ring all round, so every black rim carries a white line that
-  // breaks wherever the boards cross it.
-  d = abs(ls - 1.16) - 0.035;
-  L = mix(L, wl, cut(d, ew) * smoothstep(0.5, 0.1, s.y));
   return clamp(L, 0.0, 1.0);
 }
 
@@ -190,12 +173,16 @@ vec4 surface(vec2 p){
   float Rw = uK2.z * uScale;
   float Rw2 = Rw * Rw;
   float fb = 0.0; vec2 gb = vec2(0.0);
+  // The pool's middle: the balls' centre, weighted by area, for the dome.
+  vec3 cm = vec3(0.0);
   for (int i = 0; i < MAXB; i++){
     if (i >= uN) break;
     vec4 b = uB[i];
     vec2 d = p - b.xy;
     float dd = dot(d, d);
     float qb = dd / Rw2;
+    float ra = b.z / uScale;
+    cm += vec3(b.xy, 1.0) * b.w * ra * ra;
     if (qb < 1.0){
       float rb = b.z / (0.25 * uScale);
       float wb = b.w * rb * rb;
@@ -293,6 +280,13 @@ vec4 surface(vec2 p){
   vec2 gh = dh * gF + Hr * sat * rl.yz / uScale + Hb * gb / (1.0 + fb);
   // The ripples ride with the liquid and die toward the rim, so the
   // silhouette stays a clean meniscus.
+  // One large dome over the whole pool: every normal is leaned out from the
+  // pool's middle in proportion to its distance, so the reflection sweeps
+  // across the body as one continuous band, the horizon cutting it once.
+  vec2 cen = cm.z > 1e-6 ? cm.xy / cm.z : uRes * 0.5;
+  // Only the body leans: a loose drop, thin in the broad field, keeps its
+  // own curvature and its own horizon.
+  gh -= uG.x * sat * smoothstep(0.2, 1.2, fb) * (p - cen) / uScale;
   vec3 n0 = normalize(vec3(-gh, 1.0));
   gh += uE.y * sat * ripple((p - disp) / uScale);
   vec3 n = normalize(vec3(-gh, 1.0));
@@ -336,8 +330,9 @@ vec3 printAt(vec2 p, vec4 sf){
   vec2 gp = vec2(dFdx(phi), dFdy(phi));
   float fpx = max(length(gp), 1e-4);
 
-  // Width is the only tone carrier, continuously. The studio is soft (its
-  // edges graded over uE.x), so its luminance is a real gradient, and the
+  // Width is the only tone carrier, continuously. Where the studio's tone
+  // steps, at a cut, the stroke steps with it; across the rims and the swells,
+  // where the reflection is graded by the surface itself, the
   // stroke swells with it: a hairline of about a twelfth of the period on a
   // softbox, through every width, to fat strokes nine tenths of the period
   // across a board, which merge with a thread of white between them. The
