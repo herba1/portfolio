@@ -22,6 +22,9 @@ const DESC = 2.8; // and below it
 const GUTTER = 14; // round clearance between letter ink and text ink
 const MIN_SEG = 84; // narrower slivers stay empty
 const DEPTH = 3; // and so does any free region shallower than this many lines
+const TRIM = 0.6; // a region's end line is at least this wide against its neighbours
+const FULL = 0.7; // and a ragged end line fills at least this much of it
+const CLEAR = 6; // letter ink this near a line's ink band cuts it
 const MEASURE = 360; // column width: about 56 characters of the ballad
 const COL_GAP = 24;
 const PASSES = 6;
@@ -33,7 +36,7 @@ const PASSES = 6;
 const TOLERANCE = 1.3;
 const FULL_TOLERANCE = 2;
 const EMERGENCY = 3;
-const SHORT = 0.6; // of the measure
+const SHORT = 0.4; // of the measure
 
 // Knuth–Plass constants (TeX's, tightened for a narrow measure).
 const STRETCH = 0.55;
@@ -124,6 +127,19 @@ function rasterLetter(char, px, w) {
     drawX: pad + left - cw / 2,
     drawY: pad + asc - ch / 2,
     font: probe.font,
+    // Is there real (undilated) ink anywhere in the box [x0, x1) x [y0, y1),
+    // in glyph-centred coordinates?
+    inkIn(x0, x1, y0, y1) {
+      const a = x0 + cw / 2;
+      const b = x1 + cw / 2;
+      const r0 = Math.max(0, Math.floor(y0 + ch / 2));
+      const r1 = Math.min(ch - 1, Math.ceil(y1 + ch / 2));
+      for (let y = r0; y <= r1; y += 1) {
+        const r = raw[y];
+        for (let i = 0; i < r.length; i += 2) if (r[i] < b && r[i + 1] > a) return true;
+      }
+      return false;
+    },
     hit(x, y) {
       const px = Math.floor(x + cw / 2);
       const py = Math.floor(y + ch / 2);
@@ -438,19 +454,33 @@ export async function createReflow(host) {
   }
 
   // Free segments on each baseline of each column: the column minus the
-  // dilated letter, in reading order (column, then line, then left to right).
-  // A segment is kept only if it belongs to a free region at least DEPTH
-  // baselines deep: some run of DEPTH consecutive lines through it whose
-  // free spans share MIN_SEG of width with it. A lone line under a
+  // dilated letter. A segment is kept only if it belongs to a free region at
+  // least DEPTH baselines deep: some run of DEPTH consecutive lines through it
+  // whose free spans share MIN_SEG of width with it. A lone line under a
   // terminal, or a two-line notch in a bay, stays white, so the letter cuts
   // a clean channel through the block instead of leaving islands.
+  //
+  // The round gutter reaches above and below the letter as well as beside
+  // it, so a baseline passing just over a terminal or the crown of a bowl
+  // would be cut where no ink touches it: a hole in a full line with no
+  // letter under it. A blocked span with no real ink within CLEAR of the
+  // line's own ink band is dropped, and the segments either side of it run
+  // together as one line.
   //
   // A counter or a bay (free space walled by the letter on both sides) is
   // owned by one column: the one whose box holds most of it. Only that
   // column runs into it; the other column's sliver of it stays white, so a
   // bowl carries one continuous run of the text, never two fragments side
   // by side across a gutter that read across in the wrong order.
-  function segments() {
+  //
+  // The kept segments are then grouped into regions: a run of lines in one
+  // column, one segment per line, each overlapping the one above, broken
+  // wherever the letter splits a run in two or joins two into one, or a
+  // stroke steps in and the width jumps by more than TRIM. Each
+  // region is a typographic unit set whole, in reading order (column, then
+  // top line, then left to right), and opens and closes on a full line:
+  // end lines narrower than TRIM of the lines next to them stay white.
+  function regions() {
     const blockedAt = [];
     for (let li = 0; li < lines; li += 1) {
       const base = top + SIZE + li * LEAD;
@@ -460,10 +490,12 @@ export async function createReflow(host) {
       for (let y = Math.max(0, y0); y <= y1 && y < letter.rows.length; y += 1) {
         for (const s of letter.rows[y]) spans.push([s[0] + letter.ox + pos.x, s[1] + letter.ox + pos.x]);
       }
-      blockedAt.push(mergeSpans(spans));
+      const ey0 = base - CAP - CLEAR - pos.y;
+      const ey1 = base + DESC + CLEAR - pos.y;
+      blockedAt.push(mergeSpans(spans).filter(([a, b]) => letter.inkIn(a - pos.x, b - pos.x, ey0, ey1)));
     }
     const blocked = enclosedOwners(blockedAt);
-    const segs = [];
+    const regs = [];
     for (let ci = 0; ci < cols.length; ci += 1) {
       const c = cols[ci];
       // Every free span of this column, line by line, before any culling.
@@ -475,10 +507,10 @@ export async function createReflow(host) {
         for (const [a, b] of blocked[ci][li]) {
           if (b <= x) continue;
           if (a >= c.r) break;
-          if (a - x >= MIN_SEG) row.push({ x, w: a - x, base, atL: x === c.l, atR: false });
+          if (a - x >= MIN_SEG) row.push({ x, w: a - x, base, li, atL: x === c.l, atR: false });
           x = Math.max(x, b);
         }
-        if (c.r - x >= MIN_SEG) row.push({ x, w: c.r - x, base, atL: x === c.l, atR: true });
+        if (c.r - x >= MIN_SEG) row.push({ x, w: c.r - x, base, li, atL: x === c.l, atR: true });
         free.push(row);
       }
       // Widest overlap of [a, b) with any free span on line li.
@@ -507,11 +539,48 @@ export async function createReflow(host) {
         }
         return false;
       };
+      const kept = free.map((row, li) => row.filter((s) => deep(li, s)));
+      // Link each segment to the one above it when that is a one-to-one
+      // continuation; anything else starts a new region.
+      const touch = (s, t) => Math.min(s.x + s.w, t.x + t.w) - Math.max(s.x, t.x) > 0;
+      const colRegs = [];
       for (let li = 0; li < lines; li += 1) {
-        for (const s of free[li]) if (deep(li, s)) segs.push(s);
+        for (const s of kept[li]) {
+          const up = li > 0 ? kept[li - 1].filter((t) => touch(s, t)) : [];
+          const one = up.length === 1 && kept[li].filter((t) => touch(t, up[0])).length === 1;
+          // A stroke stepping in (or out) changes the width at a stroke:
+          // that is a new bay, not the same run narrowing along a curve.
+          const reg = one && Math.min(s.w, up[0].w) >= Math.max(s.w, up[0].w) * TRIM ? up[0].reg : null;
+          if (reg) {
+            reg.push(s);
+            s.reg = reg;
+          } else {
+            s.reg = [s];
+            colRegs.push(s.reg);
+          }
+        }
+      }
+      colRegs.sort((a, b) => a[0].li - b[0].li || a[0].x - b[0].x);
+      // An end line is measured against the region's own width where it
+      // ends: the widest of the DEPTH lines inward from it. A bowl's crown
+      // or foot, where the curve closes fast, is trimmed back to the first
+      // line that holds its own against its neighbours; a long taper beside
+      // a flank, narrowing a little each line, is kept to its tip.
+      const near = (reg, k, dir) => {
+        let w = 0;
+        for (let m = 1; m <= DEPTH; m += 1) if (reg[k + m * dir]) w = Math.max(w, reg[k + m * dir].w);
+        return w;
+      };
+      for (const reg of colRegs) {
+        let lo = 0;
+        let hi = reg.length;
+        while (hi - lo >= DEPTH && reg[lo].w < near(reg, lo, 1) * TRIM) lo += 1;
+        while (hi - lo >= DEPTH && reg[hi - 1].w < near(reg, hi - 1, -1) * TRIM) hi -= 1;
+        if (hi - lo >= DEPTH) regs.push(reg.slice(lo, hi));
       }
     }
-    return segs;
+    for (const reg of regs) for (const s of reg) delete s.reg;
+    return regs;
   }
 
   // The longest line that fits at natural spacing (or shrunk), for a
@@ -539,45 +608,113 @@ export async function createReflow(host) {
     return { pos: best, start: k, fit: 1, flag: end.t === PEN && end.flag, rag: true };
   }
 
+  // One line of text into segment j of the run segs, from item `from`:
+  // total fit over the next five lines; if that sets this line loose, the
+  // best tight line on its own, and failing that, ragged. A short runaround
+  // line has too few spaces to justify evenly: it is always set ragged,
+  // flush left at its segment, never stretched.
+  function setLine(par, from, segs, j, fit, flag) {
+    const widthAt = (k) => (segs[k] ? segs[k].w : colW);
+    const short = segs[j].w < colW * SHORT;
+    let b = short ? null : firstOfBest(par, from, j, fit, flag, widthAt, EMERGENCY, WINDOW);
+    // A full measure would show a rag as an error in the block; it may go
+    // a little looser before it gives up.
+    const tol = segs[j].atL && segs[j].atR ? FULL_TOLERANCE : TOLERANCE;
+    if (!short && (!b || b.r > tol)) b = firstOfBest(par, from, j, fit, flag, widthAt, tol, 1);
+    if (!b) b = ragged(par, from, segs[j].w);
+    return b;
+  }
+
+  // How much of its segment a laid line fills at natural spacing.
+  function fill(par, from, to, w) {
+    const { items, sw } = par;
+    const brk = items[to];
+    const isPen = brk.t === PEN && brk.p < INF && brk.p > -INF;
+    const hangW = brk.t === PEN ? brk.hang : items[to - 1].hang || 0;
+    return (sw[to] - sw[from] + (isPen ? brk.w : 0) - hangW) / w;
+  }
+
+  // Each region is set whole, as one unit: its lines are broken with the
+  // window looking on into the regions after it, and if the region would
+  // open or close on a scrap (a ragged line filling less than FULL of its
+  // segment), that end line is left white and the region is set again,
+  // until a full line starts and ends it. A region left shallower than
+  // DEPTH lines stays white and the text carries on in the next.
   function relayout() {
-    const segs = segments();
+    const regs = regions();
     const out = [];
-    const widthAt = (j) => (segs[j] ? segs[j].w : colW);
-    let p = 0;
-    let par = pars[0];
-    let from = 0;
-    let fit = 1;
-    let flag = false;
-    for (let j = 0; j < segs.length; j += 1) {
-      if (from >= par.items.length - 1) {
-        p += 1;
-        par = pars[p % pars.length];
-        from = 0;
+    let state = { p: 0, from: 0, fit: 1, flag: false };
+    // Sets segments start..hi-1 of reg from state st, after the lines in
+    // `kept`. Each line's window reads at most WINDOW segments ahead, so a
+    // region trimmed at its foot only needs setting again from WINDOW lines
+    // above the new foot: the lines before that cannot change.
+    const setRegion = (reg, start, hi, tail, st, kept) => {
+      const segs = reg.slice(0, hi).concat(tail);
+      const lns = kept.slice();
+      const before = [];
+      let { p, from, fit, flag } = st;
+      let par = pars[p % pars.length];
+      for (let j = start; j < hi; j += 1) {
+        if (from >= par.items.length - 1) {
+          p += 1;
+          par = pars[p % pars.length];
+          from = 0;
+        }
+        before[j] = { p, from, fit, flag };
+        const b = setLine(par, from, segs, j, fit, flag);
+        // Not even one word fits this sliver: it stays white.
+        if (!b) continue;
+        const end = par.items[b.pos];
+        const last = end.t === PEN && end.p <= -INF;
+        const f = b.rag ? fill(par, from, b.pos, segs[j].w) : 1;
+        lns.push({ seg: segs[j], j, par, from, to: b.pos, rag: !!b.rag, last, scrap: !last && f < FULL });
+        from = b.start;
+        fit = b.fit;
+        flag = b.flag;
       }
-      // Total fit over the next five lines; if that sets this line loose,
-      // the best tight line on its own, and failing that, ragged.
-      // A short runaround line has too few spaces to justify evenly: it is
-      // always set ragged, flush left at its segment, never stretched.
-      const short = segs[j].w < colW * SHORT;
-      let b = short ? null : firstOfBest(par, from, j, fit, flag, widthAt, EMERGENCY, WINDOW);
-      // A full measure would show a rag as an error in the block; it may go
-      // a little looser before it gives up.
-      const tol = segs[j].atL && segs[j].atR ? FULL_TOLERANCE : TOLERANCE;
-      if (!short && (!b || b.r > tol)) b = firstOfBest(par, from, j, fit, flag, widthAt, tol, 1);
-      if (!b) {
-        if (debug) debug.rag = (debug.rag || 0) + 1;
-        b = ragged(par, from, segs[j].w);
+      return { lns, before, st: { p, from, fit, flag } };
+    };
+    for (let ri = 0; ri < regs.length; ri += 1) {
+      const reg = regs[ri];
+      // The window's look-ahead past this region's foot.
+      const tail = [];
+      for (let k = ri + 1; k < regs.length && tail.length < WINDOW; k += 1) tail.push(...regs[k].slice(0, WINDOW - tail.length));
+      let lo = 0;
+      let hi = reg.length;
+      let res = null;
+      let before = [];
+      let resume = { at: 0, st: state, kept: [] };
+      while (hi - lo >= DEPTH) {
+        res = setRegion(reg, resume.at, hi, tail, resume.st, resume.kept);
+        before = Object.assign(before, res.before);
+        const { lns } = res;
+        if (lns.length < DEPTH) {
+          res = null;
+          break;
+        }
+        if (lns[0].scrap) {
+          lo = lns[0].j + 1;
+          resume = { at: lo, st: state, kept: [] };
+          before = [];
+          res = null;
+          continue;
+        }
+        const z = lns[lns.length - 1];
+        if (z.scrap) {
+          hi = z.j;
+          const at = Math.max(lo, hi - WINDOW);
+          resume = { at, st: before[at] || state, kept: lns.filter((ln) => ln.j < at) };
+          res = null;
+          continue;
+        }
+        break;
       }
-      // Not even one word fits this sliver: it stays white.
-      if (!b) {
+      if (!res) {
         if (debug) debug.skip = (debug.skip || 0) + 1;
         continue;
       }
-      const end = par.items[b.pos];
-      out.push({ seg: segs[j], par, from, to: b.pos, rag: !!b.rag, last: end.t === PEN && end.p <= -INF });
-      from = b.start;
-      fit = b.fit;
-      flag = b.flag;
+      out.push(...res.lns);
+      state = res.st;
     }
     layout = out;
   }
@@ -605,7 +742,7 @@ export async function createReflow(host) {
         }
       } else r = Math.min(0, natural > L ? (L - natural) / Math.max(1e-3, ssh[ln.to] - ssh[ln.from]) : 0);
       let x = ln.seg.x;
-      if (debug) ctx.fillStyle = ln.rag ? "#d00" : r > 1.1 ? "#06c" : INK;
+      if (debug) ctx.fillStyle = ln.scrap ? "#0a0" : ln.rag ? "#d00" : r > 1.1 ? "#06c" : INK;
       // Ragged and last lines keep natural spacing (or shrink) and start
       // flush left at their segment, wherever it begins: one rule for every
       // line, so the letter cuts the block rather than shaping it.
@@ -642,6 +779,12 @@ export async function createReflow(host) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, W, H);
+    if (debug) {
+      // Each laid line's segment, outlined, to read the regions by.
+      ctx.strokeStyle = "rgba(0,120,255,0.35)";
+      ctx.lineWidth = 1;
+      for (const ln of layout) ctx.strokeRect(ln.seg.x + 0.5, ln.seg.base - CAP + 0.5, ln.seg.w - 1, CAP + DESC);
+    }
     drawLines();
     ctx.fillStyle = INK;
     ctx.font = letter.font;
@@ -706,7 +849,8 @@ export async function createReflow(host) {
       debug.n += 1;
       debug.sum += ms;
       debug.max = Math.max(debug.max, ms);
-      if (debug.n % 30 === 0) console.log(`reflow: ${(debug.sum / debug.n).toFixed(2)}ms avg, ${debug.max.toFixed(2)}ms max, ${layout.length} lines, rag ${debug.rag || 0}, skip ${debug.skip || 0}`);
+      if (ms > 16) debug.slow = (debug.slow || 0) + 1;
+      if (debug.n % 30 === 0) console.log(`reflow: ${(debug.sum / debug.n).toFixed(2)}ms avg, ${debug.max.toFixed(2)}ms max, ${layout.length} lines, slow ${debug.slow || 0}, skip ${debug.skip || 0}`);
     }
   });
 
