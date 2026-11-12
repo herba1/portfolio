@@ -208,6 +208,8 @@ export async function createTorn(host, { embedded = false } = {}) {
       pts: [],
       len: 0,
       D,
+      // tip: how close to a torn end (0-255), where the core peels onto the piece.
+      tip: new Uint8Array(N),
       // self: the piece's coverage before anyone excludes it (rect and excl), cached once torn.
       self: new Uint8Array(N),
       excl: pieces.filter((q) => q.state !== "healed"),
@@ -235,47 +237,88 @@ export async function createTorn(host, { embedded = false } = {}) {
 
   const halfWidth = (s) => (STROKE / 2) * (1 + (vnoise(s / 70, 0.5, 21) - 0.5) * 0.28 + (vnoise(s / 19, 0.5, 22) - 0.5) * 0.08);
 
+  // Torn exits. A hand-torn strip never stops on a straight cut: the two
+  // tears either side of it run together, so each end is a ragged tongue.
+  // Over the last 0.6 stroke widths at either end the half width falls to
+  // zero, the tongue leans to one side (the two tears never run evenly), a
+  // stronger broad wobble is baked into the field so piece and hole still
+  // match, and the split always peels the white core onto the piece.
+  const taperLen = () => STROKE * 0.68;
+  const tongue = (u) => (u >= 1 ? 1 : u <= 0 ? 0 : u * (1.3 - 0.3 * u));
+  const TIPA = A1 * 2.5; // extra broad wobble at the tip
+  const TIPB = 1.8; // and a finer chew, so the tongue's flanks step and notch
+
+  function endGeom(P, n) {
+    const pts = P.pts;
+    const p = pts[n];
+    const T = taperLen();
+    const u0 = p.s / T;
+    const u1 = (P.len - p.s) / T;
+    const f0 = tongue(u0);
+    const f1 = tongue(u1);
+    const f = Math.min(f0, f1);
+    const a = pts[Math.max(0, n - 1)];
+    const b = pts[Math.min(pts.length - 1, n + 1)];
+    const tl = Math.hypot(b.x - a.x, b.y - a.y);
+    const nx = tl > 0 ? -(b.y - a.y) / tl : 0;
+    const ny = tl > 0 ? (b.x - a.x) / tl : 0;
+    const off = clamp(P.sk0 * (1 - f0) + P.sk1 * (1 - f1), -0.6, 0.6) * p.hw;
+    return {
+      x: p.x + nx * off,
+      y: p.y + ny * off,
+      hw: p.hw * f,
+      w: Math.sqrt(1 - f),
+      t: Math.max(1 - smooth(0.6, 1.3, u0), 1 - smooth(0.6, 1.3, u1)),
+    };
+  }
+
   function addPoint(P, x, y) {
     const last = P.pts[P.pts.length - 1];
     if (last) P.len += Math.hypot(x - last.x, y - last.y);
     const p = { x, y, hw: halfWidth(P.len), s: P.len };
     P.pts.push(p);
-    if (!P.cap0 && last) {
-      const l = Math.hypot(x - P.pts[0].x, y - P.pts[0].y) || 1;
-      P.cap0 = { x: P.pts[0].x, y: P.pts[0].y, dx: (x - P.pts[0].x) / l, dy: (y - P.pts[0].y) / l };
-    }
-    if (last) stamp(P, last, p, P.pts.length > 2);
-  }
-
-  // On release the front becomes a straight torn end too: rebuild the field
-  // with both ends clipped flat.
-  function closeEnd(P) {
-    const n = P.pts.length;
-    if (n < 2) {
-      // A tap tears out a dot.
-      stamp(P, P.pts[0], P.pts[0], false);
+    if (P.pts.length === 1) {
+      // Which way each tongue leans, fixed by where the tear began.
+      P.sk0 = (hash2(Math.round(x), Math.round(y), 51) < 0.5 ? -1 : 1) * (0.3 + 0.25 * hash2(Math.round(x), Math.round(y), 54));
+      P.sk1 = (hash2(Math.round(x), Math.round(y), 52) < 0.5 ? -1 : 1) * (0.3 + 0.25 * hash2(Math.round(x), Math.round(y), 55));
+      P.tseed = 60 + Math.floor(hash2(Math.round(x), Math.round(y), 53) * 1000);
       return;
     }
-    const e = P.pts[n - 1];
-    let k = n - 2;
-    while (k > 0 && Math.hypot(e.x - P.pts[k].x, e.y - P.pts[k].y) < 8) k--;
-    const l = Math.hypot(e.x - P.pts[k].x, e.y - P.pts[k].y) || 1;
-    P.capN = { x: e.x, y: e.y, dx: (e.x - P.pts[k].x) / l, dy: (e.y - P.pts[k].y) / l };
+    // The running end tapers too: every segment still inside the end's
+    // tongue is burnt again at its new, wider width (the field keeps the
+    // minimum, so the tongue only ever grows behind the front).
+    const n = P.pts.length;
+    const T = taperLen();
+    let s = n - 1;
+    while (s > 1 && P.len - P.pts[s - 1].s < T + 12) s--;
+    const bb = [GW, GH, -1, -1];
+    for (; s < n; s++) stamp(P, s - 1, s, s > 1, bb);
+    if (bb[2] > bb[0]) {
+      paintPiece(P, bb[0], bb[1], bb[2], bb[3]);
+      paintSheet(bb[0], bb[1], bb[2], bb[3]);
+      dirty = true;
+    }
+  }
+
+  // On release, burn the whole path again cleanly with both tongues final.
+  function closeEnd(P) {
+    const n = P.pts.length;
     P.D.fill(1e9);
-    for (let s = 1; s < n; s++) stamp(P, P.pts[s - 1], P.pts[s], s > 1, true);
+    P.tip.fill(0);
+    const bb = [GW, GH, -1, -1];
+    if (n < 2) stamp(P, 0, 0, false, bb); // a tap tears out a dot
+    else for (let s = 1; s < n; s++) stamp(P, s - 1, s, s > 1, bb);
     const [x0, y0, x1, y1] = P.bb;
     paintPiece(P, x0, y0, x1, y1);
     paintSheet(x0, y0, x1, y1);
   }
 
-  // Burn one segment into the piece's field and repaint what it touched.
-  function stamp(P, a, b, joint, quiet) {
-    // Ends are clipped flat only near their own end of the path, so a path
-    // that loops back past its start is not cut away.
-    const reach = STROKE * 0.75;
-    const c0 = P.cap0 && a.s < reach ? P.cap0 : null;
-    const cN = P.capN && P.len - b.s < reach ? P.capN : null;
-    const m = Math.max(a.hw, b.hw) + A1 + A2 + 1.5;
+  // Burn one segment into the piece's field; grows `acc` by what it touched.
+  function stamp(P, ia, ib, joint, acc) {
+    const dot = ia === ib ? { ...P.pts[ia], hw: P.pts[ia].hw * 0.8, w: 0.6, t: 1 } : null;
+    const a = dot || endGeom(P, ia);
+    const b = dot || endGeom(P, ib);
+    const m = Math.max(a.hw, b.hw) + A1 + A2 + TIPA + TIPB + BW * 2 + 2;
     const x0 = clamp(Math.floor((Math.min(a.x, b.x) - m + PAD) * R), 0, GW);
     const y0 = clamp(Math.floor((Math.min(a.y, b.y) - m + PAD) * R), 0, GH);
     const x1 = clamp(Math.ceil((Math.max(a.x, b.x) + m + PAD) * R), 0, GW);
@@ -284,27 +327,47 @@ export async function createTorn(host, { embedded = false } = {}) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const L2 = dx * dx + dy * dy;
+    const L = Math.sqrt(L2);
     const D = P.D;
+    const tip = P.tip;
+    const seed = P.tseed;
+    const wob = a.w > 0.001 || b.w > 0.001;
+    const as = P.pts[ia].s;
+    const bs = P.pts[ib].s;
+    const sScale = L > 0 && bs > as ? 1 : 0;
     for (let j = y0; j < y1; j++) {
       const py = (j + 0.5) / R - PAD;
       for (let i = x0; i < x1; i++) {
         const px = (i + 0.5) / R - PAD;
         let v;
+        let tc = 0;
         if (L2 > 0) {
-          // Butt ends: a torn strip ends in a ragged straight tear, not a
-          // round cap. Interior joints get a disc so turns stay whole.
-          const L = Math.sqrt(L2);
+          // Butt segments, discs at the joints so turns stay whole; the
+          // ends need no cap of their own, the tongue closes them.
           const t = ((px - a.x) * dx + (py - a.y) * dy) / L2;
-          const tc = t < 0 ? 0 : t > 1 ? 1 : t;
+          tc = t < 0 ? 0 : t > 1 ? 1 : t;
           const perp = Math.abs((px - a.x) * dy - (py - a.y) * dx) / L - (a.hw + (b.hw - a.hw) * tc);
           const out = t < 0 ? -t * L : t > 1 ? (t - 1) * L : -1e9;
           v = Math.max(perp, out);
           if (joint) v = Math.min(v, Math.hypot(px - a.x, py - a.y) - a.hw);
         } else v = Math.hypot(px - a.x, py - a.y) - a.hw;
-        if (c0) v = Math.max(v, -((px - c0.x) * c0.dx + (py - c0.y) * c0.dy));
-        if (cN) v = Math.max(v, (px - cN.x) * cN.dx + (py - cN.y) * cN.dy);
+        if (wob) {
+          // The wobble runs along each flank (by arc length, a separate
+          // wobble per side) rather than across the plane, so past the tip
+          // it is constant and can never pinch off an island. The two
+          // flanks meet the tip at different heights: a stepped point.
+          const w = a.w + (b.w - a.w) * tc;
+          if (w > 0.001) {
+            const s = (as + (bs - as) * tc) * sScale;
+            const fl = (px - a.x) * dy - (py - a.y) * dx > 0 ? 0.5 : 9.5;
+            v += w * ((vnoise(s / 11, fl, seed) - 0.5) * 2 * TIPA + (vnoise(s / 4.5, fl, seed + 1) - 0.5) * 2 * TIPB);
+          }
+        }
         const k = j * GW + i;
-        if (v < D[k]) D[k] = v;
+        if (v <= D[k]) {
+          D[k] = v;
+          tip[k] = (a.t + (b.t - a.t) * tc) * 255;
+        }
       }
     }
     const bb = P.bb;
@@ -312,10 +375,10 @@ export async function createTorn(host, { embedded = false } = {}) {
     bb[1] = Math.min(bb[1], y0);
     bb[2] = Math.max(bb[2], x1);
     bb[3] = Math.max(bb[3], y1);
-    if (quiet) return;
-    paintPiece(P, x0, y0, x1, y1);
-    paintSheet(x0, y0, x1, y1);
-    dirty = true;
+    acc[0] = Math.min(acc[0], x0);
+    acc[1] = Math.min(acc[1], y0);
+    acc[2] = Math.max(acc[2], x1);
+    acc[3] = Math.max(acc[3], y1);
   }
 
   function paintPiece(P, x0, y0, x1, y1) {
@@ -344,7 +407,8 @@ export async function createTorn(host, { embedded = false } = {}) {
           d[o + 3] = 0;
           continue;
         }
-        const bw = BW * side[k] * band[k];
+        const tp = P.tip[k] / 255;
+        const bw = BW * Math.max(side[k], tp) * band[k] * (1 + 0.8 * tp);
         const t = bw > 0.05 ? clamp((bw + e) * R * 0.8 + (fib[k] - 0.5) * 1.6, 0, 1) : 0;
         const g = tooth[k];
         const lift = (fib[k] - 0.5) * 6 * t;
@@ -376,19 +440,26 @@ export async function createTorn(host, { embedded = false } = {}) {
           continue;
         }
         let near = 1e9;
+        let nearTip = 0;
         for (const q of holes) {
           const e = q.D[k] + nE[k];
           if (e * R > 0.5) {
-            if (e < near) near = e;
+            if (e < near) {
+              near = e;
+              nearTip = q.tip[k];
+            }
             continue;
           }
           const c = cov(e) * q.self[k] * exclAt(q, k);
           a *= 1 - c;
-          if (e > 0 && e < near) near = e;
+          if (e > 0 && e < near) {
+            near = e;
+            nearTip = q.tip[k];
+          }
         }
         let t = 0;
         if (near < BW + 1) {
-          const bw = BW * 0.85 * (1 - side[k]) * band[k];
+          const bw = BW * 0.85 * (1 - Math.max(side[k], nearTip / 255)) * band[k];
           if (bw > 0.05) t = clamp((bw - near) * R * 0.8 + (fib[k] - 0.5) * 1.6, 0, 1);
         }
         const g = tooth[k];
@@ -427,9 +498,9 @@ export async function createTorn(host, { embedded = false } = {}) {
         const px = (i + 0.5) / R - PAD;
         if (rectSdf(px, py) > -1) continue;
         if (P.excl.length && exclAt(P, k) < 0.99) continue;
-        const s = side[k];
+        const s = Math.max(side[k], P.tip[k] / 255);
         const hh = hash2(i, j, 91);
-        const pPiece = (0.3 * s + 0.015) / R;
+        const pPiece = (0.3 * s + 0.2 * P.tip[k] / 255 + 0.015) / R;
         const pHole = (0.26 * (1 - s) + 0.015) / R;
         let dir = 0;
         if (hh < pPiece) dir = 1;
