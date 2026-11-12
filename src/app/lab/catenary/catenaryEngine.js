@@ -138,6 +138,14 @@ const CLOUD_SHADE = [0x9d, 0xb6, 0xcf];
 // where the cumulus tops are brightest as shot.
 const SUN = 125;
 const DIFFUSE = 0.22;
+// The cloud's edge (see PLATE): the warm tint is keyed tight on the modelled
+// cloud light (gamma, WARM_KEY from-to), so only the sunlit cores warm; below
+// the key, EDGE_BLUE of each fringe pixel's shortfall in blue is made up
+// toward the local sky lifted to skylight. RELIEF is the gain of the wide
+// unsharp mask that gives the cumulus back its lobes.
+const WARM_KEY = [0.8, 0.93];
+const EDGE_BLUE = 1;
+const RELIEF = 0.7;
 // Halation, the film's own optics rather than its grade: light that went
 // through the emulsion, bounced off the base (no remjet) and came back
 // through the red layer a little way off. Over the finished linear scene,
@@ -219,6 +227,7 @@ uniform vec3 uCloudShade; // linear
 uniform vec2 uSun;     // toward the sun, image px direction (unit)
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
+uniform vec4 uEdge;    // warm key from, to (gamma); relief gain; skylight edge amount
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
   vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -321,18 +330,92 @@ void main() {
   yc -= (yc - uSculpt.x) * 0.16 * uSculpt.y * away * (1.0 - s2);
   yc = mix(ylg, yc, mass * step(uSculpt.x, ylg));
   float ratio = pow(yc / max(ylg, 1e-4), 2.2);
+
+  // Relief: the lobes of the cumulus, put back. A wide unsharp mask (about
+  // 30 plate px) on the cloud's own light, at low gain and in gamma, so each
+  // cauliflower lobe stands off its neighbour the way the diffusion and the
+  // zoom had flattened it. The fine end is read a mip up, so it lifts the
+  // lobes, not the grain. Cloud only: the open sky and the steel take none,
+  // so no dark ring is drawn around a cloud.
+  float yF = pow(dot(textureLod(uPlate, uv, 1.0).rgb, LUMA), 1.0 / 2.2);
+  vec2 tr = vec2(12.0) / vec2(textureSize(uPlate, 0));
+  float yB = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      float wt = (i == 0 ? 2.0 : 1.0) * (j == 0 ? 2.0 : 1.0);
+      yB += wt * dot(textureLod(uPlate, uv + vec2(float(i), float(j)) * tr, 3.5).rgb, LUMA);
+    }
+  }
+  yB = pow(yB / 16.0, 1.0 / 2.2);
+  float cloudM = mass * smoothstep(0.05, 0.35, s);
+  float dg = clamp(yF - yB, -0.12, 0.12) * uEdge.z * cloudM;
+  float yFr = yF * pow(ratio, 1.0 / 2.2);
+  // The lobes rise into the cores only as far as the shoulder allows: no
+  // lifted pixel is pushed past the print's paper white.
+  dg *= dg > 0.0 ? 1.0 - smoothstep(0.86, 0.97, yFr) : 1.0;
+  ratio *= pow(clamp((yFr + dg) / max(yFr, 1e-3), 0.6, 1.25), 2.2);
+
   float y = dot(c, LUMA);
   float yt = y * ratio;
   c *= ratio;
-  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), lit);
+  // The warm key: only the sunlit cores warm. Keyed tight on the modelled
+  // cloud light a mip up (gamma, uEdge.xy, about 0.80-0.93): a fringe pixel
+  // is cloud and cobalt mixed, and warm paper mixed into blue is khaki-grey.
+  float yk = pow(clamp(dot(textureLod(uPlate, uv, 1.5).rgb, LUMA) * ratio, 0.0, 1.0), 1.0 / 2.2);
+  float core = smoothstep(uEdge.x, uEdge.y, yk);
+  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), lit * core);
   c = mix(c, uCloudShade * (yt / dot(uCloudShade, LUMA)), uSculpt.z * shade);
+
+  // Below the key the edge goes blue, not grey. The local sky is read on a
+  // ring a cloud's lobe out (about 50 plate px), weighted to its most
+  // saturated, darkest reading, and lifted by the vibrance floor the open sky
+  // gets. Each fringe pixel's chroma is drawn toward a target that runs from
+  // that sky (at the sky's own light) to skylight blue (CLOUD_SHADE, at the
+  // key) and on to neutral in the core: white, pale blue, cobalt, never
+  // grey. Only the chroma moves (luminance kept), and only as far as the
+  // pixel is short of the target's blue: a pixel already that blue is left.
+  vec3 skyA = vec3(0.0);
+  float skyW = 1e-4;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982;
+    vec2 o = vec2(cos(a), sin(a)) * vec2(52.0) / vec2(textureSize(uPlate, 0));
+    vec3 q = rgb2hsv(pow(textureLod(uPlate, uv + o, 4.0).rgb, vec3(1.0 / 2.2)));
+    float wq = pow(q.y, 4.0) * smoothstep(0.25, 0.4, q.z) + 1e-5;
+    vec2 hv = vec2(cos(q.x * 6.2831853), sin(q.x * 6.2831853));
+    skyA += wq * vec3(hv * q.y, q.z);
+    skyW += wq;
+  }
+  skyA /= skyW;
+  float skyS = length(skyA.xy);
+  float skyH = fract(atan(skyA.y, skyA.x) / 6.2831853 + 1.0);
+  float hueOk = smoothstep(170.0, 190.0, skyH * 360.0) * (1.0 - smoothstep(235.0, 250.0, skyH * 360.0));
+  skyH = mix(uVib.z, skyH, hueOk);
+  vec3 sl = rgb2hsv(pow(uCloudShade, vec3(1.0 / 2.2)));
+  // The floor is skylight's own pale chroma, a little deeper toward the
+  // sky's light, and never more than the local sky has: the target is the
+  // sky seen through thin cloud, not the sky itself, so the cloud's shaded
+  // body goes pale blue and the open cobalt (already bluer) is left alone.
+  float t = smoothstep(min(skyA.z, uEdge.x - 0.15), uEdge.x, yk);
+  float dhs = fract(sl.x - skyH + 0.5) - 0.5;
+  float tS = min(mix(sl.y * 1.5, sl.y * 1.25, t), max(skyS, sl.y));
+  vec3 tgt = pow(hsv2rgb(vec3(fract(skyH + dhs * (0.5 + 0.5 * t)), tS * (1.0 - core * core), 1.0)), vec3(2.2));
+  vec3 tc = tgt * (yt / dot(tgt, LUMA)) - yt;
+  vec3 cc = c - dot(c, LUMA);
+  float tl = length(tc);
+  float need = clamp(1.0 - dot(cc, tc) / max(tl * tl, 1e-6), 0.0, 1.0);
+  float steel = 1.0 - key.r;
+  float eAmt = uEdge.w * steel * steel * (1.0 - core) * smoothstep(0.3, 0.45, yk) * smoothstep(0.0, 0.3, need);
+  c = max(dot(c, LUMA) + mix(cc, tc, eAmt), 0.0);
 
   // Wide diffusion: screened, so it lifts the cobalt and never clips. Masked
   // off the steel: the mast stays graphite where it crosses lit cloud, one
   // sharp silhouette against the soft cloud light. (Halation is its own pass,
   // over the whole scene: HALO.)
   float bare = 1.0 - 0.85 * key.r;
-  vec3 veil = uCloudTop * key.b * key.b * uGlow.y * bare;
+  // Its colour follows the same key: warm paper off the sunlit cores,
+  // skylight over the cobalt, so the veil never greys the blue it lifts.
+  vec3 skyl = uCloudShade * (dot(uCloudTop, LUMA) / dot(uCloudShade, LUMA));
+  vec3 veil = mix(skyl, uCloudTop, core) * key.b * key.b * uGlow.y * bare;
   c = 1.0 - (1.0 - c) * (1.0 - veil);
   outColor = vec4(c, 1.0);
 }`;
@@ -593,6 +676,12 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const cloudShade = CLOUD_SHADE.map((v) => toLin(v / 255));
   const sunA = (num("sun", SUN) * Math.PI) / 180;
   const sun = [Math.cos(sunA), -Math.sin(sunA)];
+  const edge = [
+    clamp(num("warmFrom", WARM_KEY[0]), 0, 1),
+    clamp(num("warmTo", WARM_KEY[1]), 0, 1),
+    clamp(num("relief", RELIEF), 0, 3),
+    clamp(num("edgeBlue", EDGE_BLUE), 0, 1),
+  ];
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
@@ -918,6 +1007,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
     gl.uniform4fv(plateP.u.uVib, vib);
     gl.uniform2fv(plateP.u.uSun, sun);
+    gl.uniform4fv(plateP.u.uEdge, edge);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND);
