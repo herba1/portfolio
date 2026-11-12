@@ -51,6 +51,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the zenith (the top of the print), keyed off the cloud so the cores stay
 // white and their shadow sides take the skylight's blue (gradeSky).
 //
+// The developed print gets a film finish of its own (finish, grain): a
+// Pro-Mist diffusion of its high-key light, so the cloud's cores bleed into
+// the cobalt; halation, a thin warm ring where steel and wire cross cloud;
+// and an emulsion grain in log light, strongest in the mid-tones, a new frame
+// of it 24 times a second.
+//
 // Everything renders through _kit/film.js (summer) in linear light.
 //
 // Query: ?front=0..1 holds the front (0 blank, 1 developed); ?from=far runs
@@ -97,6 +103,12 @@ const OPEN_FRONT = 0.29;
 const Z = 0.05; // strata lift at full: 5% scale for the nearest stratum
 const COC = 15; // max circle of confusion, half-res px of the print
 const BAND = 0.62; // light in the front, linear
+
+// The print's finish (see finish() and grain() in COMPOSITE).
+const DIFFUSE = 0.1; // share of the high-key light's wide levels laid back
+const HAL_GAIN = 1.2; // red-layer exposure from that spill on dark steel
+const GRAIN = 0.8; // emulsion grain, stops at its strongest, in the mid-tones
+const GRAIN_PX = 1.5; // its clumps, in device px at DPR 2
 
 const FILM = {
   ...FILM_PRESETS.summer,
@@ -254,15 +266,102 @@ void main() {
   o = ws > 1e-4 ? acc / ws : c0;
 }`;
 
+const GRADE = `
+// The sky graded towards a deep summer cobalt, the way a polariser and a
+// Superia scan render a sky straight overhead. The photograph's sky is a pale,
+// washed cerulean; here the clear blue is pulled, in log light, towards a
+// target that is darkest and most saturated at the top of the print (the
+// zenith) and eases lighter towards the bottom (nearer the horizon). It is a
+// gain per channel, target over the photo's typical clear blue, so the sky's
+// own drawing and grain ride on it unchanged. Keyed by how much of a pixel is
+// clear sky: cloud cores (white, little chroma, bright) keep their light, and
+// the shadow sides between, grey and a little blue, take part of the gain, so
+// they pick up the skylight's blue instead of going grey.
+const vec3 SKY_REF = vec3(0.205, 0.347, 0.571);  // the photo's clear blue, linear
+const vec3 SKY_TOP = vec3(0.055, 0.118, 0.34);   // through the film: ~hue 212, sat .8, value .58
+const vec3 SKY_BOT = vec3(0.095, 0.2, 0.5);      // ...easing to ~sat .72, value .7
+float skyness(vec3 c) {
+  float mx = max(max(c.r, c.g), c.b);
+  float mn = min(min(c.r, c.g), c.b);
+  float white = mn / max(mx, 1e-4);
+  float l = dot(c, LUMA);
+  // clear blue: low whiteness, blue over red, not bright
+  float m = 1.0 - smoothstep(0.42, 0.78, white);
+  m *= smoothstep(0.0, 0.08, c.b - c.r);
+  m *= 1.0 - smoothstep(0.42, 0.7, l);
+  return m;
+}
+vec3 gradeSky(vec3 c, vec2 iuv) {
+  float y = smoothstep(0.0, 1.0, iuv.y);
+  vec3 lg = mix(log(SKY_TOP), log(SKY_BOT), y) - log(SKY_REF);
+  return c * exp(lg * skyness(c));
+}
+`;
+
+// The print's finish. The developed print (the photograph, its sky graded) is
+// fixed, so its high-key light is taken once per size into a small pyramid,
+// 1/4, 1/8 and 1/16 of the print: only what is past about 0.6 luminance, keyed
+// in log light, so the cloud's cores and sunlit tops feed it and the blue and
+// the steel do not. HIKEY makes the 1/4 level (four bilinear taps one mip
+// down cover its 4x4 block of print pixels), SHRINK the two below it (and
+// blurs the 1/16 level twice more in place, for the Pro-Mist's wide wings).
+const HIKEY = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform vec2 uPx; // one print pixel, in uv
+${COMMON}
+${GRADE}
+vec3 printAt(vec2 iuv) {
+  float a = textureLod(uAlpha, iuv, 1.0).r;
+  vec3 fill = textureLod(uFill, iuv, 1.0).rgb;
+  return textureLod(uPlate, iuv, 1.0).rgb + (1.0 - a) * (gradeSky(fill, iuv) - fill);
+}
+vec3 highKey(vec3 c) {
+  float l = max(dot(c, LUMA), 1e-4);
+  return c * smoothstep(log(0.45), log(0.8), log(l));
+}
+void main() {
+  vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
+  vec2 d = uPx;
+  o = vec4(0.25 * (highKey(printAt(iuv + vec2(-d.x, -d.y))) + highKey(printAt(iuv + vec2(d.x, -d.y)))
+                 + highKey(printAt(iuv + vec2(-d.x, d.y))) + highKey(printAt(iuv + vec2(d.x, d.y)))), 1.0);
+}`;
+
+// 13-tap downsample (Jimenez): half the size, a soft, alias-free blur.
+const SHRINK = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+void main() {
+  vec2 t = uTexel;
+  vec4 c = texture(uSrc, vUv) * 0.125;
+  c += (texture(uSrc, vUv + t * vec2(-1, -1)) + texture(uSrc, vUv + t * vec2(1, -1)) + texture(uSrc, vUv + t * vec2(-1, 1)) + texture(uSrc, vUv + t * vec2(1, 1))) * 0.125;
+  c += (texture(uSrc, vUv + t * vec2(-2, -2)) + texture(uSrc, vUv + t * vec2(2, -2)) + texture(uSrc, vUv + t * vec2(-2, 2)) + texture(uSrc, vUv + t * vec2(2, 2))) * 0.03125;
+  c += (texture(uSrc, vUv + t * vec2(0, -2)) + texture(uSrc, vUv + t * vec2(-2, 0)) + texture(uSrc, vUv + t * vec2(2, 0)) + texture(uSrc, vUv + t * vec2(0, 2))) * 0.0625;
+  o = c;
+}`;
+
 const COMPOSITE = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uBgBlur;
 uniform sampler2D uFgBlur;
+uniform sampler2D uHk4;  // the developed print's high-key light, 1/4 res
+uniform sampler2D uHk8;  // ...1/8
+uniform sampler2D uHk16; // ...1/16
 uniform float uSig;
 uniform float uBand;
+uniform float uGrainSeed;
+uniform float uGrainPx;
 ${COMMON}
+const float DIFFUSE = ${f(DIFFUSE)};
+const float HAL_GAIN = ${f(HAL_GAIN)};
+const vec3 HAL_TINT = vec3(1.0, 0.35, 0.08);
+const float GRAIN = ${f(GRAIN)};
 const float SIGMA = ${f(SIGMA)};
 const float SKY_BAND = ${f(SKY_BAND)};
 const float SKY_PX = ${f(SKY_PX)};
@@ -296,36 +395,7 @@ vec3 toLin(vec3 c) {
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
 }
 
-// The sky graded towards a deep summer cobalt, the way a polariser and a
-// Superia scan render a sky straight overhead. The photograph's sky is a pale,
-// washed cerulean; here the clear blue is pulled, in log light, towards a
-// target that is darkest and most saturated at the top of the print (the
-// zenith) and eases lighter towards the bottom (nearer the horizon). It is a
-// gain per channel, target over the photo's typical clear blue, so the sky's
-// own drawing and grain ride on it unchanged. Keyed by how much of a pixel is
-// clear sky: cloud cores (white, little chroma, bright) keep their light, and
-// the shadow sides between, grey and a little blue, take part of the gain, so
-// they pick up the skylight's blue instead of going grey.
-const vec3 SKY_REF = vec3(0.205, 0.347, 0.571);  // the photo's clear blue, linear
-const vec3 SKY_TOP = vec3(0.055, 0.118, 0.34);   // through the film: ~hue 212, sat .8, value .58
-const vec3 SKY_BOT = vec3(0.095, 0.2, 0.5);      // ...easing to ~sat .72, value .7
-float skyness(vec3 c) {
-  float mx = max(max(c.r, c.g), c.b);
-  float mn = min(min(c.r, c.g), c.b);
-  float white = mn / max(mx, 1e-4);
-  float l = dot(c, LUMA);
-  // clear blue: low whiteness, blue over red, not bright
-  float m = 1.0 - smoothstep(0.42, 0.78, white);
-  m *= smoothstep(0.0, 0.08, c.b - c.r);
-  m *= 1.0 - smoothstep(0.42, 0.7, l);
-  return m;
-}
-vec3 gradeSky(vec3 c, vec2 iuv) {
-  float y = smoothstep(0.0, 1.0, iuv.y);
-  vec3 lg = mix(log(SKY_TOP), log(SKY_BOT), y) - log(SKY_REF);
-  return c * exp(lg * skyness(c));
-}
-
+${GRADE}
 // The latent image: the scene itself, a positive at low contrast on a
 // cool white-blue wash, fainter the further it is from the developer.
 // Clouds stay the brightest thing in it, so the cores that develop first
@@ -442,6 +512,68 @@ vec3 develop(vec3 c, float d, vec2 iuv, float cap, vec3 wash, float rim) {
   return halate(r, frontOn(d, iuv) * rim, cap);
 }
 
+// A smooth read of a coarse level: cubic B-spline from four bilinear taps,
+// so a 1/16 level magnified 16x has no bilinear diamonds in it.
+vec3 smoothAt(sampler2D t, vec2 uv) {
+  vec2 res = vec2(textureSize(t, 0));
+  vec2 p = uv * res - 0.5;
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  vec2 f2 = f * f;
+  vec2 f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec2 w3 = f3 / 6.0;
+  vec2 g0 = w0 + w1;
+  vec2 g1 = w2 + w3;
+  vec2 h0 = (i - 0.5 + w1 / g0) / res;
+  vec2 h1 = (i + 1.5 + w3 / g1) / res;
+  return g0.y * (g0.x * texture(t, vec2(h0.x, h0.y)).rgb + g1.x * texture(t, vec2(h1.x, h0.y)).rgb)
+       + g1.y * (g0.x * texture(t, vec2(h0.x, h1.y)).rgb + g1.x * texture(t, vec2(h1.x, h1.y)).rgb);
+}
+
+// The film's finish on the developed print, from the pyramid of its high-key
+// light. Diffusion (a Pro-Mist): a share of the wide levels laid back over
+// the print, so the cloud's cores bleed softly into the cobalt and the
+// skyline glows. Halation: the same spill, from the narrow level, where it
+// lands on something dark (steel and wire against cloud: the matte, a, and
+// not the bright hardware) exposes the red layer, a thin warm ring where the
+// mast crosses cumulus; plain blue next to cloud is lit by it too but is not
+// steel, so it takes none (and the ring is only round the steel against
+// cloud). Both
+// held softly under the developed cloud round the pixel (cap), so no white
+// is pushed past where it already was. dev: how developed this pixel is.
+vec3 finish(vec3 c, vec2 iuv, float dev, float cap, float a) {
+  vec2 uv = vec2(iuv.x, 1.0 - iuv.y);
+  vec3 h4 = smoothAt(uHk4, uv);
+  vec3 h8 = smoothAt(uHk8, uv);
+  vec3 h16 = smoothAt(uHk16, uv);
+  float l0 = dot(c, LUMA);
+  vec3 add = DIFFUSE * (0.1 * h4 + 0.3 * h8 + 0.6 * h16);
+  float dark = a * (1.0 - smoothstep(0.06, 0.3, l0));
+  add += HAL_TINT * (HAL_GAIN * dot(0.7 * h4 + 0.3 * h8, LUMA) * dark);
+  add *= dev;
+  float la = dot(add, LUMA);
+  float room = max(max(cap, l0) - l0, 0.0);
+  float k = la > 1e-5 ? room * (1.0 - exp(-la / max(room, 1e-5))) / la : 1.0;
+  return c + add * k;
+}
+
+// Emulsion grain, in log light: strongest in the mid-tones (a stop either
+// side of the cobalt and the cloud's shadow sides), cleaner in deep steel and
+// in the white cores. Clumps about one and a half print pixels across, a
+// little dye in it, and a new frame of it 24 times a second.
+vec3 grain(vec3 c) {
+  vec2 gp = gl_FragCoord.xy / uGrainPx + uGrainSeed * vec2(17.13, 31.71);
+  float g = vnoise(gp) * 0.6 + vnoise(gp * 2.17 + 5.3) * 0.4 - 0.5;
+  vec3 gc = vec3(vnoise(gp + 41.0), vnoise(gp + 83.0), vnoise(gp + 127.0)) - 0.5;
+  float l = max(dot(c, LUMA), 1e-4);
+  float z = log2(l / 0.16);
+  float amt = GRAIN * exp(-z * z / 4.5);
+  return c * exp2((vec3(g) + 0.35 * gc) * amt);
+}
+
 void main() {
   vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
 
@@ -484,7 +616,14 @@ void main() {
   // ...and the glow spills a little past the silhouette onto the sky.
   float spill = smoothstep(0.02, 0.3, aM - a) * (1.0 - fg.a);
   sky = halate(sky, 0.4 * frontOn(dF, iuv) * spill, cap);
-  o = vec4(fgP + sky * (1.0 - fg.a), 1.0);
+  vec3 col = fgP + sky * (1.0 - fg.a);
+
+  // How developed this pixel is: the sky's band and the steel's, by cover.
+  float wB = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(dB));
+  float devB = 1.0 - smoothstep(-0.5 * wB, 0.5 * wB, dB);
+  float devF = 1.0 - smoothstep(-0.3 * uSig, 0.7 * uSig, dF);
+  col = finish(col, iuv, mix(devB, devF, fg.a), cap, fg.a);
+  o = vec4(grain(col), 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -597,6 +736,8 @@ export async function createDevelop(host, { embedded = false } = {}) {
     fg: compile(gl, VERT, PREP_FG),
     gather: compile(gl, VERT, GATHER.replace("__N__", "72")),
     comp: compile(gl, VERT, COMPOSITE),
+    hikey: compile(gl, VERT, HIKEY),
+    shrink: compile(gl, VERT, SHRINK),
     blit: compile(gl, VERT, BLIT),
   };
 
@@ -636,6 +777,7 @@ export async function createDevelop(host, { embedded = false } = {}) {
     for (const k of Object.keys(T)) {
       const x = T[k];
       if (x instanceof WebGLFramebuffer) gl.deleteFramebuffer(x);
+      else if (typeof x === "boolean") continue;
       else if (x && x.t) gl.deleteTexture(x.t);
     }
     T = null;
@@ -653,6 +795,10 @@ export async function createDevelop(host, { embedded = false } = {}) {
       fgBlur: target(hw, hh),
       scene: target(w, h),
       out: target(w, h, { half: false }),
+      hk4: target(Math.max(2, Math.ceil(w / 4)), Math.max(2, Math.ceil(h / 4))),
+      hk8: target(Math.max(2, Math.ceil(w / 8)), Math.max(2, Math.ceil(h / 8))),
+      hk16: target(Math.max(2, Math.ceil(w / 16)), Math.max(2, Math.ceil(h / 16))),
+      hk16b: target(Math.max(2, Math.ceil(w / 16)), Math.max(2, Math.ceil(h / 16))),
     };
     t.bgFb = fbo(t.bgCol, t.bgCoc);
     t.fgFb = fbo(t.fgCol, t.fgCoc);
@@ -660,6 +806,11 @@ export async function createDevelop(host, { embedded = false } = {}) {
     t.fgBlurFb = fbo(t.fgBlur);
     t.sceneFb = fbo(t.scene);
     t.outFb = fbo(t.out);
+    t.hk4Fb = fbo(t.hk4);
+    t.hk8Fb = fbo(t.hk8);
+    t.hk16Fb = fbo(t.hk16);
+    t.hk16bFb = fbo(t.hk16b);
+    t.hkReady = false;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     T = t;
     film.resize(w, h);
@@ -848,7 +999,37 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.disable(gl.SCISSOR_TEST);
   };
 
+  // The developed print's high-key light, 1/4, 1/8, 1/16: fixed, so made
+  // once for each size of the print.
+  const drawHighKey = () => {
+    begin();
+    gl.useProgram(P.hikey.p);
+    common(P.hikey);
+    gl.uniform2f(P.hikey.u.uPx, 1 / pw, 1 / ph);
+    gl.viewport(0, 0, T.hk4.w, T.hk4.h);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, T.hk4Fb);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.useProgram(P.shrink.p);
+    gl.uniform1i(P.shrink.u.uSrc, 6);
+    for (const [src, dst, fb] of [
+      [T.hk4, T.hk8, T.hk8Fb],
+      [T.hk8, T.hk16, T.hk16Fb],
+      // the widest level blurred twice more at its own size, so the cloud's
+      // spill reaches well out into the blue
+      [T.hk16, T.hk16b, T.hk16bFb],
+      [T.hk16b, T.hk16, T.hk16Fb],
+    ]) {
+      bindTex(6, src.t);
+      gl.uniform2f(P.shrink.u.uTexel, 1 / src.w, 1 / src.h);
+      gl.viewport(0, 0, dst.w, dst.h);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    T.hkReady = true;
+  };
+
   const drawFinal = () => {
+    if (!T.hkReady) drawHighKey();
     begin();
     // 3. Composite at full res, in linear light.
     gl.useProgram(P.comp.p);
@@ -861,6 +1042,14 @@ export async function createDevelop(host, { embedded = false } = {}) {
     bindTex(5, T.fgBlur.t);
     gl.uniform1i(P.comp.u.uBgBlur, 4);
     gl.uniform1i(P.comp.u.uFgBlur, 5);
+    bindTex(6, T.hk4.t);
+    bindTex(7, T.hk8.t);
+    bindTex(8, T.hk16.t);
+    gl.uniform1i(P.comp.u.uHk4, 6);
+    gl.uniform1i(P.comp.u.uHk8, 7);
+    gl.uniform1i(P.comp.u.uHk16, 8);
+    gl.uniform1f(P.comp.u.uGrainSeed, seed);
+    gl.uniform1f(P.comp.u.uGrainPx, Math.max(1, (GRAIN_PX * stage.dpr) / 2));
     gl.uniform1f(P.comp.u.uSig, SIGMA * (1 + 0.9 * Math.min(1, Math.abs(st.speed) * 0.8)));
     const ends = clamp(st.p / 0.03, 0, 1) * clamp((1 - st.p) / 0.03, 0, 1);
     gl.uniform1f(P.comp.u.uBand, BAND * ends * ends * (3 - 2 * ends));
