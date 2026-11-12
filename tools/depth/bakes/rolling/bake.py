@@ -81,7 +81,9 @@ centre of the guard whose slots show the green blade roots turning behind it.
           as whole wires through the crossings and drawn into the front.
 
 photo_front.py then replaces front.webp's wires with wires cut from the photo's
-own luminance (variable width, the steel's own shading, no drawn strokes);
+own luminance (variable width, the steel's own shading; out at the rim, where
+the photo's wires bunch and shred, each one drawn on along its own measured
+angle) and rebuilds the plate behind them and the room right of the head;
 texture.py then writes the photo's own blade pixels (grain, dust, the light
 through the sheet, the real specular) at full detail, with how far each one
 can be trusted (wires, sticker, edge and badge are not); run it after a bake

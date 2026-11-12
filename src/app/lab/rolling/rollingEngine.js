@@ -310,13 +310,29 @@ vec3 poseAt(float tau){
 }
 
 // The room beyond the photo's edge, for when the phone swings past it: the
-// photo's own edge, blurred out further the further past it, and dimmed, so
-// the dim ground runs on instead of stopping at a seam.
+// photo's edge row run on along the sensor's rows, blurred along the row
+// only (wider the further past the edge) and dimmed, so the dim ground runs
+// on instead of stopping at a seam. Past the top or bottom the edge row is
+// spread along itself, never stretched down the columns: the rows are the
+// readout's direction, so nothing out there tears any other way.
 vec3 plateAt(vec2 q){
   vec2 out2 = max(max(-q, q - 1.0), 0.0) * uImg;
   float far = max(out2.x, out2.y);
   if (far <= 0.0) return texture(uPlate, q).rgb;
-  return textureLod(uPlate, clamp(q, 0.0, 1.0), clamp(log2(1.0 + far), 0.0, 6.0) + uLod).rgb * mix(1.0, 0.7, clamp(far / 120.0, 0.0, 1.0));
+  vec2 c = clamp(q, 0.5 / uImg, 1.0 - 0.5 / uImg);
+  // the row's blur: 9 taps along x, spread with the distance past the edge
+  float w = (4.0 + 0.6 * far) / uImg.x;
+  vec3 acc = vec3(0.0);
+  float ws = 0.0;
+  for (int i = -4; i <= 4; i++) {
+    float x = c.x + float(i) * w;
+    // a tap past the side folds back in along the row
+    x = x < 0.0 ? -x : (x > 1.0 ? 2.0 - x : x);
+    float g = exp(-0.5 * float(i * i) / 6.0);
+    acc += g * textureLod(uPlate, vec2(x, c.y), uLod).rgb;
+    ws += g;
+  }
+  return acc / ws * mix(1.0, 0.7, clamp(far / 120.0, 0.0, 1.0));
 }
 
 // The blade frame at radius rho: row 0 holds blades 0 and 1 (lo, hi), row 1
