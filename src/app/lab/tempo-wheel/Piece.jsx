@@ -6,7 +6,10 @@ import { START, wheelPositions } from "./tempoMath";
 import "./tempo.css";
 
 const ONES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
-const HUNDREDS = [" ", "1", "2", "3", " "];
+// The blank faces are empty. A figure space falls back to a wider glyph in
+// this face and would widen the hundreds slot past the other two, so the
+// three figures would no longer share one measure.
+const HUNDREDS = ["", "1", "2", "3", ""];
 
 function Wheel({ faces, pos, stripRef }) {
   return (

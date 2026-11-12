@@ -1,4 +1,4 @@
-import { MAX, MIN, START, wheelPositions } from "./tempoMath";
+import { MAX, MIN, START, bearingAt, wheelPositions } from "./tempoMath";
 import { createAudio } from "./tempoAudio";
 
 // One value, v, in beats per minute, drives everything: the ruler, the
@@ -14,6 +14,7 @@ const BAND = 7; // how far past either end the ruler can be pulled, in units
 const rubber = (over) => BAND * (1 - 1 / (over / BAND + 1));
 const banded = (x) => (x < MIN ? MIN - rubber(MIN - x) : x > MAX ? MAX + rubber(x - MAX) : x);
 
+const SPINE = 12; // the ruler's top line, in canvas px (on the 4px grid)
 const FRICTION = 2.4; // per second, as a fling coasts
 const STIFF = 260;
 const DAMP = 2 * Math.sqrt(STIFF);
@@ -37,7 +38,16 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
   let rh = 48;
   let dpr = 1;
   let colW = 0;
+  let slots = [0, 0, 0, 1]; // left of each figure slot, and right of the last, in ruler px
+  let dx = 0;
+  let em = 16;
+  // Where the ruler starts and ends, in ruler px: under the ink of the
+  // outermost figures, whatever they are and wherever they roll.
+  let edgeL = 0;
+  let edgeR = 1;
   let drawnV = NaN;
+  let drawnL = NaN;
+  let drawnR = NaN;
   let lastDetent = Math.round(v);
   let phase = 0;
   let scheduled = -1;
@@ -56,9 +66,8 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
   let dragVel = 0;
 
   const resize = () => {
-    const r = box.getBoundingClientRect();
-    const size = Math.round(clamp(Math.min(r.height * 0.3, r.width * 0.26), 64, 224) / 16) * 16;
-    root.style.setProperty("--tempo-size", `${size}px`);
+    // The numeral's size is fluid CSS (see --text-tempo); the ruler is
+    // stretched to the numeral's measure, so read both back from layout.
     w = Math.max(1, Math.round(ruler.getBoundingClientRect().width));
     rh = Math.round(ruler.getBoundingClientRect().height) || 48;
     dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -66,7 +75,11 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     ruler.height = Math.round(rh * dpr);
     unit = clamp(Math.round(w / 110), 8, 12);
     const wheel = strips[2].parentElement;
+    em = parseFloat(getComputedStyle(number).fontSize) || 16;
     colW = wheel.getBoundingClientRect().width + parseFloat(getComputedStyle(wheel.previousElementSibling).marginRight || "0");
+    const x0 = ruler.getBoundingClientRect().left + dx;
+    const rects = strips.map((s) => s.parentElement.getBoundingClientRect());
+    slots = [...rects.map((r) => r.left - x0), rects[2].right - x0];
     drawnV = NaN;
     wake();
   };
@@ -79,38 +92,55 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     strips[0].style.setProperty("--tempo-roll", String(p.h));
     strips[1].style.setProperty("--tempo-roll", String(p.t));
     strips[2].style.setProperty("--tempo-roll", String(p.o));
-    number.style.transform = `translate3d(${(-p.shift * colW) / 2}px, 0, 0)`;
+    dx = (-p.shift * colW) / 2;
+    number.style.transform = `translate3d(${dx}px, 0, 0)`;
+    // Left edge: the hundreds figure, handing over to the tens figure as
+    // the hundreds slot empties and the number slides to centre.
+    const hl = slots[0] + bearingAt(p.h, (k) => [1, 1, 2, 3, 3][clamp(k, 0, 4)]) * em;
+    const tl = slots[1] + bearingAt(p.t, (k) => k % 10) * em;
+    edgeL = hl + (tl - hl) * p.shift + dx;
+    edgeR = slots[3] - bearingAt(p.o, (k) => k % 10) * em + dx;
   };
 
   const renderRuler = () => {
-    if (v === drawnV) return;
+    // The ruler is the numeral's underline: it ends hard under the ink of
+    // the first and last figure, with no fade of its own.
+    const L = Math.round(edgeL);
+    const R = Math.round(edgeR);
+    if (v === drawnV && L === drawnL && R === drawnR) return;
     drawnV = v;
+    drawnL = L;
+    drawnR = R;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, rh);
     const cx = Math.round(w / 2);
-    const half = w / 2;
-    const span = Math.ceil(half / unit) + 1;
+    const span = Math.ceil(Math.max(cx - L, R - cx) / unit) + 1;
     const first = Math.max(MIN, Math.floor(v) - span);
     const last = Math.min(MAX, Math.ceil(v) + span);
-    const top = 12;
+    const top = SPINE;
     const lw = 1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(L, 0, R - L, rh);
+    ctx.clip();
     for (let i = first; i <= last; i += 1) {
-      const x = cx + (i - v) * unit;
-      const d = Math.abs(x - cx) / half;
-      if (d > 1) continue;
-      // Fall off toward the edges so the ruler has no ends of its own.
-      const edge = Math.pow(Math.cos(d * Math.PI * 0.5), 2.4);
+      const x = Math.round(cx + (i - v) * unit);
+      if (x < L || x >= R) continue;
       const major = i % 10 === 0;
       const mid = !major && i % 5 === 0;
       const len = major ? 24 : mid ? 16 : 12;
       // Ticks right under the mark lift a little, like a loupe.
       const near = Math.exp(-Math.pow((x - cx) / (unit * 2.5), 2));
-      const a = Math.min(1, (major ? 0.7 : mid ? 0.46 : 0.3) * edge + near * 0.22);
+      const a = Math.min(1, (major ? 0.7 : mid ? 0.46 : 0.3) + near * 0.22);
       ctx.fillStyle = `rgba(242, 240, 235, ${a})`;
-      ctx.fillRect(x - lw / 2, top, lw, len);
+      ctx.fillRect(x, top, lw, len);
     }
-    // The centre mark: fixed, full strength, longer than any tick.
+    ctx.restore();
+    // The spine: one full-strength hairline from edge to edge, so the
+    // underline has a measure even where the ticks fall between pixels.
     ctx.fillStyle = "rgb(242, 240, 235)";
+    ctx.fillRect(L, top, R - L, 1);
+    // The centre mark: fixed, full strength, longer than any tick.
     ctx.fillRect(cx - 1, 0, 2, 48);
   };
 

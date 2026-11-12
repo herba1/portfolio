@@ -2,10 +2,17 @@
   --tempo-ground: rgb(0 0 0);
   --tempo-ink: rgb(242 240 235);
   --tempo-tick: rgb(242 240 235);
-  /* The numeral sits on the body rung of the ladder: at this size it reads
-     as an instrument, not a headline. */
-  --tempo-weight: 460;
-  --tempo-size: 160px;
+  /* The numeral is the poster: one scale step of its own, fluid with the
+     piece, and capped by height so the block never leaves the frame. It
+     stays on the body rung of the ladder; at this size scale does the
+     shouting and weight stays quiet. */
+  --text-tempo: min(clamp(160px, 34cqw, 560px), 52cqh);
+  --text-tempo--font-weight: 460;
+  /* The tracking law, exactly, at whatever size the clamp lands on:
+     -0.043 x (size - 12px), written in em so it scales with the type. */
+  --text-tempo--letter-spacing: calc(0.516px - 0.043em);
+  --tempo-size: var(--text-tempo);
+  --tempo-weight: var(--text-tempo--font-weight);
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -27,11 +34,13 @@
   color-scheme: dark;
 }
 
+/* One typographic block: the stack shrinks to the numeral's measure and
+   everything under it is stretched to that measure. */
 .tempo-stack {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  width: 100%;
+  align-items: stretch;
+  width: max-content;
   /* Optical centre: a touch above the middle. */
   margin-top: -2cqh;
   opacity: 0;
@@ -44,6 +53,7 @@
 
 .tempo-dot {
   display: block;
+  align-self: center;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -60,9 +70,7 @@
   font-weight: var(--tempo-weight);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
-  /* The tracking law, exactly, at whatever size the box gives:
-     -0.043 x (size - 12px). */
-  --tempo-track: calc(0.516px - 0.043em);
+  --tempo-track: var(--text-tempo--letter-spacing);
   /* The counter window is the figure box itself: cap height plus just enough
      to keep the overshoot of 0, 3, 6, 8 and 9 off the knife, snapped up to the
      4px grid. Nothing is faded; a digit is either in the slot or behind the
@@ -113,9 +121,21 @@
 
 .tempo-ruler {
   display: block;
-  width: min(100%, 1040px);
+  /* Exactly the numeral's measure: contributes nothing to the stack's
+     width, then stretches to it. The canvas clips its ticks to the ink of
+     the outer figures. */
+  width: 0;
+  min-width: 100%;
   height: 48px;
-  /* The slot now ends at the baseline, so the ruler keeps its distance
-     from the figures in proportion to them. */
-  margin-top: round(calc(var(--tempo-size) * 0.28), 4px);
+  /* Measured in the numeral's own font, so 1cap and the window resolve the
+     same here as on the figures. */
+  font-size: var(--tempo-size);
+  font-weight: var(--tempo-weight);
+  /* Baseline to the ruler's spine is a whole number of grid steps: the
+     window's sink below the baseline and the spine's own offset inside the
+     canvas (12px) are taken back out of the margin. */
+  --tempo-over: 0.02em;
+  --tempo-window: round(up, calc(1cap + 2 * var(--tempo-over)), 4px);
+  --tempo-rule: round(calc(var(--tempo-size) * 0.09), 4px);
+  margin-top: calc(var(--tempo-rule) - 12px - (var(--tempo-window) - 1cap) / 2);
 }
