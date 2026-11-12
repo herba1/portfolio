@@ -4,16 +4,18 @@ import { useCallback, useEffect, useRef } from "react";
 
 import "./albers.css";
 
-// Each plate: left ground, right ground, and the one ink both small squares
-// are printed in. The inner ink sits between its grounds in lightness and
-// hue, so each ground pushes it away from itself: it borrows the
-// complement of whatever it sits on.
+// Each plate: left ground, right ground, and the one ink both squares are
+// printed in. The grounds are neighbours, close in hue and chroma, and part
+// mainly in lightness and temperature; the ink is their OKLab midpoint. On
+// the lighter, warmer ground it reads darker and cooler, on the deeper,
+// cooler one lighter and warmer, so one ink is pushed two ways at once.
 const PLATES = [
-  { l: "#2d3462", r: "#dcae3a", i: "#8d7f6c" }, // indigo / ochre: light-warm vs dark-cool
-  { l: "#c4432d", r: "#4d8a6b", i: "#9c8b80" }, // vermilion / sage: greenish vs pinkish
-  { l: "#5c4a8c", r: "#e9993a", i: "#b08b70" }, // violet / orange
-  { l: "#c9bfdd", r: "#45462b", i: "#8f8670" }, // pale lilac / olive: dark vs light
-  { l: "#2b2523", r: "#ece2cc", i: "#8e867a" }, // umber / cream: one grey as two
+  { l: "#d8a447", r: "#58612f", i: "#97823b" }, // warm ochre / cool olive: olive on one, ochre on the other
+  { l: "#e8bfae", r: "#76342a", i: "#af7869" }, // light rose / deep brick
+  { l: "#c3ccd6", r: "#2f3847", i: "#757e8b" }, // pale grey-blue / slate
+  { l: "#cfc3dd", r: "#3e2747", i: "#83718f" }, // lilac / aubergine
+  { l: "#f0c75a", r: "#9b5a1e", i: "#c68f3c" }, // cadmium yellow / burnt sienna: orange on one, ochre on the other
+  { l: "#2b2523", r: "#e2d6bd", i: "#80776b" }, // umber / cream: one grey as two
 ];
 
 const SLOP = 5;
@@ -175,9 +177,11 @@ export default function Piece() {
     const ratio = 1.16;
     const w = Math.round(Math.min(cw * (cw < 600 ? 0.43 : 0.37), (ch * 0.6) / ratio, 380));
     const h = Math.round(w * ratio);
-    // Even sizes keep the square centred on whole pixels.
-    const s = Math.round((w * 0.22) / 2) * 2;
-    const t = Math.max(2, Math.round((s * 0.24) / 2) * 2);
+    // Even sizes keep the square centred on whole pixels. The square is a
+    // field, not a dot: at 0.4 of its ground the eye judges its colour.
+    const s = Math.round((w * 0.4) / 2) * 2;
+    // The bridge is a band with presence, half the square's height.
+    const t = Math.max(2, Math.round((s * 0.5) / 2) * 2);
     geo.current = { w, h, s };
     el.style.setProperty("--al-w", `${w}px`);
     el.style.setProperty("--al-h", `${h}px`);
@@ -363,7 +367,7 @@ export default function Piece() {
       onKeyDown={onKey}
       tabIndex={0}
       role="img"
-      aria-label="Two coloured grounds side by side, each holding a small square of the same ink that appears as two different colours."
+      aria-label="Two coloured grounds side by side, each holding a square of the same ink that appears as two different colours."
     >
       <div ref={plateRef} className="al-plate">
         <Layer layerRef={backRef} className="al-layer--back" />
