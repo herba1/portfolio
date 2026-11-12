@@ -64,16 +64,22 @@ const HS = 500; // haze scale height, metres
 const HS_SKY = 30;
 const AIRMASS_FLOOR = 0.15;
 // The haze's own light, which every veiled ray takes on: low down the street,
-// the pale grey-blue of horizon haze (sky light scattered many times over in a
-// long column, so it has lost most of the blue's saturation); higher up it
-// eases into the sky's own light, the cobalt overhead, so the zenith deepens.
-const HAZE_COL = "#A9C3D6";
+// the cyan of horizon haze on a clear summer day (sky light scattered many
+// times over in a long column, a little paler than the open blue but still
+// the sky's colour, never milk); higher up it eases into the sky's own light,
+// the cobalt overhead, so the zenith deepens.
+const HAZE_COL = "#8FB8D4";
 const HAZE_TOP = [26, 58]; // degrees: horizon haze below, the sky's own light above
 // The air in the canyon sees less of the sky than the open column does (the
 // towers hide most of it), so the light it scatters in front of a tower is a
 // little dimmer than the sky's veil at the same elevation: a tower lost in the
 // haze sits just under the sky behind it, a silhouette, never a lighter slab.
 const CANYON = 0.82;
+// And it is bluer than the open column's veil: the canyon's air is lit by the
+// open blue overhead, not by the long horizon column, so low down it sits this
+// far from the horizon haze toward the open sky's own blue at its elevation,
+// and a far tower the haze has taken goes cobalt on cobalt, not pale.
+const TOWER_BLUE = 0.55;
 const V_CLEAR = 50000; // visibility at fog 0, metres
 const V_THICK = 150; // visibility at fog 1
 // The hand moves log V so that what you see changes evenly along the drag. In a
@@ -130,12 +136,17 @@ const visibility = (() => {
 })();
 // The street is swept: the air in the canyon around the viewer is clearer, the
 // haze lying out along the street. Density rises from nothing at the eye to
-// full beyond about this distance (rho = s / (s + d0), so a ray to d crosses
-// d - d0 ln(1 + d / d0) of full haze): the glass corner 30 m off sees a fifth
-// of its straight-line air, the far tower at 380 m two thirds. The pocket
-// holds until the far towers are gone (fog 0.5) and closes over the second
-// half of the drag, which is when the near towers fade.
+// full beyond about this distance, quadratically (rho = s^2 / (s^2 + d0^2), so
+// a ray to d crosses d - d0 atan(d / d0) of full haze): the glass corner 30 m
+// off sees a fifteenth of its straight-line air, the back-right slab at 140 m
+// half, the far tower at 350 m three quarters. So the layers part: at fog 0.5
+// the far tower is under 5% transmittance, the slab about a quarter, the
+// glass corner over 95%. The pocket holds until the far towers are gone and
+// closes over the second half of the drag, which is when the near towers fade.
 const D_CLEAR = 60;
+// The canyon's air is denser than the open column's (the street's haze, not
+// the sky's), so a tower's ray takes this much more extinction per metre.
+const TOWER_GAIN = 1.6;
 const clearPocket = (f) => {
   const t = clamp((f - 0.5) / 0.5, 0, 1);
   return D_CLEAR * (1 - t * t * (3 - 2 * t));
@@ -153,12 +164,12 @@ const DETAIL_K = 0.65;
 // A tower the haze takes keeps its build the same way: its floors and mullions
 // (the plate less a normalised blur of the tower pixels alone, at the scale of
 // its floors, ~30 plate px on the far tower) come back over the in-scatter at
-// the square root of the transmittance, never under a quarter, so at fog 0.6
+// the square root of the transmittance, never under a fifth, so at fog 0.5
 // the far tower is a sky-tinted version of itself, faint cobalt on cobalt,
 // not a flat slab. Tower-only, so no sky bleeds in as a rim at the silhouette.
 const FLOORS_LOD = 3; // 480 x 320, then one 13-tap step down to 240 x 160
 const FLOORS_POW = 0.5;
-const FLOORS_MIN = 0.32;
+const FLOORS_MIN = 0.22;
 // And it sits under what is behind it: the air light in front of a tower is
 // held under this share of the hazed sky's luminance next to its silhouette
 // (the cumulus' and the gaps' light at the scale of their forms, through the
@@ -279,8 +290,8 @@ vec3 tauTower(vec2 uv, vec4 aux) {
   float s = max(sin(radians(aux.b * 90.0)), 0.06);
   // Air in a haze layer that thins with height, along the ray to a tower.
   float L = ${HS.toFixed(1)} / s * (1.0 - exp(-d * s / ${HS.toFixed(1)}));
-  // Less of it near the eye: the swept street, d - d0 ln(1 + d / d0) of d.
-  L *= 1.0 - uClear / d * log(1.0 + d / max(uClear, 1e-3));
+  // Less of it near the eye: the swept street, d - d0 atan(d / d0) of d.
+  L *= ${TOWER_GAIN.toFixed(2)} * (1.0 - uClear / d * atan(d / max(uClear, 1e-3)));
   // Blue goes first along the street.
   return betaAt(uv, log(d), 1.0) * L * vec3(${K_RGB.map((k) => k.toFixed(2)).join(", ")});
 }
@@ -473,8 +484,8 @@ void main() {
   // on past them to the sky and its cumulus, takes on the same haze light at
   // its elevation, by how much of the haze it crossed (the towers by their
   // distance, the sky by its airmass). Low down the street that light is the
-  // pale grey-blue of horizon haze, so the low sky and the gaps between the
-  // low cumulus lift and lose their saturation toward it; higher it eases into
+  // cyan of horizon haze, so the low sky and the gaps between the low cumulus
+  // lift a little and lose some saturation toward it, never to milk; higher it eases into
   // the sky's own light, the cobalt overhead, so the zenith stays deep and
   // the sky deepens toward it instead of away.
   float elev = aux.b * 90.0;
@@ -497,9 +508,10 @@ void main() {
   // there (the wide blur beside a high tower is mostly cumulus, and would turn
   // it to milk or to the clouds' grey), and dimmed by the sky the towers hide
   // from it, so a tower the haze has taken sits just under the sky behind it:
-  // pale grey-blue down the street, blue going to cobalt overhead.
+  // leaning from the horizon haze toward the open blue down the street (lit
+  // from overhead), so a far tower goes cobalt on cobalt, deepening overhead.
   vec3 openHi = openD * mix(1.0, luma(held) / max(luma(openD), 1e-3), hi);
-  vec3 open = pow(mix(hazeD, openHi, up), vec3(2.2)) * ${CANYON.toFixed(2)};
+  vec3 open = pow(mix(mix(hazeD, openD, ${TOWER_BLUE.toFixed(2)}), openHi, up), vec3(2.2)) * ${CANYON.toFixed(2)};
   // And the sun's light, scattered forward: strongest toward the sun, just
   // past the top of the frame, and next to nothing in the low sky down the
   // street, which looks away from it.
