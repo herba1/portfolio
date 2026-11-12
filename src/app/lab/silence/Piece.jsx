@@ -32,7 +32,7 @@ const readStill = () => {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null;
 };
 
-const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+const easeOut = (t) => 1 - (1 - t) * (1 - t);
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -86,25 +86,37 @@ export default function Piece({ embedded = false }) {
       g.W = r.width;
       g.H = r.height;
       g.dpr = window.devicePixelRatio || 1;
-      const size = Math.round(
-        Math.min(34, Math.max(15, Math.min(g.W * 0.024, g.H * 0.036))),
-      );
-      const lineH = round4(size * 1.25);
-      const ls = tracking(size);
-      for (const el of [measure, ...els]) {
-        if (!el) continue;
-        el.style.fontSize = `${size}px`;
-        el.style.lineHeight = `${lineH}px`;
-        el.style.letterSpacing = ls;
+      // The poem is the poster: the 5x3 block fills ~70% of the height
+      // (four row pitches of 1.75em plus one 1.25em line), capped so it
+      // never runs wider than ~84% of the page.
+      const setSize = (size) => {
+        const lineH = round4(size * 1.25);
+        const ls = tracking(size);
+        for (const el of [measure, ...els]) {
+          if (!el) continue;
+          el.style.fontSize = `${size}px`;
+          el.style.lineHeight = `${lineH}px`;
+          el.style.letterSpacing = ls;
+        }
+        const wordW = measure.getBoundingClientRect().width;
+        const rowPitch = round4(size * 1.75);
+        // Even spacing: the gap between columns matches the gap between
+        // rows, read from the x-height band. Whole pixels.
+        const colPitch = Math.round(wordW + (rowPitch - size * 0.72));
+        return { size, lineH, wordW, rowPitch, colPitch };
+      };
+      let m = setSize(Math.max(15, Math.floor((0.7 * g.H) / (4 * 1.75 + 1.25))));
+      const blockW = (q) => q.wordW + (COLS - 1) * q.colPitch;
+      const maxW = g.W * 0.84;
+      if (blockW(m) > maxW) {
+        m = setSize(Math.max(15, Math.floor((m.size * maxW) / blockW(m))));
       }
-      g.wordW = measure.getBoundingClientRect().width;
-      g.lineH = lineH;
-      // Even spacing: the gap between columns matches the gap between rows.
-      g.rowPitch = round4(size * 1.75);
-      const gap = g.rowPitch - size * 0.72; // row gap read from the x-height band
-      g.colPitch = g.wordW + gap;
-      const totalW = g.wordW + (COLS - 1) * g.colPitch;
-      const totalH = (ROWS - 1) * g.rowPitch + lineH;
+      g.wordW = m.wordW;
+      g.lineH = m.lineH;
+      g.rowPitch = m.rowPitch;
+      g.colPitch = m.colPitch;
+      const totalW = blockW(m);
+      const totalH = (ROWS - 1) * g.rowPitch + g.lineH;
       g.x0 = Math.round((g.W - totalW) / 2);
       g.y0 = Math.round((g.H - totalH) / 2 / 4) * 4;
       if (snap) {
@@ -184,15 +196,15 @@ export default function Piece({ embedded = false }) {
     };
 
     // ---- pointer ----
+    // The whole page is the hit area: each slot owns its cell of the grid,
+    // and the outer rows and columns run on to the edges of the page, so
+    // any pointer position names a slot.
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     const slotAt = (px, py) => {
-      const padX = (g.colPitch - g.wordW) / 2;
-      const padY = (g.rowPitch - g.lineH) / 2;
-      const lx = px - g.x0 + padX;
-      const ly = py - g.y0 + padY;
-      if (lx < 0 || ly < 0) return -1;
-      const c = Math.floor(lx / g.colPitch);
-      const r = Math.floor(ly / g.rowPitch);
-      if (c >= COLS || r >= ROWS) return -1;
+      const lx = px - g.x0 + (g.colPitch - g.wordW) / 2;
+      const ly = py - g.y0 + (g.rowPitch - g.lineH) / 2;
+      const c = clamp(Math.floor(lx / g.colPitch), 0, COLS - 1);
+      const r = clamp(Math.floor(ly / g.rowPitch), 0, ROWS - 1);
       return r * COLS + c;
     };
     const onMove = (e) => {
@@ -272,35 +284,29 @@ export default function Piece({ embedded = false }) {
       paint();
     };
 
-    // Still: the hole has stepped up from the centre, and the next word
-    // is caught mid-slide into it.
+    // Still: the hole has taken one step up off the centre (7 -> 4), and
+    // the word that stood above the centre is caught mid-slide down into
+    // it, so the absence still sits in the middle of the poem.
     let stillSet = false;
     const paintStill = () => {
       if (!stillSet) {
         stillSet = true;
-        // The hole has walked 7 -> 4 -> 3 -> 0: the top-left word is
-        // caught sliding down into slot 3, at t.
-        for (const [from, to] of [
-          [4, 7],
-          [3, 4],
-          [0, 3],
-        ]) {
-          const wi = occupant[from];
-          occupant[to] = wi;
-          occupant[from] = -1;
-          words[wi].slot = to;
-        }
-        hole = 0;
+        const wi = occupant[4];
+        occupant[CENTRE] = wi;
+        occupant[4] = -1;
+        words[wi].slot = CENTRE;
+        hole = 4;
       }
-      const moving = occupant[3];
+      const moving = occupant[CENTRE];
+      const a = slotPos(4);
+      const e = easeOut(still);
       for (let i = 0; i < words.length; i++) {
         const w = words[i];
         const p = slotPos(w.slot);
         w.x = p.x;
         w.y = p.y;
+        w.vx = w.vy = 0;
         if (i === moving) {
-          const a = slotPos(0);
-          const e = easeOut(still);
           w.y = a.y + (p.y - a.y) * e;
           w.vy = 1;
         }
