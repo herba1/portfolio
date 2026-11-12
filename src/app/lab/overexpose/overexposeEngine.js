@@ -38,8 +38,22 @@ export const FILM = {
   printGrey: 0.25,
   saturation: 1.15,
   blueDepth: 1.5,
-  blueHue: [0.86, 0.93, 1.0],
+  blueHue: [0.84, 0.92, 1.0],
   hiDesat: 0.45,
+  // The sky through the print's shoulder. On the paper the blue channel reaches
+  // the base white first, then green climbs after it, and a print-chroma blue
+  // measure collapses with it: overexposed sky slid from cobalt to a milky grey
+  // cyan (hue ~185, saturation ~0.05 at +3). The scan reads "sky" from the
+  // scene's own blue-over-red ratio instead, which no exposure changes, and for
+  // it keeps the blue compensation (stronger as it lifts), keeps most of the
+  // saturation the highlight bleach would take, and holds the blue a touch
+  // under the paper white. So overexposure lifts the sky's luminance at hue
+  // ~205: powder blue at +3, with the clouds still the brightest thing on it.
+  skyQ: [0.6, 1.5], // log2 blue/red of the scene where sky starts and is full
+  skyHiKeep: 0.5, // share of the highlight desaturation the sky is spared
+  skyHiHue: 1.5, // extra blue compensation on lifted sky
+  skyCap: 0.05, // how far under the paper white the sky's blue stays
+
   hiWarm: 0.025,
   bloom: 0.08,
   halation: 0.15,
@@ -72,6 +86,7 @@ uniform vec3 uGamma; uniform vec3 uShoulder; uniform float uToe; uniform float u
 uniform vec3 uGref;         // negative density of the printer-light grey
 uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax;
 uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm;
+uniform vec2 uSkyQ; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
 uniform float uGrain; uniform float uSeed; uniform float uGrainPx;
 out vec4 o;
@@ -118,14 +133,21 @@ void main(){
   // Scan: summer sky leans cobalt, colour sits in the midtones and bleaches
   // (a little warm) in the highlights. Saturation is a power on the channel
   // ratios, so no channel is ever pushed through zero.
-  float blue = clamp((c.b - c.r) / (c.b + 1e-4), 0.0, 1.0);
-  c *= 1.0 + (uBlueHue - 1.0) * blue * blue;
+  // (and bright: a blue-black needle shadow is not sky)
+  float sky = smoothstep(uSkyQ.x, uSkyQ.y, log2(max(L.b, 1e-6) / max(L.r, 1e-6))) * smoothstep(0.02, 0.07, dot(L, LUMA));
+  float blue = max(clamp((c.b - c.r) / (c.b + 1e-4), 0.0, 1.0), sky);
+  float hi0 = clamp((dot(c, LUMA) - 0.45) / 0.4, 0.0, 1.0);
+  c *= 1.0 + (uBlueHue - 1.0) * blue * blue * (1.0 + uSkyHiHue * hi0 * sky);
   float y = dot(c, LUMA);
   float hi = clamp((y - 0.45) / 0.4, 0.0, 1.0);
-  float s = uSat * (1.0 - uHiDesat * hi) * (1.0 + (uBlueSat - 1.0) * blue);
+  float s = uSat * (1.0 - uHiDesat * hi * (1.0 - uSkyHiKeep * sky)) * (1.0 + (uBlueSat - 1.0) * blue);
   vec3 r = max(c, 1e-5) / max(y, 1e-5);
   c = y * pow(r, vec3(s));
   c *= y / max(dot(c, LUMA), 1e-6);
+  // Never past the paper's own white: a channel that would print brighter than
+  // the base gives up luminance with the others, so the hue holds.
+  vec3 white = pow(vec3(10.0), -uDmin) * (1.0 - uSkyCap * sky);
+  c /= max(1.0, max(c.r / white.r, max(c.g / white.g, c.b / white.b)));
   c *= 1.0 + uHiWarm * hi * vec3(1.0, 0.3, -0.6);
   vec3 outc = srgb(c);
 
@@ -405,6 +427,10 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uBlueHue, F.blueHue);
     gl.uniform1f(u.uHiDesat, F.hiDesat);
     gl.uniform1f(u.uHiWarm, F.hiWarm);
+    gl.uniform2fv(u.uSkyQ, F.skyQ);
+    gl.uniform1f(u.uSkyHiKeep, F.skyHiKeep);
+    gl.uniform1f(u.uSkyHiHue, F.skyHiHue);
+    gl.uniform1f(u.uSkyCap, F.skyCap);
     gl.uniform1f(u.uBloom, F.bloom);
     gl.uniform1f(u.uHal, F.halation);
     gl.uniform3fv(u.uHalColor, F.halationColor);

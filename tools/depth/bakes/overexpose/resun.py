@@ -20,7 +20,9 @@
 #     edge in the sun's forward lobe, scaled to the sky beyond so it out-shines it.
 #
 # Run after desun.py (which removes the old sun's disc, star and aureole):
-#   python3 desun.py 6 26 && python3 resun.py 0.3906 0.1706 && python3 bake_wormseye.py <OE_WORK>/crop1536r.npy
+#   python3 desun.py 6 26 && python3 resun.py 0.3906 0.1706 && python3 deepen.py <OE_WORK>/crop1536r.npy \
+#     && python3 bake_wormseye.py <OE_WORK>/crop1536d.npy
+# (deepen.py then replaces the open sky's field with one that deepens towards the zenith.)
 # OE_WORK holds the 8k caches and hdr/tree_lined_driveway_8k.hdr (Poly Haven).
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wormseye_lib as wlib, numpy as np
