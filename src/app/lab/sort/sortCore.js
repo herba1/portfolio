@@ -445,25 +445,34 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 // sky; the face under it stops well short. The verge is combed over by rows
 // laid from the print's left edge, so the sheet is opaque from the root up.
 //
-// The stack is lit by its own sort order: each row carries a facing (0
-// tucked low under the lean, 1 at the crest turned to the sky), and the
-// facing picks which stretch of its runs the row reads. Low rows read the
-// dark green heads; across the upper third the rows read on into the tails,
-// and each row's tail lands at its end as a block gone over to white-gold.
-// The tall rows up there blow out whole at their ends, a broken column of
-// glowing blocks (the spine), and a few glint tiles break off the crest.
+// The stack is lit by its own sort order: every row reads a long stretch of
+// its run (readWindow), so each shows the whole ramp from dark green heads to
+// bright tails. Each row carries a facing (0 tucked low under the lean, 1 at
+// the crest turned to the sky) that tips the stretch and shades the row's
+// head. Across the upper third each row's tail lands at its end as a block
+// gone over to white; the tall rows up there blow out whole at their ends, a
+// broken column of glowing blocks (the spine), tall rows all down the face
+// blow out too, and glint tiles break off strip ends at every height.
 export const WAVE_ON = 0.12; // mask level where the verge sorts in place and the stack's foot lifts
 export const RUN_MIN = 120; // shorter verge runs are never lifted
 export const SHOW_MIN = 72; // shorter runs stay photo, not sorted in place: no mosaic of stubs
 export const GLINT_PEAK = 0.5; // a run whose brightest pixel is this bright can throw a glint
-export const GLINTS = 16; // glint tiles at most
+export const GLINTS = 44; // glint tiles at most...
+const CREST_GLINTS = 16; // ...of them at the crest
+// The stretch an end block or a glint reads: the run's very tail.
+const TAIL = [0.9, 1];
+// Tall rows anywhere on the face (BLOCK_H grid px and up, 16-24 device px at
+// the usual print size) blow out at their ends, so white blocks break off
+// all through the field, not only at the crest.
+const BLOCK_H = 18;
 // A layer's run is chosen among its source band's runs left of here.
 const SRC_X1 = ROOT_X1 + 240;
 // Each grid row holds up to PARTS tiles, three RGBA16UI texels each, in a
 // texture GH wide and 3 x PARTS tall: (x0, x1, source band + 1, flags) for
 // the tile's span, (run x0, run x1, facing x 65535, vegetation share of the
-// run x 65535), and (row x0, row x1, the row's offset into the sort order x 65535, blow-out x
-// 65535) for the whole row the tile is part of. The first tile that holds a pixel draws it,
+// run x 65535), and (row x0, row x1, the stretch of the ramp the row reads
+// as two bytes (lo << 8 | hi, readWindow), blow-out x 65535) for the whole
+// row the tile is part of. The first tile that holds a pixel draws it,
 // so glints and end blocks are written first.
 export const PARTS = 16;
 export const F_LIFT = 1; // a lifted strip: lit by its facing (the holdout matte covers every sorted pixel)
@@ -487,6 +496,29 @@ export function rowShift(r, salt) {
   const drift = (vnoise(r / 9, salt * 0.13) - 0.5) * 0.7;
   return clamp(0.5 + 0.5 * clamp(0.8 * v + drift, -1, 1), 0, 1);
 }
+
+// The ramp a row reads, in ramp coordinates: 0..RAMP_GREEN is its run's
+// grass, darkest green to brightest yellow-green, and RAMP_GREEN..1 the
+// bright half of whatever else the run carried (sky and wall highlights),
+// so the ramp never drops back to dark where the grass ends. The shader
+// maps a ramp coordinate onto the sort order with the run's grass share.
+export const RAMP_GREEN = 0.82;
+// The stretch of the ramp a row reads, [lo, hi], inner edge to outer end.
+// Every row reads a long stretch, at least about three quarters of the
+// ramp, so the whole dark-head to bright-tail gradient shows inside it:
+// dark green where it leaves the stack's inner edge, bright yellow-green on
+// out into the near-white tail. The facing tips the stretch (under the lean
+// the row starts on the darkest heads and stops at the brightest grass; at
+// the crest it starts lighter and runs on through the tail), and the row's
+// own offset slides it darker or brighter, so neighbours still differ.
+export function readWindow(r, salt, f) {
+  const sh = 2 * rowShift(r, salt) - 1;
+  const width = 0.74 + 0.16 * hash(r, salt + 9) + 0.1 * f;
+  const lo = clamp(0.02 + 0.16 * f + 0.12 * sh, 0, 0.3);
+  const hi = clamp(lo + width + 0.08 * sh, RAMP_GREEN - 0.02, 1);
+  return [lo, hi];
+}
+const packWindow = (w) => (Math.round(clamp(w[0], 0, 1) * 255) << 8) | Math.round(clamp(w[1], 0, 1) * 255);
 
 // Which layers lift, and from where, for this mask. The stack's foot is the
 // verge: the mask over the root zone (its upper quartile, so a few strokes
@@ -650,7 +682,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
       table[o1 + 3] = Math.round(clamp(run.vf, 0, 1) * 65535);
       table[o2] = ra;
       table[o2 + 1] = rb;
-      table[o2 + 2] = Math.round(clamp(w, 0, 1) * 65535);
+      table[o2 + 2] = packWindow(w);
       table[o2 + 3] = Math.round(clamp(blow, 0, 1) * 65535);
     }
   };
@@ -669,7 +701,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
     const run = end - xa >= 24 ? pick(r, salt, prevRun[salt]) : null;
     if (!run) return { tiles: [], xb: xa };
     prevRun[salt] = run;
-    list.push([r, xa, end, F_LIFT, run, f, xa, end, rowShift(r, salt)]);
+    list.push([r, xa, end, F_LIFT, run, f, xa, end, readWindow(r, salt, f)]);
     return { tiles: [[xa, end, run]], xb: end };
   };
   // A row's end block, from about x0 (a smooth line down the rows, so the
@@ -678,7 +710,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
     if (!tt.tiles.length) return;
     const [, , run] = tt.tiles[tt.tiles.length - 1];
     const a = Math.min(x0 + (hash(r, 71) - 0.5) * 40, tt.xb - 48);
-    ends.push([r, a, tt.xb, F_LIFT | F_BLOWN, run, f, xa, tt.xb, 0.5, blow]);
+    ends.push([r, a, tt.xb, F_LIFT | F_BLOWN, run, f, xa, tt.xb, TAIL, blow]);
   };
 
   // The tiles, collected first so glints and end blocks can be written
@@ -742,30 +774,40 @@ export function geometry(mask8, base, link, plan, out = {}) {
       endBlock(r, tt, reach - (thick ? 240 : 170) - 30 * hash(r, 75), f, xa, thick ? 1 : 0.62);
     } else {
       // Elsewhere the run's tail lands at the row's end as a block gone over
-      // to white-gold, more of it the more the row faces the sky.
-      const blow = t > 0.5 ? smooth(0.45, 0.9, f) : 0;
+      // to white-gold, more of it the more the row faces the sky. A tall row
+      // anywhere on the face, under the lean as well, blows out at its end
+      // more often than not: its tail read on past 0.9, a white block.
+      let blow = t > 0.5 ? smooth(0.45, 0.9, f) : 0;
+      if (h >= BLOCK_H && hash(r, 83) < (t < 0 ? 0.34 : 0.66)) blow = Math.max(blow, 0.8 + 0.2 * hash(r, 85));
       if (blow > 0.04) {
-        const bl = clamp((xb - lx0) * (0.12 + 0.22 * hash(r, 71) * blow), 14, 120);
-        ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, 0.5, blow]);
+        const bl = clamp((xb - lx0) * (0.12 + 0.22 * hash(r, 71) * blow), 14, h >= BLOCK_H ? 150 : 120);
+        ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, TAIL, blow]);
       }
     }
-    if (f > 0.6) tails.push({ r, x1: xb, run, f, y: ROWS.y0[r], xa, xb });
+    // Any row may throw a glint off its end, the crest's most often: the
+    // white rectangles break off at every height.
+    if (f > 0.6 || hash(r, 87) < 0.22 + (h >= BLOCK_H ? 0.3 : 0)) tails.push({ r, x1: xb, run, f, y: ROWS.y0[r], xa, xb });
   }
 
-  // Glints: a handful of bright tails where the facing peaks, spaced apart.
+  // Glints: bright tails all down the face, most where the facing peaks,
+  // spaced apart.
   // Each is the strip's own brightest pixel broken off past its end, after a
   // short gap, as tall as the row.
   const glint = [];
   tails.sort((p, q) => q.f - p.f + (hash(q.r, 61) - hash(p.r, 61)) * 0.3);
+  let crestN = 0;
   for (const g of tails) {
     if (glint.length >= GLINTS) break;
     if (!g.run) continue;
+    // The crest keeps its handful; the rest are spread down the face.
+    if (g.f > 0.6 && crestN >= CREST_GLINTS) continue;
     if (peakOf(g.run) < GLINT_PEAK) continue;
     if (glint.some((o) => Math.abs(o.x - g.x1) < 60 && Math.abs(o.y - g.y) < 16)) continue;
     const gap = 4 + Math.round(hash(g.r, 63) * 10);
     const w = 12 + Math.round(hash(g.r, 65) * 30);
     glint.push({ x: g.x1, y: g.y });
-    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, 0.5, 1);
+    if (g.f > 0.6) crestN++;
+    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, [0.97, 1], 1);
   }
   for (const p of ends) put(...p);
   for (const p of face) put(...p);

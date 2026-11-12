@@ -1,6 +1,6 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
-import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_GLINT, F_BLOWN, demoMask, bake, liftPlan, liftMask, links, restSort, geometry } from "./sortCore";
+import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_GLINT, F_BLOWN, RAMP_GREEN, demoMask, bake, liftPlan, liftMask, links, restSort, geometry } from "./sortCore";
 
 // Sort: a real pixel sort, after Kim Asendorf's ASDF Pixel Sort (2010), run
 // on the GPU over a summer photograph of a Japanese level crossing.
@@ -50,12 +50,14 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_GLINT, F_BLOWN, demoMask,
 // (tools/depth/bakes/sort/hold.py), mixed over the strips per device pixel.
 //
 // Each row is one unbroken luminance ramp, inner edge to outer edge, lit by
-// the sort order: its facing (low under the lean, high at the crest) picks the
-// stretch of its run it reads, and its own hashed offset slides that stretch
-// darker or brighter, so a dark row often lies against a bright one. Low rows
-// read mostly the dark green heads; across the upper third the rows read on
-// into the tails, and each row's tail lands at its end as a white-gold block (the tall rows
-// there blow out whole, the spine). Glint tiles break off the crest's ends. A run's few grey, beige
+// the sort order: every row reads a long stretch of its run (sortCore's
+// readWindow), so dark green heads at the inner edge run on to bright
+// yellow-green and near-white at the outer end. Its facing (low under the
+// lean, high at the crest) tips that stretch and shades its head, and its own
+// hashed offset slides it darker or brighter, so neighbours differ. Across
+// the upper third each row's tail lands at its end as a white block (the tall
+// rows there blow out whole, the spine); tall rows all down the face blow out
+// at their ends too, and glint tiles break off strip ends at every height. A run's few grey, beige
 // or blue pixels (road, wall, sky) are graded onto the green ramp by their
 // luminance, so the sheet stays one green. The stack climbs as the mask over
 // the verge rises: amount 0.5 lifts it half way, with no crest.
@@ -156,6 +158,9 @@ void main() {
   float f = 0.0;
   float pr = 0.0;
   float sh = 0.0;
+  float rv = 0.0;
+  float sr = 0.0;
+  float st = 0.0;
   int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
   for (int k = 0; k < ${PARTS}; k++) {
     uvec4 a = texelFetch(uStripe, ivec2(g.y, 3 * k), 0);
@@ -165,25 +170,24 @@ void main() {
     uvec4 b = texelFetch(uStripe, ivec2(g.y, 3 * k + 1), 0);
     uvec4 c = texelFetch(uStripe, ivec2(g.y, 3 * k + 2), 0);
     f = float(b.b) / 65535.0;
-    float vf = clamp(float(b.a) / 65535.0, 0.35, 1.0);
     glint = (fl & ${F_GLINT}u) != 0u;
     blow = (fl & ${F_BLOWN}u) != 0u ? float(c.a) / 65535.0 : 0.0;
     // The row is one span: a single long sorted run stretched over the row
-    // from its inner edge to its outer end, one unbroken ramp. Its facing
-    // picks the stretch it reads: low and tucked, the dark green heads; at
-    // the crest, on out past the grass into the brightest tails. The row's
-    // own offset (sh) slides that stretch along the sort order, darker or
-    // brighter, so neighbouring rows differ.
-    float sr = (float(g.x - int(c.r)) + 0.5) / float(c.g - c.r);
-    float st = (float(g.x - int(a.r)) + 0.5) / float(a.g - a.r);
-    sh = float(c.b) / 65535.0 * 2.0 - 1.0;
-    float lo = 0.42 * pow(f, 1.6) * vf;
-    float hi = mix(0.62 * vf, vf, smoothstep(0.0, 0.55, f)) + (1.0 - vf) * smoothstep(0.4, 0.85, f);
-    lo = clamp(lo + 0.42 * sh, 0.0, 0.8);
-    hi = clamp(hi + 0.36 * sh, lo + 0.22, 1.0);
-    pr = glint ? 0.985 + 0.015 * st : mix(lo, hi, sr);
+    // from its inner edge to its outer end, one unbroken ramp. The row reads
+    // a long stretch of it (sortCore's readWindow, packed lo << 8 | hi), in
+    // ramp coordinates: 0..RAMP_GREEN is the run's grass, darkest to
+    // brightest, and the rest is the bright half of what the run carried
+    // past the grass, so the ramp never drops back to dark mid-row.
+    sr = (float(g.x - int(c.r)) + 0.5) / float(c.g - c.r);
+    st = (float(g.x - int(a.r)) + 0.5) / float(a.g - a.r);
+    float wlo = float(c.b >> 8u) / 255.0;
+    float whi = float(c.b & 255u) / 255.0;
+    sh = clamp((wlo + whi - 1.0) * 2.0, -1.0, 1.0);
+    rv = glint ? 0.985 + 0.015 * st : mix(wlo, whi, sr);
     // An end block reads the very tail of its run, brightest pixels last.
-    if (blow > 0.0) pr = mix(0.86, 1.0, st);
+    if (blow > 0.0) rv = mix(0.9, 1.0, st);
+    float gs = float(b.a) / 65535.0;
+    pr = rv < ${RAMP_GREEN} ? rv / ${RAMP_GREEN} * gs : mix(gs + 0.62 * (1.0 - gs), 1.0, (rv - ${RAMP_GREEN}) / ${(1 - RAMP_GREEN).toFixed(4)});
     float len = float(b.g - b.r);
     src = ivec2(int(b.r) + int(clamp(pr, 0.0, 1.0) * (len - 1.0)), int(a.b) - 1);
     lifted = true;
@@ -208,25 +212,34 @@ void main() {
       ramp = mix(ramp, vec3(0.80, 0.84, 0.40), smoothstep(0.42, 0.85, y));
       col = mix(col, ramp, (1.0 - gr) * 0.85);
       // Turned away from the light (under the lean, inside the hollow, the
-      // lip turning under) the sheet falls into shade: a dark band.
-      // Each row is turned a little its own way: its offset tips it too.
-      col *= mix(0.4, 1.0, smoothstep(0.0, 0.42, f + 0.24 * sh));
+      // lip turning under) the sheet falls into shade, but only at its head:
+      // the shade lifts along the row, so even a row under the lean runs
+      // from near-black green out to its own bright end.
+      float shade = mix(0.42, 1.0, smoothstep(0.0, 0.42, f + 0.24 * sh));
+      col *= mix(shade, 1.0, smoothstep(0.3, 0.92, sr));
+      // Every row's outer end goes on from bright yellow-green towards
+      // near-white: the ramp's last stretch, the run's brightest pixels.
+      float lit = smoothstep(0.78, 1.0, rv) * smoothstep(0.3, 0.68, y);
+      col = mix(col, vec3(0.90, 0.96, 0.66), lit * (0.45 + 0.4 * f));
       // Turned to the sky at the crest, the run's brightest tail blooms
       // white-gold; a glint is that pixel broken off.
-      vec3 gold = mix(vec3(0.98, 0.80, 0.36), vec3(1.0, 0.96, 0.80), smoothstep(0.3, 0.75, y));
+      vec3 gold = mix(vec3(1.0, 0.86, 0.46), vec3(1.0, 0.99, 0.93), smoothstep(0.3, 0.75, y));
       // The last stretch of a lit run goes over whole, a hard block at the
       // strip's end, not a fade.
       float crest = smoothstep(0.45, 0.9, f);
-      float push = mix(pow(f, 1.5) * 0.5, 1.0, crest) * smoothstep(0.62 - 0.14 * crest, 0.9, pr);
-      push = max(push, pow(f, 1.5) * step(0.93, pr));
+      float push = mix(pow(f, 1.5) * 0.5, 1.0, crest) * smoothstep(0.86 - 0.12 * crest, 0.98, rv);
       col = mix(col, gold, push);
-      // A row's end block: the tail gone over whole, gold at the edge of the
-      // light and blown to white where the row faces the sky full on.
+      // A row's end block: the tail gone over whole, blown past 0.9 to white,
+      // gold only at the edge of the light.
+      // The block still ramps: it takes over from the row's yellow-green at
+      // its start and is white by its end, and the run's own grain shows
+      // through it as it goes.
       if (blow > 0.0) {
-        vec3 hot = mix(vec3(1.0, 0.80, 0.34), vec3(1.0, 0.97, 0.84), clamp(smoothstep(0.3, 0.8, y) * 0.55 + 0.35 * blow - 0.1, 0.0, 1.0));
-        col = mix(col, hot, 0.35 + 0.65 * blow);
+        float heat = smoothstep(0.0, 0.75, st);
+        vec3 hot = mix(vec3(0.97, 0.93, 0.56), vec3(1.0, 0.995, 0.95), clamp(heat * (0.55 + 0.45 * blow) + 0.35 * smoothstep(0.35, 0.8, y) - 0.1, 0.0, 1.0));
+        col = mix(col, hot, (0.5 + 0.5 * heat) * (0.82 + 0.18 * smoothstep(0.25, 0.7, y)) * (0.6 + 0.4 * blow));
       }
-      if (glint) col = mix(vec3(1.0, 0.8, 0.32), vec3(1.0, 0.97, 0.86), 0.25 + 0.35 * smoothstep(0.3, 0.8, y));
+      if (glint) col = mix(vec3(1.0, 0.92, 0.62), vec3(1.0, 0.995, 0.96), 0.45 + 0.55 * smoothstep(0.3, 0.8, y));
     }
   }
   // A pole or a sign stands in front of the stack: the print over the
