@@ -47,6 +47,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // and it carries the hand's speed with friction; the strata,
 // stirred by that speed, settle on a spring.
 //
+// The painted sky is graded towards a deep cobalt in log light, darkest at
+// the zenith (the top of the print), keyed off the cloud so the cores stay
+// white and their shadow sides take the skylight's blue (gradeSky).
+//
 // Everything renders through _kit/film.js (summer) in linear light.
 //
 // Query: ?front=0..1 holds the front (0 blank, 1 developed); ?from=far runs
@@ -266,7 +270,7 @@ const float HALO = ${f(HALO)};
 // The cool white-blue an overexposed sky washes out to (linear).
 const vec3 WASH = vec3(0.66, 0.77, 0.92);
 // The level the latent sky's blue is lifted towards (linear luminance).
-const float SKY_LAT = 0.46;
+const float SKY_LAT = 0.2;
 const vec3 LEAK = vec3(1.0, 0.8, 0.58);
 // Halation: the red layer's glow, amber-orange (linear).
 const vec3 AMBER = vec3(1.0, 0.5, 0.12);
@@ -291,15 +295,45 @@ vec3 toLin(vec3 c) {
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
 }
 
+// The sky graded towards a deep summer cobalt, the way a polariser and a
+// Superia scan render a sky straight overhead. The photograph's sky is a pale,
+// washed cerulean; here the clear blue is pulled, in log light, towards a
+// target that is darkest and most saturated at the top of the print (the
+// zenith) and eases lighter towards the bottom (nearer the horizon). It is a
+// gain per channel, target over the photo's typical clear blue, so the sky's
+// own drawing and grain ride on it unchanged. Keyed by how much of a pixel is
+// clear sky: cloud cores (white, little chroma, bright) keep their light, and
+// the shadow sides between, grey and a little blue, take part of the gain, so
+// they pick up the skylight's blue instead of going grey.
+const vec3 SKY_REF = vec3(0.205, 0.347, 0.571);  // the photo's clear blue, linear
+const vec3 SKY_TOP = vec3(0.055, 0.118, 0.34);   // through the film: ~hue 212, sat .8, value .58
+const vec3 SKY_BOT = vec3(0.095, 0.2, 0.5);      // ...easing to ~sat .72, value .7
+float skyness(vec3 c) {
+  float mx = max(max(c.r, c.g), c.b);
+  float mn = min(min(c.r, c.g), c.b);
+  float white = mn / max(mx, 1e-4);
+  float l = dot(c, LUMA);
+  // clear blue: low whiteness, blue over red, not bright
+  float m = 1.0 - smoothstep(0.42, 0.78, white);
+  m *= smoothstep(0.0, 0.08, c.b - c.r);
+  m *= 1.0 - smoothstep(0.42, 0.7, l);
+  return m;
+}
+vec3 gradeSky(vec3 c, vec2 iuv) {
+  float y = smoothstep(0.0, 1.0, iuv.y);
+  vec3 lg = mix(log(SKY_TOP), log(SKY_BOT), y) - log(SKY_REF);
+  return c * exp(lg * skyness(c));
+}
+
 // The latent image: the scene itself, a positive at low contrast on a
 // cool white-blue wash, fainter the further it is from the developer.
 // Clouds stay the brightest thing in it, so the cores that develop first
 // come up as cloud, not as grey on a paler sheet. Density builds (it is not
 // a cross-fade): interpolate in log light, so the darks come up through
 // clean tones rather than a grey mix.
-vec3 latent(vec3 c, float d, float dev) {
+vec3 latent(vec3 c, float d, float dev, vec3 wash) {
   float an = clamp(d / AHEAD, 0.0, 1.0);
-  vec3 lat = mix(WASH, c, mix(0.55, 0.3, an));
+  vec3 lat = mix(wash, c, mix(0.55, 0.3, an));
   return exp(mix(log(max(lat, 1e-4)), log(max(c, 1e-4)), dev));
 }
 
@@ -313,10 +347,12 @@ vec3 latent(vec3 c, float d, float dev) {
 // finished print, and it needs no local cap: a cap drawn from the cloud
 // round each pixel lifted the blue only near cloud, in round patches the
 // shape of its samples, a polka-dot over the clear sky.
-vec3 latentSky(vec3 c, float d, float dev) {
+vec3 latentSky(vec3 c, float d, float dev, float y) {
   float an = clamp(d / AHEAD, 0.0, 1.0);
   float lc = max(dot(c, LUMA), 1e-4);
-  float lt = max(lc, mix(SKY_LAT, lc, mix(0.55, 0.3, an)));
+  // the level follows the graded sky's own fall-off, deeper towards the zenith
+  float lat = SKY_LAT * mix(0.72, 1.25, smoothstep(0.0, 1.0, y));
+  float lt = max(lc, mix(lat, lc, mix(0.55, 0.3, an)));
   return c * pow(lt / lc, 1.0 - dev);
 }
 
@@ -325,12 +361,14 @@ vec3 latentSky(vec3 c, float d, float dev) {
 // level never steps), the level its whites come up to.
 float cloudWhite(vec2 iuv) {
   vec2 px = vec2(1.0 / 2400.0, 1.0 / 1600.0);
-  float m = dot(textureLod(uFill, iuv, 5.0).rgb, LUMA);
+  float m = dot(gradeSky(textureLod(uFill, iuv, 5.0).rgb, iuv), LUMA);
   for (int i = 0; i < 6; i++) {
     float an = float(i) * 1.047198 + 0.4;
     vec2 dir = vec2(cos(an), sin(an)) * px;
-    m = max(m, dot(textureLod(uFill, iuv + dir * 70.0, 5.0).rgb, LUMA));
-    m = max(m, dot(textureLod(uFill, iuv + dir.yx * vec2(1.5, 0.667) * 170.0, 5.5).rgb, LUMA));
+    vec2 u1 = iuv + dir * 70.0;
+    vec2 u2 = iuv + dir.yx * vec2(1.5, 0.667) * 170.0;
+    m = max(m, dot(gradeSky(textureLod(uFill, u1, 5.0).rgb, u1), LUMA));
+    m = max(m, dot(gradeSky(textureLod(uFill, u2, 5.5).rgb, u2), LUMA));
   }
   return m;
 }
@@ -356,7 +394,7 @@ vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   float w = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(d));
   float dev = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
   float open = 1.0 - cov;
-  vec3 r = mix(c, latentSky(c, d, dev), open);
+  vec3 r = mix(c, latentSky(c, d, dev, iuv.y), open);
   float h = 4.0 * dev * (1.0 - dev);
   float leak = 0.7 + 0.3 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
   // Halation is the red layer's own glow: on a cool sky it has to take a
@@ -372,11 +410,11 @@ vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
 }
 
 // The structure at key distance d past the front (d < 0: developed).
-vec3 develop(vec3 c, float d, vec2 iuv, float cap) {
+vec3 develop(vec3 c, float d, vec2 iuv, float cap, vec3 wash) {
   float sig = uSig;
   float dev = 1.0 - smoothstep(-0.3 * sig, 0.7 * sig, d);
   // the latent steel may come up towards the sky's tone, never past it
-  vec3 r = liftUnder(c, latent(c, d, dev), cap);
+  vec3 r = liftUnder(c, latent(c, d, dev, wash), cap);
   // The front: light where developer meets paper, trailing a little behind.
   float w = d >= 0.0 ? sig : sig * 1.3;
   float b = exp(-(d * d) / (w * w));
@@ -404,12 +442,18 @@ void main() {
   // this pixel, so the steel's wash never outshines the sky behind it.
   float dB = ahead(skyKey(iuv));
   float rB = SKY_COC * cocOf(dB);
-  vec3 skyDev = texture(uFill, iuv).rgb;
+  vec3 skyDev = gradeSky(texture(uFill, iuv).rgb, iuv);
   float cap = max(dot(skyDev, LUMA), cloudWhite(iuv));
-  vec3 sky = mix(skyDev, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, rB));
+  vec3 sky = mix(skyDev, gradeSky(texture(uBgBlur, vUv).rgb, iuv), smoothstep(0.25, 1.25, rB));
   sky = developSky(sky, dB, iuv, cov);
 
-  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap) * fg.a;
+  // The latent steel's wash: the graded sky round it, a little cooler and
+  // paler, so ahead of the front the steel is a faint density in the sky's
+  // own blue rather than a white cut-out on it (a constant pale wash read as
+  // a negative, light-on-blue, once the sky went deep).
+  vec3 skyHere = gradeSky(textureLod(uFill, iuv, 4.0).rgb, iuv);
+  vec3 wash = 1.15 * mix(skyHere, WASH * dot(skyHere, LUMA) / dot(WASH, LUMA), 0.3);
+  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap, wash) * fg.a;
   o = vec4(fgP + sky * (1.0 - fg.a), 1.0);
 }`;
 
