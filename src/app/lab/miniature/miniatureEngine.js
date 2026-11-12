@@ -8,7 +8,8 @@ import { createStage, clamp } from "../_kit/stage";
 // proportional to the gap in inverse depth, so |d - focus| is the physically
 // right blur measure. The plane is reverse-tilted a little, so blur grows
 // faster up and down the frame than any lens at this scale would allow: the
-// tilt-shift miniature.
+// tilt-shift miniature. The sky, at infinity, is the exception: it never
+// takes more blur than the horizon below it (planeAt).
 //
 //   once    the depth map refined against the photograph's luminance with a
 //           guided filter at the photograph's resolution, so a depth edge
@@ -73,6 +74,9 @@ const FAR = { f: 0.634, y: 0.3 }; // St Peter's dome on the horizon
 // the sky and the far hills to one value; one step nearer is already the far
 // end of the Corso.
 const SKY_TOL = 0;
+// Half-width of the stretch, in photograph widths, over which the horizon
+// under the sky is found behind whatever stands up into it.
+const HORIZON_SPAN = 0.04;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -94,6 +98,10 @@ uniform float uMax;   // coc cap, in output units
 uniform float uDof;
 uniform float uNearMax; // the near field's coc cap, in output units
 uniform vec4 uCrop;     // the photograph's window on the print: x, y, w, h in photograph uv
+// The sky and its horizon (depthField): r, the photograph height of the
+// horizon below this sky pixel, times g, the sky mask, so that filtering
+// across the sky's edge leaves r / g the horizon and g the sky's share.
+uniform sampler2D uSkyY;
 // Print uv to photograph uv. Every pass works in print uv; only a read of the
 // photograph or its depth goes through this.
 vec2 photo(vec2 uv) {
@@ -101,8 +109,25 @@ vec2 photo(vec2 uv) {
 }
 // uFocusY is a height in the photograph, so a focus point means the same
 // place in the square whatever the crop.
+//
+// The sky is at infinity, as far as the horizon and no farther, so its CoC
+// is capped at the horizon's: min(coc, cocAtHorizon), taken here as the plane
+// the sky sees. The reverse tilt is what makes the square a model; the sky
+// has no ground in it to shrink, and with the tilt in it the blur kept
+// climbing to the top of the frame and the cumulus went to white smudges. So
+// the tilt adds nothing above the horizon or above the focus, whichever is
+// lower: with the focus in the square the sky takes the horizon depth's own
+// defocus at the focus height, about half the cap, and the clouds keep their
+// sunlit tops and their blue undersides; with the focus on the dome it is
+// the horizon's own plane, which is sharp. Taking it only at the horizon row
+// was not enough: there the tilt has already pushed the horizon to within
+// an eighth of the cap.
 float planeAt(vec2 uv) {
-  return uFocus - uTilt * (photo(uv).y - uFocusY);
+  vec2 p = photo(uv);
+  vec2 s = textureLod(uSkyY, p, 0.0).rg;
+  float sky = max(p.y, max(s.r / max(s.g, 1e-3), uFocusY));
+  float y = mix(p.y, sky, s.g);
+  return uFocus - uTilt * (y - uFocusY);
 }
 float cocAt(vec2 uv, out float d) {
   d = texture(uDepth, photo(uv)).r;
@@ -625,13 +650,15 @@ void main() {
 //   grain    at 24 frames a second (held two or three display frames at
 //            60 Hz), clumped at about 1.25 device pixels, driven by
 //            luminance: about 2% in the midtones, falling off into the
-//            shadows and the highlights. Only this pass runs between changes.
+//            shadows and the highlights, and halved in flat midtone blue
+//            sky. Only this pass runs between changes.
 const MIST = 0.08; // share of the blurred highlights added back
 const MIST_TINT = [1.0, 0.95, 0.88]; // warm neutral
 const HALATION = 0.15; // peak strength of the ring
 const HALATION_TINT = [1.0, 0.4, 0.14]; // red-orange
 const GRAIN = 0.021; // grain sd in the midtones, of full scale
 const GRAIN_SIZE = 1.25; // device px
+const SKY_GRAIN = 0.5; // share of the grain kept in flat midtone blue
 const GRAIN_FPS = 24;
 
 const FILM_COMMON = `#version 300 es
@@ -755,6 +782,7 @@ void main() {
 }`;
 
 const FILM_GRAIN = `${FILM_COMMON}
+const float SKY_GRAIN_CUT = ${(1 - SKY_GRAIN).toFixed(2)};
 uniform sampler2D uFilm;
 uniform vec2 uCanvas;
 uniform float uSeed;
@@ -789,6 +817,16 @@ void main() {
   vec3 c = vec3(vn(g * 0.8 + 17.3), vn(g * 0.8 + 53.1), vn(g * 0.8 + 211.9)) * 2.4;
   float l = luma(col);
   float mid = pow(clamp(4.0 * l * (1.0 - l), 0.0, 1.0), 1.5);
+  // Flat blue sky takes half: at full strength the even midtone blue showed
+  // every clump, a sensor's speckle over the whole sky rather than a fine
+  // film grain. Blue: blue well over red. Flat: no more than a faint
+  // gradient across a few pixels either way, so the clouds' edges, the
+  // skyline and anything with texture keep the full grain.
+  float lx = luma(texelFetch(uFilm, ivec2(f) + ivec2(3, 0), 0).rgb) - luma(texelFetch(uFilm, ivec2(f) - ivec2(3, 0), 0).rgb);
+  float ly = luma(texelFetch(uFilm, ivec2(f) + ivec2(0, 3), 0).rgb) - luma(texelFetch(uFilm, ivec2(f) - ivec2(0, 3), 0).rgb);
+  float even = 1.0 - smoothstep(0.012, 0.04, max(abs(lx), abs(ly)));
+  float blue = smoothstep(0.12, 0.25, col.b - col.r);
+  mid *= 1.0 - SKY_GRAIN_CUT * blue * even;
   col += uGrain * mid * (n + 0.35 * c);
   outColor = vec4(col, 1.0);
 }`;
@@ -927,8 +965,33 @@ function depthField(img) {
   let far = 255;
   for (let i = 0; i < w * h; i++) far = Math.min(far, data[i * 4]);
   const sky = new Uint8Array(w * h);
+  const run = new Float32Array(w);
   for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h && data[(y * w + x) * 4] <= far + SKY_TOL; y++) sky[y * w + x] = 255;
+    let y = 0;
+    for (; y < h && data[(y * w + x) * 4] <= far + SKY_TOL; y++) sky[y * w + x] = 255;
+    run[x] = y / h;
+  }
+  // The horizon each column of sky stands on, for the sky's CoC cap. A run
+  // ends on whatever first breaks it, which over St Peter's or a pine top is
+  // well above the horizon, so the line is the lowest run end within a
+  // stretch either side (the horizon carries on behind the dome), then
+  // smoothed so the cap has no step from one column to the next.
+  const span = Math.round(w * HORIZON_SPAN);
+  const low = new Float32Array(w);
+  for (let x = 0; x < w; x++) {
+    for (let k = Math.max(0, x - span); k <= Math.min(w - 1, x + span); k++) low[x] = Math.max(low[x], run[k]);
+  }
+  // Two channels: the horizon height in the sky (0 elsewhere) and the mask.
+  const skyY = new Uint8Array(w * h * 2);
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    let n = 0;
+    for (let k = Math.max(0, x - span); k <= Math.min(w - 1, x + span); k++, n++) sum += low[k];
+    const v = Math.round((sum / n) * 255);
+    for (let y = 0; y < h && sky[y * w + x]; y++) {
+      skyY[(y * w + x) * 2] = v;
+      skyY[(y * w + x) * 2 + 1] = 255;
+    }
   }
   const at = (u, v) => {
     // Median of a small neighbourhood: a pointer resting on an edge picks a
@@ -946,7 +1009,7 @@ function depthField(img) {
     vals.sort((a, b) => a - b);
     return vals[vals.length >> 1] / 255;
   };
-  return { at, sky, w, h, horizon: far / 255 };
+  return { at, sky, skyY, w, h, horizon: far / 255 };
 }
 
 // A focus ring: a critically damped spring with a little extra mass, so a
@@ -1003,6 +1066,21 @@ export async function createMiniature(host) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  // The horizon height under each sky pixel and the sky mask, for the sky's
+  // CoC cap (planeAt).
+  // Unit 8, which nothing else uses, for every pass that asks for a CoC.
+  const skyYTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE8);
+  gl.bindTexture(gl.TEXTURE_2D, skyYTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, field.w, field.h, 0, gl.RG, gl.UNSIGNED_BYTE, field.skyY);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.activeTexture(gl.TEXTURE0);
 
   const snap = compile(gl, VERT, SNAP_PASS);
   const dilate = compile(gl, VERT, DILATE);
@@ -1157,10 +1235,13 @@ export async function createMiniature(host) {
     gl.bindTexture(gl.TEXTURE_2D, colorTex);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, depthTex);
+    gl.activeTexture(gl.TEXTURE8);
+    gl.bindTexture(gl.TEXTURE_2D, skyYTex);
     // Uniforms shared by the two buffer passes (units: buffer pixels).
     const bufferUniforms = (u) => {
       gl.uniform1i(u.uColor, 0);
       gl.uniform1i(u.uDepth, 1);
+      gl.uniform1i(u.uSkyY, 8);
       gl.uniform1f(u.uFocus, focus.x);
       gl.uniform1f(u.uFocusY, focusY.x);
       gl.uniform1f(u.uTilt, TILT);
@@ -1215,6 +1296,7 @@ export async function createMiniature(host) {
     gl.uniform1i(cu.uSky, 4);
     gl.uniform1i(cu.uColor, 0);
     gl.uniform1i(cu.uDepth, 1);
+    gl.uniform1i(cu.uSkyY, 8);
     gl.uniform1i(cu.uBlur, 2);
     gl.uniform1i(cu.uNear, 3);
     gl.uniform1f(cu.uFocus, focus.x);
