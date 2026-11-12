@@ -2,6 +2,10 @@
   --tempo-ground: rgb(0 0 0);
   --tempo-ink: rgb(242 240 235);
   --tempo-tick: rgb(242 240 235);
+  /* The second ink of a two-colour run. It prints exactly one thing, the
+     centre mark, so the index is found by colour before it is read by
+     length; every figure, tick and the spine stay in bone. */
+  --tempo-signal: oklch(0.64 0.2 35);
   /* The numeral is the poster: one scale step of its own, fluid with the
      piece, and capped by height so the block never leaves the frame. It
      stays on the body rung of the ladder; at this size scale does the

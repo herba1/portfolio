@@ -17,10 +17,23 @@ const banded = (x) => (x < MIN ? MIN - rubber(MIN - x) : x > MAX ? MAX + rubber(
 const SPINE = 12; // the ruler's top line, in canvas px (on the 4px grid)
 const MAJOR = 24; // a major tick's length below the spine
 // The needle is the metronome's pallet. At rest it hangs from the spine to
-// a major tick's length; on the beat it kicks to the ruler's full height
-// and a heavier stroke, then bleeds back with the same decay as the click.
+// a major tick's length, twice a tick's stroke and in the piece's second
+// ink; on the beat it kicks to the ruler's full height and a heavier stroke,
+// then bleeds back with the same decay as the click.
 const NEEDLE = { rest: 2, beat: 3 };
 const DECAY = 9; // per second
+
+// A token's colour as the canvas will take it. A string the 2D context
+// can't parse leaves fillStyle untouched, so that is caught and the
+// fallback kept.
+const inkOf = (ctx, raw, fallback) => {
+  const value = raw.trim();
+  if (!value) return fallback;
+  ctx.fillStyle = "#010203";
+  const before = ctx.fillStyle;
+  ctx.fillStyle = value;
+  return ctx.fillStyle === before ? fallback : value;
+};
 const FRICTION = 2.4; // per second, as a fling coasts
 const STIFF = 260;
 const DAMP = 2 * Math.sqrt(STIFF);
@@ -48,6 +61,9 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
   let slots = [0, 0, 0, 1]; // left of each figure slot, and right of the last, in ruler px
   let dx = 0;
   let em = 16;
+  // The two inks, read back from the tokens on .tempo-root.
+  let bone = "rgb(242, 240, 235)";
+  let signal = "rgb(232, 76, 48)";
   // Where the ruler starts and ends, in ruler px: under the ink of the
   // outermost figures, whatever they are and wherever they roll.
   let edgeL = 0;
@@ -83,6 +99,9 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
     ruler.width = Math.round(w * dpr);
     ruler.height = Math.round(rh * dpr);
     unit = clamp(Math.round(w / 110), 8, 12);
+    const tokens = getComputedStyle(root);
+    bone = inkOf(ctx, tokens.getPropertyValue("--tempo-tick"), bone);
+    signal = inkOf(ctx, tokens.getPropertyValue("--tempo-signal"), signal);
     const lead = strips[0].parentElement;
     em = parseFloat(getComputedStyle(number).fontSize) || 16;
     leadW = lead.getBoundingClientRect().width;
@@ -135,6 +154,7 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
     const top = SPINE;
     const lw = 1;
     ctx.save();
+    ctx.fillStyle = bone;
     ctx.beginPath();
     ctx.rect(L, 0, R - L, rh);
     ctx.clip();
@@ -147,16 +167,17 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
       // Ticks right under the mark lift a little, like a loupe.
       const near = Math.exp(-Math.pow((x - cx) / (unit * 2.5), 2));
       const a = Math.min(1, (major ? 0.7 : mid ? 0.46 : 0.3) + near * 0.22);
-      ctx.fillStyle = `rgba(242, 240, 235, ${a})`;
+      ctx.globalAlpha = a;
       ctx.fillRect(x, top, lw, len);
     }
     ctx.restore();
     // The spine: one full-strength hairline from edge to edge, so the
     // underline has a measure even where the ticks fall between pixels.
-    ctx.fillStyle = "rgb(242, 240, 235)";
+    ctx.fillStyle = bone;
     ctx.fillRect(L, top, R - L, 1);
-    // The centre mark, which is also the beat. It never leaves the ruler:
-    // at rest it hangs from the spine like a heavy major tick; on the beat
+    // The centre mark, which is also the beat, and the only thing printed
+    // in the second ink. It never leaves the ruler: at rest it hangs from
+    // the spine at a major tick's length but twice its stroke; on the beat
     // it spans the whole strip, above the spine and below the ticks.
     // Snapped to device pixels, so the stroke stays a hard bar of ink
     // instead of a grey fringe while it thins back down.
@@ -165,6 +186,7 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
     const x0 = snap(cx - nw / 2);
     const y0 = snap(top * (1 - P));
     const y1 = snap(top + MAJOR + (rh - top - MAJOR) * P);
+    ctx.fillStyle = signal;
     ctx.fillRect(x0, y0, nw, y1 - y0);
   };
 
