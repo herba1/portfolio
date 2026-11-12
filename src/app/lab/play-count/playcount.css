@@ -49,6 +49,10 @@
    absolutely placed from it by the engine. */
 .playcount-number {
   --pc-size: 120px;
+  /* roll window edges from the centre line; the engine measures the face and
+     overwrites these */
+  --pc-win-top: 0.46em;
+  --pc-win-bottom: 0.45em;
   position: absolute;
   left: 50%;
   top: 50%;
@@ -74,7 +78,6 @@
 
 .playcount-col,
 .playcount-comma {
-  --pc-win: 0.39em; /* half the window: the figure height, plus overshoot */
   position: absolute;
   left: 0;
   top: -1.2em;
@@ -82,27 +85,34 @@
   will-change: transform;
 }
 
-/* A hard window the figure height: a turning figure slides out under a crisp
-   edge, like a counter wheel. Open at the sides so tight tracking never
-   shaves a glyph. */
+/* A hard window a little taller than the figures: a turning figure slides
+   out under a crisp edge, like a counter wheel. The edges sit a clear 0.1em
+   off the cap line and the baseline, so a mid-roll cut reads as an aperture,
+   never as a crop along the type. Open at the sides so tight tracking never
+   shaves a glyph. Figures ride a layer above the commas: a comma crossing
+   one passes behind it. */
 .playcount-col {
+  z-index: 1;
   width: var(--pc-adv);
   clip-path: polygon(
-    -40% calc(50% - var(--pc-win)),
-    140% calc(50% - var(--pc-win)),
-    140% calc(50% + var(--pc-win)),
-    -40% calc(50% + var(--pc-win))
+    -40% calc(50% - var(--pc-win-top)),
+    140% calc(50% - var(--pc-win-top)),
+    140% calc(50% + var(--pc-win-bottom)),
+    -40% calc(50% + var(--pc-win-bottom))
   );
 }
 
-/* The comma's window drops below the baseline far enough to hold its tail
-   and its duck, and no further. */
+/* The comma's window: the gap between the figures' advances, which the
+   engine keeps current (--pc-gap-l, --pc-gap-r). Its left edge is hard: the
+   gap a new comma opens out of and a leaving one slides back into. Vertically
+   it only has to hold the tail, since a comma never leaves the baseline. */
 .playcount-comma {
+  z-index: 0;
   clip-path: polygon(
-    -60% calc(50% - var(--pc-win)),
-    160% calc(50% - var(--pc-win)),
-    160% calc(50% + 0.8em),
-    -60% calc(50% + 0.8em)
+    var(--pc-gap-l, 0px) calc(50% - var(--pc-win-top)),
+    var(--pc-gap-r, 160%) calc(50% - var(--pc-win-top)),
+    var(--pc-gap-r, 160%) calc(50% + var(--pc-win-bottom) + 0.2em),
+    var(--pc-gap-l, 0px) calc(50% + var(--pc-win-bottom) + 0.2em)
   );
 }
 
@@ -139,6 +149,7 @@
 
 .playcount-caret {
   position: absolute;
+  z-index: 2;
   left: 0;
   top: -0.36em;
   width: max(2px, 0.024em);

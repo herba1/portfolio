@@ -15,15 +15,16 @@ const TRACK_K = -0.043; // tracking law, px per px over 12
 // Spring presets (stiffness, damping ratio). Slightly under-damped: settles
 // with a breath of overshoot, never a bounce.
 const X_SPRING = { k: 380, z: 0.9 };
-// Commas trail the figures slightly, so the digits make room before a comma lands.
-const COMMA_SPRING = { k: 230, z: 0.94 };
 const ROLL_SPRING = { k: 300, z: 0.84 };
 const PRESENCE_SPRING = { k: 420, z: 1 };
-// How far a comma dips below the baseline while it crosses a figure, in em.
-// Deep enough that its head clears the figures' feet: it passes under them.
-const COMMA_DUCK = 0.24;
-// How far below its window a comma waits before it enters, in em.
-const COMMA_DROP = 0.62;
+// A relocating comma's offset from its new slot. Much quicker than the
+// figures and critically damped: it is through the figure it crosses and
+// riding the new gap while the figures are still parting to open it.
+const COMMA_SPRING = { k: 1500, z: 1 };
+// Air between the figures' ink and the edges of the roll window, in em.
+// Enough that a mid-roll cut lands clearly off the baseline and the cap line,
+// so it reads as an aperture rather than a crop along the type.
+const WINDOW_AIR = 0.1;
 
 function step(s, target, cfg, dt) {
   const c = 2 * cfg.z * Math.sqrt(cfg.k);
@@ -36,9 +37,11 @@ const settled = (s, target, eps) => Math.abs(s.p - target) < eps && Math.abs(s.v
 
 let uid = 0;
 
-// Nothing fades. A glyph enters or leaves by sliding through the hard edge of
+// Nothing fades. A figure enters or leaves by sliding through the hard edge of
 // its own window, like a counter wheel turning a figure into view: `side` is
-// the edge it uses, +1 below, -1 above.
+// the edge it uses, +1 below, -1 above. A comma never leaves the baseline: it
+// enters and leaves by width, its advance opening from nothing while the mark
+// slides out of the gap.
 function makeDigit(digit, x, entering, side = 1) {
   return {
     id: ++uid,
@@ -57,8 +60,23 @@ function makeDigit(digit, x, entering, side = 1) {
   };
 }
 
-function makeComma(x, entering) {
-  return { id: ++uid, kind: "c", x: { p: x, v: 0 }, tx: x, pres: { p: entering ? 0 : 1, v: 0 }, tpres: 1, el: null, mark: null };
+// A comma has no position of its own: it lives in the gap after the figure on
+// its left (`anchor`), up to the figure on its right (`next`), so it moves with
+// the figures by construction. When it changes gap it carries an offset from
+// the new one (`off`) that springs to zero: it slides there along the baseline.
+function makeComma(anchor, next, entering) {
+  return {
+    id: ++uid,
+    kind: "c",
+    anchor,
+    next,
+    x: { p: 0, v: 0 },
+    off: { p: 0, v: 0 },
+    pres: { p: entering ? 0 : 1, v: 0 },
+    tpres: 1,
+    el: null,
+    mark: null,
+  };
 }
 
 export function createPlayCount(root, { stage, input, embedded = false, initial = 1284903, onValue } = {}) {
@@ -80,6 +98,42 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
 
   // ---- layout ---------------------------------------------------------
 
+  // The roll window is set from the face itself: the baseline as the browser
+  // places it, and the figures' ink height from the font, each given air.
+  const windowEdges = () => {
+    const col = document.createElement("span");
+    col.className = "playcount-col";
+    const glyph = document.createElement("span");
+    glyph.className = "playcount-glyph";
+    const line = document.createElement("span");
+    line.style.display = "block";
+    line.textContent = "0";
+    const mark = document.createElement("span");
+    mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+    line.appendChild(mark);
+    glyph.appendChild(line);
+    col.appendChild(glyph);
+    num.appendChild(col);
+    const cr = col.getBoundingClientRect();
+    const em = parseFloat(getComputedStyle(col).fontSize) || 100;
+    const base = (mark.getBoundingClientRect().top - (cr.top + cr.height / 2)) / em;
+    const cs = getComputedStyle(col);
+    col.remove();
+    // figure height with overshoot; Geist's is 0.73em, the fallback if the
+    // canvas has not resolved the face yet
+    let asc = 0.73;
+    try {
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = `${cs.fontWeight} 100px ${cs.fontFamily}`;
+      let a = 0;
+      for (let i = 0; i < 10; i++) a = Math.max(a, ctx.measureText(String(i)).actualBoundingBoxAscent / 100);
+      if (a > 0.6 && a < 0.9) asc = a;
+    } catch {}
+    if (!(base > 0 && base < 0.5)) return;
+    num.style.setProperty("--pc-win-top", `${(asc - base + WINDOW_AIR).toFixed(4)}em`);
+    num.style.setProperty("--pc-win-bottom", `${(base + WINDOW_AIR).toFixed(4)}em`);
+  };
+
   const measure = () => {
     const w = box.clientWidth || 800;
     const h = box.clientHeight || 600;
@@ -99,6 +153,7 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
     num.style.setProperty("--pc-size", `${size}px`);
     const adv = advEm * size;
     const commaRaw = commaEm * size;
+    windowEdges();
     const track = TRACK_K * (size - 12);
     metrics = { size, adv: adv + track, comma: commaRaw + track, track };
     num.style.setProperty("--pc-adv", `${metrics.adv}px`);
@@ -144,6 +199,36 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
 
   // ---- the two change paths -----------------------------------------
 
+  // Where a comma sits with no offset: centred in the gap its figures leave
+  // it, which is exactly its slot at rest and narrower while they part.
+  const place = (c) => {
+    const left = c.anchor.x.p + metrics.adv;
+    const gap = c.next ? Math.max(0, Math.min(metrics.comma, c.next.x.p - left)) : metrics.comma;
+    return left + (gap - metrics.comma) / 2;
+  };
+
+  // Seat comma j of `count` among the figures `nd`: the figure index it
+  // follows is fixed by the count of figures to its right.
+  const seat = (c, nd, count, j) => {
+    const i = nd.length - 1 - 3 * (count - j);
+    const anchor = nd[i];
+    const next = nd[i + 1] || null;
+    if (!c) return makeComma(anchor, next, true);
+    if (c.anchor !== anchor || c.next !== next) {
+      // keep it exactly where it is now, as an offset from its new gap
+      const here = place(c) + c.off.p;
+      c.anchor = anchor;
+      c.next = next;
+      c.off.p = here - place(c);
+    }
+    return c;
+  };
+
+  const retireComma = (c) => {
+    c.tpres = 0;
+    leaving.push(c);
+  };
+
   const apply = (next, mode) => {
     next = Math.max(0, Math.min(MAX_VALUE, Math.round(next)));
     if (next === value && digits.length) return;
@@ -180,12 +265,8 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
       for (let i = n; i < digits.length; i++) retire(digits[i], nl.left + (digits[i].tx - old.left), 1);
       // the caret is pushed ahead by the keystroke, as in any text field
       if (added) caret.x.p = Math.max(caret.x.p, edge + added * metrics.adv + metrics.size * 0.06);
-      for (let j = 0; j < nl.cx.length; j++) {
-        const c = commas[j] || makeComma(nl.cx[j], true);
-        c.tx = nl.cx[j];
-        nc.push(c);
-      }
-      for (let j = nl.cx.length; j < commas.length; j++) retire(commas[j], nl.left + (commas[j].tx - old.left));
+      for (let j = 0; j < nl.cx.length; j++) nc.push(seat(commas[j], nd, nl.cx.length, j));
+      for (let j = nl.cx.length; j < commas.length; j++) retireComma(commas[j]);
     } else {
       // Keyed by place from the right: columns roll like an odometer.
       const dir = Math.sign(next - prev) || 1;
@@ -217,14 +298,9 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
       const ncount = nl.cx.length;
       for (let k = 0; k < ncount; k++) {
         const j = ncount - 1 - k;
-        const c = commas[oc - 1 - k] || makeComma(nl.cx[j], true);
-        c.tx = nl.cx[j];
-        nc[j] = c;
+        nc[j] = seat(commas[oc - 1 - k], nd, ncount, j);
       }
-      for (let k = ncount; k < oc; k++) {
-        const c = commas[oc - 1 - k];
-        retire(c, nl.right - (old.right - c.tx));
-      }
+      for (let k = ncount; k < oc; k++) retireComma(commas[oc - 1 - k]);
     }
 
     digits = nd;
@@ -277,34 +353,41 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
 
   const pitch = () => metrics.size * PITCH;
 
-  // How far a comma's box runs under the live figures, in px.
-  const overlap = (c) => {
-    const inset = metrics.adv * 0.02; // figures fill nearly all of their advance
-    const l = c.x.p;
-    const r = c.x.p + metrics.comma;
-    let most = 0;
-    for (const d of digits.concat(leaving)) {
-      if (d.kind !== "d") continue;
-      const o = Math.min(r, d.x.p + metrics.adv - inset) - Math.max(l, d.x.p + inset);
-      if (o > most) most = o;
-    }
-    return most;
-  };
-
   // Every visible pixel is full-strength ink. The only things that move are
   // positions on springs and the hard-edged window each glyph is seen through:
   // no opacity, no blur, no scale.
   const render = (g) => {
     const p = Math.max(0, Math.min(1, g.pres.p));
+    if (g.kind === "c") g.x.p = place(g) + g.off.p;
     g.el.style.transform = `translate3d(${g.x.p.toFixed(2)}px, 0, 0)`;
     if (g.kind === "c") {
-      // A relocating comma ducks under the figures it crosses: while any
-      // figure is over it, it stays below their feet, and it rises back to
-      // the baseline only once it is clear, so ink never touches ink.
-      const t = Math.min(1, overlap(g) / (metrics.adv * 0.12));
-      const f = t * t * (3 - 2 * t);
-      const y = (f * COMMA_DUCK + (1 - p) * COMMA_DROP) * metrics.size;
-      g.mark.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+      // A comma stays on the baseline. Entering or leaving, its advance opens
+      // or closes on the figures' spring and the mark slides out of, or back
+      // into, the edge of the figure on its left. Relocating, it slides along
+      // the baseline and passes behind the figure it crosses: its window is
+      // cut back to the space between the figures' advances, so ink never
+      // touches ink.
+      const off = -(1 - p) * metrics.comma;
+      g.mark.style.transform = `translate3d(${off.toFixed(2)}px, 0, 0)`;
+      // a breath of air past each figure's advance, so a comma cut by the
+      // window never reads as glued to the figure it is leaving
+      const inset = -metrics.size * 0.02;
+      let lo = 0;
+      let hi = metrics.comma * 1.6;
+      const boxes = [];
+      for (const d of digits.concat(leaving)) {
+        if (d.kind !== "d" || d.pres.p < 0.3) continue;
+        boxes.push(d.x.p - g.x.p + inset);
+      }
+      boxes.sort((a, b) => a - b);
+      for (const a of boxes) {
+        const b = a + metrics.adv - 2 * inset;
+        if (a <= lo && b > lo) lo = b;
+        else if (a < hi && b >= hi) hi = a;
+      }
+      if (hi < lo) hi = lo;
+      g.el.style.setProperty("--pc-gap-l", `${lo.toFixed(2)}px`);
+      g.el.style.setProperty("--pc-gap-r", `${hi.toFixed(2)}px`);
       return;
     }
     const P = pitch();
@@ -335,10 +418,16 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
     let busy = false;
     const all = digits.concat(commas, leaving);
     for (const g of all) {
-      step(g.x, g.tx, g.kind === "c" ? COMMA_SPRING : X_SPRING, dt);
       step(g.pres, g.tpres, PRESENCE_SPRING, dt);
-      if (g.kind === "d") step(g.roll, g.troll, ROLL_SPRING, dt);
-      if (!settled(g.x, g.tx, 0.05) || !settled(g.pres, g.tpres, 0.002) || (g.kind === "d" && !settled(g.roll, g.troll, 0.0005))) busy = true;
+      if (!settled(g.pres, g.tpres, 0.002)) busy = true;
+      if (g.kind === "c") {
+        step(g.off, 0, COMMA_SPRING, dt);
+        if (!settled(g.off, 0, 0.05)) busy = true;
+        continue;
+      }
+      step(g.x, g.tx, X_SPRING, dt);
+      step(g.roll, g.troll, ROLL_SPRING, dt);
+      if (!settled(g.x, g.tx, 0.05) || !settled(g.roll, g.troll, 0.0005)) busy = true;
     }
     leaving = leaving.filter((g) => {
       if (g.pres.p < 0.01 && g.tpres === 0) {
@@ -387,7 +476,7 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
 
   // A refused keystroke: the number leans and comes back.
   const nudgeLimit = () => {
-    for (const g of digits.concat(commas)) g.x.v += metrics.size * 0.9;
+    for (const g of digits) g.x.v += metrics.size * 0.9;
     wake();
   };
 
@@ -466,13 +555,14 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
       g.x.p *= s;
       g.tx = layout.dx[i];
     });
-    commas.forEach((c, j) => {
-      c.x.p *= s;
-      c.tx = layout.cx[j];
-    });
+    for (const c of commas) c.off.p *= s;
     caret.tx = caretX();
     caret.x.p *= s;
     for (const g of leaving) {
+      if (g.kind === "c") {
+        g.off.p *= s;
+        continue;
+      }
       g.x.p *= s;
       g.tx *= s;
     }
@@ -488,7 +578,11 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
     const str = String(value);
     layout = slots(str);
     digits = [...str].map((ch, i) => makeDigit(+ch, layout.dx[i], false));
-    commas = layout.cx.map((x) => makeComma(x, false));
+    commas = layout.cx.map((_, j) => {
+      const c = seat(null, digits, layout.cx.length, j);
+      c.pres.p = 1;
+      return c;
+    });
     sync();
     for (const g of digits.concat(commas)) render(g);
     caret.tx = caretX();
