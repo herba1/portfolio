@@ -76,9 +76,9 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
   // ---------- render ----------
   const renderNumber = () => {
     const p = wheelPositions(v);
-    strips[0].style.transform = `translate3d(0, ${-p.h}em, 0)`;
-    strips[1].style.transform = `translate3d(0, ${-p.t}em, 0)`;
-    strips[2].style.transform = `translate3d(0, ${-p.o}em, 0)`;
+    strips[0].style.setProperty("--tempo-roll", String(p.h));
+    strips[1].style.setProperty("--tempo-roll", String(p.t));
+    strips[2].style.setProperty("--tempo-roll", String(p.o));
     number.style.transform = `translate3d(${(-p.shift * colW) / 2}px, 0, 0)`;
   };
 

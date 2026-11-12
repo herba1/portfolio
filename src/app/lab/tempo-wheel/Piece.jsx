@@ -11,7 +11,7 @@ const HUNDREDS = [" ", "1", "2", "3", " "];
 function Wheel({ faces, pos, stripRef }) {
   return (
     <span className="tempo-wheel" aria-hidden="true">
-      <span ref={stripRef} className="tempo-strip" style={{ transform: `translate3d(0, ${-pos}em, 0)` }}>
+      <span ref={stripRef} className="tempo-strip" style={{ "--tempo-roll": pos }}>
         {faces.map((f, i) => (
           <span key={i} className="tempo-face">
             {f}

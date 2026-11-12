@@ -63,19 +63,27 @@
   /* The tracking law, exactly, at whatever size the box gives:
      -0.043 x (size - 12px). */
   --tempo-track: calc(0.516px - 0.043em);
+  /* The counter window is the figure box itself: cap height plus just enough
+     to keep the overshoot of 0, 3, 6, 8 and 9 off the knife, snapped up to the
+     4px grid. Nothing is faded; a digit is either in the slot or behind the
+     edge of it. */
+  --tempo-over: 0.02em;
+  --tempo-window: round(up, calc(1cap + 2 * var(--tempo-over)), 4px);
+  /* Distance between faces on a strip. A hair more than the window, so the
+     incoming figure enters at the bottom cut just as the outgoing one clears
+     the top, and the two never share the slot as whole numbers. */
+  --tempo-gap: 0.2em;
+  --tempo-pitch: calc(var(--tempo-window) + var(--tempo-gap));
   will-change: transform;
 }
 
 .tempo-wheel {
   position: relative;
   display: block;
-  /* The window is taller than one face so a turning digit fades away
-     over the drum's shoulder instead of being cut by a hard edge. */
-  height: 1.25em;
+  /* A hard crop at the figure box: a letterpress slug, not a drum. */
+  height: var(--tempo-window);
   overflow: hidden;
   margin-inline-end: var(--tempo-track);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 19%, #000 80%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 19%, #000 80%, transparent 100%);
 }
 
 .tempo-wheel:last-child {
@@ -83,16 +91,23 @@
 }
 
 .tempo-strip {
-  padding-top: 0.125em;
   display: flex;
   flex-direction: column;
+  transform: translate3d(0, calc(var(--tempo-roll, 0) * var(--tempo-pitch) * -1), 0);
   will-change: transform;
 }
 
 .tempo-face {
   display: block;
-  height: 1em;
-  line-height: 1;
+  box-sizing: border-box;
+  height: var(--tempo-pitch);
+  /* Centre the cap box in the window so the overshoot room is even. */
+  padding-top: calc((var(--tempo-window) - 1cap) / 2);
+  /* The line box is the cap box: trimmed exactly where text-box is known,
+     and within a hair of it elsewhere, since Geist's ascent minus descent
+     is its cap height. */
+  line-height: 1cap;
+  text-box: trim-both cap alphabetic;
   text-align: center;
 }
 
@@ -100,5 +115,7 @@
   display: block;
   width: min(100%, 1040px);
   height: 48px;
-  margin-top: 8px;
+  /* The slot now ends at the baseline, so the ruler keeps its distance
+     from the figures in proportion to them. */
+  margin-top: round(calc(var(--tempo-size) * 0.28), 4px);
 }
