@@ -3,12 +3,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 // Train Window: looking out of a local train on a summer day.
 //
-// The view is from a low seat, looking up and out through the window: the
-// camera is pitched up so the horizon sits ~79% down the print and the sky
-// takes the rest, through an 88° Panini lens (straight verticals at the
-// centre, converging as they climb). Each pixel's ray is levelled back into a
-// square-out pinhole's image plane (tan of the angle, horizon at y = 0, camera
-// 1.7 m up), where the layers live. Moving along the track by s metres moves
+// The view is from a low seat, looking up and out through the window: a
+// worm's-eye look-up. The camera is pitched ~32° up, so the horizon sits at
+// the very bottom of the print (bowing up into its lower corners) and the sky
+// fills nearly all of it, through a 110° Panini lens with a stereographic
+// vertical squeeze. The poles, seen from below, converge hard on a vanishing
+// point overhead, their crossarms against the cumulus. Each pixel's ray is
+// levelled back into a square-out pinhole's image plane (tan of the angle,
+// horizon at y = 0, camera 1.7 m up), where the layers live. Moving along the track by s metres moves
 // everything at distance D by s / D in that plane, so each layer slides at its
 // own speed:
 //
@@ -21,17 +23,22 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    mirror and a gap so the open country behind shows through;
 //  - the far tree line and farmland (~900 m), a mirrored strip;
 //  - cumulus at a few kilometres (Poly Haven `kloofendal_48d_partly_cloudy`
-//    pure sky, rotated so its sun agrees with the plate's), which barely move;
+//    pure sky, rotated so its sun agrees with the plate's, baked up to the
+//    zenith by tools/depth/bakes/train-window/sky.py), which barely move;
 //  - distribution poles every 11-19 m, 8 m out, so one nearly always stands
-//    in the window and climbs out of its top edge (Poly Haven
-//    `modular_electricity_poles`, scaled to an 11.5 m pole, rendered in
+//    in the window and climbs into the sky from below its bottom edge
+//    (Poly Haven `modular_electricity_poles`, scaled to an 11.5 m pole, rendered in
 //    perspective from this camera and lit by the plate's own HDRI), with their
 //    conductors drawn as catenaries.
 //
 // Motion blur is the shutter: every layer is integrated along x over 1/40 s
 // at its own screen velocity, so the near grass streaks, the poles smear into
-// soft bars, the hedge softens and the clouds stay sharp. The field and hedge
-// read horizontally box-filtered pyramids; the poles, which carry the idea,
+// soft bars, the hedge softens and the clouds stay sharp. The pole is the
+// print's one sharp anchor: at a crawl it is opaque and crisp, and the poles
+// and conductors are taken from a second development of the same frame with
+// no diffusion (no Pro-Mist veil, no film halation), so their only blur is
+// velocity x shutter. The field and hedge read horizontally box-filtered
+// pyramids; the poles, which carry the idea,
 // read per-row summed-area tables of their premultiplied radiance, so their
 // smear is the exact box integral over the shutter's path (two reads a row at
 // any length, no taps to band). Either way a long streak keeps its vertical
@@ -58,13 +65,14 @@ const POLE_JITTER = 8; // spacing varies by this much (m)
 const SHUTTER = 1 / 40;
 const V_MAX = 34; // m/s, a fast local
 const V_CRUISE = 2.4; // the crawl it coasts down to
-const HFOV = 88; // degrees across a landscape print
+const HFOV = 110; // degrees across a landscape print
 const PAN_W = 4 * Math.tan(((HFOV / 4) * Math.PI) / 180); // Panini (d = 1) plane width
-const HORIZON = 0.79; // horizon height, as a share of the print from the top
-const TILT = 0.65; // share of the look-up done by tilting (the rest is lens shift)
+const HORIZON = 0.98; // horizon height at the centre, as a share of the print from the top
+const TILT = 0.92; // share of the look-up done by pitching the camera (the rest is lens shift)
+const TOP_EL = 84; // highest elevation (deg) the print's top may reach (a tall portrait zooms in)
 
 // Asset geometry (from the bake).
-const SKY = { el0: 64, el1: -2.5, yaw: -112 };
+const SKY = { el0: 90, el1: -2.5, yaw: -112 };
 const DIST = { yaw0: -10, yaw1: 44, el0: 6, el1: -1 };
 const HEDGE = { yaw0: 43, yaw1: 120.5, el0: 15, el1: -1.4, gap: 62 };
 const GROUND = { y0: -0.004, y1: -0.335, x0: -0.95, period: 1.65 };
@@ -213,11 +221,15 @@ vec4 hedgeAt(float yawDeg, float v, float lenDeg, float lv) {
 float hash11(float n) { return fract(sin(n * 127.1) * 43758.5453); }
 
 void main() {
-  // Panini (d = 1) back to a ray, tilted up by the camera's pitch, then
-  // levelled into the square-out pinhole's image plane.
+  // Panini (d = 1) back to a ray, its vertical squeezed stereographically
+  // (qv = 2·tan(t/2) of the angle t above the lens's equator, so the arms at
+  // the top of a pole are not stretched the way a rectilinear 75° would),
+  // tilted up by the camera's pitch, then levelled into the square-out
+  // pinhole's image plane.
   vec2 q = uView.xy + vUv * uView.zw;
   float phi = 2.0 * atan(0.5 * q.x);
-  vec3 rc = vec3(sin(phi), 0.5 * q.y * (1.0 + cos(phi)), cos(phi));
+  float qv = 0.5 * q.y * (1.0 + cos(phi));
+  vec3 rc = vec3(sin(phi), qv / (1.0 - 0.25 * qv * qv), cos(phi));
   vec3 r = normalize(vec3(rc.x, rc.y * uPitch.x + rc.z * uPitch.y, rc.z * uPitch.x - rc.y * uPitch.y));
   float rz = max(r.z, 1e-3);
   float x = r.x / rz, y = r.y / rz;
@@ -366,6 +378,9 @@ void main() {
     }
   }
   col = mix(col, vec3(0.012, 0.013, 0.015), wireA * 0.92);
+  // How much of this pixel is the line itself (poles and conductors): the
+  // print takes those from a second development without the diffusion.
+  float lineA = wireA * 0.92;
 
   // Poles: sprites rendered from this very camera, smeared by the shutter.
   float lenM = aV * uShutter;                      // metres the train moved
@@ -395,6 +410,7 @@ void main() {
       float bgL = dot(col, LUMA);
       float hot = smoothstep(0.6, 1.7, bgL);
       col = col * (1.0 - pc.a) + pc.rgb;
+      lineA = 1.0 - (1.0 - lineA) * (1.0 - pc.a);
       if (hot > 0.0 && pc.a > 0.01) {
         float nA = 0.5 * poleBox(cell, X, Y, lenTex + 12.0).a
                  + 0.25 * poleBox(cell, X, Y - 5.0, 8.0).a
@@ -407,7 +423,7 @@ void main() {
 
   // A soft graduated ND over the sky, then exposure.
   col *= exp2(-uGrad * smoothstep(0.0, 0.3, y));
-  outColor = vec4(col * uExpo, 1.0);
+  outColor = vec4(col * uExpo, clamp(lineA, 0.0, 1.0));
 }`;
 
 const BLIT = `#version 300 es
@@ -415,10 +431,12 @@ precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uTex;
+uniform sampler2D uLine;   // the same frame developed without diffusion
+uniform sampler2D uMask;   // the scene: line (pole, conductor) coverage in a
 uniform float uFade;
 uniform vec3 uPaper;
 void main() {
-  vec3 c = texture(uTex, vUv).rgb;
+  vec3 c = mix(texture(uTex, vUv).rgb, texture(uLine, vUv).rgb, texture(uMask, vUv).a);
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -699,6 +717,14 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     ["sky", "distant", "hedge", "ground", "poles"].map((n) => loadImage(`${BASE}${n}.webp`)),
   );
   const sky = imageTexture(gl, skyImg, { wrap: gl.REPEAT });
+  // Near the top of the look-up the strip's columns crowd together (yaw runs
+  // fast at 70° up), so an isotropic mip would blur the cumulus overhead.
+  const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+  if (aniso) {
+    const max = gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+    gl.bindTexture(gl.TEXTURE_2D, sky);
+    gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, max));
+  }
   const dist = imageTexture(gl, distImg, { wrap: gl.MIRRORED_REPEAT });
   const ground = hPyramid(gl, groundImg, { wrap: true, alpha: false });
   const hedge = hPyramid(gl, hedgeImg, { wrap: false, alpha: true });
@@ -720,6 +746,7 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
   const L = { x: 0, y: 0, w: 1, h: 1 };
   let sceneT = null;
   let filmT = null;
+  let lineT = null;
   let scale = 1;
   let lastBox = null;
   const layout = (W, H, dpr) => {
@@ -751,22 +778,26 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     L.rh = Math.max(2, Math.round(L.ph * scale));
     freeTarget(gl, sceneT);
     freeTarget(gl, filmT);
+    freeTarget(gl, lineT);
     sceneT = target(gl, L.rw, L.rh, floatOk);
     if (!sceneT.ok) {
       freeTarget(gl, sceneT);
       sceneT = target(gl, L.rw, L.rh, false);
     }
     filmT = target(gl, L.rw, L.rh, false);
+    lineT = target(gl, L.rw, L.rh, false);
     film.resize(L.rw, L.rh);
   };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
 
-  // The lens: 88° across a landscape print (Panini plane units); a portrait
+  // The lens: 110° across a landscape print (Panini plane units); a portrait
   // print keeps a little more height and narrows. The horizon sits HORIZON
-  // down the print at its centre. On the Panini centre line y = tan(angle), so
-  // a pure tilt would be atan((HORIZON - 0.5)·vh); the camera tilts by TILT of
-  // that (verticals converge as they climb) and a rising front makes up the
-  // rest (which keeps the horizon from bowing like a fisheye's).
+  // down the print at its centre, so the sky is the picture. On the centre
+  // line y = 2·tan(angle / 2) (the stereographic squeeze), so a pure tilt
+  // would be 2·atan((HORIZON - 0.5)·vh / 2); the camera pitches by TILT of
+  // that, a real look-up whose verticals rush to a vanishing point overhead,
+  // and a little rising front makes up the rest. A tall print would pitch
+  // past the zenith: it zooms in until its top edge stays under TOP_EL.
   const view = () => {
     const aspect = L.pw / L.ph;
     let vw = PAN_W;
@@ -775,15 +806,24 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
       vh = PAN_W / 1.15;
       vw = vh * aspect;
     }
-    const pitch = TILT * Math.atan((HORIZON - 0.5) * vh);
-    return { vw, vh, pitch, y0: -Math.tan(pitch) - (1 - HORIZON) * vh };
+    const at = (k) => {
+      const h = vh * k;
+      const pitch = TILT * 2 * Math.atan(((HORIZON - 0.5) * h) / 2);
+      const y0 = -2 * Math.tan(pitch / 2) - (1 - HORIZON) * h;
+      return { pitch, y0, top: pitch + 2 * Math.atan((y0 + h) / 2) };
+    };
+    let k = 1;
+    while (k > 0.3 && at(k).top > (TOP_EL * Math.PI) / 180) k *= 0.98;
+    const { pitch, y0 } = at(k);
+    return { vw: vw * k, vh: vh * k, pitch, y0 };
   };
 
   // A Panini-plane point to the level pinhole's image plane, for culling.
   const toPlane = (qx, qy, pitch) => {
     const phi = 2 * Math.atan(qx / 2);
     const rx = Math.sin(phi);
-    const ry = (qy * (1 + Math.cos(phi))) / 2;
+    const qv = (qy * (1 + Math.cos(phi))) / 2;
+    const ry = qv / (1 - (qv * qv) / 4);
     const rz = Math.cos(phi);
     const c = Math.cos(pitch);
     const sn = Math.sin(pitch);
@@ -910,18 +950,20 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    film.render(
-      sceneT.tex,
-      {
-        ...FILM_PRESETS.summer,
-        input: floatOk && sceneT.ok ? "linear" : "srgb",
-        whitePoint: 2.2,
-        halation: 0.22,
-        halationColor: [1, 0.42, 0.18],
-        grainSeed,
-      },
-      filmT.fbo,
-    );
+    const stock = {
+      ...FILM_PRESETS.summer,
+      input: floatOk && sceneT.ok ? "linear" : "srgb",
+      whitePoint: 2.2,
+      halation: 0.22,
+      halationColor: [1, 0.42, 0.18],
+      grainSeed,
+    };
+    film.render(sceneT.tex, stock, filmT.fbo);
+    // The pole is the one sharp thing in the print: the same frame developed
+    // again with no Pro-Mist veil, no film halation (the scene draws its own
+    // edge ring) and little optical softness, used wherever the pole or a
+    // conductor covers the pixel. Its only blur is the shutter's smear.
+    film.render(sceneT.tex, { ...stock, bloom: 0, halation: 0, softness: 0.12 }, lineT.fbo);
 
     gl.bindVertexArray(vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -936,6 +978,12 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
     gl.uniform1i(blit.u.uTex, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, lineT.tex);
+    gl.uniform1i(blit.u.uLine, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.uniform1i(blit.u.uMask, 2);
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1022,6 +1070,7 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
       film.destroy();
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
+      freeTarget(gl, lineT);
       for (const t of [sky, dist, ground.tex, hedge.tex, poles]) gl.deleteTexture(t);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
