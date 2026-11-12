@@ -21,26 +21,57 @@ import { createStage, clamp } from "../_kit/stage";
 const TITLE = ["DRIVE", "MY CAR"];
 const MOD = 2; // dots per module
 const CAP = 9 * MOD; // rows
-const GAP = 1 * MOD; // columns between letters
-const SPACE = 3 * MOD;
-const LEADING = 2 * MOD; // rows between lines
 const DOT = 0.44; // radius as a share of the pitch
 
 // One character per module, nine modules tall. # a module; / a module
 // shifted one dot right (rising stairs); + its left column only, - its
 // right column only (where a shifted stair meets a bar or junction).
+//
+// V, M and Y are drawn with true 45-degree diagonals, one module across per
+// module down, straight from cap height: V's arms meet on the baseline, M's
+// vee reaches two thirds of the way down, Y's arms meet at mid-height and
+// centre. That makes V wide, as a real 45-degree V is.
 const CELL = { "#": [0, 1], "/": [1, 2], "+": [0], "-": [1] };
 const GLYPHS = {
   D: ["####...", "#...#..", "#....#.", "#.....#", "#.....#", "#.....#", "#..../.", "#.../..", "####+.."],
   R: ["#####..", "#....#.", "#.....#", "#..../.", "#####+.", "#..#...", "#...#..", "#....#.", "#.....#"],
   I: ["#", "#", "#", "#", "#", "#", "#", "#", "#"],
-  V: ["#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", ".#.../.", "..#./..", "...#+.."],
-  E: ["######", "#.....", "#.....", "#.....", "#####.", "#.....", "#.....", "#.....", "######"],
-  M: ["#.......#", "##...../#", "#.#.../.#", "#..#./..#", "#...#+..#", "#.......#", "#.......#", "#.......#", "#.......#"],
-  Y: ["#.....#", "#.....#", ".#.../.", "..#./..", "...#+..", "...#...", "...#...", "...#...", "...#..."],
+  V: [
+    "#.............../",
+    ".#............./.",
+    "..#.........../..",
+    "...#........./...",
+    "....#......./....",
+    ".....#...../.....",
+    "......#.../......",
+    ".......#./.......",
+    "........#+.......",
+  ],
+  E: ["#######", "#......", "#......", "#......", "######.", "#......", "#......", "#......", "#######"],
+  M: [
+    "#.........#",
+    "##......./#",
+    "#.#...../.#",
+    "#..#.../..#",
+    "#...#./...#",
+    "#....#+...#",
+    "#.........#",
+    "#.........#",
+    "#.........#",
+  ],
+  Y: ["#......./", ".#...../.", "..#.../..", "...#./...", "....#+...", "....#....", "....#....", "....#....", "....#...."],
   C: ["..-####", "./.....", "/......", "#......", "#......", "#......", ".#.....", "..#....", "...####"],
   A: ["..-#+..", "./..#..", "/....#.", "#.....#", "#.....#", "#######", "#.....#", "#.....#", "#.....#"],
 };
+
+// Side bearings. Each side of a glyph is a straight stem (s) or a round,
+// diagonal or open side (o). Two stems face each other at two modules; any
+// round or diagonal side sits one module from its neighbour. Distances are
+// measured ink to ink, then pushed to the next even column so every glyph
+// keeps its module phase.
+const SIDES = { D: "so", R: "ss", I: "ss", V: "oo", E: "so", M: "ss", Y: "oo", C: "oo", A: "ss" };
+const fit = (a, b) => (SIDES[a][1] === "s" && SIDES[b][0] === "s" ? 2 * MOD : MOD);
+const SPACE = 3; // dots, ink to ink, before rounding to an even column
 
 // Dot cells of one glyph, in grid units from its top left.
 function glyphCells(rows) {
@@ -62,27 +93,55 @@ function glyphCells(rows) {
   return out;
 }
 
-// Dot cells of the whole title, in grid units from the block's top left.
-// Every glyph starts on an even column and every line on an even row, so the
-// removal patterns meet each stroke in the same phase.
-function layout() {
-  const cells = [];
-  let width = 0;
-  TITLE.forEach((line, li) => {
-    let x = 0;
-    const top = li * (CAP + LEADING);
-    for (const ch of line) {
-      if (ch === " ") {
-        x += SPACE;
-        continue;
-      }
-      const rows = GLYPHS[ch];
-      for (const [i, j] of glyphCells(rows)) cells.push([x + i, top + j]);
-      x += rows[0].length * MOD + GAP;
+const even = (v) => Math.ceil(v / 2) * 2;
+
+// One line at its natural fit: glyph origins and the gaps between them.
+function setLine(line) {
+  const items = [];
+  let right = 0; // ink edge of the last glyph
+  let prev = null;
+  let space = false;
+  for (const ch of line) {
+    if (ch === " ") {
+      space = true;
+      continue;
     }
-    width = Math.max(width, x - GAP);
+    const cells = glyphCells(GLYPHS[ch]);
+    const ink = Math.max(...cells.map((c) => c[0])) + 1;
+    const x = prev ? even(right + (space ? SPACE : fit(prev, ch))) : 0;
+    items.push({ ch, cells, x, ink, word: space });
+    right = x + ink;
+    prev = ch;
+    space = false;
+  }
+  return { items, width: right };
+}
+
+// The title set to one measure. The longest line sets it; every shorter line
+// is tracked out, in whole module columns spread evenly over its letter gaps
+// (never its word spaces), until both lines share a left and a right edge.
+// Cells carry their line, so the leading can be chosen later, at resize.
+function layout() {
+  const lines = TITLE.map(setLine);
+  const measure = Math.max(...lines.map((l) => l.width));
+  const cells = [];
+  lines.forEach((l, li) => {
+    // Letter gaps, the ones set beside a round or diagonal side first, so two
+    // facing stems stay at their two modules as long as possible.
+    const gaps = l.items
+      .map((it, n) => (n > 0 && !it.word ? n : -1))
+      .filter((n) => n > 0)
+      .sort((a, b) => fit(l.items[a - 1].ch, l.items[a].ch) - fit(l.items[b - 1].ch, l.items[b].ch) || a - b);
+    const units = Math.floor((measure - l.width) / 2);
+    const add = new Array(l.items.length).fill(0);
+    for (let u = 0; u < units; u++) add[gaps[u % gaps.length]] += 2;
+    let shift = 0;
+    l.items.forEach((it, n) => {
+      shift += add[n];
+      for (const [i, j] of it.cells) cells.push([it.x + shift + i, j, li]);
+    });
   });
-  return { cells, cols: width, rows: TITLE.length * CAP + (TITLE.length - 1) * LEADING };
+  return { cells, cols: measure };
 }
 
 const mod = (a, n) => ((a % n) + n) % n;
@@ -102,19 +161,22 @@ export function createDots(host) {
   const { ctx, canvas } = stage;
   canvas.style.cursor = "grab";
 
-  const { cells, cols, rows } = layout();
+  const { cells, cols } = layout();
+  const LINES = TITLE.length;
   const count = cells.length;
   const scale = new Float32Array(count).fill(1);
   const vel = new Float32Array(count);
   const px = new Float32Array(count); // device-pixel centres
   const py = new Float32Array(count);
   const u = new Float32Array(count); // 0..1 across the word
-  const masks = PATTERNS.map((p) => Uint8Array.from(cells, ([i, j]) => (p(i, j) ? 1 : 0)));
+  const gj = new Int16Array(count); // row on the shared grid
+  let masks = [];
+  let rows = CAP;
+  let leading = -1;
 
   let settled = false;
   let dirty = true;
-  const paper = document.createElement("canvas");
-  let pitch = 1, ox = 0, oy = 0, dpr = 2, W = 1, H = 1;
+  let pitch = 1, ox = 0, oy = 0, dpr = 2;
 
   const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
   const stillS = parseFloat(params.get("s"));
@@ -127,41 +189,39 @@ export function createDots(host) {
   let frontY = still ? parseFloat(params.get("y") ?? "0.5") : 0.5; // 0..1 of the block
   let lastX = 0;
 
+  // The measure runs the full width of the box, one module in from each
+  // edge; pitch is whole device pixels. The leading then opens, in steps of
+  // two modules so the removal patterns keep their phase on every line,
+  // until the margins above and below match the side margins, up to a
+  // cap-height's blank between lines. A short, wide box fits the height.
+  const MARGIN = MOD;
+  const LEAD_MIN = 2 * MOD, LEAD_MAX = 10 * MOD, LEAD_STEP = 2 * MOD;
   stage.onResize((w, h, d) => {
-    W = w; H = h; dpr = d;
-    // Full bleed: the longest line runs to one dot of the edges, unless the
-    // stack is too tall for the box. Pitch is whole device pixels.
-    const raw = Math.min(w / (cols + 2), h / (rows + 2));
-    pitch = Math.max(1, Math.floor(raw * dpr)); // device px
-    const bw = cols * pitch, bh = rows * pitch;
-    ox = Math.round((w * dpr - bw) / 2);
-    oy = Math.round((h * dpr - bh) / 2);
+    dpr = d;
+    const dw = w * d, dh = h * d;
+    const byW = dw / (cols + 2 * MARGIN);
+    const byH = dh / (LINES * CAP + (LINES - 1) * LEAD_MIN + 2 * MARGIN);
+    pitch = Math.max(1, Math.floor(Math.min(byW, byH)));
+    const side = (dw - cols * pitch) / 2 / pitch; // side margin in dots
+    const spare = dh / pitch - LINES * CAP - 2 * side;
+    const lead = LINES > 1
+      ? clamp(Math.floor(spare / (LINES - 1) / LEAD_STEP) * LEAD_STEP, LEAD_MIN, LEAD_MAX)
+      : 0;
+    if (lead !== leading) {
+      leading = lead;
+      rows = LINES * CAP + (LINES - 1) * leading;
+      for (let k = 0; k < count; k++) gj[k] = cells[k][1] + cells[k][2] * (CAP + leading);
+      masks = PATTERNS.map((p) => Uint8Array.from(cells, (c, k) => (p(c[0], gj[k]) ? 1 : 0)));
+    }
+    ox = Math.round((dw - cols * pitch) / 2);
+    oy = Math.round((dh - rows * pitch) / 2);
     for (let k = 0; k < count; k++) {
       px[k] = ox + (cells[k][0] + 0.5) * pitch;
-      py[k] = oy + (cells[k][1] + 0.5) * pitch;
+      py[k] = oy + (gj[k] + 0.5) * pitch;
       u[k] = (cells[k][0] + 0.5) / cols;
     }
-    paper.width = Math.round(w * d);
-    paper.height = Math.round(h * d);
-    const pc = paper.getContext("2d");
-    pc.fillStyle = "#fff";
-    pc.fillRect(0, 0, paper.width, paper.height);
-    // The grid itself, edge to edge: pin dots at every position, as on the
-    // specimen sheets' background patterns.
-    pc.fillStyle = "#000";
-    pc.beginPath();
-    const rp = Math.max(1, pitch * 0.055);
-    const gx0 = ox - Math.ceil(ox / pitch) * pitch + pitch / 2;
-    const gy0 = oy - Math.ceil(oy / pitch) * pitch + pitch / 2;
-    for (let y = gy0; y < paper.height + pitch; y += pitch) {
-      for (let x = gx0; x < paper.width + pitch; x += pitch) {
-        pc.moveTo(x + rp, y);
-        pc.arc(x, y, rp, 0, Math.PI * 2);
-      }
-    }
-    pc.fill();
     dirty = true;
-    if (!settled) settle();
+    if (still || !settled) settle();
     settled = true;
   });
 
@@ -169,7 +229,7 @@ export function createDots(host) {
   // the pointer's row so it reads as a wave leaving the finger.
   const BOW = 0.18;
   const reach = (k) => {
-    const dy = Math.abs((cells[k][1] + 0.5) / rows - frontY);
+    const dy = Math.abs((gj[k] + 0.5) / rows - frontY);
     return (u[k] * 0.86 + dy * BOW) / (0.86 + BOW + 1e-3) * 0.999 + 0.0005;
   };
   const patternAt = (k, sv) => mod(Math.floor(sv + 1 - reach(k)), N);
@@ -250,8 +310,10 @@ export function createDots(host) {
 
     if (!dirty) return;
     dirty = moving;
+    // Black dots on a flat white field, nothing else.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(paper, 0, 0);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "#000";
     ctx.beginPath();
     const r0 = R * pitch;
