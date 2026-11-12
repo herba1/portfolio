@@ -74,22 +74,41 @@
 
 .playcount-col,
 .playcount-comma {
+  --pc-win: 0.39em; /* half the window: the figure height, plus overshoot */
   position: absolute;
   left: 0;
   top: -1.2em;
   height: 2.4em;
-  will-change: transform, opacity;
-  transform-origin: 50% 50%;
+  will-change: transform;
 }
 
+/* A hard window the figure height: a turning figure slides out under a crisp
+   edge, like a counter wheel. Open at the sides so tight tracking never
+   shaves a glyph. */
 .playcount-col {
   width: var(--pc-adv);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 10%, #000 32%, #000 68%, transparent 90%);
-  mask-image: linear-gradient(to bottom, transparent 10%, #000 32%, #000 68%, transparent 90%);
+  clip-path: polygon(
+    -40% calc(50% - var(--pc-win)),
+    140% calc(50% - var(--pc-win)),
+    140% calc(50% + var(--pc-win)),
+    -40% calc(50% + var(--pc-win))
+  );
+}
+
+/* The comma's window drops below the baseline far enough to hold its tail
+   and its duck, and no further. */
+.playcount-comma {
+  clip-path: polygon(
+    -60% calc(50% - var(--pc-win)),
+    160% calc(50% - var(--pc-win)),
+    160% calc(50% + 0.8em),
+    -60% calc(50% + 0.8em)
+  );
 }
 
 .playcount-strip,
-.playcount-glyph {
+.playcount-glyph,
+.playcount-comma-mark {
   position: absolute;
   inset: 0;
 }
@@ -102,8 +121,16 @@
   letter-spacing: 0;
 }
 
-.playcount-glyph {
+.playcount-glyph,
+.playcount-strip,
+.playcount-comma-mark {
   will-change: transform;
+}
+
+.playcount-comma-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .playcount-comma {

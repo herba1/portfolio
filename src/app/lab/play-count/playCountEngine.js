@@ -19,6 +19,11 @@ const X_SPRING = { k: 380, z: 0.9 };
 const COMMA_SPRING = { k: 230, z: 0.94 };
 const ROLL_SPRING = { k: 300, z: 0.84 };
 const PRESENCE_SPRING = { k: 420, z: 1 };
+// How far a comma dips below the baseline while it crosses a figure, in em.
+// Deep enough that its head clears the figures' feet: it passes under them.
+const COMMA_DUCK = 0.24;
+// How far below its window a comma waits before it enters, in em.
+const COMMA_DROP = 0.62;
 
 function step(s, target, cfg, dt) {
   const c = 2 * cfg.z * Math.sqrt(cfg.k);
@@ -31,11 +36,15 @@ const settled = (s, target, eps) => Math.abs(s.p - target) < eps && Math.abs(s.v
 
 let uid = 0;
 
-function makeDigit(digit, x, entering) {
+// Nothing fades. A glyph enters or leaves by sliding through the hard edge of
+// its own window, like a counter wheel turning a figure into view: `side` is
+// the edge it uses, +1 below, -1 above.
+function makeDigit(digit, x, entering, side = 1) {
   return {
     id: ++uid,
     kind: "d",
     digit,
+    side,
     x: { p: x, v: 0 },
     tx: x,
     roll: { p: digit, v: 0 },
@@ -43,12 +52,13 @@ function makeDigit(digit, x, entering) {
     pres: { p: entering ? 0 : 1, v: 0 },
     tpres: 1,
     el: null,
+    strip: null,
     glyphs: null,
   };
 }
 
 function makeComma(x, entering) {
-  return { id: ++uid, kind: "c", x: { p: x, v: 0 }, tx: x, pres: { p: entering ? 0 : 1, v: 0 }, tpres: 1, el: null };
+  return { id: ++uid, kind: "c", x: { p: x, v: 0 }, tx: x, pres: { p: entering ? 0 : 1, v: 0 }, tpres: 1, el: null, mark: null };
 }
 
 export function createPlayCount(root, { stage, input, embedded = false, initial = 1284903, onValue } = {}) {
@@ -125,8 +135,9 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
   const caret = { x: { p: 0, v: 0 }, tx: 0 };
   const caretX = () => layout.right + metrics.size * 0.06;
 
-  const retire = (g, tx) => {
+  const retire = (g, tx, side) => {
     g.tx = tx;
+    if (side) g.side = side;
     g.tpres = 0;
     leaving.push(g);
   };
@@ -146,6 +157,12 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
 
     if (mode === "type") {
       // Keyed from the left: digits keep identity, commas slide.
+      // A new digit starts flush against the number's right edge as it stands
+      // now, not in its final slot, and travels in with its neighbours: it
+      // can only ever sit beside them, never on top of them.
+      const lastOld = digits[digits.length - 1];
+      const edge = lastOld ? Math.max(old.right, lastOld.x.p + metrics.adv) : old.right;
+      let added = 0;
       for (let i = 0; i < n; i++) {
         let g = digits[i];
         const d = +str[i];
@@ -154,12 +171,15 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
           g.troll += (d - g.digit + 10) % 10;
           g.digit = d;
         } else if (!g) {
-          g = makeDigit(d, nl.dx[i], true);
+          g = makeDigit(d, edge + added * metrics.adv, true, 1);
+          added++;
         }
         g.tx = nl.dx[i];
         nd.push(g);
       }
-      for (let i = n; i < digits.length; i++) retire(digits[i], nl.left + (digits[i].tx - old.left));
+      for (let i = n; i < digits.length; i++) retire(digits[i], nl.left + (digits[i].tx - old.left), 1);
+      // the caret is pushed ahead by the keystroke, as in any text field
+      if (added) caret.x.p = Math.max(caret.x.p, edge + added * metrics.adv + metrics.size * 0.06);
       for (let j = 0; j < nl.cx.length; j++) {
         const c = commas[j] || makeComma(nl.cx[j], true);
         c.tx = nl.cx[j];
@@ -182,17 +202,16 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
           while (g.roll.p - g.troll > 10) g.troll += 10;
           g.digit = d;
         } else {
-          g = makeDigit(d, nl.dx[i], true);
-          // a new leading digit arrives from the side it is coming from
-          g.roll.p = d - dir * 0.6;
+          // a new leading digit turns into view from the side the count is
+          // coming from, through the same edge as the rolling columns
+          g = makeDigit(d, nl.dx[i], true, dir);
         }
         g.tx = nl.dx[i];
         nd[i] = g;
       }
       for (let k = n; k < on; k++) {
         const g = digits[on - 1 - k];
-        g.troll += dir * 0.6;
-        retire(g, nl.right - (old.right - g.tx));
+        retire(g, nl.right - (old.right - g.tx), -dir);
       }
       const oc = commas.length;
       const ncount = nl.cx.length;
@@ -235,14 +254,19 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
     }
     el.appendChild(strip);
     g.el = el;
+    g.strip = strip;
     num.appendChild(el);
   };
 
   const mountComma = (c) => {
     const el = document.createElement("span");
     el.className = "playcount-comma";
-    el.textContent = ",";
+    const mark = document.createElement("span");
+    mark.className = "playcount-comma-mark";
+    mark.textContent = ",";
+    el.appendChild(mark);
     c.el = el;
+    c.mark = mark;
     num.appendChild(el);
   };
 
@@ -253,39 +277,48 @@ export function createPlayCount(root, { stage, input, embedded = false, initial 
 
   const pitch = () => metrics.size * PITCH;
 
+  // How far a comma's box runs under the live figures, in px.
+  const overlap = (c) => {
+    const inset = metrics.adv * 0.02; // figures fill nearly all of their advance
+    const l = c.x.p;
+    const r = c.x.p + metrics.comma;
+    let most = 0;
+    for (const d of digits.concat(leaving)) {
+      if (d.kind !== "d") continue;
+      const o = Math.min(r, d.x.p + metrics.adv - inset) - Math.max(l, d.x.p + inset);
+      if (o > most) most = o;
+    }
+    return most;
+  };
+
+  // Every visible pixel is full-strength ink. The only things that move are
+  // positions on springs and the hard-edged window each glyph is seen through:
+  // no opacity, no blur, no scale.
   const render = (g) => {
     const p = Math.max(0, Math.min(1, g.pres.p));
-    let lift = (1 - p) * metrics.size * 0.14;
-    let alpha = p;
+    g.el.style.transform = `translate3d(${g.x.p.toFixed(2)}px, 0, 0)`;
     if (g.kind === "c") {
-      // A relocating comma ducks under the figures it crosses: it dips a
-      // little and goes quiet in flight, full strength once it lands.
-      const t = Math.min(1, Math.abs(g.x.p - g.tx) / (metrics.adv * 0.4));
+      // A relocating comma ducks under the figures it crosses: while any
+      // figure is over it, it stays below their feet, and it rises back to
+      // the baseline only once it is clear, so ink never touches ink.
+      const t = Math.min(1, overlap(g) / (metrics.adv * 0.12));
       const f = t * t * (3 - 2 * t);
-      alpha *= 1 - 0.9 * f;
-      lift += f * metrics.size * 0.08;
+      const y = (f * COMMA_DUCK + (1 - p) * COMMA_DROP) * metrics.size;
+      g.mark.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+      return;
     }
-    const scale = 0.86 + 0.14 * p;
-    const blur = (1 - p) * metrics.size * 0.03;
-    g.el.style.transform = `translate3d(${g.x.p.toFixed(2)}px, ${lift.toFixed(2)}px, 0) scale(${scale.toFixed(4)})`;
-    g.el.style.opacity = alpha.toFixed(3);
-    g.el.style.filter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : "";
-    if (g.kind === "d") {
-      const r = g.roll.p;
-      const P = pitch();
-      for (let i = 0; i < 10; i++) {
-        let off = (((i - r) % 10) + 10) % 10;
-        if (off > 5) off -= 10;
-        const s = g.glyphs[i];
-        // one figure at rest; neighbours only show while the column turns
-        const o = Math.max(0, 1 - Math.abs(off) / 0.9);
-        const far = o <= 0;
-        s.style.visibility = far ? "hidden" : "";
-        if (!far) {
-          s.style.transform = `translate3d(0, ${(off * P).toFixed(2)}px, 0)`;
-          s.style.opacity = (o * o * (3 - 2 * o)).toFixed(3);
-        }
-      }
+    const P = pitch();
+    // entering and leaving are a turn of the wheel through the window's edge
+    g.strip.style.transform = `translate3d(0, ${((1 - p) * P * g.side).toFixed(2)}px, 0)`;
+    const r = g.roll.p;
+    for (let i = 0; i < 10; i++) {
+      let off = (((i - r) % 10) + 10) % 10;
+      if (off > 5) off -= 10;
+      const s = g.glyphs[i];
+      // a figure a full pitch away is already past the window's edge
+      const far = Math.abs(off) >= 1;
+      s.style.visibility = far ? "hidden" : "";
+      if (!far) s.style.transform = `translate3d(0, ${(off * P).toFixed(2)}px, 0)`;
     }
   };
 
