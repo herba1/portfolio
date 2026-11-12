@@ -351,15 +351,26 @@
 }
 
 /* Until a tile is taken in hand (ScrollGuard), the page owns vertical
-   scroll over it: a finger pans the page, and the pieces' own scrollers hold
-   still so a wheel passes through them to the page. Their scroll position is
-   kept, and comes back to life with the first press inside. */
+   scroll over it. A finger pans the page, and on a touch screen the pieces'
+   own scrollers hold still so the swipe reaches the page; their scroll
+   position is kept and comes back with the first press inside. A wheel is
+   different: it scrolls the list under the pointer, and once that list runs
+   out the next gesture carries on to the page, as it would anywhere else. */
 .xl-tile:not([data-engaged], [data-focused]) .piece-box * {
   touch-action: pan-y !important;
 }
-.xl-tile:not([data-engaged], [data-focused])
-  :is(.deck, .ol-root, .flyout-panel, .bd-dock__panel, .cf-tracks, .hm-scroll, .pull-vinyl-scroll, .ink-panel__body) {
-  overflow-y: hidden !important;
+@media (hover: none) {
+  .xl-tile:not([data-engaged], [data-focused])
+    :is(.deck, .ol-root, .flyout-panel, .bd-dock__panel, .cf-tracks, .hm-scroll, .pull-vinyl-scroll, .ink-panel__body) {
+    overflow-y: hidden !important;
+  }
+}
+/* A piece's scroller may set `overscroll-behavior: contain` for its own
+   page, which stops scroll from ever chaining past it to the index; it
+   applies even to a scroller that is held still or has nothing to scroll.
+   On the index only a focused tile keeps it. */
+.xl-tile:not([data-focused]) .piece-box * {
+  overscroll-behavior: auto !important;
 }
 
 /* Focus (ScrollGuard): on a touch screen a tile hands the piece every
