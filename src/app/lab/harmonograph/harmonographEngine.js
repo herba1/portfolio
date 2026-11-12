@@ -13,9 +13,11 @@ import { createNib } from "./penAudio";
 // and the table circles. Lifting the nib starts a new figure, and the old one
 // is pulled into the sheet as an impression in a spot ink, the next of a
 // small fixed set each time. The impression is a plate, not a second pen
-// line: the figure's path is turned into a density field, and the plate is
-// solid where its turns crowd and screened away to open paper where they
-// spread, printed one fixed misregistration off the key. The sheet builds up
+// line: the time the nib spent over every pixel of the paper becomes a
+// continuous tone, and the plate is a halftone of it at the ink's own screen
+// angle, solid where the slow turns crowd and thinning out through ever
+// smaller dots to open paper where they spread, printed one fixed
+// misregistration off the key. The sheet builds up
 // as a riso or letterpress print with the pen's near-black key, the only
 // linework on it, always on top. The pen lifts itself once the swing has
 // wound in, so the centre of every figure stays open.
@@ -173,12 +175,13 @@ const PLATE_IN = 0.55; // share of the pull over which the plate inks up
 // finished is pulled into the sheet as an impression in the next spot ink,
 // at full strength and overprinted (multiply), each plate a pixel or two
 // out of register with the key, as a riso or a jobbing letterpress lays it.
-// The key always prints last, over every spot.
+// The key always prints last, over every spot. Each plate is screened at
+// its own angle, 15, 75, 45 and 0 degrees, so they rosette, not clash.
 const SPOTS = [
-  { rgb: [232, 78, 44], mx: 1.5, my: -1 }, // vermilion
-  { rgb: [0, 112, 186], mx: -1, my: 1.5 }, // process blue
-  { rgb: [255, 76, 150], mx: 1.5, my: 1 }, // fluorescent pink
-  { rgb: [0, 128, 120], mx: -1.5, my: -1 }, // teal
+  { rgb: [232, 78, 44], mx: 1.5, my: -1, angle: 15 }, // vermilion
+  { rgb: [0, 112, 186], mx: -1, my: 1.5, angle: 75 }, // process blue
+  { rgb: [255, 76, 150], mx: 1.5, my: 1, angle: 45 }, // fluorescent pink
+  { rgb: [0, 128, 120], mx: -1.5, my: -1, angle: 0 }, // teal
 ];
 const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
@@ -237,6 +240,10 @@ export async function createHarmonograph(host) {
   const preT = params.has("t") ? clamp(parseFloat(params.get("t")) || 0, 0, 1) : null;
   const preGhost = params.has("ghost");
   const preHold = params.has("hold");
+  // ?drops=N: the sheet already carries N pulled impressions, one per spot
+  // ink in turn, from N different releases of the pen. ?ghost is one drop
+  // on the very swing the pen then draws again.
+  const preDrops = params.has("drops") ? clamp(parseInt(params.get("drops"), 10) || 0, 0, 8) : preGhost ? 1 : 0;
   const nib = createNib();
 
   let setIndex = params.get("set") === "1" ? 1 : 0;
@@ -289,8 +296,11 @@ export async function createHarmonograph(host) {
   // a share of the sheet's side (so it survives a resize), NaN between
   // strokes. A finished figure is pulled into its plate from this, not from
   // the key's raster.
+  // Each point carries the machine's clock, so a plate knows how long the
+  // nib dwelt along every stretch of the line.
   let curPath = [];
   let prevPath = [];
+  let clock = 0; // seconds of swing
 
   // Pen.
   let pen = "down"; // down | up
@@ -308,17 +318,28 @@ export async function createHarmonograph(host) {
   // Tear.
   let leaving = null; // { canvas, t, ox, oy }
 
-  const preset = (i = setIndex) => {
-    const s = R;
+  // The opening swing. A release is a phase for each lateral pendulum, a
+  // direction for the table's circle and a share of the full swing; the
+  // first is the sheet's own opening swing.
+  const RELEASES = [
+    { fx: 0, fy: 0, dir: 1, a: 1 },
+    { fx: 2.1, fy: 0.5, dir: -1, a: 0.96 },
+    { fx: 4.0, fy: 2.6, dir: 1, a: 0.92 },
+    { fx: 1.0, fy: 4.5, dir: -1, a: 0.98 },
+  ];
+  const preset = (i = setIndex, rel = RELEASES[0]) => {
+    const s = R * rel.a;
     const k = 1 - TABLE;
-    px.x = 0;
-    px.v = SETS[i].ax * k * s * px.wd;
-    py.x = SETS[i].ay * k * s;
-    py.v = 0;
+    const A = SETS[i].ax * k * s;
+    const B = SETS[i].ay * k * s;
+    px.x = A * Math.sin(rel.fx);
+    px.v = A * px.wd * Math.cos(rel.fx);
+    py.x = B * Math.cos(rel.fy);
+    py.v = -B * py.wd * Math.sin(rel.fy);
     qx.x = TABLE * s;
     qx.v = 0;
     qy.x = 0;
-    qy.v = TABLE * s * qy.wd;
+    qy.v = rel.dir * TABLE * s * qy.wd;
   };
 
   const penPos = () => [side / 2 + px.x - qx.x, side / 2 + py.x - qy.x];
@@ -369,117 +390,123 @@ export async function createHarmonograph(host) {
   const inks = () => [curCtx];
 
   // The key of a finished figure, as a plate in spot ink: the figure's
-  // letterpress shadow. The path is replayed into a fine field as ink laid
-  // per unit of paper (line length per square pixel, so its reciprocal is
-  // the spacing between turns), averaged over little more than the width of
-  // a turn, and the plate is cut from that field the way a block is cut from
-  // a drawing: a hard edge, solid where the turns crowd closer than a pen
-  // width or two, open paper everywhere else. The cut is set so the plate
-  // never takes more than COVER of the sheet, whatever the figure; only its
-  // last fraction of a millimetre, a narrow band at the edge, is screened, at
-  // one fixed angle and a fine ruling, so the solid steps down into the paper
-  // as dots rather than a wash. Nothing of the line itself survives in it;
-  // the near-black key is the only linework on the sheet, and where the two
-  // meet the plate's misregistration shows as a sliver of paper on one side
-  // of a bundle's edge and of red on the other.
-  const CELL = 1; // CSS px per field cell
-  const SPREAD = 6.5; // CSS px, the radius the density is averaged over
-  const CLOSE = 2.6; // CSS px: turns closer than this may print
-  const COVER = 0.2; // the most of the sheet a plate may cover
-  const BAND = 4; // CSS px, the width of the screened band at the edge
-  const SCREEN = 2; // CSS px, the halftone's pitch
-  const SCREEN_ANGLE = 15; // degrees, every plate
+  // letterpress shadow, screened as a continuous-tone halftone. The path is
+  // replayed into a field at device resolution as the time the nib spent
+  // over each pixel (every stretch of line carries the seconds the pen took
+  // to cross it), so the slow turns and the crowded inner winds build ink
+  // and the fast open loops barely mark. The field is softened over a few
+  // pen widths, read against its own spread (TONE_Q of the inked area prints
+  // at TONE_AT), and eased up to solid, so the tone runs continuously from
+  // solid in the crowded core to nothing on open paper. That tone is then
+  // set through an AM screen: round dots on a fixed ruling, turned to the
+  // ink's own angle, each dot's area matched to the tone. There is no cut and
+  // no edge anywhere; the plate thins out as dots along the outer loops.
+  // Every ink sits at its own angle, as a four-colour printer sets them, so
+  // the plates overprint into rosettes and moire against each other and
+  // against the key's own line moire. Nothing of the line itself survives in
+  // the plate; the near-black key is the only linework on the sheet.
+  const SIGMA = 3.6; // CSS px, the softening of the time field
+  const TONE_Q = 0.75; // this share of the inked area ...
+  const TONE_AT = 0.78; // ... prints at this tone or lighter
+  const SCREEN = 2.4; // CSS px, the halftone's pitch
+  // The round-dot spot function, 0.5 + 0.25 (cos u + cos v), read as the
+  // threshold for a given dot area: its values over one screen cell, sorted,
+  // so dot area follows the tone exactly from a speck to the closed solid.
+  const SPOT_LUT = (() => {
+    const m = 96;
+    const v = new Float32Array(m * m);
+    for (let j = 0; j < m; j++) {
+      for (let i = 0; i < m; i++) v[j * m + i] = 0.5 + 0.25 * (Math.cos(((i + 0.5) / m) * TAU) + Math.cos(((j + 0.5) / m) * TAU));
+    }
+    v.sort();
+    const lut = new Float32Array(1025);
+    for (let k = 0; k <= 1024; k++) lut[k] = v[Math.min(v.length - 1, Math.floor((1 - k / 1024) * v.length))];
+    return lut;
+  })();
   const field = () => {
-    const g = Math.max(8, Math.round(side / CELL));
-    const cell = side / g; // CSS px
-    const F = new Float32Array(g * g);
+    const n = spot.width;
+    const F = new Float32Array(n * n);
     let lx = NaN;
     let ly = NaN;
-    for (let i = 0; i < prevPath.length; i += 2) {
-      const x = prevPath[i] * g;
-      const y = prevPath[i + 1] * g;
+    let lt = NaN;
+    for (let i = 0; i < prevPath.length; i += 3) {
+      const x = prevPath[i] * n - 0.5;
+      const y = prevPath[i + 1] * n - 0.5;
+      const t = prevPath[i + 2];
       if (Number.isNaN(x) || Number.isNaN(lx)) {
         lx = x;
         ly = y;
+        lt = t;
         continue;
       }
       const L = Math.hypot(x - lx, y - ly);
       const k = Math.max(1, Math.ceil(L * 2));
-      const w = (L * cell) / k; // CSS px of line per sample
+      const w = Math.max(0, t - lt) / k; // seconds of the nib per sample
       for (let j = 0; j < k; j++) {
-        const t = (j + 0.5) / k;
-        const sx = lx + (x - lx) * t - 0.5;
-        const sy = ly + (y - ly) * t - 0.5;
+        const f = (j + 0.5) / k;
+        const sx = lx + (x - lx) * f;
+        const sy = ly + (y - ly) * f;
         const ix = Math.floor(sx);
         const iy = Math.floor(sy);
-        if (ix < 0 || iy < 0 || ix >= g - 1 || iy >= g - 1) continue;
+        if (ix < 0 || iy < 0 || ix >= n - 1 || iy >= n - 1) continue;
         const fx = sx - ix;
         const fy = sy - iy;
-        const o = iy * g + ix;
+        const o = iy * n + ix;
         F[o] += w * (1 - fx) * (1 - fy);
         F[o + 1] += w * fx * (1 - fy);
-        F[o + g] += w * (1 - fx) * fy;
-        F[o + g + 1] += w * fx * fy;
+        F[o + n] += w * (1 - fx) * fy;
+        F[o + n + 1] += w * fx * fy;
       }
       lx = x;
       ly = y;
+      lt = t;
     }
-    // Three box passes each way: close to a gaussian of radius SPREAD.
-    const r = Math.max(1, Math.round(SPREAD / cell / 1.7));
-    const tmp = new Float32Array(g * g);
+    // Three box passes each way: close to a gaussian of SIGMA.
+    const r = Math.max(1, Math.round(SIGMA * dpr));
+    const tmp = new Float32Array(n * n);
     const box = (src, dst, stride, step) => {
-      for (let l = 0; l < g; l++) {
+      const norm = 1 / (2 * r + 1);
+      for (let l = 0; l < n; l++) {
         const o = l * stride;
         let acc = 0;
-        for (let i = -r; i <= r; i++) acc += src[o + clamp(i, 0, g - 1) * step];
-        for (let i = 0; i < g; i++) {
-          dst[o + i * step] = acc / (2 * r + 1);
-          acc += src[o + Math.min(g - 1, i + r + 1) * step] - src[o + Math.max(0, i - r) * step];
+        for (let i = -r; i <= r; i++) acc += src[o + clamp(i, 0, n - 1) * step];
+        for (let i = 0; i < n; i++) {
+          dst[o + i * step] = acc * norm;
+          acc += src[o + Math.min(n - 1, i + r + 1) * step] - src[o + Math.max(0, i - r) * step];
         }
       }
     };
     for (let p = 0; p < 3; p++) {
-      box(F, tmp, g, 1);
-      box(tmp, F, 1, g);
+      box(F, tmp, n, 1);
+      box(tmp, F, 1, n);
     }
-    // Line per square pixel.
-    const area = cell * cell;
-    for (let i = 0; i < F.length; i++) F[i] /= area;
-    // The cut: the closest-packed turns, never past COVER of the sheet.
-    let lo = 1 / CLOSE;
-    let n = 0;
-    for (let i = 0; i < F.length; i++) if (F[i] > lo) n++;
-    const cap = Math.floor(COVER * F.length);
-    if (n > cap) {
-      const v = new Float32Array(n);
-      for (let i = 0, j = 0; i < F.length; i++) if (F[i] > lo) v[j++] = F[i];
-      v.sort();
-      lo = v[n - cap];
-    }
-    // The field's slope, so the screened band can be held to a fixed width
-    // across the paper however steeply or slowly the density climbs.
-    const G = new Float32Array(g * g);
-    for (let y = 1; y < g - 1; y++) {
-      for (let x = 1, o = y * g + 1; x < g - 1; x++, o++) {
-        G[o] = Math.hypot(F[o + 1] - F[o - 1], F[o + g] - F[o - g]) / (2 * cell);
-      }
-    }
-    return { F, G, g, lo };
+    // The field's own spread, from a sample of the inked area: the tone
+    // curve 1 - exp(-d / ref) puts TONE_Q of it at TONE_AT or lighter.
+    let peak = 0;
+    for (let i = 0; i < F.length; i++) if (F[i] > peak) peak = F[i];
+    const floor = peak * 1e-4;
+    const sample = [];
+    for (let i = 0; i < F.length; i += 7) if (F[i] > floor) sample.push(F[i]);
+    sample.sort((a, b) => a - b);
+    const q = sample.length ? sample[Math.floor(TONE_Q * (sample.length - 1))] : 1;
+    const ref = q / -Math.log(1 - TONE_AT);
+    return { F, ref, floor };
   };
 
   const tint = () => {
     const n = spot.width;
-    const { F, G, g, lo } = field();
+    const { F, ref, floor } = field();
     const out = spotCtx.createImageData(n, n);
     const d = out.data;
     const [r, gr, bl] = pulling.rgb;
     const grain = inkGrain(n);
-    const ang = (SCREEN_ANGLE * Math.PI) / 180;
+    const ang = (pulling.angle * Math.PI) / 180;
     const pitch = SCREEN * dpr;
-    const cu = (Math.cos(ang) * TAU) / pitch;
-    const su = (Math.sin(ang) * TAU) / pitch;
-    // The screen's two waves, cos(x cu + y su) and cos(y cu - x su), split
-    // into per-row and per-column tables so a pixel costs no trig.
+    const kk = TAU / pitch;
+    const cu = Math.cos(ang) * kk;
+    const su = Math.sin(ang) * kk;
+    // The screen's two waves, u = x cu + y su and v = y cu - x su, split into
+    // per-row and per-column tables so a pixel costs no trig.
     const wave = (k) => {
       const c = new Float32Array(n);
       const sn = new Float32Array(n);
@@ -491,32 +518,27 @@ export async function createHarmonograph(host) {
     };
     const [cXu, sXu] = wave(cu);
     const [cXs, sXs] = wave(su);
-    const aa = 1 / pitch; // the spot function's slope: about one device px of edge
-    const fs = g / n;
+    const slope = 0.25 * kk; // the spot function's slope per device px, per unit of sin
+    const inv = 1 / ref;
     for (let y = 0, p = 0; y < n; y++) {
-      const gy = clamp((y + 0.5) * fs - 0.5, 0, g - 1.001);
-      const iy = gy | 0;
-      const ty = gy - iy;
       for (let x = 0; x < n; x++, p++) {
-        const gx = clamp((x + 0.5) * fs - 0.5, 0, g - 1.001);
-        const ix = gx | 0;
-        const tx = gx - ix;
-        const o = iy * g + ix;
-        const dens = (F[o] * (1 - tx) + F[o + 1] * tx) * (1 - ty) + (F[o + g] * (1 - tx) + F[o + g + 1] * tx) * ty;
-        if (dens <= lo) continue;
-        let ink;
-        // How far inside the cut this pixel lies, CSS px.
-        const slope = (G[o] * (1 - tx) + G[o + 1] * tx) * (1 - ty) + (G[o + g] * (1 - tx) + G[o + g + 1] * tx) * ty;
-        const tone = (dens - lo) / (Math.max(1e-6, slope) * BAND);
-        if (tone >= 1) ink = 1;
-        else {
-          // A round-dot screen across the band: dots at the plate's outer
-          // edge, a chequer at half, holes where it closes up to the solid.
-          const cosU = cXu[x] * cXs[y] - sXu[x] * sXs[y];
-          const cosV = cXu[y] * cXs[x] + sXu[y] * sXs[x];
-          const spotFn = 0.5 + 0.25 * (cosU + cosV);
-          ink = clamp((spotFn - (1 - tone)) / aa + 0.5, 0, 1);
-        }
+        const dens = F[p];
+        if (dens <= floor) continue;
+        const tone = 1 - Math.exp(-dens * inv);
+        const c = tone * 1024;
+        const ci = c | 0;
+        const thr = ci >= 1024 ? SPOT_LUT[1024] : SPOT_LUT[ci] + (SPOT_LUT[ci + 1] - SPOT_LUT[ci]) * (c - ci);
+        const cosU = cXu[x] * cXs[y] - sXu[x] * sXs[y];
+        const cosV = cXu[y] * cXs[x] + sXu[y] * sXs[x];
+        const sinU = sXu[x] * cXs[y] + cXu[x] * sXs[y];
+        const sinV = sXu[y] * cXs[x] - cXu[y] * sXs[x];
+        const s = 0.5 + 0.25 * (cosU + cosV);
+        // About one device pixel of edge on every dot, whatever its size,
+        // leaning toward paper in the light tones and ink in the dark, so
+        // a speck can vanish into the paper and the solid can close up.
+        const g = Math.max(0.06, slope * Math.hypot(sinU, sinV));
+        const ink = clamp((s - thr) / g + tone, 0, 1);
+        if (ink <= 0) continue;
         const al = Math.min(1, 0.94 * ink * grain[p]);
         const i = p * 4;
         d[i] = r;
@@ -662,7 +684,7 @@ export async function createHarmonograph(host) {
   const deposit = (x, y, speed, taper, rch) => {
     if (!last) {
       last = { x, y };
-      curPath.push(NaN, NaN, x / side, y / side);
+      curPath.push(NaN, NaN, NaN, x / side, y / side, clock);
       back = null;
       firstRun = true;
       runLevel = -1;
@@ -729,7 +751,7 @@ export async function createHarmonograph(host) {
       runOpen = true;
     }
     for (const c of inks()) c.lineTo(x * dpr, y * dpr);
-    curPath.push(x / side, y / side);
+    curPath.push(x / side, y / side, clock);
     runSegs++;
     curInk = true;
     if (back) {
@@ -751,6 +773,7 @@ export async function createHarmonograph(host) {
     let [x0, y0] = penPos();
     let travelled = 0;
     for (let i = 0; i < n; i++) {
+      clock += H;
       if (held !== "pen") {
         step(px);
         step(py);
@@ -971,18 +994,21 @@ export async function createHarmonograph(host) {
     const first = !base;
     layout(w, h, d);
     if (first) {
-      if (preGhost) {
-        // A figure already drawn and pulled into the sheet as its plate, and
-        // the pen set going on the same swing again, so the key comes down
-        // on its own impression, a hair out of register.
-        preset();
+      // Figures already drawn and pulled into the sheet as plates, and the
+      // pen set going on the last one's swing again, so the key comes down
+      // on its own impression, a hair out of register.
+      const rel = (i) => RELEASES[i % RELEASES.length];
+      for (let i = 0; i < preDrops; i++) {
+        preset(setIndex, rel(i));
+        pen = "down";
+        last = null;
         for (let t = 0; t < 70; t += 1 / 30) simulate(1 / 30);
         settle();
         bake();
         pen = "up";
         for (const o of all) scaleOsc(o, 0);
       }
-      preset();
+      preset(setIndex, rel(Math.max(0, preDrops - 1)));
       if (pen === "up") {
         pen = "down";
         last = null;
