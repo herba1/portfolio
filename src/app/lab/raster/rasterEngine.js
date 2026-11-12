@@ -11,19 +11,24 @@ import { createStage, clamp } from "../_kit/stage";
 // at the centre of the box, turned to its own angle. Every time the ink or
 // the screen moves, the outline is filled into an offscreen canvas in the
 // screen's own rotated frame at 8 x 8 samples per screen cell, and each cell
-// takes the fraction of its area the letter covers, 0 to 1. That fraction is
-// printed with a Euclidean spot: a round dot that grows until, at 50%, it is
-// a square standing on its corner, touching its four neighbours point to
-// point in a checkerboard; past half the paper is what is left, round white
-// holes on the cell corners that close up to solid at 100%. One shape all
-// the way, no seam between a dot and a slab.
+// takes the fraction of its area the letter covers, 0 to 1. The letters are
+// not flat ink but a lit relief: each stroke rises from its outline to a
+// rounded crest, a point light hangs over the page where the pointer is,
+// and the dark it leaves, 10% on a lit flank to 95% in shadow, is
+// multiplied into the coverage. That tone is printed with a Euclidean spot:
+// a round dot that grows until, at 50%, it is a square standing on its
+// corner, touching its four neighbours point to point in a checkerboard;
+// past half the paper is what is left, round white holes on the cell
+// corners that close up to solid at 100%. One shape all the way, no seam
+// between a dot and a slab.
 //
-// Drag up or down and the pitch slides between five and twenty cells
-// across a letter; drag sideways and the screen turns from 0 to 45 degrees.
-// Square to the strokes and at a pitch that divides the design grid, the two
-// lock and the letters come out clean. Anywhere else the 0, 90 and 45-degree
-// strokes cross the screen at an angle and beat against it, and moire bands
-// sweep through the word; at exactly 45 the cuts lock to the screen.
+// Hover to move the light. Drag up or down and the pitch slides between five
+// and twenty-eight cells across a letter; drag sideways and the screen turns
+// from 0 to 45 degrees. Square to the strokes and at a pitch that divides
+// the design grid, the two lock and the letters come out clean. Anywhere
+// else the 0, 90 and 45-degree strokes and the shading across them cross the
+// screen at an angle and beat against it, and moire bands slide along inside
+// the stems; at exactly 45 the cuts lock to the screen.
 
 const GLYPHS = {
   a: [5, "0,2 4,2 4,6 0,6 0,4 4,4"],
@@ -98,7 +103,7 @@ const DEFS = {};
 for (const [ch, [cols, ...strokes]] of Object.entries(GLYPHS)) DEFS[ch] = { cols, strokes: strokes.map(parse) };
 
 const W_MIN = 5;
-const W_MAX = 20;
+const W_MAX = 28;
 const A_MAX = 45;
 const A_DEFAULT = 45;
 const INK = "#0b0b0b";
@@ -253,6 +258,8 @@ export async function createRaster(host, { embedded = false } = {}) {
   let Af = clamp(+(q.get("a") ?? A_DEFAULT), 0, A_MAX);
   const freezeFrom = q.has("from") ? clamp(+q.get("from"), W_MIN, W_MAX) : null;
   const freezeAt = q.has("at") ? +q.get("at") / 1000 : null;
+  // Where the light hangs until the pointer moves it, as fractions of the box.
+  const lightHome = { x: clamp(+(q.get("lx") ?? 0.1), -1, 2), y: clamp(+(q.get("ly") ?? -0.08), -1, 2) };
 
   // Hidden input so phones raise a keyboard.
   const input = document.createElement("input");
@@ -332,6 +339,11 @@ export async function createRaster(host, { embedded = false } = {}) {
     const was = { cell: raster.cell, x: anchor.x, y: anchor.y, cos: raster.cos, sin: raster.sin, theta: raster.theta };
     anchor.x = snap(bw / 2);
     anchor.y = snap(bh / 2);
+    light.z = 0.36 * Math.min(bw, bh);
+    if (!light.set) {
+      light.x = light.tx = bw * lightHome.x;
+      light.y = light.ty = bh * lightHome.y;
+    }
     raster.g = g;
     raster.cell = (g * 5) / Wf;
     raster.theta = (Af * Math.PI) / 180;
@@ -420,16 +432,29 @@ export async function createRaster(host, { embedded = false } = {}) {
   stage.on("down", (p) => {
     drag = { y: p.y, x: p.x, w: Wf, a: Af, moved: false };
   });
+  // Hover carries the light; a drag leaves it where it is.
+  const aimLight = (p) => {
+    light.tx = p.x;
+    light.ty = p.y;
+    light.set = true;
+  };
   stage.on("move", (p) => {
-    if (!drag) return;
+    if (!drag) {
+      aimLight(p);
+      return;
+    }
     const dy = p.y - drag.y;
     const dx = p.x - drag.x;
     if (Math.abs(dy) > 4 || Math.abs(dx) > 4) drag.moved = true;
     const span = Math.max(240, stage.width * 0.4);
     setScreen(drag.w - dy / 24, drag.a + (dx / span) * A_MAX, "drag");
   });
-  stage.on("up", () => {
-    if (drag && !drag.moved) input.focus({ preventScroll: true });
+  stage.on("up", (p) => {
+    if (drag && !drag.moved) {
+      input.focus({ preventScroll: true });
+      // A tap is how a touch screen moves the light.
+      aimLight(p);
+    }
     drag = null;
   });
   const onWheel = (e) => {
@@ -507,10 +532,173 @@ export async function createRaster(host, { embedded = false } = {}) {
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   };
+  // ---- relief
+  // The letters are shaded as a raised, rounded relief. Its height comes
+  // from the distance to the outline of the ink, all strokes together, so
+  // overlaps and joins merge: a quarter circle rises from the edge to a
+  // crest wherever the ink is half a stroke deep, so a stem is a half pipe
+  // and the 45-degree cuts and the joins come out as mitred creases. A point
+  // light hangs over the page where the pointer is; each cell prints the
+  // dark the light leaves at its centre. The stroke geometry is untouched:
+  // the light only decides how much of each cell prints.
+  const shapeOf = (loops, h) => {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const loop of loops) {
+      for (const [x, y] of loop) {
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+    }
+    return { loops, h: Math.max(0.5, h), x0, y0, x1, y1 };
+  };
+  // Nonzero winding, the rule the canvas fills the outline with.
+  const wound = (sh, x, y) => {
+    if (x < sh.x0 || x > sh.x1 || y < sh.y0 || y > sh.y1) return false;
+    let w = 0;
+    for (const loop of sh.loops) {
+      for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+        const ay = loop[j][1];
+        const by = loop[i][1];
+        if (ay > y === by > y) continue;
+        const ax = loop[j][0];
+        const bx = loop[i][0];
+        if (x < ax + ((y - ay) * (bx - ax)) / (by - ay)) w += by > ay ? 1 : -1;
+      }
+    }
+    return w !== 0;
+  };
+  // The ink's true outline: every stroke edge cut into short pieces, keeping
+  // only the pieces with ink on one side, so the ends and edges of strokes
+  // buried in other strokes drop out. Kept pieces merge back into runs, and
+  // runs and strokes are bucketed in a coarse grid for lookup.
+  const buildRelief = (shapes) => {
+    let h = 0.5;
+    for (const sh of shapes) h = Math.max(h, sh.h);
+    const G = Math.max(8, 2 * h);
+    const reach = h + raster.cell;
+    const grid = new Map();
+    const put = (x0, y0, x1, y1, kind, item) => {
+      for (let gy = Math.floor(y0 / G); gy <= Math.floor(y1 / G); gy++) {
+        for (let gx = Math.floor(x0 / G); gx <= Math.floor(x1 / G); gx++) {
+          const key = gx * 65536 + gy;
+          let b = grid.get(key);
+          if (!b) grid.set(key, (b = { shapes: [], runs: [] }));
+          b[kind].push(item);
+        }
+      }
+    };
+    for (const sh of shapes) put(sh.x0, sh.y0, sh.x1, sh.y1, "shapes", sh);
+    const inkAt = (x, y) => {
+      const b = grid.get(Math.floor(x / G) * 65536 + Math.floor(y / G));
+      return !!b && b.shapes.some((sh) => wound(sh, x, y));
+    };
+    const step = Math.max(1, h / 3);
+    const addRun = (ax, ay, bx, by) => put(Math.min(ax, bx) - reach, Math.min(ay, by) - reach, Math.max(ax, bx) + reach, Math.max(ay, by) + reach, "runs", [ax, ay, bx - ax, by - ay]);
+    for (const sh of shapes) {
+      for (const loop of sh.loops) {
+        for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+          const [ax, ay] = loop[j];
+          const [bx, by] = loop[i];
+          const len = Math.hypot(bx - ax, by - ay);
+          if (len < 1e-6) continue;
+          const nx = (ay - by) / len;
+          const ny = (bx - ax) / len;
+          const n = Math.max(1, Math.ceil(len / step));
+          let open = -1;
+          for (let k = 0; k <= n; k++) {
+            let keep = false;
+            if (k < n) {
+              const t = (k + 0.5) / n;
+              const mx = ax + (bx - ax) * t;
+              const my = ay + (by - ay) * t;
+              keep = inkAt(mx + nx * 0.5, my + ny * 0.5) !== inkAt(mx - nx * 0.5, my - ny * 0.5);
+            }
+            if (keep && open < 0) open = k;
+            if (!keep && open >= 0) {
+              addRun(ax + ((bx - ax) * open) / n, ay + ((by - ay) * open) / n, ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n);
+              open = -1;
+            }
+          }
+        }
+      }
+    }
+    return { grid, G, h };
+  };
+  // The light in page pixels: `x`, `y` over the page, `z` above it.
+  const light = { x: 0, y: 0, tx: 0, ty: 0, z: 0, set: false };
+  const lightFrame = () => ({ x: light.x, y: light.y, z: light.z, r2: (light.z * 2.6) ** 2 });
+  const toneAt = (x, y, relief, lit) => {
+    const b = relief.grid.get(Math.floor(x / relief.G) * 65536 + Math.floor(y / relief.G));
+    if (!b) return 0;
+    const inside = b.shapes.some((sh) => wound(sh, x, y));
+    // Depth over half a stroke, and the unit direction that runs downhill
+    // to the nearest edge.
+    let dmin = Infinity;
+    let qx = x;
+    let qy = y;
+    for (const [ax, ay, ex, ey] of b.runs) {
+      const l2 = ex * ex + ey * ey;
+      const t = clamp(((x - ax) * ex + (y - ay) * ey) / l2, 0, 1);
+      const cx = ax + t * ex;
+      const cy = ay + t * ey;
+      const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+      if (d2 < dmin) {
+        dmin = d2;
+        qx = cx;
+        qy = cy;
+      }
+    }
+    let best = 1;
+    let ox = 0;
+    let oy = 0;
+    if (dmin < Infinity) {
+      const d = Math.sqrt(dmin);
+      best = (inside ? d : -d) / relief.h;
+      const s = d > 1e-6 ? (inside ? 1 : -1) / d : 0;
+      ox = (qx - x) * s;
+      oy = (qy - y) * s;
+    }
+    // The half pipe: the surface normal leans out by (1 - depth).
+    const lean = 1 - clamp(best, 0, 1);
+    const nx = ox * lean;
+    const ny = oy * lean;
+    const nz = Math.sqrt(Math.max(0, 1 - lean * lean));
+    let lx = lit.x - x;
+    let ly = lit.y - y;
+    const lz = lit.z;
+    const flat2 = lx * lx + ly * ly;
+    const il = 1 / Math.sqrt(flat2 + lz * lz);
+    lx *= il;
+    ly *= il;
+    const lzn = lz * il;
+    const diffuse = Math.max(0, nx * lx + ny * ly + nz * lzn);
+    // Blinn highlight, the eye straight above the page.
+    let hx = lx;
+    let hy = ly;
+    let hz = lzn + 1;
+    const ih = 1 / Math.sqrt(hx * hx + hy * hy + hz * hz);
+    hx *= ih;
+    hy *= ih;
+    hz *= ih;
+    const spec = Math.max(0, nx * hx + ny * hy + nz * hz) ** 28;
+    // The light falls off across the page, so the word holds a broad
+    // gradient as well as the relief.
+    const fall = 1 / (1 + flat2 / lit.r2);
+    const bright = clamp(1.3 * diffuse * (0.45 + 0.55 * fall) + 0.6 * spec - 0.04, 0, 1);
+    return 0.1 + 0.86 * (1 - bright);
+  };
+
   let cov = null;
+  let toneDirty = false;
   const sampleCover = () => {
     const cell = raster.cell;
     const strokes = [];
+    const shapes = [];
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
@@ -518,8 +706,10 @@ export async function createRaster(host, { embedded = false } = {}) {
     for (const g of glyphs.concat(dying)) {
       for (const st of g.strokes) {
         const path = new Path2D();
-        if (!outline(st, path)) continue;
+        const loops = [];
+        if (!outline(st, path, loops)) continue;
         strokes.push(path);
+        shapes.push(shapeOf(loops, st.h.v));
         const m = Math.max(0, st.h.v) * 2 + 1;
         for (const p of st.pts) {
           x0 = Math.min(x0, p.x.v - m);
@@ -529,7 +719,7 @@ export async function createRaster(host, { embedded = false } = {}) {
         }
       }
     }
-    if (!strokes.length) return { i0: 0, j0: 0, cols: 0, rows: 0, a: new Float32Array(0) };
+    if (!strokes.length) return { i0: 0, j0: 0, cols: 0, rows: 0, raw: new Float32Array(0), a: new Float32Array(0), relief: null };
     // The ink's box, turned into the screen frame.
     let s0 = Infinity;
     let t0 = Infinity;
@@ -585,7 +775,30 @@ export async function createRaster(host, { embedded = false } = {}) {
     }
     const norm = 1 / (255 * ss * ss);
     for (let n = 0; n < sum.length; n++) sum[n] = Math.min(1, sum[n] * norm);
-    return { i0, j0, cols, rows, a: sum };
+    const out = { i0, j0, cols, rows, raw: sum, a: new Float32Array(sum.length), relief: buildRelief(shapes) };
+    shadeCover(out);
+    return out;
+  };
+  // The tone: each cell prints its area coverage times the ink the relief
+  // asks for at the cell's centre, so the spot follows the shading through
+  // the whole letter and not only along its edge.
+  const shadeCover = (c) => {
+    const cell = raster.cell;
+    const { cos, sin } = raster;
+    const lit = lightFrame();
+    for (let y = 0; y < c.rows; y++) {
+      const v = (y + c.j0 + 0.5) * cell;
+      for (let x = 0; x < c.cols; x++) {
+        const n = y * c.cols + x;
+        const raw = c.raw[n];
+        if (raw < 0.004) {
+          c.a[n] = 0;
+          continue;
+        }
+        const u = (x + c.i0 + 0.5) * cell;
+        c.a[n] = raw * toneAt(anchor.x + cos * u - sin * v, anchor.y + sin * u + cos * v, c.relief, lit);
+      }
+    }
   };
   const coverage = (c, i, j) => {
     const x = i - c.i0;
@@ -615,6 +828,10 @@ export async function createRaster(host, { embedded = false } = {}) {
     if (coverDirty || !cov) {
       cov = sampleCover();
       coverDirty = false;
+      toneDirty = false;
+    } else if (toneDirty) {
+      shadeCover(cov);
+      toneDirty = false;
     }
     if (snapCells) {
       snapCells = false;
@@ -693,7 +910,8 @@ export async function createRaster(host, { embedded = false } = {}) {
     enlist(cov, true);
   };
 
-  const outline = (s, path) => {
+  // The stroke's outline into `path`; with `loops`, also as point lists.
+  const outline = (s, path, loops) => {
     const P = s.pts;
     const n = P.length;
     const h = Math.max(0, s.h.v);
@@ -703,6 +921,12 @@ export async function createRaster(host, { embedded = false } = {}) {
     if (n === 1) {
       const { x, y } = { x: P[0].x.v, y: P[0].y.v };
       path.rect(x - h, y - h, 2 * h, 2 * h);
+      loops?.push([
+        [x - h, y - h],
+        [x + h, y - h],
+        [x + h, y + h],
+        [x - h, y + h],
+      ]);
       return true;
     }
     const L = [];
@@ -738,6 +962,7 @@ export async function createRaster(host, { embedded = false } = {}) {
       };
       loop(L);
       loop(R.reverse());
+      loops?.push(L, R);
       return true;
     }
     const d0 = dirs[0];
@@ -757,6 +982,7 @@ export async function createRaster(host, { embedded = false } = {}) {
     path.moveTo(all[0][0], all[0][1]);
     for (let i = 1; i < all.length; i++) path.lineTo(all[i][0], all[i][1]);
     path.closePath();
+    loops?.push(all);
     return true;
   };
 
@@ -929,6 +1155,18 @@ export async function createRaster(host, { embedded = false } = {}) {
     if (embedded && stage.idleFor() > 2500 && !drag) {
       demoT += dt;
       setScreen(9.5 - 4.5 * Math.cos(demoT * 0.45), 22.5 - 22.5 * Math.cos(demoT * 0.29), "drag");
+      light.tx = stage.width * (0.5 + 0.42 * Math.cos(demoT * 0.37));
+      light.ty = stage.height * (0.3 + 0.3 * Math.sin(demoT * 0.37));
+    }
+    // The light glides after the pointer.
+    const lk = 1 - Math.exp(-dt * 9);
+    const ldx = (light.tx - light.x) * lk;
+    const ldy = (light.ty - light.y) * lk;
+    if (Math.abs(ldx) + Math.abs(ldy) > 0.05) {
+      light.x += ldx;
+      light.y += ldy;
+      toneDirty = true;
+      dirty = true;
     }
     const moving = simulate(dt);
     const on = caretOn();
