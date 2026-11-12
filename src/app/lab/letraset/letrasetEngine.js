@@ -74,7 +74,7 @@ const smooth = (a, b, x) => {
 
 const PAPER = [242, 240, 235];
 const INK = [17, 17, 18];
-const PAPER_INK = "rgb(20, 19, 18)";
+const PAPER_INK = [20, 19, 18];
 
 // ---------------------------------------------------------------- paper
 
@@ -257,8 +257,9 @@ export async function createLetraset(host, { embedded = false } = {}) {
     const inkA = new Uint8Array(n);
     for (let i = 0; i < n; i++) inkA[i] = pd[i * 4 + 3];
 
-    // The adhesive's grip varies: patches let go early or late, and dust
-    // leaves a few pinholes that will not take at all.
+    // The adhesive's grip varies a little from patch to patch, but a full
+    // rub clears all of it; only a speck of dust here and there leaves a
+    // pinhole that will not take.
     const thr = new Float32Array(n);
     const crack = new Float32Array(n);
     const fs = 1 / (F * 0.16 * R);
@@ -266,16 +267,17 @@ export async function createLetraset(host, { embedded = false } = {}) {
       for (let i = 0; i < sw; i++) {
         const k = j * sw + i;
         if (!inkA[k]) continue;
-        let t = 0.42 + 1.25 * fbm(i * fs, j * fs, 31);
-        if (vnoise(i / (1.6 * R), j / (1.6 * R), 33) > 0.94) t += 4;
+        let t = 0.46 + 0.34 * fbm(i * fs, j * fs, 31);
+        if (vnoise(i / (1.4 * R), j / (1.4 * R), 33) > 0.982) t += 4;
         thr[k] = t;
       }
     }
-    // Cracks: warped Voronoi edges inside each glyph; some glyphs barely
-    // crack, a few crack across.
+    // Cracks: hairline, warped Voronoi edges inside each glyph where the film
+    // flexed. Most glyphs carry one or two, a few none. The value is the
+    // hairline's coverage of the pixel, so it stays continuous at any DPR.
     const r = rng(1977);
     for (const g of L.glyphs) {
-      const ns = 1 + Math.floor(Math.pow(r(), 1.5) * 4.6);
+      const ns = 1 + Math.floor(Math.pow(r(), 1.3) * 3.4);
       if (ns < 2) continue;
       const x0 = Math.floor(g.l * R) - 2;
       const x1 = Math.ceil(g.r * R) + 2;
@@ -284,16 +286,19 @@ export async function createLetraset(host, { embedded = false } = {}) {
       const seeds = [];
       for (let s = 0; s < ns; s++) seeds.push([x0 + r() * (x1 - x0), y0 + r() * (y1 - y0)]);
       const active = [];
-      for (let a = 0; a < ns; a++) for (let b = 0; b < ns; b++) active[a * ns + b] = active[b * ns + a] ?? r() < 0.5;
-      const warp = F * 0.12 * R;
-      const w = 0.62 * R;
+      for (let a = 0; a < ns; a++) for (let b = 0; b < ns; b++) active[a * ns + b] = active[b * ns + a] ?? r() < 0.25;
+      // A gentle bend plus a fine jag, so a crack runs across the stroke
+      // like a fracture rather than folding back on itself.
+      const warp = F * 0.035 * R;
+      const jag = F * 0.012 * R;
+      const w = 0.2 * R;
       const seed = Math.floor(r() * 1e6);
       for (let j = Math.max(0, y0); j < Math.min(sh, y1); j++) {
         for (let i = Math.max(0, x0); i < Math.min(sw, x1); i++) {
           const k = j * sw + i;
           if (!inkA[k]) continue;
-          const qx = i + (vnoise(i / (6 * R), j / (6 * R), seed) - 0.5) * warp;
-          const qy = j + (vnoise(i / (6 * R), j / (6 * R), seed + 9) - 0.5) * warp;
+          const qx = i + (vnoise(i / (14 * R), j / (14 * R), seed) - 0.5) * warp + (vnoise(i / (1.6 * R), j / (1.6 * R), seed + 3) - 0.5) * jag;
+          const qy = j + (vnoise(i / (14 * R), j / (14 * R), seed + 9) - 0.5) * warp + (vnoise(i / (1.6 * R), j / (1.6 * R), seed + 5) - 0.5) * jag;
           let a = -1;
           let b = -1;
           let da = 1e9;
@@ -313,7 +318,7 @@ export async function createLetraset(host, { embedded = false } = {}) {
           if (b < 0 || !active[a * ns + b]) continue;
           const sep = Math.hypot(seeds[a][0] - seeds[b][0], seeds[a][1] - seeds[b][1]);
           const e = (db - da) / (2 * sep);
-          crack[k] = 1 - smooth(0, w, e);
+          crack[k] = clamp(w / 2 + 0.5 - e, 0, Math.min(1, w));
         }
       }
     }
@@ -334,6 +339,15 @@ export async function createLetraset(host, { embedded = false } = {}) {
     paperInk.height = Math.round(H * R);
     const paperInkCtx = paperInk.getContext("2d");
 
+    // What has let go under the current pose, kept in sheet space and laid
+    // on the paper in one pass when the sheet moves, so pixels released by
+    // different strokes meet without a resampling seam.
+    const lay = document.createElement("canvas");
+    lay.width = sw;
+    lay.height = sh;
+    const layCtx = lay.getContext("2d");
+    const layImg = layCtx.createImageData(sw, sh);
+
     S = {
       W, H, R, L, sw, sh, inkA, thr, crack,
       press: new Float32Array(n),
@@ -341,7 +355,7 @@ export async function createLetraset(host, { embedded = false } = {}) {
       ink, inkCtx, inkImg, scuff, scuffCtx, paperInk, paperInkCtx,
       paper: makePaper(W, H, R),
       film: makeFilm(SW, SH, R),
-      temp: document.createElement("canvas"),
+      lay, layCtx, layImg, layPose: null,
       pose: { x: 0, y: 0, a: 0 },
     };
     paint(0, 0, sw, sh);
@@ -387,41 +401,50 @@ export async function createLetraset(host, { embedded = false } = {}) {
     S.inkCtx.putImageData(inkImg, 0, 0, x0, y0, x1 - x0, y1 - y0);
   };
 
-  // Lets go of every pixel in the block that has passed its threshold and
-  // lays it on the paper through the sheet's pose.
+  const samePose = (a, b) => Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3 && Math.abs(a.a - b.a) < 1e-6;
+
+  // Lays everything released under the last pose onto the paper in one
+  // resample, then starts an empty layer.
+  const commit = () => {
+    const { R, layPose: q } = S;
+    if (!q) return;
+    const p = S.paperInkCtx;
+    p.setTransform(R, 0, 0, R, 0, 0);
+    p.translate(q.x, q.y);
+    p.rotate(q.a);
+    p.drawImage(S.lay, 0, 0, S.sw / R, S.sh / R);
+    p.setTransform(1, 0, 0, 1, 0, 0);
+    S.layCtx.clearRect(0, 0, S.sw, S.sh);
+    S.layImg.data.fill(0);
+    S.layPose = null;
+  };
+
+  // Lets go of every pixel in the block that has passed its threshold onto
+  // the layer that travels to the paper with the sheet's current pose.
   const release = (x0, y0, x1, y1) => {
-    const { sw, inkA, thr, press, gone, crack, R } = S;
-    const w = x1 - x0;
-    const h = y1 - y0;
-    let out = null;
+    const { sw, inkA, thr, press, gone, crack, layImg } = S;
+    const d = layImg.data;
+    let any = false;
     for (let j = y0; j < y1; j++) {
       for (let i = x0; i < x1; i++) {
         const k = j * sw + i;
-        if (!inkA[k] || gone[k] || crack[k] > 0.5 || press[k] < thr[k]) continue;
+        if (!inkA[k] || gone[k] || press[k] < thr[k]) continue;
+        if (!any) {
+          any = true;
+          if (S.layPose && !samePose(S.layPose, S.pose)) commit();
+          if (!S.layPose) S.layPose = { ...S.pose };
+        }
         gone[k] = 1;
-        if (!out) out = new ImageData(w, h);
-        const o = ((j - y0) * w + (i - x0)) * 4;
-        out.data[o + 3] = inkA[k] * (1 - crack[k]);
+        const o = k * 4;
+        // A crack lets go too, but its hair of ink stays on the film: a
+        // paper-coloured fracture through a solid letter.
+        d[o] = PAPER_INK[0];
+        d[o + 1] = PAPER_INK[1];
+        d[o + 2] = PAPER_INK[2];
+        d[o + 3] = inkA[k] * (1 - crack[k]);
       }
     }
-    if (!out) return;
-    const t = S.temp;
-    if (t.width < w || t.height < h) {
-      t.width = Math.max(t.width, w);
-      t.height = Math.max(t.height, h);
-    }
-    const tc = t.getContext("2d");
-    tc.clearRect(0, 0, w, h);
-    tc.putImageData(out, 0, 0);
-    tc.globalCompositeOperation = "source-in";
-    tc.fillStyle = PAPER_INK;
-    tc.fillRect(0, 0, w, h);
-    tc.globalCompositeOperation = "source-over";
-    const p = S.paperInkCtx;
-    p.setTransform(R, 0, 0, R, 0, 0);
-    p.translate(S.pose.x, S.pose.y);
-    p.rotate(S.pose.a);
-    p.drawImage(t, 0, 0, w, h, x0 / R, y0 / R, w / R, h / R);
+    if (any) S.layCtx.putImageData(layImg, 0, 0, x0, y0, x1 - x0, y1 - y0);
   };
 
   // One burnisher stroke from a to b, in sheet units. Each pixel takes the
@@ -511,20 +534,23 @@ export async function createLetraset(host, { embedded = false } = {}) {
 
   // The lyric, rubbed down by hand: each letter placed by eye, so the
   // spacing and baseline wander a little, and each rubbed differently.
+  // Practised hands: nearly every letter goes down whole, with only its
+  // hairline cracks and the odd pinhole. One rub stopped short of the R's
+  // outer edge, and the A took a quicker, lighter rub that only just held.
   const RUBS = [
-    { passes: 4, gain: 0.3 },
-    { passes: 3, gain: 0.26, x1: 0.8 },
-    { passes: 4, gain: 0.3 },
-    { passes: 3, gain: 0.28 },
-    { passes: 4, gain: 0.3 },
-    { passes: 2, gain: 0.22 },
     { passes: 4, gain: 0.32 },
-    { passes: 3, gain: 0.3 },
-    { passes: 3, gain: 0.26, y0: 0.15 },
     { passes: 4, gain: 0.3 },
-    { passes: 3, gain: 0.28 },
+    { passes: 4, gain: 0.32 },
+    { passes: 3, gain: 0.32 },
     { passes: 4, gain: 0.3 },
-    { passes: 3, gain: 0.26 },
+    { passes: 4, gain: 0.32 },
+    { passes: 3, gain: 0.3, x1: 0.66 },
+    { passes: 4, gain: 0.32 },
+    { passes: 4, gain: 0.3 },
+    { passes: 4, gain: 0.32 },
+    { passes: 3, gain: 0.32 },
+    { passes: 2, gain: 0.2 },
+    { passes: 4, gain: 0.3 },
   ];
   const BASE_A = -0.011;
 
@@ -732,6 +758,13 @@ export async function createLetraset(host, { embedded = false } = {}) {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(S.paper, 0, 0, W, H);
     ctx.drawImage(S.paperInk, 0, 0, W, H);
+    if (S.layPose) {
+      ctx.save();
+      ctx.translate(S.layPose.x, S.layPose.y);
+      ctx.rotate(S.layPose.a);
+      ctx.drawImage(S.lay, 0, 0, SW, SH);
+      ctx.restore();
+    }
 
     ctx.save();
     ctx.translate(S.pose.x, S.pose.y);
