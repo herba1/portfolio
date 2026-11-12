@@ -32,3 +32,22 @@ the fill holds under any branch sway.
 
     python3 -I barkmask.py
     python3 -I bark.py '{"stops":1.3,"mixc":0.6,"tgt":[1.36,0.94,0.6]}'
+
+## mattes and fill, cleaned
+
+`clean.py` runs over the shipped `canopy.webp` and `layers.webp` (copied in as
+`canopy.orig.webp`, `layers.orig.webp`). Right of the central cypress
+(asset ~960-1060, 1765-1830) the far matte had a sky gap smeared along rows,
+foliage slivers across it and a doubled blob at its tip, with sky blue and
+black unmixing residue in the fill. The gap is cut back to its body (what
+survives a 15 px opening), the rest becomes far foliage, coloured by a block
+of far-pine needles from nearby (best match on the ring round the fill, then
+levelled to the surround at low frequency). Then, over all three mattes:
+lone small sky holes in solid foliage (under 100 px of visible sky, not
+touching a real gap) are closed in the layer round them; every matte is
+feathered (sigma 1.6 px); the fill under every see-through edge gets the
+local needle colour where it was black residue, sky blue or blown, and rim
+needles are lifted to within 0.25 stop of their neighbours so a gap has no
+ink outline; last, the feathered rim is broken up by the needles' own light.
+
+    python3 -I clean.py '{"out":".../public/lab/komorebi/"}'
