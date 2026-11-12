@@ -51,6 +51,64 @@ const ALBEDO_MAX = 1.0;
 const S_PHOTO = (T0 - T_START) / T_SPAN;
 const S_OPEN = 0.78;
 
+// Thin occluders, fitted by hand to the plate: the two lamp standards with
+// their mast arms and signal heads, the utility poles and their crossarms,
+// the signal and sign poles. Each structure stands where its foot meets the
+// road (the ground row gives its exact depth), and its parts are capsules in
+// the plane through that foot: [x0, y0, x1, y1, radius m] in plate pixels.
+// Depth Anything only knows a pole's depth to about its own width, too loose
+// for the march to catch a 0.3 m pole; these cast the long late shadows
+// across the road sharply, the way the poles themselves would.
+const POLES = [
+  // left lamp standard, mast arm and signal head over the near lane
+  { foot: 1505, parts: [[90, 1505, 100, 476, 0.2], [100, 536, 204, 508, 0.09], [168, 507, 228, 505, 0.2], [100, 983, 445, 983, 0.11], [458, 986, 534, 986, 0.26]] },
+  // utility pole by the planter, two crossarms and the transformer
+  { foot: 1497, parts: [[460, 1497, 440, 566, 0.21], [420, 662, 550, 662, 0.09], [376, 722, 510, 722, 0.09], [470, 842, 506, 826, 0.3]] },
+  // the pole behind the bus stop
+  { foot: 1492, parts: [[545, 1492, 555, 762, 0.17], [510, 834, 602, 834, 0.08]] },
+  // right lamp standard and its mast arm out to the signal
+  { foot: 1485, parts: [[2237, 1485, 2237, 466, 0.22], [2237, 526, 2150, 500, 0.09], [2120, 492, 2176, 495, 0.2], [1880, 995, 2237, 995, 0.11], [1862, 985, 1960, 985, 0.26]] },
+  // signal pole with the swan-neck lamp
+  { foot: 1480, parts: [[1945, 1480, 1945, 950, 0.15], [1945, 950, 1850, 880, 0.07], [1850, 880, 1770, 873, 0.07]] },
+  // far-side pole with its sign gantry
+  { foot: 1475, parts: [[1622, 1475, 1622, 1165, 0.15], [1415, 1174, 1622, 1174, 0.09], [1415, 1230, 1622, 1230, 0.09]] },
+];
+// And what the frame does not show: the photographer's own corner, just out
+// of shot to the left: two utility poles, the corner house, and past a side
+// street the narrow end of the next block. Camera space, metres (y up from
+// the lens, the road at -CAM_H). At the photo's sun their shadows fall away
+// out of frame; only once the sun swings round behind-left, in the last two
+// hours, do they reach in: the block's shadow cuts diagonally across the
+// crosswalk, the light through the side street lays a band over the near
+// road with the poles' shadows raked across it, and the house's eave line
+// climbs the foreground.
+const offPole = (x, z, h) => [
+  [x, -CAM_H, z, x + 0.1, h - CAM_H, z, 0.26],
+  [x - 1.3, h - 2.8, z, x + 1.3, h - 2.8, z, 0.09],
+  [x - 1.1, h - 3.8, z, x + 1.1, h - 3.8, z, 0.09],
+  [x + 0.1, h - 5.6, z + 0.3, x + 0.4, h - 4.6, z + 0.3, 0.34],
+];
+const OFF_FRAME = [...offPole(-12, 20, 12), ...offPole(-15.5, 31, 12.5)];
+// Min and max corners: the corner house (7.5 m to the eaves), the next
+// block (11 m).
+const BOXES = [
+  [-40, -CAM_H, -30, -13, 7.5 - CAM_H, 6],
+  [-40, -CAM_H, 22, -16, 11 - CAM_H, 27],
+];
+function occluders() {
+  const out = [];
+  for (const { foot, parts } of POLES) {
+    const Z = (CAM[0] * CAM_H) / (foot - CAM[2]);
+    const at = (x, y) => [((x - CAM[1]) * Z) / CAM[0], ((CAM[2] - y) * Z) / CAM[0], Z];
+    for (const [x0, y0, x1, y1, r] of parts) out.push([...at(x0, y0), r, ...at(x1, y1), 0]);
+  }
+  for (const [ax, ay, az, bx, by, bz, r] of OFF_FRAME) out.push([ax, ay, az, r, bx, by, bz, 0]);
+  return out;
+}
+const OCC = occluders();
+const OCC_FLAT = new Float32Array(OCC.flat());
+const BOX_FLAT = new Float32Array(BOXES.flatMap((b) => [b[0], b[1], b[2], 0, b[3], b[4], b[5], 0]));
+
 const LUMA = [0.2126, 0.7152, 0.0722];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const rad = (d) => (d * Math.PI) / 180;
@@ -72,7 +130,14 @@ function sunAt(t) {
   const warm = clamp(1 - deg / 35, 0, 1);
   const g = 0.2 + 0.8 * Math.sqrt(Math.max(se, 0));
   const sky = SKY_NOON.map((v, i) => v * g * (1 + warm * SKY_WARM[i]));
-  return { L, sun, sky, el: deg, warm };
+  // How far into the late afternoon: 0 at the photo's high sun, 1 at the end.
+  const late = clamp((62 - deg) / 56, 0, 1);
+  // The fill the shadows get. The bake's hazy-noon sky is fitted to the photo
+  // and stays exact there; as the sun drops the haze thins toward the clear
+  // late sky, so the shade loses fill against the direct light and the long
+  // shadows come up nearer two stops than one.
+  const fill = sky.map((v) => v * (1 - 0.6 * late * late));
+  return { L, sun, sky, fill, el: deg, warm, late };
 }
 
 const VERT = `#version 300 es
@@ -218,6 +283,9 @@ uniform float uCloud;
 uniform vec3 uLo;
 uniform vec3 uHi;
 uniform float uDebug;
+uniform float uLate;     // 0 at the photo's sun .. 1 at the last light
+uniform vec4 uOcc[${OCC.length * 2}];
+uniform vec4 uBox[${BOXES.length * 2}];
 ${COMMON}
 vec3 s2l(vec3 c) { c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 vec3 l2s(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -228,6 +296,67 @@ vec3 shading(vec3 N, float vis) {
   float circ = 1.0 + 0.35 * max(dot(N, Lh), 0.0);
   vec3 horiz = uSun * uL.y + uSky;
   return uSun * vis * ndl + uSky * (0.5 + 0.5 * N.y) * circ + ${BOUNCE.toFixed(3)} * horiz * (0.5 - 0.5 * N.y);
+}
+
+// Hard-edged thin occluders: the closest approach of the ray to the sun to
+// each capsule, against its radius, softened by the sun's own disc (half a
+// degree) so the shadow sharpens at the foot and blurs toward its tip.
+float poleVis(vec3 P, vec2 px) {
+  float v = 1.0;
+  for (int i = 0; i < ${OCC.length}; i++) {
+    vec3 A = uOcc[2 * i].xyz;
+    float r = uOcc[2 * i].w;
+    vec3 B = uOcc[2 * i + 1].xyz;
+    vec3 E = B - A;
+    // a pixel on (or right beside) the occluder itself is not its receiver
+    if (A.z > 2.0 && B.z > 2.0) {
+      vec2 a = proj(A);
+      vec2 e = proj(B) - a;
+      float h = clamp(dot(px - a, e) / max(dot(e, e), 1e-4), 0.0, 1.0);
+      if (length(px - a - e * h) < r * uCam.x / A.z + 5.0) continue;
+    }
+    vec3 w0 = P - A;
+    float b = dot(uL, E);
+    float c = dot(E, E);
+    float d = dot(uL, w0);
+    float e2 = dot(E, w0);
+    float den = c - b * b;
+    float u = den > 1e-5 ? clamp((e2 - b * d) / den, 0.0, 1.0) : 0.0;
+    float t = max(dot(A + E * u - P, uL), 0.0);
+    u = clamp(dot(P + uL * t - A, E) / c, 0.0, 1.0);
+    t = max(dot(A + E * u - P, uL), 0.0);
+    if (t < 0.3) continue;
+    float dist = length(P + uL * t - A - E * u);
+    float pen = 0.03 + 0.0042 * t;
+    float occ = clamp((r + pen - dist) / (2.0 * pen), 0.0, 1.0) * min(1.0, r / pen);
+    v *= 1.0 - occ;
+  }
+  // Boxes: where the ray crosses each face plane, how far inside the face it
+  // is (metres, + inside); the largest is the ray's depth into the
+  // silhouette, which the sun's disc turns into a soft edge.
+  for (int i = 0; i < ${BOXES.length}; i++) {
+    vec3 lo = uBox[2 * i].xyz;
+    vec3 hi = uBox[2 * i + 1].xyz;
+    vec3 c = 0.5 * (lo + hi);
+    vec3 hw = 0.5 * (hi - lo);
+    float best = -1e3;
+    float tb = 0.0;
+    for (int k = 0; k < 3; k++) {
+      if (abs(uL[k]) < 1e-4) continue;
+      for (int sgn = 0; sgn < 2; sgn++) {
+        float plane = sgn == 0 ? lo[k] : hi[k];
+        float t = (plane - P[k]) / uL[k];
+        if (t <= 0.3) continue;
+        vec3 q = abs(P + uL * t - c) - hw;
+        q[k] = -1e3;
+        float inside = -max(max(q.x, q.y), q.z);
+        if (inside > best) { best = inside; tb = t; }
+      }
+    }
+    float pen = 0.03 + 0.0042 * tb;
+    v *= 1.0 - smoothstep(-pen, pen, best);
+  }
+  return v;
 }
 
 // Cloud shadow: follow the ray to the sun up to the cloud deck at 1.6 km and
@@ -251,22 +380,41 @@ void main() {
   float vis = mix(texture(uVis, vUv).r, dz.g, uW0);
   vec3 P = viewPos(px, Z);
   float cs = Z < 3500.0 ? cloudShadow(P + vec3(0.0, ${CAM_H.toFixed(2)}, 0.0)) : 1.0;
-  vec3 surf = base * ${ALBEDO_MAX.toFixed(3)} * shading(N, vis * cs);
+  float pv = Z < 3500.0 && mt.r < 0.5 && dot(N, uL) > 0.0 ? mix(poleVis(P, px), 1.0, uW0) : 1.0;
+  vec3 surf = base * ${ALBEDO_MAX.toFixed(3)} * shading(N, vis * cs * pv);
 
-  // Sky: the photo's own light, warmed as the sun drops; the cumulus take the
-  // sun's colour on the faces it reaches (it is behind us), the clear blue
-  // only a little.
+  // Sky, driven by the same sun. The clear blue deepens from the hazy
+  // horizon to cobalt overhead, more so as the sun drops and the sky ahead
+  // of us (90 degrees from it) polarises; low down it keeps a pale warm
+  // haze. The cumulus take the sun's colour on the faces it reaches (it is
+  // behind us, to the left late on), and their shaded undersides go to the
+  // blue of the sky they are lit by.
   vec3 sunTint = uSun / max(dot(uSun, LUMA), 1e-4);
-  vec3 clear = base * mix(vec3(1.0), vec3(1.05, 0.995, 0.93), uWarm);
-  vec3 cloud = base * mix(vec3(1.0), sunTint, 0.7 * uWarm);
+  vec3 vd = normalize(vec3((px.x - uCam.y) / uCam.x, (uCam.z - px.y) / uCam.x, 1.0));
+  float zen = smoothstep(0.02, 0.5, vd.y);
+  float hz = 1.0 - smoothstep(0.0, 0.16, vd.y);
+  vec3 cobalt = vec3(0.2, 0.4, 1.18);
+  vec3 clear = base * mix(vec3(1.0), cobalt, zen * (0.45 + 0.55 * uLate));
+  clear *= mix(vec3(1.0), vec3(1.1, 1.0, 0.86), hz * uLate * 0.8);
+  clear *= 1.0 - 0.22 * zen * uLate;
+  // Which way a cloud pixel faces: bright in the photo means sunlit, and a
+  // pixel with less cloud above it (or, late, to its left) is a top.
+  float cy = dot(base, LUMA);
+  vec2 tx = vec2(1.0 / uPlate.x, 1.0 / uPlate.y);
+  float gUp = textureLod(uMat, t - vec2(0.0, 26.0) * tx, 2.0).g;
+  float gLeft = textureLod(uMat, t - vec2(30.0, 8.0) * tx, 2.0).g;
+  float lit = clamp(smoothstep(0.42, 0.86, cy) * 0.8 + (mt.g - gUp) * 1.6 + (mt.g - gLeft) * 1.2 * uLate, 0.0, 1.0);
+  vec3 skyBlue = vec3(0.62, 0.92, 1.3);
+  vec3 cloudLit = base * mix(vec3(1.0), sunTint * vec3(1.06, 1.0, 1.0), 0.95 * uLate);
+  vec3 cloudShade = base * mix(vec3(1.0), skyBlue, 0.75 * uLate) * (1.0 - 0.3 * uLate);
+  vec3 cloud = mix(cloudShade, cloudLit, lit);
   // Toward the low sun (off the frame to the left) the sky brightens and
   // warms: forward scattering by the haze.
-  vec3 vd = normalize(vec3((px.x - uCam.y) / uCam.x, (uCam.z - px.y) / uCam.x, 1.0));
   float glow = exp((dot(vd, uL) - 1.0) / 0.45) * uWarm;
   vec3 sky = (mix(clear, cloud, mt.g) + base * sunTint * glow * 0.45) * uSkyGain;
 
   vec3 col = mix(surf, sky, mt.r) * uExpo;
-  if (uDebug > 0.5) col = vec3(vis * cs * max(dot(N, uL), 0.0)) * (1.0 - mt.r) * 0.6;
+  if (uDebug > 0.5) col = vec3(vis * cs * pv * max(dot(N, uL), 0.0)) * (1.0 - mt.r) * 0.6;
   // Back through the photo's own scan grade (lifted, tinted black; rolled
   // white), unclamped above white so the film's shoulder gets the highlights.
   vec3 s = uLo + (uHi - uLo) * l2s(col);
@@ -494,7 +642,7 @@ export async function createAfternoon(host, { embedded = false } = {}) {
   };
 
   const photo = sunAt(T0);
-  const lumH = (s) => dot3(s.sun, LUMA) * Math.max(s.L[1], 0) + dot3(s.sky, LUMA);
+  const lumH = (s) => dot3(s.sun, LUMA) * Math.max(s.L[1], 0) + dot3(s.fill, LUMA);
 
   // Sun: the drag sets a goal; what you see follows on a spring.
   let goal = held ? clamp(sunQ, 0, 1) : S_PHOTO;
@@ -593,7 +741,7 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     bindTex(4, T.vis.tex, u.uVis);
     gl.uniform3fv(u.uL, sun.L);
     gl.uniform3fv(u.uSun, sun.sun);
-    gl.uniform3fv(u.uSky, sun.sky);
+    gl.uniform3fv(u.uSky, sun.fill);
     const ang = Math.acos(clamp(dot3(sun.L, photo.L), -1, 1));
     gl.uniform1f(u.uW0, Math.exp(-((ang / 0.09) ** 2)));
     // Exposure follows the light about half way, as a photographer would.
@@ -601,6 +749,9 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     gl.uniform1f(u.uExpo, expo * 2 ** expoStops);
     gl.uniform1f(u.uSkyGain, Math.pow(dot3(sun.sky, LUMA) / dot3(photo.sky, LUMA), 1.6));
     gl.uniform1f(u.uWarm, sun.warm);
+    gl.uniform1f(u.uLate, sun.late);
+    gl.uniform4fv(u["uOcc[0]"], OCC_FLAT);
+    gl.uniform4fv(u["uBox[0]"], BOX_FLAT);
     // A light breeze, ~3 m/s from the west-south-west.
     gl.uniform2f(u.uWind, 420 + time * 2.6, -260 + time * 1.2);
     gl.uniform1f(u.uCloud, 0.78);
@@ -618,12 +769,14 @@ export async function createAfternoon(host, { embedded = false } = {}) {
         {
           ...FILM_PRESETS.summer,
           // The scan already carries its grade; the film adds the optics.
-          contrast: 1.08,
+          // and late, the low sun's harder light: a touch more contrast, the
+          // shade cooler and the sunlit side warmer.
+          contrast: 1.08 + 0.1 * sun.late,
           toe: 0.0,
           saturation: 1.04,
           blueDepth: 0.35,
-          shadowTint: [0.97, 1, 1.03],
-          highlightTint: [0.99, 1, 1.01],
+          shadowTint: [0.97 - 0.02 * sun.late, 1, 1.03 + 0.03 * sun.late],
+          highlightTint: [0.99 + 0.03 * sun.late, 1, 1.01 - 0.05 * sun.late],
           vignette: 0.22,
           whitePoint: 1.25,
           input: linear ? "linear" : "srgb",
