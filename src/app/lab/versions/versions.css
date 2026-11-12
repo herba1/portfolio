@@ -138,7 +138,6 @@
   letter-spacing: var(--text-heading--letter-spacing);
   font-weight: var(--text-heading--font-weight);
   text-wrap: balance;
-  /* As wide as its words, so the leader can start where they end. */
   width: max-content;
   max-width: 100%;
 }
@@ -261,8 +260,8 @@
 
 /* The margin: the stack's own index, laid out in the scene's flat plane so
    the dates never take the perspective. One hairline a gutter clear of the
-   front sheet, running the stack's height; a tick on each spine's baseline
-   reaching back toward it; the date set against the rule. Positions are set
+   front sheet, running the stack's height; a short tick on each spine's
+   baseline, the same length at every depth; the date set against the rule. Positions are set
    from the stack's geometry in versionsEngine.js. */
 .versions-timeline {
   position: absolute;
@@ -297,17 +296,18 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* A leader drawn from the rule back to its own sheet's edge, through the
-   middle of the lower case, so change, leader and date read as one row and
-   no leader ever crosses paper. The current save's is inked; the rest are
-   the sheets' own hairline. */
+/* A short tick off the rule, back toward the stack, through the middle of
+   the lower case on its spine's baseline. Every tick is the same length:
+   the stack and the margin are two columns joined by alignment, never by a
+   wire across the gutter. The current save's is inked; the rest are the
+   sheets' own hairline. */
 .versions-tick::before {
   content: "";
   position: absolute;
   left: calc(var(--versions-gutter, 28px) + 1px);
   top: var(--versions-tick-at, 15px);
   height: 1px;
-  width: var(--reach, var(--versions-reach, 8px));
+  width: var(--versions-reach, 8px);
   background: color-mix(in srgb, var(--versions-ink) calc(var(--near, 0) * 100%), var(--versions-edge));
   transform: translateX(-100%);
 }

@@ -33,7 +33,8 @@ const PAD = 32; // px, a card's side padding
 const AXIS = CARD_L + PAD;
 const MEASURE = CARD_R - CARD_L - 2 * PAD; // px, the text column's width
 // The margin: one hairline GUTTER px clear of the front card's right edge,
-// ticks reaching back toward the spines, dates set GAP px past the rule.
+// a short tick on the rule at each spine's baseline, dates set GAP px past
+// the rule. Nothing crosses the gutter: the margin is its own column.
 const GUTTER = 28;
 const RULE = CARD_R + GUTTER;
 const TICK = 8; // px, a tick's reach back from the rule
@@ -245,19 +246,17 @@ export function createVersions(root, { embedded = false } = {}) {
       ticks[i].style.visibility = "visible";
       ticks[i].style.transform = `translate3d(0, ${(at - dateBase).toFixed(2)}px, 0)`;
       whens[i].style.transform = kd < 0.999 ? `scale(${kd.toFixed(4)})` : "none";
-      // The leader runs through the middle of the lower case, so it meets
-      // the date and the line it joins rather than underlining them.
+      // The tick sits through the middle of the lower case, so it points at
+      // the date's line rather than underlining it.
       ticks[i].style.setProperty("--versions-tick-at", `${(dateBase - 4 * kd).toFixed(2)}px`);
       ticks[i].style.opacity = alpha.toFixed(3);
-      // A leader from the sheet's own edge out to the rule, on the spine's
-      // line: the change and its date read as one row, like a contents page.
-      // It starts where its paper ends, so it never runs over a sheet,
-      // its own or another, and the margin stands clear of the stack.
-      const end = AXIS + (x + CARD_R - AXIS) * sc;
+      // No wire runs from the sheet to the margin: the stack and the margin
+      // are two columns joined only by the baseline they share, the way a
+      // tracklist sets its times. Each row gets one TICK-long mark on the
+      // rule, the same at every depth.
       // The rule runs the stack's full height, from the oldest sheet still
       // behind to the foot of the front one, wherever perspective has it.
       if (foot == null && d >= 0) foot = edge + heights[i] * sc;
-      ticks[i].style.setProperty("--reach", `${Math.max(TICK, RULE + 1 - end).toFixed(2)}px`);
       c.style.filter = blur > 0.02 ? `blur(${blur.toFixed(2)}px)` : "none";
       c.style.opacity = alpha.toFixed(3);
       c.style.zIndex = String(1000 - Math.round(d * 40));
@@ -273,7 +272,7 @@ export function createVersions(root, { embedded = false } = {}) {
     }
     rule.style.top = `${top.toFixed(2)}px`;
     rule.style.height = `${Math.max(0, (foot ?? top) - top).toFixed(2)}px`;
-    // The current save's leader is drawn in full ink.
+    // The current save's tick is drawn in full ink.
     for (let i = 0; i < COUNT; i += 1) {
       const near = 1 - smooth(0, 0.6, Math.abs(i - q));
       ticks[i].style.setProperty("--near", near.toFixed(3));
