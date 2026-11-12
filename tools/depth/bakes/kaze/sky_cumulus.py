@@ -31,20 +31,30 @@ from a grid of optical depth toward the sun (SUN, the frame's top left
 corner, as in kazeEngine.js) and toward the zenith:
 
 - sun: warm-neutral white, with the multiple scattering of a dense cloud
-  (three octaves, each softer and reaching deeper; Wrenninge et al. 2013),
-  so the sunlit domes glow and the light rolls round their shoulders;
-- skylight: cyan-blue, from above, dimmed by the cloud over the sample,
-  so the flanks turned from the sun take the sky's colour and the base,
-  under the whole tower, is the darkest, a flat blue-grey;
+  (four octaves, each with half the extinction, half the contribution and
+  half the forward lobe of the last; Wrenninge et al. 2013), and deeper
+  still a diffusion term (1 / (1 + tau)), so the whole body is lit from
+  within and glows instead of shading as grey clay; the light rolls round
+  the domes' shoulders, warm on the faces toward the sun;
+- skylight: the zenith's pale cyan (hue about 200), from above, dimmed by
+  the cloud over the sample, with high floors (inside a cumulus the sky's
+  light is scattered round too), so the flanks turned from the sun print a
+  luminous skylight cyan and the base, under the whole tower, the deepest;
 - a little warm bounce from the summer ground on the undersides;
-- forward scattering (Henyey-Greenstein) where a thin edge stands between
-  you and the sun: the silver lining, strongest on the mass nearest it;
+- forward scattering (Henyey-Greenstein, g 0.6) where a thin edge stands
+  between you and the sun: the silver lining; and the powder (the skin
+  looking away from the sun a little darker than the cloud just inside it);
+- a soft skin: the density eases in (smoothstep) over its last metres, and
+  the finest billows carry about half their old amplitude, so silhouettes
+  fade into the sky over a few pixels and the domes read as soft billows;
 - a little air between: the far masses lean toward the sky behind them.
 
 The open sky and the sun's bloom are sky_tower.py's (open_sky). The cloud
-is exposed so its brightest domes print under the clip, rolled off to warm
-white by a shoulder; the engine's grade and the film's shoulder carry them
-the rest of the way.
+is exposed by its median (WHITE at PCT 50), so the body sits high, as a
+real cumulus's does (luminance p25/p50 about 185/205 on screen), and its
+brightest domes roll off under the clip through a shoulder that whitens as
+it rolls (DESAT), as film does near its white; the engine's grade and the
+film's shoulder carry them the rest of the way.
 
   python tools/depth/bakes/kaze/sky_cumulus.py [out.webp]
   SCALE=0.5 PREVIEW=preview.png python ...   (a quick half-size look)
@@ -69,16 +79,25 @@ LVOX = float(os.environ.get("LVOX", 0.03))  # km: the light grid
 LUM = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
 # Light, linear, before the exposure.
-SUN_C = np.array([1.0, 0.94, 0.83], np.float32)       # warm-neutral
-SKY_C = np.array([0.26, 0.50, 1.0], np.float32)       # skylight, cyan-blue
+SUN_C = np.array([1.0, 0.91, 0.74], np.float32)       # warm-neutral
+# The skylight, and the multiply scattered light inside the cloud, take the
+# zenith's colour, not grey: a pale cyan (hue about 200), so the flanks
+# turned from the sun print a luminous skylight cyan and never lean lavender.
+SKY_C = np.array([float(c) for c in os.environ.get("SKYC", "0.36,0.62,1.0").split(",")], np.float32)
 GND_C = np.array([0.55, 0.50, 0.40], np.float32)      # bounce off the summer ground
-KS = float(os.environ.get("KS", 1.0))    # sun
-KA = float(os.environ.get("KA", 1.4))   # skylight
+KS = float(os.environ.get("KS", 4.0))    # sun
+KA = float(os.environ.get("KA", 2.4))   # skylight
+KM = float(os.environ.get("KM", 1.4))   # the deep multiple scattering (diffusion)
 KG = float(os.environ.get("KG", 0.05))   # ground bounce
+G0 = float(os.environ.get("G0", 0.6))    # forward lobe of the first octave
+OCT = int(os.environ.get("OCT", 4))      # scattering octaves
+POW = float(os.environ.get("POW", 0.5))  # the powder: how dark the sun-averted skin
 SIGMA = float(os.environ.get("SIGMA", 70.0))  # /km at full density
 RAMP = float(os.environ.get("RAMP", 0.014))   # km: the soft skin, where density climbs to full
-WHITE = float(os.environ.get("WHITE", 0.86))
-PCT = float(os.environ.get("PCT", 97.0))  # linear: where the brightest domes are exposed to
+FINE = float(os.environ.get("FINE", 0.010))   # km: the fine billows' depth
+WHITE = float(os.environ.get("WHITE", 0.77))
+DESAT = float(os.environ.get("DESAT", 0.5))  # how far the shoulder whitens
+PCT = float(os.environ.get("PCT", 50.0))  # the cloud's median is exposed to WHITE (linear)
 
 # The masses: azimuth (deg, 0 straight ahead = the frame's bottom centre,
 # east positive, -90 west, the sun's side); horizontal distance of the axis
@@ -213,8 +232,9 @@ def vnoise(x, y, z, seed):
 
 
 @nb.njit(cache=True)
-def billow(x, y, z, f0, octs, seed):
-    """Billowy fBm (folded value noise): rounded bumps, sharp creases."""
+def billow(x, y, z, f0, octs, seed, gain=0.5):
+    """Billowy fBm (folded value noise): rounded bumps, sharp creases. gain
+    is each octave's amplitude after the last (0.5, pink)."""
     s = 0.0
     a = 0.5
     f = f0
@@ -222,9 +242,21 @@ def billow(x, y, z, f0, octs, seed):
     for o in range(octs):
         s += a * (1.0 - 2.0 * abs(vnoise(x * f, y * f, z * f, seed + o * 17)))
         tot += a
-        a *= 0.5
+        a *= gain
         f *= 2.03
     return s / tot
+
+
+# The fine billows, read live: the crinkle at a few metres. Its octaves fall
+# off faster than pink (gain 0.35, so the finest two carry about half the
+# amplitude they did), so the domes read as soft billows, not a stippled
+# crust; the larger of them still model each dome.
+FGAIN = 0.35
+
+
+@nb.njit(cache=True, inline="always")
+def fine(x, y, z, seed):
+    return 0.45 - billow(x, y, z, 26.0, 4, seed + 3, FGAIN)
 
 
 # ---- the grids ----
@@ -356,7 +388,6 @@ def build_light(sdf, lo, hi, vox, lvox, L, ramp, sigma):
 
 NEAR = 6       # live steps toward the sun
 NDS = 0.012    # km each
-FINE = 0.010   # km: the fine billows' depth
 
 
 @nb.njit(cache=True, inline="always")
@@ -366,7 +397,9 @@ def hg(c, g):
 
 @nb.njit(cache=True, parallel=True)
 def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, seed,
-           sunc, skyc, gndc, ks, ka, kg, out, trans):
+           sunc, skyc, gndc, P, out, trans):
+    """P: ks, ka, km, kg, g0, octaves, powder, fine depth."""
+    ks, ka, km, kg, g0, noct, powk, fd = P[0], P[1], P[2], P[3], P[4], int(P[5]), P[6], P[7]
     Hh, Ww = DX.shape
     for py in nb.prange(Hh):
         for px in range(Ww):
@@ -392,9 +425,20 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
             if not ok or t1 <= t0:
                 continue
             cosv = dx * L[0] + dy * L[1] + dz * L[2]
-            ph0 = 0.75 * hg(cosv, 0.55) + 0.25 * hg(cosv, -0.15)
-            ph1 = 0.6 * hg(cosv, 0.35) + 0.4 * hg(cosv, -0.1)
-            ph2 = 1.0 / (4 * math.pi)
+            # the phase of each octave of scattering: a Henyey-Greenstein
+            # forward lobe (g0 for the single scattering, the silver lining),
+            # with a little back lobe, each octave's lobe half as forward
+            PH = np.empty(8)
+            gg = g0
+            for o in range(noct):
+                PH[o] = (0.85 * hg(cosv, gg) + 0.15 * hg(cosv, -0.25 * gg)) * 4 * math.pi
+                gg *= 0.5
+            # the powder: looking away from the sun, the skin of a dome has
+            # had no depth yet to scatter light toward you and prints a
+            # little darker than the cloud a few metres in (the dark-edged,
+            # bright-cored look of a cumulus seen side- or down-sun); looking
+            # toward the sun it is not, and the forward lobe silvers it
+            pw_on = powk * min(max(0.5 - 0.5 * cosv, 0.0), 1.0)
             T = 1.0
             cr = 0.0
             cg = 0.0
@@ -402,6 +446,7 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
             t = t0
             st = vox * 0.45
             n = 0
+            tv = 0.0   # optical depth along the view, so far
             while t < t1 and T > 0.004 and n < 4000:
                 n += 1
                 x = dx * t
@@ -412,8 +457,12 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                     t += max(st, (s - ramp * 1.2) * 0.6)
                     continue
                 # the fine billows, read live
-                s += FINE * (0.45 - billow(x, y, z, 26.0, 4, seed + 3))
+                s += fd * fine(x, y, z, seed)
                 dn = min(max(-s / ramp + 0.5, 0.0), 1.0)
+                # the skin: density eases in over its last few metres
+                # (smoothstep, not linear), so a silhouette fades into the
+                # sky over a few pixels rather than cutting against it
+                dn = dn * dn * (3.0 - 2.0 * dn)
                 if dn <= 0.0:
                     t += st
                     continue
@@ -429,15 +478,30 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                     qz = z + L[2] * q * NDS
                     sq = tri(sdf, lo, vox, qx, qy, qz)
                     if sq < ramp * 1.6:
-                        sq += FINE * (0.45 - billow(qx, qy, qz, 26.0, 4, seed + 3))
+                        sq += fd * fine(qx, qy, qz, seed)
                         tau_s += sigma * min(max(-sq / ramp + 0.5, 0.0), 1.0) * NDS
                 tau_s += tri0(ts, lo, lvox, x + L[0] * (NEAR + 0.5) * NDS, y + L[1] * (NEAR + 0.5) * NDS, z + L[2] * (NEAR + 0.5) * NDS)
                 tau_u = tri0(tu, lo, lvox, x, y, z)
                 hn = min(max((z - zb) / (zt - zb), 0.0), 1.0)
-                # sun: three octaves of scattering, each softer and deeper
-                sun = (math.exp(-tau_s) * ph0 + 0.5 * math.exp(-0.22 * tau_s) * ph1
-                       + 0.18 * ph2 / (1.0 + 0.1 * tau_s)) * 4 * math.pi
-                # the sky from above, dimmed by the cloud over the sample
+                # sun: octaves of multiple scattering (Wrenninge et al. 2013),
+                # each with half the extinction, half the contribution and
+                # half the forward lobe of the last, so the light reaches
+                # deeper and spreads softer, and the sunlit domes glow
+                sun = 0.0
+                ea = 1.0
+                eb = 1.0
+                for o in range(noct):
+                    sun += eb * math.exp(-ea * tau_s) * PH[o]
+                    ea *= 0.5
+                    eb *= 0.5
+                # the powder on the single scattering (only the view's first
+                # few metres in, and only looking away from the sun)
+                sun *= 1.0 - pw_on * math.exp(-2.0 * tv)
+                # deeper still, the light diffuses: what a thick cloud passes
+                # falls off as 1 / (1 + tau), not exponentially; it lights the
+                # whole body from within, so the shaded mass is luminous and
+                # not grey clay
+                ms = 1.0 / (1.0 + 0.06 * tau_s)
                 # The skylight's modelling: the surface's normal from the
                 # grid, the sky taken more from above than below (so the
                 # flat base, facing down, stays the darkest), and an
@@ -459,21 +523,27 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                     qz = z + gz * dd
                     sq = tri(sdf, lo, vox, qx, qy, qz)
                     if sq < 0.12:
-                        sq += FINE * (0.45 - billow(qx, qy, qz, 26.0, 4, seed + 3))
+                        sq += fd * fine(qx, qy, qz, seed)
                     ao += min(max(sq / dd, 0.0), 1.0) / dd
                     wt += 1.0 / dd
                 ao /= wt
-                sky = ((0.35 + 0.65 * math.exp(-0.05 * tau_u)) * (0.6 + 0.4 * hn)
-                       * (0.62 + 0.38 * gz) * (0.45 + 0.55 * ao))
+                # the sky from above, dimmed by the cloud over the sample;
+                # the floors are high: inside a cumulus the skylight is
+                # itself scattered round many times, so no face goes dark
+                sky = ((0.55 + 0.45 * math.exp(-0.05 * tau_u)) * (0.7 + 0.3 * hn)
+                       * (0.72 + 0.28 * gz) * (0.6 + 0.4 * ao))
                 gnd = (1 - hn) ** 2
-                er = ks * sun * sunc[0] + ka * sky * skyc[0] + kg * gnd * gndc[0]
-                eg = ks * sun * sunc[1] + ka * sky * skyc[1] + kg * gnd * gndc[1]
-                eb = ks * sun * sunc[2] + ka * sky * skyc[2] + kg * gnd * gndc[2]
+                # the diffuse light inside takes the sky's colour as much as
+                # the sun's: it has bounced between cloud and sky
+                er = ks * sun * sunc[0] + ka * sky * skyc[0] + km * ms * (0.5 * sunc[0] + 0.5 * skyc[0]) + kg * gnd * gndc[0]
+                eg = ks * sun * sunc[1] + ka * sky * skyc[1] + km * ms * (0.5 * sunc[1] + 0.5 * skyc[1]) + kg * gnd * gndc[1]
+                eb_ = ks * sun * sunc[2] + ka * sky * skyc[2] + km * ms * (0.5 * sunc[2] + 0.5 * skyc[2]) + kg * gnd * gndc[2]
                 a = 1 - math.exp(-sg * st)
                 cr += T * a * er
                 cg += T * a * eg
-                cb += T * a * eb
+                cb += T * a * eb_
                 T *= 1 - a
+                tv += sg * st
                 t += st
             out[py, px, 0] = cr
             out[py, px, 1] = cg
@@ -491,6 +561,7 @@ def main():
     DX, DY, DZ = [np.ascontiguousarray(D[..., i]) for i in range(3)]
     del D
     L = unit(ray_at(*SUN)).astype(np.float64)
+    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE], np.float64)
     skyl = open_sky(U, V).astype(np.float32)
 
     # the masses, far to near (by the axis' distance)
@@ -508,7 +579,7 @@ def main():
         o = np.zeros((H, W, 3), np.float32)
         tt = np.ones((H, W), np.float32)
         render(DX, DY, DZ, sdf, ts, tu, lo, hi2, VOX, LVOX, L, T["zb"], T["zt"], RAMP, SIGMA,
-               SEED + T["seed"] * 31, SUN_C, SKY_C, GND_C, KS, KA, KG, o, tt)
+               SEED + T["seed"] * 31, SUN_C, SKY_C, GND_C, PRM, o, tt)
         # a little air: the mass leans toward the sky behind it with distance
         dist = np.hypot(T["dist"], (T["zb"] + T["zt"]) / 2)
         haze = 1 - np.exp(-dist / 30.0)
@@ -530,14 +601,25 @@ def main():
     rad *= gain
     # a print's shoulder on the cloud: the brightest roll off to warm white
     m = rad.max(-1)
-    K, TOP = 0.72, 0.95
+    K, TOP = float(os.environ.get("KNEE", 0.5)), float(os.environ.get("TOP", 0.92))
     sm = np.where(m < K, m, K + (TOP - K) * (1 - np.exp(-(m - K) / (TOP - K))))
     rad = rad * (sm / np.maximum(m, 1e-6))[..., None]
+    # and as it rolls off it loses its colour, as film's does near its white:
+    # the brightest domes print a clean white, the sunlit ones a touch warm
+    # (their light is the sun's), and only the shade keeps the sky's cyan
+    w = DESAT * np.where(m < K, 0.0, 1 - np.exp(-(m - K) / (TOP - K)))[..., None]
+    rad = rad * (1 - w) + (rad @ LUM)[..., None] * w
     acc = rad + tr[..., None] * skyl
     s8 = enc(acc)
     rng = np.random.default_rng(3)
     s8 = s8 + (rng.random(s8.shape, np.float32) - 0.5) / 255
     img = (np.clip(s8, 0, 0.975) * 255 + 0.5).astype(np.uint8)
+    # the print's cloud, as it is measured against the reference: luminance
+    # percentiles of the solid cloud, and the colour of its shaded fifth
+    Yc = (img[solid].astype(np.float32) @ (LUM * 1.0))
+    sh = img[solid][Yc < np.percentile(Yc, 20)].mean(0)
+    print("cloud Y 10/25/50/75/90/99", np.percentile(Yc, [10, 25, 50, 75, 90, 99]).round().tolist(),
+          "shade rgb", sh.round().tolist(), flush=True)
     if out_path:
         Image.fromarray(img).save(out_path, quality=90, method=6)
     else:

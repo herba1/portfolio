@@ -74,7 +74,7 @@ uniform vec4 uView;        // the part of the image on screen: x0, y0, w, h (uv)
 
 const vec2 SUN = vec2(${SUN[0].toFixed(4)}, ${SUN[1].toFixed(4)});
 const vec2 ZEN = vec2(${ZEN[0].toFixed(4)}, ${ZEN[1].toFixed(4)});
-const float DOME = 0.7;     // the sunlit domes' lift into the print's warm white
+const float DOME = 0.4;     // the sunlit domes' lift into the print's warm white
 
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
@@ -139,13 +139,13 @@ void main() {
   // with some red in it; its chroma (the blue's lead over red, as a share of
   // the blue) runs well above the cloud shadow's, so that is held out.
   float cb = (sky.b - sky.r) / max(sky.b, 1e-4);
-  float shade = (1.0 - blue) * smoothstep(0.08, 0.2, Y) * (1.0 - smoothstep(0.4, 0.6, Y));
+  float shade = (1.0 - blue) * smoothstep(0.08, 0.2, Y) * (1.0 - smoothstep(0.5, 0.75, Y));
   shade *= 1.0 - smoothstep(0.72, 0.84, cb);
   // (light: the bake's volume already lights the shade with skylight, so
   // this only keeps it from going slate under the film)
   sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.15 * shade), vec3(0.0));
-  const vec3 SKYSH = vec3(0.86, 0.97, 1.12);
-  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.3 * shade);
+  const vec3 SKYSH = vec3(0.88, 0.96, 1.14);
+  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.45 * shade);
   // The zenith: straight up the sky is deepest. The HDRI already falls off
   // toward it; this only leans the top of the frame a little further, toward
   // a clean film blue rather than slate. Multiplied, so the sky's own
