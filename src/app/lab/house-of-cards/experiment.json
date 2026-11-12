@@ -1,6 +1,6 @@
 {
   "title": "House of Cards",
-  "description": "Times Square at night, one coloured point for every pair of pixels, each one placed at its own depth. At rest it is just the photograph. Drag and it comes apart into hard dots of light on black, then thins to the scan rings a spinning lidar would have returned, while the camera swings up to half a radian round the street: the near figure and taxis shear away from the far signs and black shadows open behind them, so the picture shows it was three-dimensional all along. Let go and it settles back into the exact photograph, near points first and the far street last, like a focus pull.",
+  "description": "Times Square at night, one coloured point for every pair of pixels, each one placed at its own depth. At rest it is just the photograph. Drag and it comes apart into hard dots of light on black, then thins to the scan rings a spinning lidar would have returned. The dots carry return strength, not the photo's colour, so the man in black comes back as the brightest, densest thing in the street and only the signs keep a tint of their hue. Meanwhile the camera swings up to half a radian round the street: the near figure and taxis shear away from the far signs and black shadows open behind them, so the picture shows it was three-dimensional all along. Let go and it settles back into the exact photograph, near points first and the far street last, like a focus pull.",
   "tags": ["WebGL", "Photography", "Depth", "Point cloud"],
   "status": "draft",
   "createdAt": "2026-11-06T16:40:00.000Z",

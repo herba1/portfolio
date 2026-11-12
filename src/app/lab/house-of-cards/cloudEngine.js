@@ -32,10 +32,15 @@ const SENSOR = 0.03; // sensor height above the lens, world units (z = 1 is the 
 const YAW = 0.55;
 const PITCH = 0.16;
 const PIVOT = 2.1;
+// Return intensity: the floor a black surface still reflects, and the gain at
+// the nearest point (a dark coat up close comes back at FLOOR x GAIN).
+const FLOOR = 0.35;
+const GAIN = 2.9;
 
 const VS = `#version 300 es
 layout(location=0) in float aCell;
 layout(location=1) in float aDepth;
+layout(location=2) in float aUpright; // 1 standing square to the sensor, 0 the street
 uniform sampler2D uColor;
 uniform vec2 uGrid;        // depth grid size in cells
 uniform vec2 uRect;        // drawn image size, device px
@@ -50,6 +55,8 @@ uniform float uPivot;
 uniform float uRing;       // scan ring spacing, device px
 uniform float uSensor;     // sensor height above the lens
 uniform int uPass;         // 0 opaque photo, 1 lidar dots
+uniform float uFloor;      // reflectance floor: what a black surface still returns
+uniform float uGain;       // return intensity at the nearest point
 out vec4 vColor;
 
 float hash(uint x){
@@ -94,14 +101,19 @@ void main(){
     if (d < 0.015) { cull(); return; }
     // Which scan ring this point sits on: elevation from the sensor, in ring
     // steps. A point is a return if its cell holds the ring's centre line.
+    // Anything close and standing (the figure, the truck's flank) fills its
+    // beam with the most returns: it is scanned on twice the rings and on
+    // every azimuth step, so it comes back as the densest thing in the cloud.
+    bool body = d > 0.66 && aUpright > 0.5;
+    float ring = body ? uRing * 0.5 : uRing;
     vec3 q = p - vec3(0.0, uSensor, 0.0);
-    float u = q.y / length(q.xz) * uFocal / uRing;
+    float u = q.y / length(q.xz) * uFocal / ring;
     float k = floor(u + 0.5);
-    bool onRing = abs(u - k) * uRing < cell * 0.5;
-    // Along the ring, every other azimuth step, staggered ring to ring; a
-    // lit surface returns on every step, so the signs read as solid strips.
+    bool onRing = abs(u - k) * ring < cell * 0.5;
+    // Along the ring, every other azimuth step, staggered ring to ring. Lit
+    // signs return on every step too, so they read as solid strips.
     float m = max(max(srgb.r, srgb.g), srgb.b);
-    bool onStep = mod(gx + k, 2.0) < 0.5 || m > 0.55;
+    bool onStep = mod(gx + k, 2.0) < 0.5 || m > 0.55 || body;
     bool ret = onRing && onStep;
     // Everything else goes out early: the dense grid is a stage on the way.
     float keep = ret ? 1.0 : 1.0 - smoothstep(0.08, 0.42, s);
@@ -109,14 +121,27 @@ void main(){
     if (w < 0.004) { cull(); return; }
     // Returns are a whole device pixel wider than the grid's dots.
     size = ret ? 2.0 : 1.0;
-    // Light on black. The signs run hot and keep their hue (scaled back under 1 instead of
-    // clipping to white, and a touch more saturated); walls and asphalt stay
-    // dim grey lines, so the city's light carries the picture.
+    // Return intensity, not photo colour. A lidar measures how much of its
+    // own laser comes back, so a black coat, a tyre or wet asphalt still
+    // returns: reflectance has a floor, and the photo's luminance only lifts
+    // it. Incidence takes it down: the street the beam skims returns 30% of
+    // what a body standing square to it does. Range takes it down too, full strength at the nearest point to about
+    // 30% at the far end, so the figure in front is the brightest thing in
+    // the cloud and the far towers are faint.
     float y = dot(srgb, vec3(0.2126, 0.7152, 0.0722));
-    vec3 c = max(mix(vec3(y), srgb, 1.3), 0.0) * 1.8;
-    // Near surfaces return stronger, as a real scanner's do, so a dark coat
-    // close by still reads as lines while the far dark street sinks.
-    c = c / max(1.0, max(max(c.r, c.g), c.b)) + vec3(0.88, 1.0, 1.1) * (0.03 + 0.2 * d * d * d);
+    float refl = max(uFloor, pow(y, 0.6));
+    float range = clamp((z - 1.0) / 1.86, 0.0, 1.0);
+    float I = refl * mix(1.0, 0.3, range) * mix(0.3, 1.0, aUpright) * uGain;
+    // Near-white, a touch cool. Only the signs keep their hue, and only as a
+    // tint: bright and saturated in the photo, so lit panels, not paint.
+    float chroma = m - min(min(srgb.r, srgb.g), srgb.b);
+    float lit = smoothstep(0.5, 0.85, m) * smoothstep(0.3, 0.65, chroma / max(m, 1e-3));
+    vec3 hue = srgb / max(m, 1e-3);
+    vec3 tint = mix(vec3(0.9, 0.96, 1.0), hue, 0.75 * lit);
+    vec3 c = min(tint * I, vec3(1.0));
+    // While the photo is still handing over, a dot starts as its own pixel
+    // and turns into a return as it loosens.
+    c = mix(srgb, c, smoothstep(0.04, 0.3, s));
     vColor = vec4(c * w, 0.0);
   } else {
     vColor = vec4(srgb * w, w);
@@ -195,11 +220,38 @@ export async function createCloud(host) {
   const keys = new Uint16Array(n);
   for (let i = 0; i < n; i++) keys[i] = Math.round(depth[i] * 65535);
   order.sort((a, b) => keys[a] - keys[b]);
+  // How upright each surface stands. A lidar's beam comes back strongest off
+  // what stands square to it (a person, a truck, a wall) and weakest off the
+  // street it skims. Depth Anything's street gets nearer steadily down the
+  // frame; anything standing up holds its depth from top to bottom. So the
+  // vertical slope of depth, over a stencil wide enough to read the slope of a
+  // surface and not the steps between its slabs, says which is which.
+  const upright = new Float32Array(n);
+  {
+    const K = Math.max(1, Math.round(gh / 130));
+    const lo = (0.012 * K) / 6;
+    const hi = (0.022 * K) / 6;
+    for (let y = 0; y < gh; y++) {
+      const up = Math.max(0, y - K) * gw;
+      const dn = Math.min(gh - 1, y + K) * gw;
+      const me = y * gw;
+      for (let x = 0; x < gw; x++) {
+        // The gentler side, so the top of a head against the far street
+        // still counts as standing.
+        const slope = 2 * Math.min(depth[dn + x] - depth[me + x], depth[me + x] - depth[up + x]);
+        const t = clamp((slope - lo) / (hi - lo), 0, 1);
+        upright[y * gw + x] = 1 - t * t * (3 - 2 * t);
+      }
+    }
+  }
+
   const cells = new Float32Array(n);
   const ds = new Float32Array(n);
+  const us = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     cells[i] = order[i];
     ds[i] = depth[order[i]];
+    us[i] = upright[order[i]];
   }
 
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false, alpha: false });
@@ -209,7 +261,7 @@ export async function createCloud(host) {
   gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-  const NAMES = ["uColor", "uGrid", "uRect", "uCanvas", "uOffset", "uFocal", "uLod", "uLoose", "uOrbit", "uTime", "uPivot", "uRing", "uSensor", "uPass"];
+  const NAMES = ["uColor", "uGrid", "uRect", "uCanvas", "uOffset", "uFocal", "uLod", "uLoose", "uOrbit", "uTime", "uPivot", "uRing", "uSensor", "uPass", "uFloor", "uGain"];
   const U = Object.fromEntries(NAMES.map((k) => [k, gl.getUniformLocation(prog, k)]));
 
   const vao = gl.createVertexArray();
@@ -224,6 +276,11 @@ export async function createCloud(host) {
   gl.bufferData(gl.ARRAY_BUFFER, ds, gl.STATIC_DRAW);
   gl.enableVertexAttribArray(1);
   gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+  const b2 = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b2);
+  gl.bufferData(gl.ARRAY_BUFFER, us, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
 
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -332,6 +389,8 @@ export async function createCloud(host) {
     gl.uniform1f(U.uPivot, PIVOT);
     gl.uniform1f(U.uRing, rh / RINGS);
     gl.uniform1f(U.uSensor, SENSOR);
+    gl.uniform1f(U.uFloor, FLOOR);
+    gl.uniform1f(U.uGain, GAIN);
     gl.enable(gl.BLEND);
 
     // The photograph, opaque, fading out point by point as each one lets go.
