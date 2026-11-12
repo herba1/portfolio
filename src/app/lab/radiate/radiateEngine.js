@@ -7,7 +7,10 @@ import { GLYPHS, ADVANCE } from "./radiateGlyphs";
 // The lines are true offset curves. Pass 1 computes the exact signed
 // distance from every device pixel to the glyph outlines (the baked
 // quadratics themselves, solved analytically, not a raster), taking the
-// union of the letters so their echoes meet in clean creases. Pass 2 draws
+// union of the letters so their first echoes meet in clean creases; from a
+// few periods out the union is smooth and the field blurred, both by an
+// amount that grows with distance, so the creases round into bends instead
+// of running straight to the frame edge. Pass 2 draws
 // the lines as level sets of that field, box-filtered analytically against
 // each pixel's footprint, so they stay exact at any density and grey out
 // instead of aliasing where they crowd.
@@ -36,6 +39,8 @@ uniform vec2 uOrigin;              // css px of the word's em origin
 uniform float uFont;               // css px per em
 uniform float uDpr;
 uniform float uH;                  // canvas height in device px
+uniform float uKnee;               // em: echoes inside this stay sharply creased
+uniform float uSmooth;             // blend radius per unit of distance past the knee
 out vec4 o;
 
 float dot2(vec2 v){ return dot(v, v); }
@@ -101,6 +106,23 @@ int crossing(vec2 p, vec2 A, vec2 B, vec2 C, bool line){
   return x > p.x ? dir : 0;
 }
 
+// The letters' union. A hard min creases every echo on the medial axis
+// between two letters, and those creases run straight to the frame edge.
+// This is a cubic smooth min (C2, so the lines bend with continuous
+// curvature) whose blend radius grows with distance: zero up to the knee,
+// so the first echoes keep Wyman's sharp creases, then uSmooth times the
+// distance past it, so further out the kinks round into continuous bends.
+// The radius follows the mean of the two distances, not the min, so it is
+// itself smooth across the medial axis. It only ever lowers the field, and
+// only where both letters are already further than the knee, so the
+// outlines themselves never move.
+float sunion(float a, float b){
+  float k = uSmooth * max(0.5 * (a + b) - uKnee, 0.0);
+  if (k < 1e-6) return min(a, b);
+  float h = max(k - abs(a - b), 0.0) / k;
+  return min(a, b) - h * h * h * k * (1.0 / 6.0);
+}
+
 void main(){
   // Texel rows run with css y (row 0 at the top), so the draw pass can
   // fetch at css * dpr directly.
@@ -123,9 +145,69 @@ void main(){
       wind += crossing(p, A, B, C, line);
     }
     float sd = sqrt(d2) * (wind != 0 ? -1.0 : 1.0);
-    best = min(best, sd);
+    best = g == 0 ? sd : sunion(best, sd);
   }
   o = vec4(best * uFont, 0.0, 0.0, 1.0);   // signed distance in css px
+}`;
+
+// Pass 1b, twice (across, then down): the union above rounds the creases
+// between letters, but a letter has concave corners of its own (the
+// notch between the arches of an m, the shoulder of a b), and their
+// creases run just as straight to the frame edge. So the field is then
+// blurred with a Gaussian whose width grows with distance: none up to the
+// knee, so the first echoes keep their sharp corners, then uBlur times the
+// distance past it. A blur leaves a straight run of lines where it is and
+// rounds every kink into a bend about as wide as the blur. Past the canvas
+// edge the field is continued in a straight line, so the lines there do
+// not bend toward the frame.
+const BLUR_FS = `#version 300 es
+precision highp float;
+uniform highp sampler2D uSrc;      // field so far, css px
+uniform highp sampler2D uBase;     // the unblurred field, for the width
+uniform vec2 uDir;                 // (1, 0) or (0, 1)
+uniform float uKnee;               // css px
+uniform float uBlur;               // sigma per css px past the knee
+uniform float uDpr;
+out vec4 o;
+
+const int N = 16;                  // taps each side, out to 2.5 sigma
+
+float at(float x, ivec2 i0, ivec2 size){
+  int axis = uDir.x > 0.5 ? 0 : 1;
+  float lim = float(size[axis] - 1);
+  float xc = clamp(x, 0.0, lim);
+  int k = int(floor(xc));
+  float u = xc - float(k);
+  ivec2 p0 = i0, p1 = i0;
+  p0[axis] = k;
+  p1[axis] = min(k + 1, size[axis] - 1);
+  float v = mix(texelFetch(uSrc, p0, 0).r, texelFetch(uSrc, p1, 0).r, u);
+  if (x == xc) return v;
+  // Straight on past the edge, at the slope of the last 8 texels.
+  ivec2 q = i0;
+  q[axis] = x < 0.0 ? 8 : size[axis] - 9;
+  float slope = (v - texelFetch(uSrc, q, 0).r) / 8.0;
+  return v + abs(x - xc) * slope;
+}
+
+void main(){
+  ivec2 i0 = ivec2(gl_FragCoord.xy);
+  ivec2 size = textureSize(uSrc, 0);
+  float self = texelFetch(uSrc, i0, 0).r;
+  float d0 = texelFetch(uBase, i0, 0).r;
+  float sigma = uBlur * max(d0 - uKnee, 0.0) * uDpr;   // texels
+  if (sigma < 0.35) { o = vec4(self, 0.0, 0.0, 1.0); return; }
+  int axis = uDir.x > 0.5 ? 0 : 1;
+  float x0 = float(i0[axis]);
+  float gap = sigma * 2.5 / float(N);
+  float sum = 0.0, wsum = 0.0;
+  for (int i = -N; i <= N; i++) {
+    float z = float(i) * 2.5 / float(N);
+    float w = exp(-0.5 * z * z);
+    sum += w * at(x0 + float(i) * gap, i0, size);
+    wsum += w;
+  }
+  o = vec4(sum / wsum, 0.0, 0.0, 1.0);
 }`;
 
 const DRAW_FS = `#version 300 es
@@ -174,12 +256,16 @@ float cover(float x, float duty){
   return clamp((ink(x + h * 0.5, duty) - ink(x - h * 0.5, duty)) / h, 0.0, 1.0);
 }
 
-// The same box filter on an endless grating at half duty, for the echo,
-// whose lines run on through the inside of its letters.
-float inkOpen(float x){ return floor(x) * 0.5 + max(0.0, fract(x) - 0.5); }
-float coverOpen(float x){
+// The same box filter on an endless grating, for the echo, whose lines
+// run on through the inside of its letters. Its line takes 'duty' of each
+// period, centred on the half period.
+float inkOpen(float x, float duty){
+  float a = 0.5 - duty * 0.5;
+  return floor(x) * duty + clamp(fract(x) - a, 0.0, duty);
+}
+float coverOpen(float x, float duty){
   float h = max(length(vec2(dFdx(x), dFdy(x))), 1e-4);
-  return clamp((inkOpen(x + h * 0.5) - inkOpen(x - h * 0.5)) / h, 0.0, 1.0);
+  return clamp((inkOpen(x + h * 0.5, duty) - inkOpen(x - h * 0.5, duty)) / h, 0.0, 1.0);
 }
 
 // The magnet changes the period, not the distance. It is a Gaussian
@@ -212,7 +298,14 @@ void main(){
 
 
   vec2 v = css - uMag.xy;
-  float m = uMag.z * uM;
+  // The magnet never packs the lines below about 2.5 device px. Along the
+  // normal it raises the density to 1 + m; across it the bell's flank
+  // tilts the lines by up to about m more (measured: the excess phase's
+  // gradient stays under m everywhere), so 1 + 2m is the worst case and m
+  // is held to it. At DPR 2 and the usual period this leaves m alone; on a
+  // small or DPR 1 screen it stops the lines short of a grey wash.
+  float mMax = max((uP * uDpr / 2.5 - 1.0) * 0.5, 0.0);
+  float m = uMag.z * min(uM, mMax);
   float dm = max(field(uMag.xy), 0.0);
   float F = phase(d, dm, v, m);
 
@@ -238,20 +331,23 @@ void main(){
     F2 += pulse(d2, q);
   }
 
-  float cov = cover(d > 0.0 ? F / uP : d / uP, 0.5);
-  float cov2 = coverOpen(F2 / uP);
-
-  // Difference of the two (XOR on hard ink), held to a wide bell on the
-  // hand by fading the result, never the lines. The letters stay solid.
-  float moire = cov + cov2 - 2.0 * cov * cov2;
+  // The echo shows over a wide bell on the hand. Right at the letters,
+  // and through their counters, the two gratings cross instead of running
+  // together, so it stays out of the first few echoes too and the word
+  // keeps its own clean outline.
   float wide = exp(-dot(v, v) / (uSigma * uSigma * uSpread * uSpread));
   float w = smoothstep(0.03, 0.55, wide) * clamp(uMag.z * 1.6, 0.0, 1.0);
-  // Right at the letters, and through their counters, the two gratings
-  // cross instead of running together, so the first few echoes stay plain
-  // and the word keeps its own clean outline.
   w *= smoothstep(uP * 1.0, uP * 4.0, d);
+
+  // Difference of the two, XOR on hard ink. The bell fades the echo's
+  // lines, never the result: out at its edge they thin to hairlines and
+  // the XOR only nicks the plain lines, so every pixel is still black or
+  // white line work, not a cross-fade of two patterns into grey.
+  float cov = cover(d > 0.0 ? F / uP : d / uP, 0.5);
+  float cov2 = coverOpen(F2 / uP, 0.5 * w);
+  float moire = cov + cov2 - 2.0 * cov * cov2;
   float letter = clamp(0.5 - d * uDpr, 0.0, 1.0);
-  float paper = 1.0 - max(mix(cov, moire, w), letter);
+  float paper = 1.0 - max(moire, letter);
   o = vec4(vec3(paper), 1.0);
 }`;
 
@@ -298,7 +394,9 @@ export async function createRadiate(host) {
 
   const distProg = program(gl, DIST_VS, DIST_FS);
   const drawProg = program(gl, DIST_VS, DRAW_FS);
-  const uD = uniforms(gl, distProg, ["uSegs", "uGlyphs", "uOrigin", "uFont", "uDpr", "uH"]);
+  const blurProg = program(gl, DIST_VS, BLUR_FS);
+  const uB = uniforms(gl, blurProg, ["uSrc", "uBase", "uDir", "uKnee", "uBlur", "uDpr"]);
+  const uD = uniforms(gl, distProg, ["uSegs", "uGlyphs", "uOrigin", "uFont", "uDpr", "uH", "uKnee", "uSmooth"]);
   const uRange = gl.getUniformLocation(distProg, "uRange");
   const uR = uniforms(gl, drawProg, ["uDist", "uRes", "uDpr", "uH", "uP", "uN", "uMag", "uSigma", "uM", "uScale", "uSpread"]);
   const uPulse = gl.getUniformLocation(drawProg, "uPulse");
@@ -329,6 +427,15 @@ export async function createRadiate(host) {
   const MAG_M = 2;
   const ECHO = 1.045;
   const SPREAD = 1.5;
+  // The letters' union stays a hard crease for KNEE periods, then its
+  // blend radius grows at SMOOTH times the distance past that.
+  const KNEE = 1;
+  const SMOOTH = 0.45;
+  // The blur that rounds each letter's own concave corners starts a little
+  // further out and grows more slowly: its sigma is BLUR times the
+  // distance past BLUR_KNEE periods.
+  const BLUR_KNEE = 1.5;
+  const BLUR = 0.18;
 
   let segTex = null;
   let distTex = null;
@@ -378,12 +485,20 @@ export async function createRadiate(host) {
 
     const cw = stage.canvas.width;
     const ch = stage.canvas.height;
+    const target = (tex) => {
+      const f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      return f;
+    };
     if (distTex) gl.deleteTexture(distTex);
     if (fbo) gl.deleteFramebuffer(fbo);
+    // Exact union, then the blur across into a scratch texture and down
+    // into the field the draw pass reads. The scratch goes once built.
+    const exact = floatTex(cw, ch, null);
+    const across = floatTex(cw, ch, null);
     distTex = floatTex(cw, ch, null);
-    fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, distTex, 0);
+    const fExact = target(exact);
     gl.viewport(0, 0, cw, ch);
     gl.useProgram(distProg);
     gl.bindVertexArray(vao);
@@ -396,8 +511,35 @@ export async function createRadiate(host) {
     gl.uniform1f(uD.uFont, font);
     gl.uniform1f(uD.uDpr, stage.dpr);
     gl.uniform1f(uD.uH, ch);
+    gl.uniform1f(uD.uKnee, (KNEE * L.period) / font);
+    gl.uniform1f(uD.uSmooth, SMOOTH);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.useProgram(blurProg);
+    gl.uniform1i(uB.uSrc, 0);
+    gl.uniform1i(uB.uBase, 1);
+    gl.uniform1f(uB.uKnee, BLUR_KNEE * L.period);
+    gl.uniform1f(uB.uBlur, BLUR);
+    gl.uniform1f(uB.uDpr, stage.dpr);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, exact);
+    const fAcross = target(across);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, exact);
+    gl.uniform2f(uB.uDir, 1, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    fbo = target(distTex);
+    gl.bindTexture(gl.TEXTURE_2D, across);
+    gl.uniform2f(uB.uDir, 0, 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fExact);
+    gl.deleteFramebuffer(fAcross);
+    gl.deleteTexture(exact);
+    gl.deleteTexture(across);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
     built++;
   };
   stage.onResize((w, h) => build(w, h));
