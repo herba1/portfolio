@@ -88,7 +88,7 @@ export default function Piece({ embedded = false }) {
     const ink = (size, lineH) => {
       const cs = getComputedStyle(measure);
       const ctx = document.createElement("canvas").getContext("2d");
-      if (!ctx) return { left: 0, top: 0 };
+      if (!ctx) return { left: 0, top: 0, bottom: lineH };
       ctx.font = `${cs.fontWeight} ${size}px ${cs.fontFamily}`;
       if ("letterSpacing" in ctx) ctx.letterSpacing = cs.letterSpacing;
       const m = ctx.measureText(WORD);
@@ -98,6 +98,7 @@ export default function Piece({ embedded = false }) {
       return {
         left: -(m.actualBoundingBoxLeft ?? 0),
         top: baseline - (m.actualBoundingBoxAscent ?? size * 0.75),
+        bottom: baseline + (m.actualBoundingBoxDescent ?? 0),
       };
     };
 
@@ -125,26 +126,44 @@ export default function Piece({ embedded = false }) {
         const colPitch = Math.round(wordW + size * 0.3);
         return { size, lineH, wordW, rowPitch, colPitch };
       };
-      // The block owns the format: hung on a left margin, run across most
-      // of the width, top-anchored so the open white falls below it.
+      // The block hangs on a left margin and runs across most of the
+      // width. Vertically it is placed by its absence: the ink box of the
+      // empty centre slot (row 2, middle column) sits on the page's
+      // vertical centre, so the poem's silence is the poster's centre and
+      // the white frames the block above and below in equal measure.
       const margin = round4(Math.max(16, Math.min(g.W, g.H) * 0.07));
       const blockW = (q) => q.wordW + (COLS - 1) * q.colPitch;
       const inkH = (q) => (ROWS - 1) * q.rowPitch + q.size * 0.76;
       const maxW = g.W - margin * 2;
       const maxH = g.H - margin * 2;
+      const midRow = Math.floor(CENTRE / COLS);
+      // y0 that centres the hole's ink on the page, on the 4px grid.
+      const centred = (q, o) =>
+        Math.round(
+          (g.H / 2 - midRow * q.rowPitch - (o.top + o.bottom) / 2) / 4,
+        ) * 4;
+      // Does the centred block keep at least the side margin, top and
+      // bottom, measured to the ink?
+      const fits = (q, o, y0) =>
+        blockW(q) <= maxW &&
+        y0 + o.top >= margin &&
+        y0 + (ROWS - 1) * q.rowPitch + o.bottom <= g.H - margin;
       let m = setSize(100);
       const fit = Math.min(maxW / blockW(m), maxH / inkH(m));
       m = setSize(Math.max(12, Math.floor(100 * fit)));
-      while (m.size > 12 && (blockW(m) > maxW || inkH(m) > maxH)) {
+      let o = ink(m.size, m.lineH);
+      let y0 = centred(m, o);
+      while (m.size > 12 && !fits(m, o, y0)) {
         m = setSize(m.size - 1);
+        o = ink(m.size, m.lineH);
+        y0 = centred(m, o);
       }
       g.wordW = m.wordW;
       g.lineH = m.lineH;
       g.rowPitch = m.rowPitch;
       g.colPitch = m.colPitch;
-      const o = ink(m.size, m.lineH);
       g.x0 = Math.round(margin - o.left);
-      g.y0 = Math.round(margin - o.top);
+      g.y0 = y0;
       if (snap) {
         for (const w of words) {
           const p = slotPos(w.slot);
