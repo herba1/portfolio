@@ -2,20 +2,22 @@ import { createStage, clamp } from "../_kit/stage";
 
 // Letters that come from the raster, after Crouwel's New Alphabet: every
 // glyph is drawn once on a 5 x 9 design grid (a 5 x 5 body, two rows of
-// ascender, two of descender) as runs of horizontal and vertical strokes.
-// At any resolution the design grid is mapped onto the real one, each stroke
-// snaps to whole cells and is one weight thick, and its outer corners are cut
-// at 45 degrees across the full stroke.
+// ascender, two of descender) as runs of horizontal and vertical strokes, one
+// design cell thick, with every outer corner cut at 45 degrees across the
+// full stroke. The design grid is fixed on the page; the letters never move
+// when the raster changes.
 //
-// The outline is never drawn. It is only a test: every frame it is filled
-// into a canvas one pixel per raster cell, and a cell whose centre falls
-// inside it is switched on. Each cell then fades on or off on its own spring,
-// so when the raster changes the word dissolves into the dot field and is
-// rebuilt from it, stair-stepped at five cells a letter, a fine screen at
-// twenty.
+// The outline is never drawn. Every frame it is filled into an offscreen
+// canvas at 8 x 8 samples per raster cell, and each cell takes the fraction
+// of its area the letter covers, 0 to 1. That fraction is the dot: a pinpoint
+// circle at the edge of a stroke, a round dot at half, a square that closes
+// up to the full cell at one. The raster is pinned at the centre of the box
+// and its pitch is continuous: drag and it slides between five and twenty
+// cells across a letter. Where the pitch is a whole multiple of the design
+// grid (5, 10, 15, 20) the two lock and the letters come out clean; anywhere
+// between, stems and cuts land on every phase of the screen and the word
+// fills with graded dots and beat bands that travel as the pitch moves.
 
-// Stroke syntax: "x,y x,y ..." on the design grid. A trailing "z" closes the
-// stroke; a "*" after a vertex cuts that corner deep (half a body).
 const GLYPHS = {
   a: [5, "0,2 4,2 4,6 0,6 0,4 4,4"],
   b: [5, "0,0 0,6 4,6 4,2 0,2"],
@@ -93,35 +95,30 @@ const W_MAX = 20;
 const INK = "#0b0b0b";
 const ACCENT = "#e3311d";
 const DOT = "#c4c4c0";
+// Samples per raster cell, each way.
+const SS = 8;
 
-// Resolution: W cells across a full-width letter.
-const metrics = (W) => {
-  const H = Math.round((W * 9) / 5);
-  const t = Math.max(1, Math.round(W / 5.6));
-  const col = (c) => Math.round((c * (W - t)) / 4);
-  const row = (r) => Math.round((r * (H - t)) / 8);
-  const gap = Math.max(1, Math.round(W / 5));
-  const lead = Math.round((W * 3) / 5);
-  return { W, H, t, col, row, gap, lead, space: col(1) + t, deep: col(2) };
-};
-const glyphCells = (m, def) => (def.cols === 0 ? m.space : m.col(def.cols - 1) + m.t);
+// The design grid, in design cells: a full-width letter is five across and
+// nine tall, strokes and letter gaps are one, a word space two, the line
+// leading three.
+const M = { H: 9, gap: 1, lead: 3, space: 2, deep: 2 };
+const glyphCells = (def) => (def.cols === 0 ? M.space : def.cols);
 
-const lineCells = (m, chars) => {
+const lineCells = (chars) => {
   let w = 0;
   chars.forEach((ch, i) => {
-    w += glyphCells(m, DEFS[ch] || DEFS[" "]) + (i ? m.gap : 0);
+    w += glyphCells(DEFS[ch] || DEFS[" "]) + (i ? M.gap : 0);
   });
   return w;
 };
 
-// Break once, at the coarsest raster, so the lines don't reshuffle while
-// the grid changes underneath them.
+// Break on the design grid, so the lines never reshuffle while the raster
+// changes underneath them.
 const breakLines = (text, aspect) => {
-  const m = metrics(W_MIN);
   const words = text.split(" ").filter((w) => w.length);
   if (!words.length) return [[]];
-  const wordW = words.map((w) => lineCells(m, [...w]));
-  const spaceW = m.space + 2 * m.gap;
+  const wordW = words.map((w) => lineCells([...w]));
+  const spaceW = M.space + 2 * M.gap;
   const total = wordW.reduce((a, b) => a + b, 0) + spaceW * (words.length - 1);
   let best = null;
   for (let max = Math.max(...wordW); max <= total; max++) {
@@ -138,8 +135,8 @@ const breakLines = (text, aspect) => {
       }
     });
     if (lines.length > 4) continue;
-    const widest = Math.max(...lines.map((l) => lineCells(m, [...l.join(" ")])));
-    const tall = lines.length * m.H + (lines.length - 1) * m.lead;
+    const widest = Math.max(...lines.map((l) => lineCells([...l.join(" ")])));
+    const tall = lines.length * M.H + (lines.length - 1) * M.lead;
     const score = Math.min(aspect / widest, 1 / tall);
     if (!best || score > best.score * 1.04) best = { score, lines };
   }
@@ -153,6 +150,23 @@ const stepSpring = (s, dt, k, d) => {
   s.v += s.vel * dt;
 };
 
+// One halftone dot of coverage `a` in a cell of side `cell`, centred on
+// (cx, cy), with area a x cell^2: a circle up to pi/4, where it touches the
+// cell walls, then a square whose corner radius closes to zero at one.
+const ROUND = Math.PI / 4;
+const dot = (path, cx, cy, cell, a) => {
+  const half = cell / 2;
+  if (a >= 0.998) {
+    path.rect(cx - half, cy - half, cell, cell);
+  } else if (a <= ROUND) {
+    const r = cell * Math.sqrt(a / Math.PI);
+    path.moveTo(cx + r, cy);
+    path.arc(cx, cy, r, 0, Math.PI * 2);
+  } else {
+    path.roundRect(cx - half, cy - half, cell, cell, half * Math.sqrt((1 - a) / (1 - ROUND)));
+  }
+};
+
 export async function createRaster(host, { embedded = false } = {}) {
   const stage = createStage(host, { dpr: 2 });
   const { canvas, ctx } = stage;
@@ -160,9 +174,9 @@ export async function createRaster(host, { embedded = false } = {}) {
 
   const q = new URLSearchParams(location.search);
   let text = (q.get("text") || "computer love").toLowerCase();
+  // Raster cells across a full-width letter. Continuous.
   let Wf = clamp(+(q.get("w") || 7), W_MIN, W_MAX);
-  let W = Math.round(Wf);
-  const freezeFrom = q.has("from") ? clamp(Math.round(+q.get("from")), W_MIN, W_MAX) : null;
+  const freezeFrom = q.has("from") ? clamp(+q.get("from"), W_MIN, W_MAX) : null;
   const freezeAt = q.has("at") ? +q.get("at") / 1000 : null;
 
   // Hidden input so phones raise a keyboard.
@@ -177,15 +191,20 @@ export async function createRaster(host, { embedded = false } = {}) {
   let glyphs = []; // { ch, strokes: [{ def, pts:[{x,y}springs], h, c:[] , wait }] }
   let dying = [];
   let lines = [[]];
-  // The raster is pinned to one point, the middle of the box. Its pitch
-  // changes in one step, never on a spring: what moves is the ink, not the
-  // paper.
-  const raster = { cell: 0 };
+  // The raster is pinned to one point, the middle of the box; only its
+  // pitch changes. The design grid `g` is pinned to the same point, so the
+  // two lock wherever the pitch divides it.
+  const raster = { cell: 0, g: 0 };
   const anchor = { x: 0, y: 0 };
   const caret = { x: spring(0), y: spring(0), w: spring(0), h: spring(0) };
   let lastKey = -10;
   let clock = 0;
   let dirty = true;
+  // The coverage is only re-measured when the ink or the raster moved.
+  let coverDirty = true;
+  // A continuous pitch change shows the new sampling at once; a jump
+  // (keys, resize, a new word) knocks the field back and lets it rebuild.
+  let snapCells = false;
 
   const makeGlyph = (ch) => {
     const def = DEFS[ch] || DEFS["?"];
@@ -217,29 +236,33 @@ export async function createRaster(host, { embedded = false } = {}) {
   };
 
   let layoutAspect = 0;
-  const relayout = (stagger) => {
+  const relayout = (mode) => {
     const bw = stage.width;
     const bh = stage.height;
     const dpr = stage.dpr;
     const aspect = (bw * 0.82) / (bh * 0.62);
-    if (stagger === "text" || Math.abs(aspect - layoutAspect) > 0.01) {
+    if (mode === "text" || Math.abs(aspect - layoutAspect) > 0.01) {
       const flat = text.replace(/\s+/g, " ").trim();
       lines = breakLines(flat, aspect);
       layoutAspect = aspect;
     }
-    const m = metrics(W);
-    const widest = Math.max(1, ...lines.map((l) => lineCells(m, l)));
-    const tall = lines.length * m.H + (lines.length - 1) * m.lead;
-    let cell = Math.min((bw * 0.82) / widest, (bh * 0.62) / tall, (bh * 0.34) / m.H);
-    cell = Math.max(1 / dpr, Math.floor(cell * dpr) / dpr);
+    const widest = Math.max(1, ...lines.map((l) => lineCells(l)));
+    const tall = lines.length * M.H + (lines.length - 1) * M.lead;
+    let g = Math.min((bw * 0.82) / widest, (bh * 0.62) / tall, (bh * 0.34) / M.H);
+    g = Math.max(1 / dpr, Math.floor(g * dpr) / dpr);
     const snap = (v) => Math.round(v * dpr) / dpr;
     const was = { cell: raster.cell, x: anchor.x, y: anchor.y };
     anchor.x = snap(bw / 2);
     anchor.y = snap(bh / 2);
-    raster.cell = cell;
-    if (was.cell && (was.cell !== cell || was.x !== anchor.x || was.y !== anchor.y)) resample(was);
-    const ox = anchor.x - Math.floor(widest / 2) * cell;
-    const oy = anchor.y - Math.floor(tall / 2) * cell;
+    raster.g = g;
+    raster.cell = (g * 5) / Wf;
+    if (was.cell && (was.cell !== raster.cell || was.x !== anchor.x || was.y !== anchor.y)) {
+      if (mode === "drag") snapCells = true;
+      else resample(was);
+    }
+    coverDirty = true;
+    const ox = anchor.x - Math.floor(widest / 2) * g;
+    const oy = anchor.y - Math.floor(tall / 2) * g;
 
     // Map the visible characters (spaces collapsed, as laid out) onto glyphs.
     let gi = 0;
@@ -248,16 +271,14 @@ export async function createRaster(host, { embedded = false } = {}) {
     let cy = 0;
     let lastRight = 0;
     let lastLine = 0;
-    const place = (g, x0, y0, order) => {
-      g.strokes.forEach((s, si) => {
-        const deepC = m.deep * cell;
+    const place = (gl, x0, y0) => {
+      gl.strokes.forEach((s, si) => {
         s.def.pts.forEach((p, pi) => {
-          s.pts[pi].x.to = x0 + (m.col(p.x) + m.t / 2) * cell;
-          s.pts[pi].y.to = y0 + (m.row(p.y) + m.t / 2) * cell;
-          s.c[pi].to = p.deep ? deepC : (m.t + 0.08) * cell;
+          s.pts[pi].x.to = x0 + (p.x + 0.5) * g;
+          s.pts[pi].y.to = y0 + (p.y + 0.5) * g;
+          s.c[pi].to = p.deep ? M.deep * g : g;
         });
-        s.h.to = (m.t * cell) / 2;
-        s.wait = stagger === "grid" ? order * 0.022 + si * 0.035 : 0;
+        s.h.to = g / 2;
         if (s.fresh) {
           s.fresh = false;
           s.pts.forEach((pt) => {
@@ -269,18 +290,17 @@ export async function createRaster(host, { embedded = false } = {}) {
         }
       });
     };
-    let order = 0;
     lines.forEach((line, li) => {
       cx = 0;
-      cy = li * (m.H + m.lead);
+      cy = li * (M.H + M.lead);
       line.forEach((ch, ci) => {
         // skip over whitespace runs in the source that the layout collapsed
         while (gi < chars.length && /\s/.test(chars[gi]) && ch !== " ") gi++;
-        if (ci) cx += m.gap;
+        if (ci) cx += M.gap;
         const def = DEFS[ch] || DEFS["?"];
-        const g = glyphs[gi];
-        if (g) place(g, ox + cx * cell, oy + cy * cell, order++);
-        cx += glyphCells(m, def);
+        const gl = glyphs[gi];
+        if (gl) place(gl, ox + cx * g, oy + cy * g);
+        cx += glyphCells(def);
         gi++;
       });
       lastRight = cx;
@@ -288,17 +308,19 @@ export async function createRaster(host, { embedded = false } = {}) {
     });
     // Leftover glyphs (trailing whitespace) have no strokes; nothing to place.
     const atEnd = text.endsWith(" ");
-    caret.x.to = ox + (lastRight + (lastRight ? m.gap : 0) + (atEnd ? m.space + m.gap : 0)) * cell;
-    caret.y.to = oy + (lastLine * (m.H + m.lead) + m.row(6)) * cell;
-    caret.w.to = (m.col(4) + m.t) * cell;
-    caret.h.to = m.t * cell;
+    caret.x.to = ox + (lastRight + (lastRight ? M.gap : 0) + (atEnd ? M.space + M.gap : 0)) * g;
+    caret.y.to = oy + (lastLine * (M.H + M.lead) + 6) * g;
+    caret.w.to = 5 * g;
+    caret.h.to = g;
     dirty = true;
   };
 
-  const setW = (next) => {
-    if (next === W) return;
-    W = next;
-    relayout("grid");
+  // `mode` "drag" for a continuous change, "grid" for a jump.
+  const setW = (next, mode) => {
+    next = clamp(next, W_MIN, W_MAX);
+    if (Math.abs(next - Wf) < 1e-4) return;
+    Wf = next;
+    relayout(mode);
   };
   const setText = (next) => {
     text = next.slice(0, 32);
@@ -316,23 +338,15 @@ export async function createRaster(host, { embedded = false } = {}) {
     if (!drag) return;
     const dy = p.y - drag.y;
     if (Math.abs(dy) > 4 || Math.abs(p.x - drag.x) > 4) drag.moved = true;
-    Wf = clamp(drag.w - dy / 22, W_MIN, W_MAX);
-    setW(Math.round(Wf));
+    setW(drag.w - dy / 24, "drag");
   });
   stage.on("up", () => {
     if (drag && !drag.moved) input.focus({ preventScroll: true });
     drag = null;
-    Wf = W;
   });
-  let wheelAcc = 0;
   const onWheel = (e) => {
     e.preventDefault();
-    wheelAcc += e.deltaY;
-    if (Math.abs(wheelAcc) > 40) {
-      setW(clamp(W + (wheelAcc < 0 ? 1 : -1), W_MIN, W_MAX));
-      Wf = W;
-      wheelAcc = 0;
-    }
+    setW(Wf - e.deltaY / 240, "drag");
   };
   canvas.addEventListener("wheel", onWheel, { passive: false });
   const onKey = (e) => {
@@ -342,8 +356,7 @@ export async function createRaster(host, { embedded = false } = {}) {
       setText(text.slice(0, -1));
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.preventDefault();
-      setW(clamp(W + (e.key === "ArrowUp" ? 1 : -1), W_MIN, W_MAX));
-      Wf = W;
+      setW(Math.round(Wf) + (e.key === "ArrowUp" ? 1 : -1), "grid");
     } else if (e.key.length === 1) {
       const ch = e.key.toLowerCase();
       if (!DEFS[ch]) return;
@@ -358,7 +371,7 @@ export async function createRaster(host, { embedded = false } = {}) {
   });
 
   // ---- drawing
-  // The raster is one dot tile repeated: drawn once per pitch at a whole
+  // The paper is one dot tile repeated: drawn once per pitch at a whole
   // number of device pixels, then scaled by the pattern to the exact cell.
   let tileKey = "";
   let pat = null;
@@ -386,10 +399,11 @@ export async function createRaster(host, { embedded = false } = {}) {
   };
 
   // ---- cells
-  // The outlines are filled into `cover`, one pixel per raster cell, and
-  // read back: alpha past half means the cell centre is inside the letter.
-  // Lit and fading cells live in a map keyed by their index from the anchor,
-  // each with its own stiffness so they arrive and leave out of step.
+  // The outlines are filled into `cover` at SS x SS pixels per raster cell,
+  // over the box that holds the ink, and the alpha of each block is summed:
+  // that sum over SS^2 is the share of the cell the letter covers. Lit and
+  // fading cells live in a map keyed by their index from the anchor, each
+  // with its own stiffness so they arrive and leave out of step.
   const cover = document.createElement("canvas");
   const cctx = cover.getContext("2d", { willReadFrequently: true });
   const cells = new Map();
@@ -400,33 +414,67 @@ export async function createRaster(host, { embedded = false } = {}) {
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   };
+  let cov = null;
   const sampleCover = () => {
     const cell = raster.cell;
-    const i0 = Math.floor(-anchor.x / cell) - 1;
-    const j0 = Math.floor(-anchor.y / cell) - 1;
-    const cols = Math.max(1, Math.ceil((stage.width - anchor.x) / cell) + 1 - i0);
-    const rows = Math.max(1, Math.ceil((stage.height - anchor.y) / cell) + 1 - j0);
-    if (cover.width !== cols || cover.height !== rows) {
-      cover.width = cols;
-      cover.height = rows;
-    } else {
-      cctx.setTransform(1, 0, 0, 1, 0, 0);
-      cctx.clearRect(0, 0, cols, rows);
-    }
-    cctx.setTransform(1 / cell, 0, 0, 1 / cell, -anchor.x / cell - i0, -anchor.y / cell - j0);
-    cctx.fillStyle = "#000";
+    const strokes = [];
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
     for (const g of glyphs.concat(dying)) {
       for (const st of g.strokes) {
         const path = new Path2D();
-        if (outline(st, path)) cctx.fill(path);
+        if (!outline(st, path)) continue;
+        strokes.push(path);
+        const m = Math.max(0, st.h.v) * 2 + 1;
+        for (const p of st.pts) {
+          x0 = Math.min(x0, p.x.v - m);
+          y0 = Math.min(y0, p.y.v - m);
+          x1 = Math.max(x1, p.x.v + m);
+          y1 = Math.max(y1, p.y.v + m);
+        }
       }
     }
-    return { i0, j0, cols, rows, a: cctx.getImageData(0, 0, cols, rows).data };
+    if (!strokes.length) return { i0: 0, j0: 0, cols: 0, rows: 0, a: new Float32Array(0) };
+    const i0 = Math.floor((x0 - anchor.x) / cell) - 1;
+    const j0 = Math.floor((y0 - anchor.y) / cell) - 1;
+    const cols = Math.ceil((x1 - anchor.x) / cell) + 1 - i0;
+    const rows = Math.ceil((y1 - anchor.y) / cell) + 1 - j0;
+    // Fewer samples only if the fine raster would make a huge buffer.
+    const ss = Math.max(4, Math.min(SS, Math.floor(Math.sqrt(3.2e6 / (cols * rows)))));
+    const pw = cols * ss;
+    const ph = rows * ss;
+    if (cover.width !== pw || cover.height !== ph) {
+      cover.width = pw;
+      cover.height = ph;
+    } else {
+      cctx.setTransform(1, 0, 0, 1, 0, 0);
+      cctx.clearRect(0, 0, pw, ph);
+    }
+    const k = ss / cell;
+    cctx.setTransform(k, 0, 0, k, -anchor.x * k - i0 * ss, -anchor.y * k - j0 * ss);
+    cctx.fillStyle = "#000";
+    for (const path of strokes) cctx.fill(path);
+    const px = new Uint32Array(cctx.getImageData(0, 0, pw, ph).data.buffer);
+    const sum = new Float32Array(cols * rows);
+    for (let y = 0; y < ph; y++) {
+      const base = ((y / ss) | 0) * cols;
+      let n = y * pw;
+      for (let i = 0; i < cols; i++) {
+        let s = 0;
+        for (let x = 0; x < ss; x++) s += px[n++] >>> 24;
+        if (s) sum[base + i] += s;
+      }
+    }
+    const norm = 1 / (255 * ss * ss);
+    for (let n = 0; n < sum.length; n++) sum[n] = Math.min(1, sum[n] * norm);
+    return { i0, j0, cols, rows, a: sum };
   };
-  const covered = (c, i, j) => {
+  const coverage = (c, i, j) => {
     const x = i - c.i0;
     const y = j - c.j0;
-    return x >= 0 && y >= 0 && x < c.cols && y < c.rows && c.a[(y * c.cols + x) * 4 + 3] >= 128;
+    return x >= 0 && y >= 0 && x < c.cols && y < c.rows ? c.a[y * c.cols + x] : 0;
   };
   // Stiffness 60..340: the fastest cells land in a tenth of a second, the
   // slowest take about half.
@@ -437,27 +485,37 @@ export async function createRaster(host, { embedded = false } = {}) {
   const enlist = (c, settle) => {
     for (let y = 0; y < c.rows; y++) {
       for (let x = 0; x < c.cols; x++) {
-        if (c.a[(y * c.cols + x) * 4 + 3] < 128) continue;
+        const a = c.a[y * c.cols + x];
+        if (a < 0.004) continue;
         const i = x + c.i0;
         const j = y + c.j0;
         const key = keyOf(i, j);
         if (cells.has(key)) continue;
-        cells.set(key, makeCell(i, j, settle ? 1 : 0));
+        cells.set(key, makeCell(i, j, settle ? a : 0));
       }
     }
   };
   const stepCells = (dt) => {
-    const c = sampleCover();
-    enlist(c, false);
+    if (coverDirty || !cov) {
+      cov = sampleCover();
+      coverDirty = false;
+    }
+    if (snapCells) {
+      snapCells = false;
+      cells.clear();
+      enlist(cov, true);
+      return true;
+    }
+    enlist(cov, false);
     let moving = false;
     const sub = dt > 1 / 70 ? Math.ceil(dt / (1 / 70)) : 1;
     const h = dt / sub;
     for (const [key, cl] of cells) {
-      const to = covered(c, cl.i, cl.j) ? 1 : 0;
+      const to = coverage(cov, cl.i, cl.j);
       if (Math.abs(to - cl.v) < 0.003 && Math.abs(cl.vel) < 0.01) {
         cl.v = to;
         cl.vel = 0;
-        if (!to) cells.delete(key);
+        if (to < 0.004) cells.delete(key);
         continue;
       }
       moving = true;
@@ -468,10 +526,10 @@ export async function createRaster(host, { embedded = false } = {}) {
     }
     return moving;
   };
-  // When the pitch changes, carry what is lit over to the new raster by
-  // area: going fine, the old letter is redrawn in small cells with all its
-  // stair-steps; going coarse, each big cell takes the average of what it
-  // covers and lands part-way on. Then every cell springs to the outline.
+  // On a jump in pitch, carry what is lit over to the new raster by area:
+  // going fine, the old dots are redrawn in small cells; going coarse, each
+  // big cell takes the average of what it covers. Then every cell springs
+  // to its own coverage.
   function resample(was) {
     if (!cells.size) return;
     const nc = raster.cell;
@@ -499,9 +557,8 @@ export async function createRaster(host, { embedded = false } = {}) {
       const j = (key % 8192) - OFF;
       const i = Math.round((key - (j + OFF)) / 8192) - OFF;
       // ...and each cell is knocked back by its own amount, so the word
-      // breaks up into the dot field at the switch and builds itself again
-      // cell by cell. Hold the drag still and it re-forms; keep dragging
-      // and it stays dissolved.
+      // breaks up into the dot field at the jump and builds itself again
+      // cell by cell.
       const left = Math.min(1, v) * (0.12 + 0.88 * hash(j * 7 + 3, i * 13 - 5) ** 0.8);
       if (left < 0.04) continue;
       const cl = makeCell(i, j, left);
@@ -510,7 +567,9 @@ export async function createRaster(host, { embedded = false } = {}) {
   }
   const settleCells = () => {
     cells.clear();
-    enlist(sampleCover(), true);
+    cov = sampleCover();
+    coverDirty = false;
+    enlist(cov, true);
   };
 
   const outline = (s, path) => {
@@ -585,9 +644,19 @@ export async function createRaster(host, { embedded = false } = {}) {
   const D = 2 * Math.sqrt(K) * 0.86;
   const simulate = (dt, withCells = true) => {
     let moving = false;
+    let inkMoving = false;
     const sub = Math.max(1, Math.ceil(dt / (1 / 240)));
     const h = dt / sub;
-    const all = [caret.x, caret.y, caret.w, caret.h];
+    const step = (sp) => {
+      if (Math.abs(sp.to - sp.v) < 0.002 && Math.abs(sp.vel) < 0.01) {
+        sp.v = sp.to;
+        sp.vel = 0;
+        return false;
+      }
+      for (let i = 0; i < sub; i++) stepSpring(sp, h, K, D);
+      return true;
+    };
+    for (const sp of [caret.x, caret.y, caret.w, caret.h]) if (step(sp)) moving = true;
     for (const g of glyphs.concat(dying)) {
       for (const s of g.strokes) {
         if (s.wait > 0) {
@@ -595,36 +664,27 @@ export async function createRaster(host, { embedded = false } = {}) {
           moving = true;
           continue;
         }
-        for (const p of s.pts) all.push(p.x, p.y);
-        for (const c of s.c) all.push(c);
-        all.push(s.h);
+        for (const p of s.pts) {
+          if (step(p.x)) inkMoving = true;
+          if (step(p.y)) inkMoving = true;
+        }
+        for (const c of s.c) if (step(c)) inkMoving = true;
+        if (step(s.h)) inkMoving = true;
       }
     }
-    for (const sp of all) {
-      if (Math.abs(sp.to - sp.v) < 0.002 && Math.abs(sp.vel) < 0.01) {
-        sp.v = sp.to;
-        sp.vel = 0;
-        continue;
-      }
-      moving = true;
-      for (let i = 0; i < sub; i++) stepSpring(sp, h, K, D);
-    }
+    const before = dying.length;
     dying = dying.filter((g) => g.strokes.some((s) => s.h.v > 0.02 || s.h.vel > 0.01));
+    if (dying.length !== before) inkMoving = true;
+    if (inkMoving) {
+      coverDirty = true;
+      moving = true;
+    }
     if (withCells && (stepCells(dt) || cells.size > lastCount)) moving = true;
     lastCount = cells.size;
     return moving;
   };
 
   let lastCaretOn = null;
-  // Ink by fade level: a cell grows from a grey raster dot to a black
-  // square one pitch wide less its gutter, in twelve steps of colour.
-  const LEVELS = 12;
-  const mix = (a) => {
-    const from = [0xc4, 0xc4, 0xc0];
-    const to = [0x0b, 0x0b, 0x0b];
-    return "rgb(" + from.map((f, n) => Math.round(f + (to[n] - f) * a)).join(",") + ")";
-  };
-  const INKS = Array.from({ length: LEVELS }, (_, n) => mix((n + 1) / LEVELS));
   const render = () => {
     const w = stage.width;
     const h = stage.height;
@@ -638,38 +698,42 @@ export async function createRaster(host, { embedded = false } = {}) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const px = (v) => Math.round(v * dpr) / dpr;
-    const gutter = Math.max(1 / dpr, cell * 0.13);
-    const full = Math.max(1 / dpr, px(cell - gutter));
-    const dot = 2 * dotRadius(cell);
-    const paths = Array.from({ length: LEVELS }, () => new Path2D());
+    // Every lit cell is one dot of solid ink; its size is the tone.
+    const ink = new Path2D();
     for (const cl of cells.values()) {
       const a = clamp(cl.v, 0, 1);
-      if (a < 0.04) continue;
+      if (a < 0.004) continue;
       const x0 = anchor.x + cl.i * cell;
       const y0 = anchor.y + cl.j * cell;
       if (x0 > w || y0 > h || x0 + cell < 0 || y0 + cell < 0) continue;
-      const side = a > 0.995 ? full : dot + (full - dot) * a * a;
-      const o = (cell - side) / 2;
-      paths[Math.min(LEVELS - 1, Math.floor(a * LEVELS))].rect(px(x0 + o), px(y0 + o), side, side);
+      dot(ink, x0 + cell / 2, y0 + cell / 2, cell, a);
     }
-    for (let n = 0; n < LEVELS; n++) {
-      ctx.fillStyle = INKS[n];
-      ctx.fill(paths[n]);
-    }
+    ctx.fillStyle = INK;
+    ctx.fill(ink);
 
-    // Caret: the one accent, a run of cells on the baseline where the next
-    // letter goes.
+    // Caret: the one accent, a bar on the baseline where the next letter
+    // goes, screened by the same raster.
     if (caretOn() && caret.w.v > 0.5) {
-      ctx.fillStyle = ACCENT;
-      const ia = Math.round((caret.x.v - anchor.x) / cell);
-      const ib = Math.round((caret.x.v + caret.w.v - anchor.x) / cell);
-      const ja = Math.round((caret.y.v - anchor.y) / cell);
-      const jb = Math.max(ja + 1, Math.round((caret.y.v + caret.h.v - anchor.y) / cell));
-      const o = (cell - full) / 2;
+      const cx0 = caret.x.v;
+      const cy0 = caret.y.v;
+      const cx1 = cx0 + caret.w.v;
+      const cy1 = cy0 + caret.h.v;
+      const bar = new Path2D();
+      const ia = Math.floor((cx0 - anchor.x) / cell);
+      const ib = Math.ceil((cx1 - anchor.x) / cell);
+      const ja = Math.floor((cy0 - anchor.y) / cell);
+      const jb = Math.ceil((cy1 - anchor.y) / cell);
       for (let j = ja; j < jb; j++) {
-        for (let i = ia; i < ib; i++) ctx.fillRect(px(anchor.x + i * cell + o), px(anchor.y + j * cell + o), full, full);
+        const y0 = anchor.y + j * cell;
+        const oy = Math.min(cy1, y0 + cell) - Math.max(cy0, y0);
+        for (let i = ia; i < ib; i++) {
+          const x0 = anchor.x + i * cell;
+          const a = (oy * (Math.min(cx1, x0 + cell) - Math.max(cx0, x0))) / (cell * cell);
+          if (a > 0.004) dot(bar, x0 + cell / 2, y0 + cell / 2, cell, Math.min(1, a));
+        }
       }
+      ctx.fillStyle = ACCENT;
+      ctx.fill(bar);
     }
   };
   const caretOn = () => {
@@ -681,22 +745,23 @@ export async function createRaster(host, { embedded = false } = {}) {
   stage.onResize(() => {
     syncGlyphs();
     relayout("resize");
-      });
+  });
 
-  // A held still: settle at `from`, switch to `w`, stop after `at` ms.
+  // A held still: settle at `from`, jump to `w`, stop after `at` ms.
   let frozen = false;
   if (freezeFrom != null) {
     stage.onResize(() => {
       if (frozen) {
-                render();
+        render();
         return;
       }
-      W = freezeFrom;
+      const target = Wf;
+      Wf = freezeFrom;
       syncGlyphs();
       relayout("resize");
       for (let i = 0; i < 400; i++) simulate(1 / 60, false);
       settleCells();
-      W = Math.round(Wf);
+      Wf = target;
       relayout("grid");
       let t = 0;
       while (t < (freezeAt ?? 0.15)) {
@@ -708,21 +773,15 @@ export async function createRaster(host, { embedded = false } = {}) {
     });
   }
 
-  // Idle tile: breathe the raster coarse and fine.
+  // Idle tile: glide the pitch slowly coarse and fine, through the lock
+  // points and the beats between them.
   let demoT = 0;
-  let demoDir = 1;
   stage.onFrame((dt) => {
     clock += dt;
     if (frozen) return;
     if (embedded && stage.idleFor() > 2500 && !drag) {
       demoT += dt;
-      if (demoT > 0.9) {
-        demoT = 0;
-        if (W >= 14) demoDir = -1;
-        if (W <= W_MIN) demoDir = 1;
-        setW(W + demoDir * 3 > 14 ? 14 : Math.max(W_MIN, W + demoDir * 3));
-        Wf = W;
-      }
+      setW(9.5 - 4.5 * Math.cos(demoT * 0.45), "drag");
     }
     const moving = simulate(dt);
     const on = caretOn();
