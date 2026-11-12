@@ -152,8 +152,10 @@ void main() {
   vec2 flow = (m.rg * 255.0 - 128.0) / 127.0 * uRange;
   float d = m.b * uDMax * uDScale;
   vec2 p = mix(uRect.xy, uRect.zw, aGrid) + flow * uW;
-  // local area change of the warp, over two motion texels
-  vec2 tx = 2.0 / vec2(textureSize(uMotion, 0));
+  // local area change of the warp, over 4 plate px (two texels of the
+  // old half-res pack; the pack is now at the sprite's own resolution, so
+  // the span is set in plate px and does not shrink with the texel)
+  vec2 tx = 4.0 / (uRect.zw - uRect.xy);
   vec2 span = tx * (uRect.zw - uRect.xy);
   vec2 dx = (flowAt(aGrid + vec2(tx.x, 0.0)) - flowAt(aGrid - vec2(tx.x, 0.0))) / (2.0 * span.x);
   vec2 dy = (flowAt(aGrid + vec2(0.0, tx.y)) - flowAt(aGrid - vec2(0.0, tx.y))) / (2.0 * span.y);
@@ -179,7 +181,9 @@ void main() {
   vec2 size = uRect.zw - uRect.xy;
   vec2 uvO = aGrid + flow / size;
   vec2 inside = step(vec2(0.0), uvO) * step(uvO, vec2(1.0));
-  float onBody = smoothstep(0.05, 0.5, textureLod(uTexO, uvO, 1.0).a) * inside.x * inside.y;
+  // the other frame's matte at 2 plate px a texel, whatever its resolution
+  float lodO = log2(2.0 * float(textureSize(uTexO, 0).x) / size.x);
+  float onBody = smoothstep(0.05, 0.5, textureLod(uTexO, uvO, lodO).a) * inside.x * inside.y;
   float err = length(flow + flowBack(uvO));
   float agree = exp(-err * err / (2.0 * 18.0 * 18.0));
   float conf = onBody * agree;

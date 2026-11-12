@@ -12,7 +12,7 @@ flowBA.npy (chained DIS flow).
 Layers, back to front (matte.py then re-pulls the birch's matte in
 near.webp and opens its leaf gaps, and sky.py re-bakes sky.webp from the
 source frames, keeping this one's open blue sky; run them in that order
-after this step):
+after this step; jumper.py then re-cuts the jumper from the native frames):
   sky.webp     the sky alone, opaque; under the tree, the post and the hotel
                it is the sky pushed in from around them (push-pull), which is
                all a few degrees of orbit ever uncovers.
