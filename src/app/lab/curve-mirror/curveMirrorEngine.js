@@ -47,7 +47,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    eight rays are traced and shaded across the pixel and resolved
 //    premultiplied over the photo; that edge band alone then takes the
 //    photo's own edge spread and a thin warm halation from bright sky.
-// The shared film kit develops the result.
+// The shared film kit develops the result, and develops the photograph alone
+// beside it: the print is the bare photograph's development wherever the
+// object does not reach, so the film's colour bleed cannot carry the orange
+// into the sky round the frame and leave a pale rim there.
 //
 // Query: ?aim=yaw,pitch (degrees) holds the mirror still, no reveal;
 // ?aim=sun holds it on the sun.
@@ -103,7 +106,11 @@ const SCENE = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 in vec2 vUv;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+#ifndef GEO
+// the photograph alone (its shadow included) for the second development
+layout(location = 1) out vec4 outPhoto;
+#endif
 
 uniform sampler2D uPhoto;  // sRGB
 uniform sampler2D uEnv;    // sRGB equirect, centred on the mirror
@@ -172,6 +179,13 @@ vec2 envUv(vec3 d) {
   return vec2(0.5 + atan(d.x, -d.z) / (2.0 * PI), 0.5 - asin(clamp(d.y, -1.0, 1.0)) / PI);
 }
 vec3 env(vec3 d, float lod) { return textureLod(uEnv, envUv(d), lod).rgb; }
+// The glass's own footprint in the panorama, as uv gradients across a pixel
+// (taken in main from the exact cap's reflection). A turned mirror is seen
+// side on and squeezes the street across but not up and down; filtered
+// anisotropically, the trunks and leaves keep their drawing along the
+// squeeze instead of the whole footprint being blurred to its widest axis.
+vec2 gEnvGx = vec2(0.0), gEnvGy = vec2(0.0);
+vec3 envGrad(vec3 d, float k) { return textureGrad(uEnv, envUv(d), gEnvGx * k, gEnvGy * k).rgb; }
 float envDist(vec3 d) {
   float c = textureLod(uEnvD, envUv(d), 0.0).r;
   return exp2(mix(uDist.x, uDist.y, c));
@@ -546,10 +560,9 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   }
   // footprint of this pixel in the panorama (ray differentials); a little
   // sharper than the box footprint, so a wire stays one dark hairline
-  float lod = max(log2(max(spread * uEnvW / (2.0 * PI), 1.0)) - 0.7, 0.0);
   float dust = dustAt(q.xy);
   float smudge = smudgeAt(q.xy);
-  vec3 c = env(dir, lod + 2.5 * smudge);
+  vec3 c = envGrad(dir, exp2(-0.7 + 2.5 * smudge));
   // The 360 behind the lens was shot under cloud: its walls and road sit at
   // 0.02-0.13 linear where the photo's own sunlit walls read 0.52 (median of
   // the sunlit matte). The street the mirror sees is under the photo's noon
@@ -778,6 +791,15 @@ void main() {
   vec3 rCap = reflect(d, normalize(Pf - S));
   float spread = max(length(dFdx(rCap)), length(dFdy(rCap)));
   float capAA = max(fwidth(capRho), 1e-5);
+  vec2 euv = envUv(rCap);
+  gEnvGx = dFdx(euv);
+  gEnvGy = dFdy(euv);
+  // across the panorama's seam, and never wider than a few degrees (off the
+  // cap's rim the differences mean nothing)
+  gEnvGx.x -= floor(gEnvGx.x + 0.5);
+  gEnvGy.x -= floor(gEnvGy.x + 0.5);
+  gEnvGx = gEnvGx * min(1.0, 0.02 / max(length(gEnvGx), 1e-6));
+  gEnvGy = gEnvGy * min(1.0, 0.02 / max(length(gEnvGy), 1e-6));
 
 #ifdef GEO
   // the geometry pass: what the pixel centre meets, and how far; on the
@@ -872,6 +894,7 @@ void main() {
     float ol = dot(obj.rgb, LUMA) / obj.a;
     obj.rgb *= 1.0 + (0.05 + 0.05 * smoothstep(0.2, 0.02, ol)) * gl + 0.025 * gc;
   }
+  outPhoto = vec4(col * uExpo, 1.0);
   // premultiplied over
   col = col * (1.0 - obj.a) + obj.rgb;
   // alpha carries the coverage, and whether this pixel straddles an edge,
@@ -931,15 +954,35 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
+// Two developments meet here. The film's dye-cloud bleed carries colour a
+// few pixels across every edge, and its summer blue deepens only a sky that
+// is still saturated: developed over the mirror, the sky round the orange
+// frame took its colour, lost the deepening and came up as a pale rim, the
+// tell of an overlay. So the photograph is developed on its own as well, and
+// the print is that photograph everywhere the object does not reach; where
+// it does, including its antialiased edge (whose share of photo is already
+// in it, premultiplied), it is the development with the object in it, which
+// carries the sky's light into the paint the way the film does at any edge.
 const BLIT = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 outColor;
-uniform sampler2D uTex;
+uniform sampler2D uTex;    // developed with the object
+uniform sampler2D uPhotoT; // the photograph developed alone
+uniform sampler2D uCov;    // scene pass: alpha carries the object's coverage
 uniform float uFade;
 uniform vec3 uPaper;
+float cover(vec2 uv) {
+  float a = texture(uCov, uv).a;
+  return clamp((a >= 0.495 ? a - 0.5 : a) / 0.49, 0.0, 1.0);
+}
 void main() {
-  vec3 c = texture(uTex, vUv).rgb;
+  vec2 px = 1.0 / vec2(textureSize(uCov, 0));
+  float w = 0.0;
+  for (int j = -1; j <= 1; j++)
+    for (int i = -1; i <= 1; i++) w = max(w, cover(vUv + vec2(i, j) * px));
+  w = smoothstep(0.0, 0.2, w);
+  vec3 c = mix(texture(uPhotoT, vUv).rgb, texture(uTex, vUv).rgb, w);
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -1041,6 +1084,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   ]);
   const photo = imageTexture(gl, photoImg, { srgb: true, mips: true });
   const envT = imageTexture(gl, envImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
+  const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+  if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
   const envD = imageTexture(gl, envdImg, { wrapS: gl.REPEAT });
   const aux = imageTexture(gl, auxImg);
 
@@ -1057,6 +1102,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const opticsP = program(gl, VERT, OPTICS);
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
+  const filmP = createFilm(gl, { width: 2, height: 2 });
 
   const [PW, PH] = scene.photo;
   const M = scene.mirror;
@@ -1112,6 +1158,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   let sceneT = null;
   let opticsT = null;
   let filmT = null;
+  let photoT = null;
+  let filmPT = null;
   let linear = false;
   let scale = 1;
   let lastBox = null;
@@ -1155,7 +1203,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     L.ph = Math.max(2, Math.round(L.h * dpr));
     L.rw = Math.max(2, Math.round(L.pw * scale));
     L.rh = Math.max(2, Math.round(L.ph * scale));
-    for (const t of [geoT, sceneT, opticsT, filmT]) freeTarget(gl, t);
+    for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT]) freeTarget(gl, t);
     geoT = target(gl, L.rw, L.rh, false);
     sceneT = target(gl, L.rw, L.rh, floatOk);
     linear = floatOk && sceneT.ok;
@@ -1163,9 +1211,17 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       freeTarget(gl, sceneT);
       sceneT = target(gl, L.rw, L.rh, false);
     }
+    // the photograph alone, a second colour attachment of the scene pass
+    photoT = target(gl, L.rw, L.rh, linear);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, photoT.tex, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     opticsT = target(gl, L.rw, L.rh, linear);
     filmT = target(gl, L.rw, L.rh, false);
+    filmPT = target(gl, L.rw, L.rh, false);
     film.resize(L.rw, L.rh);
+    filmP.resize(L.rw, L.rh);
     dirty = true;
   };
 
@@ -1307,27 +1363,25 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
 
   let grainSeed = 0;
   const develop = (fade) => {
-    film.render(
-      opticsT.tex,
-      {
-        ...FILM_PRESETS.summer,
-        // the scan carries its own grade; the film adds the optics
-        contrast: 1.1,
-        toe: 0.025,
-        saturation: 1.06,
-        blueDepth: 0.65,
-        whitePoint: 1.2,
-        vignette: 0.2,
-        halation: 0.22,
-        halationThreshold: 1.4,
-        // wires in the glass take the sky's halo, not a red fringe of their own
-        halationLocal: 1,
-        input: linear ? "linear" : "srgb",
-        headroom: linear ? 0.6 : 1.4,
-        grainSeed,
-      },
-      filmT.fbo,
-    );
+    const look = {
+      ...FILM_PRESETS.summer,
+      // the scan carries its own grade; the film adds the optics
+      contrast: 1.1,
+      toe: 0.025,
+      saturation: 1.06,
+      blueDepth: 0.65,
+      whitePoint: 1.2,
+      vignette: 0.2,
+      halation: 0.22,
+      halationThreshold: 1.4,
+      // wires in the glass take the sky's halo, not a red fringe of their own
+      halationLocal: 1,
+      input: linear ? "linear" : "srgb",
+      headroom: linear ? 0.6 : 1.4,
+      grainSeed,
+    };
+    film.render(opticsT.tex, look, filmT.fbo);
+    filmP.render(photoT.tex, look, filmPT.fbo);
     gl.bindVertexArray(vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
@@ -1338,9 +1392,9 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     const vy = stage.canvas.height - Math.round(L.y * dpr) - L.ph;
     gl.viewport(vx, vy, L.pw, L.ph);
     gl.useProgram(blit.p);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
-    gl.uniform1i(blit.u.uTex, 0);
+    bindTex(0, filmT.tex, blit.u.uTex);
+    bindTex(1, filmPT.tex, blit.u.uPhotoT);
+    bindTex(2, sceneT.tex, blit.u.uCov);
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1439,7 +1493,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     destroy() {
       host.removeEventListener("keydown", onKey);
       film.destroy();
-      for (const t of [geoT, sceneT, opticsT, filmT]) freeTarget(gl, t);
+      filmP.destroy();
+      for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT]) freeTarget(gl, t);
       for (const t of [photo, envT, envD, aux]) gl.deleteTexture(t);
       for (const pr of [sceneP, geoP, opticsP, blit]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);

@@ -27,7 +27,7 @@
       "file": "https://upload.wikimedia.org/wikipedia/commons/9/9c/HashiNoMisasagi_Kofun%2C_Funkyu_South_360-degree.jpg",
       "author": "AsPJT (Wikimedia Commons)",
       "licence": "CC0",
-      "note": "端陵神社・端陵古墳（南）, March 2025: a 360 at a Japanese residential junction, two lanes, utility poles and wires. The hemisphere behind the lens (3840 px thumbnail): exposed to the photo's sunlit walls, its overcast sky (segment.py sky matte, kept to what connects to the zenith) replaced by a fit of the photo's own clear sky by elevation, with the wires kept."
+      "note": "端陵神社・端陵古墳（南）, March 2025: a 360 at a Japanese residential junction, two lanes, utility poles and wires. The hemisphere behind the lens (the 3840 px rendition, the largest Commons serves to a script): exposed to the photo's sunlit walls, its grey sky (segment.py sky matte at full width, the open sky plus the pockets seen through the canopy) swapped for a fit of the photo's own clear sky by elevation by unmixing under a feathered, grown matte, so the leaves and the wires stay; the photo's own cumulus carried over the zenith on a cloud plane."
     },
     "https://en.wikipedia.org/wiki/Curved_mirror#Convex_mirrors"
   ]
