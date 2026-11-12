@@ -31,9 +31,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the air in that veil's footprint is first taken down a step (?shade=, a
 // multiply), so where the cloud's sunlit crown stands behind the 0 and the 4
 // the figures still separate from it without being brightened.
-// The frame is then developed by the shared film kit (summer preset) with
-// its diffusion off: the cumulus at infinity is drawn as crisply as the
-// needles in front of it, and only the figures veil into the air.
+// Before the film kit, the trees get a film grade that reads their matte
+// (GRADE): the phone's lime greens pulled toward olive-teal, the crushed
+// crowns lifted onto a cyan toe, the over-sharpened needles eased, the brighter
+// air bled 2-4 px into every needle and branch the way a Pro-Mist does, and a
+// thin warm halation ring where bright cloud meets a dark silhouette.
+// The frame is then developed by the shared film kit (summer preset, its
+// grain opened up and moving at 24 fps) with its frame-wide diffusion off:
+// the cumulus at infinity is drawn as crisply as the needles in front of it.
 //
 // Query (stills): ?tilt=x,y (-1..1) holds the camera; ?time=HH:MM holds the
 // clock. ?roll=0..1 holds a minute change part way through. ?drift=-1..1
@@ -76,9 +81,25 @@ const FILM = {
   // of the frame, not the pyramid, and keeps the cloud's edge against blue.
   bloom: 0,
   bloomThreshold: 0.45,
-  // The all-over veil used to lift the deep crowns; the scan's black holds
-  // them where they were.
+  // The scan's own black; the crowns' deeper cyan toe is laid on the plate
+  // (GRADE.toe), so the sky's blacks are not lifted with them.
   toe: 0.05,
+  // Grain a scan would show at this size: open enough to read at DPR 2.
+  grain: 0.5,
+  grainSize: 1.35,
+};
+
+// The film grade, laid on the plates in the scene shader so it reads the
+// matte: the trees are a phone's HDR capture (lime, crisp, crushed), and on
+// film they are softer, olive-teal and lifted.
+const GRADE = {
+  soften: 0.45, // the foliage's crisp needles eased toward the next mip level
+  mistLod: 1.4, // the diffusion's spread: 2^1.4 ~ 2.6 device px, and twice that
+  mist: 0.42, // how much of the brighter air bleeds into the needles over it
+  halo: 1.2, // warm ring where bright cloud and sky meet a dark silhouette
+  hue: 0.4, // greens moved this share of the way toward 150 degrees
+  greenSat: 0.72, // and their saturation eased by a quarter
+  toe: [0.008, 0.013, 0.01], // the crowns' deep-shadow floor, linear (a cyan toe)
 };
 
 const VERT = `#version 300 es
@@ -104,8 +125,43 @@ uniform float uBleedLod;  // mip offset that scales the bleed with the figures
 uniform float uShade;     // the air under the figures, multiplied by this at full bleed
 uniform float uShadeK;    // the bleed at which the step is whole
 uniform float uEnc;
+uniform float uSoften;    // share of the next mip level in the foliage
+uniform float uMistLod;   // the diffusion's spread, as a mip level of the plates
+uniform float uMist;      // share of the brighter air that bleeds into the needles
+uniform float uHalo;      // warm ring on the dark side of a bright edge
+uniform float uHue;       // share of the way the greens move toward 150 degrees
+uniform float uGreenSat;  // the greens' saturation, multiplied
+uniform vec3 uToe;        // the crowns' deep-shadow floor, linear
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${(IMG_W / IMG_H).toFixed(6)};
+
+// Foliage colour, as a daylight negative renders it: the phone's lime
+// greens pulled toward olive-teal (hue nudged toward 150 degrees, saturation
+// eased), bark and sky-blue left alone. Graded in an encoded space so the
+// hue moves the way the eye reads it.
+vec3 hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-6)), d / (q.x + 1e-6), q.x);
+}
+vec3 rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+vec3 grade(vec3 lin) {
+  vec3 e = pow(max(lin, 0.0), vec3(1.0 / 2.2));
+  vec3 h = hsv(e);
+  float deg = h.x * 360.0;
+  // weight: greens from yellow-green to green, fading out before cyan/blue
+  float w = smoothstep(45.0, 75.0, deg) * (1.0 - smoothstep(150.0, 175.0, deg)) * smoothstep(0.08, 0.25, h.y);
+  h.x = (deg + (150.0 - deg) * uHue * w) / 360.0;
+  h.y *= mix(1.0, uGreenSat, w);
+  // olive: the brightest lime steps down a little in value
+  h.z *= mix(1.0, 0.94, w * smoothstep(0.3, 0.7, h.z));
+  return pow(rgb(h), vec3(2.2));
+}
 
 vec2 shift(float d) {
   return uCam * (d - uPlane.y) * uPlane.x * vec2(1.0, ASPECT);
@@ -180,8 +236,37 @@ void main() {
   // step contracts, and eight steps settle even at full tilt.
   vec2 u = b + shift(texture(uDepth, b).r);
   for (int i = 0; i < 8; i++) u = b + shift(texture(uDepth, u).r);
-  vec4 fg = texture(uFg, u);
-  col = mix(col, fg.rgb * uEnc, fg.a);
+  // Read a touch soft: the phone's sharpening drew every needle with a
+  // bright rim, and a scanned negative never does.
+  vec4 fg = mix(texture(uFg, u), texture(uFg, u, 1.0), uSoften);
+  fg.rgb = grade(fg.rgb * uEnc);
+
+  // The air at the needles' edges, as a diffusion filter sees it: the frame
+  // (sky and crowns) spread over about 2-4 device px, read from the same
+  // parallax. Two levels make the spread's falloff soft.
+  vec4 f2 = textureLod(uFg, u, uMistLod);
+  vec4 f3 = textureLod(uFg, u, uMistLod + 1.0);
+  vec3 s2 = textureLod(uSky, uvS, uMistLod).rgb * uEnc;
+  vec3 s3 = textureLod(uSky, uvS, uMistLod + 1.0).rgb * uEnc;
+  float aN = 0.6 * f2.a + 0.4 * f3.a;
+  vec3 skyN = 0.6 * s2 + 0.4 * s3;
+  vec3 air = mix(skyN, 0.6 * grade(f2.rgb * uEnc) + 0.4 * grade(f3.rgb * uEnc), aN);
+
+  // The crowns' deep shadow never reaches black on a scan: it sits on a
+  // cyan toe, the sky's own light scattered back into the emulsion.
+  float yf = dot(fg.rgb, LUMA);
+  fg.rgb += uToe * (1.0 - smoothstep(0.0, 0.03, yf));
+  col = mix(col, fg.rgb, fg.a);
+
+  // Pro-Mist: brighter air bleeds into the needles and branches over it, so
+  // the cobalt creeps a couple of px into every edge; dark never bleeds out.
+  col += uMist * max(air - col, 0.0) * fg.a;
+
+  // Halation: a thin warm ring on the dark side of a silhouette, only where
+  // the light behind it is bright (the cloud most, clear sky a little).
+  float yAir = dot(skyN, LUMA);
+  float ring = fg.a * (1.0 - aN) * (1.0 - smoothstep(0.02, 0.12, yf));
+  col += uHalo * vec3(1.0, 0.5, 0.2) * ring * smoothstep(0.1, 0.45, yAir) * yAir;
 
   outColor = vec4(col, 1.0);
 }`;
@@ -249,6 +334,17 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   // off it; 0.85 left the brightest cloud level with the figures.
   const shadeK = clamp(num(q.get("shade"), 0.8), 0, 1);
   const shadeW = num(q.get("shadew"), 0.15);
+  // The film grade the plates get before the film kit develops them (query
+  // keys of the same names tune it).
+  const grade = {
+    soften: num(q.get("soften"), GRADE.soften),
+    mistLod: num(q.get("mistlod"), GRADE.mistLod),
+    mist: num(q.get("mist"), GRADE.mist),
+    halo: num(q.get("halo"), GRADE.halo),
+    hue: num(q.get("hue"), GRADE.hue),
+    greenSat: num(q.get("gsat"), GRADE.greenSat),
+    toe: GRADE.toe.map((v) => v * num(q.get("lift"), 1)),
+  };
   const driftQ = q.get("drift") != null ? clamp(num(q.get("drift"), 0), -1, 1) : null;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -324,7 +420,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
 
   // ---- layout: which part of the image the box shows, where the time sits
-  const lay = { crop: [0, 0, 1, 1], drift: [0, 0], s: 1, text: [0, 0, 1, 1], fontPx: 100, figH: 70, pad: 20, bleedLod: 0, cell: 60, colon: 30, track: 0, baseX: 0 };
+  const lay = { texel: 1, crop: [0, 0, 1, 1], drift: [0, 0], s: 1, text: [0, 0, 1, 1], fontPx: 100, figH: 70, pad: 20, bleedLod: 0, cell: 60, colon: 30, track: 0, baseX: 0 };
   const layout = () => {
     const W = stage.width;
     const H = stage.height;
@@ -356,6 +452,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     ];
     const s = (W * dpr) / cw; // device px per image px
     lay.s = s;
+    lay.texel = 1 / s;
     // Type: an em in image px, never wider than the crop allows.
     const emImg = Math.min(numQ.size, cw * 0.29);
     const fontCss = emImg * (s / dpr);
@@ -580,6 +677,13 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     gl.uniform1f(u.uBleedLod, lay.bleedLod);
     gl.uniform2f(u.uWind, wind.x, wind.y);
     gl.uniform1f(u.uEnc, ENC * enc);
+    gl.uniform1f(u.uSoften, grade.soften);
+    gl.uniform1f(u.uMistLod, grade.mistLod + Math.log2(lay.texel));
+    gl.uniform1f(u.uMist, grade.mist);
+    gl.uniform1f(u.uHalo, grade.halo);
+    gl.uniform1f(u.uHue, grade.hue);
+    gl.uniform1f(u.uGreenSat, grade.greenSat);
+    gl.uniform3fv(u.uToe, grade.toe);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
