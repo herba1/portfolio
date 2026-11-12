@@ -33,7 +33,11 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //    film develops it and the photograph alike;
 //  - the street the glass shows is under the same sun: the 360's surfaces
 //    (shot under cloud) take the sun's exposure, up to the photo's own
-//    sunlit walls; its fitted sky and the photograph's own pixels keep theirs;
+//    sunlit walls; what the glass shows is then graded to the plate (opened
+//    0.7-0.8 stop, black point held, a shoulder at the plate's sunlit white),
+//    since an acrylic mirror returns ~85 % of it, and its sky is taken to the
+//    cobalt round the mirror by reflected elevation, never a stop under or
+//    greyer than the street it stands in;
 //  - the face is a second-surface acrylic dome standing proud of the frame
 //    on its own wall: a Schlick sheen of cool sky that climbs toward the rim,
 //    the zenith's broad gloss over the upper bulge, the hood's underside
@@ -548,6 +552,26 @@ float hoodSeen(vec3 q, vec3 r, float spread, out vec3 xh) {
   return hh ? 1.0 : 1.0 - smoothstep(0.25 * sp, 1.55 * sp, bestA);
 }
 
+// The plate's graded clear sky by elevation (sky_grade.py's target, the
+// same HSV stops), and the sky the glass is given: the same gradient from
+// where it stands round the mirror (about 30 degrees up) to the zenith.
+vec3 hsv2lin(float h, float s, float v) {
+  vec3 k = clamp(abs(mod(h / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return srgb2lin(v * mix(vec3(1.0), k, s));
+}
+vec3 skyT(float el) {
+  const float E[8] = float[8](-5.0, 0.0, 10.0, 20.0, 35.0, 50.0, 70.0, 90.0);
+  const float Hh[8] = float[8](212.0, 212.0, 211.5, 211.0, 210.0, 209.5, 209.0, 209.0);
+  const float Ss[8] = float[8](0.28, 0.30, 0.36, 0.42, 0.49, 0.55, 0.60, 0.63);
+  const float Vv[8] = float[8](0.91, 0.90, 0.88, 0.84, 0.76, 0.67, 0.60, 0.56);
+  el = clamp(el, -5.0, 90.0);
+  int i = 0;
+  for (int k = 0; k < 6; k++) if (el > E[k + 1]) i = k + 1;
+  float f = clamp((el - E[i]) / (E[i + 1] - E[i]), 0.0, 1.0);
+  return hsv2lin(mix(Hh[i], Hh[i + 1], f), mix(Ss[i], Ss[i + 1], f), mix(Vv[i], Vv[i + 1], f));
+}
+vec3 skyG(float el) { return skyT(32.0 + 0.64 * max(el, 0.0)); }
+
 // spread: the angular footprint of a pixel in the reflection; aa: of the face
 // in metres; both taken in main, where every pixel of the quad runs them
 vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
@@ -592,14 +616,60 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float street = (1.0 - fromPhoto) * max(1.0 - smoothstep(120.0, 600.0, dE), above);
   float cl0 = max(dot(c, LUMA), 1e-4);
   float Lg = 5.0 * cl0 * pow(cl0 / 0.12, 0.25);
-  vec3 cs = c * vec3(1.04, 1.0, 0.93) * (0.8 * (1.0 - exp(-Lg / 0.8)) / cl0);
+  vec3 cs = c * vec3(1.09, 1.0, 0.87) * (0.8 * (1.0 - exp(-Lg / 0.8)) / cl0);
+  // the overcast sky lit the 360's road from the whole dome and its walls
+  // from half of it; under the sun the two take about the same, so its road
+  // was twice as bright as its walls for what the sun makes of them
+  // (the 360's distances are a ground plane below its horizon, so the road
+  // is told by how steeply the ray looks down: its houses end about 12 deg)
+  cs *= mix(1.0, 0.45, smoothstep(0.25, 0.55, -dir.y));
   c = mix(c, cs, street);
-  // the panorama was shot under cloud: what the aluminium returns of it is
-  // given the photo's own snap (a filmic contrast about mid grey, a touch of
-  // colour), so the glass reads as a mirror, not a print behind a sheet
-  float cl = dot(c, LUMA);
-  c *= pow(max(cl, 1e-4) / 0.32, 0.32);
-  c = max(mix(vec3(dot(c, LUMA)), c, 1.15), 0.0);
+
+  // The sky. The panorama's sky (and the photograph's, re-projected) is the
+  // plate's graded clear sky by elevation, which near the horizon is the
+  // milky band over the roofs: in the glass, under the old veil, it read as a
+  // pale grey-blue strip, not the sky the mirror stands in. It is taken to
+  // the cobalt the plate shows round the mirror itself, still by the
+  // reflected elevation (skyG), as sky_grade.py does it: the clear sky
+  // rescaled to the new colour, a cloud given the difference so it keeps its
+  // own light, a wire across it its darkness.
+  float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
+  vec3 T0 = skyT(el);
+  vec3 T1 = skyG(el);
+  float wPhoto = fromPhoto * texture(uAux, ppx / uPhotoSize).b;
+  float wPano = (1.0 - fromPhoto) * smoothstep(0.14, 0.26, nbC) * smoothstep(-1.0, 4.0, el) * (1.0 - above);
+  float lr = dot(c, LUMA) / max(dot(T0, LUMA), 1e-4);
+  float wSky = max(wPhoto, wPano) * smoothstep(0.35, 0.7, lr);
+  float cloud = smoothstep(1.03, 1.35, lr);
+  vec3 sk = mix(c * T1 / T0, c + 0.35 * (T1 - T0), cloud);
+  c = mix(c, max(sk, 0.0), wSky);
+
+  // The plate's grade. The glass returns ~85 % of this, so what it shows
+  // has to stand at the plate's own exposure, not a stop under it: the
+  // street is opened up 0.7 stop (the photograph's own pixels, which carry
+  // their sun already, only enough to make up the aluminium's loss), with
+  // the black point held, then rolled on a shoulder toward the plate's
+  // sunlit white (the photo's sunlit plaster reaches 0.70 linear at its
+  // 98th percentile), so a white wall in the glass lands where the wall
+  // beside it does and nothing clips; its chroma is brought to the plate's.
+  float lift = mix(mix(exp2(0.8), exp2(0.2), fromPhoto), 1.12, wSky);
+  float cl = max(dot(c, LUMA), 1e-5);
+  // the overcast 360 lacks a sunlit street's spread: opened in contrast
+  // about its mid grey before the lift, its shadows let down to the plate's
+  float con = mix(pow(cl / 0.18, 0.3), 1.0, max(fromPhoto, wSky));
+  float lb = cl * con * lift;
+  // the shoulder is judged on luminance or, for a vivid sign or a flower,
+  // its strongest channel, so a red does not clip on its own
+  float mxc = max(max(c.r, c.g), c.b) / cl;
+  float yb = lb * max(1.0, 0.72 * mxc);
+  const float KN = 0.44, WC = 0.9;
+  float yt = yb < KN ? yb : KN + (WC - KN) * (1.0 - exp(-(yb - KN) / (WC - KN)));
+  c *= (lb / cl) * (yt / max(yb, 1e-6));
+  // vibrance, not saturation: the grey siding and the road take colour, a
+  // tree that already has it is not driven to neon
+  float chr = (max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b)) / max(max(max(c.r, c.g), c.b), 1e-4);
+  float vib = mix(mix(1.9, 1.0, smoothstep(0.1, 0.5, chr)), 1.06, max(fromPhoto, wSky));
+  c = max(mix(vec3(dot(c, LUMA)), c, vib), 0.0);
 
   // The mirror sees its own head. A reflected ray that runs up under the
   // visor (or, from the very rim, back across the frame's face) meets paint,
@@ -632,15 +702,15 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float contact = mix(0.2, 1.0, smoothstep(cw * 0.4, cw + aa, edgeM));
   float lipAO = 1.0 - (0.14 + 0.3 * topW) * exp(-edgeM / 0.016);
 
-  // Second-surface acrylic, n 1.49: the aluminised back returns ~88 % of
+  // Second-surface acrylic, n 1.49: the aluminised back returns ~92 % of
   // what gets through the front, twice through 3 mm of faintly cool acrylic,
   // a little dimmer toward the rim where the path through the sheet is longer.
   float cosi = max(dot(-d, Nn), 0.0);
   float F = 0.039 + 0.961 * pow(1.0 - cosi, 5.0);
   float cost = sqrt(1.0 - (1.0 - cosi * cosi) / (1.49 * 1.49));
-  vec3 absorb = exp(-vec3(0.05, 0.035, 0.02) * 2.0 / cost);
-  float vig = 1.0 - 0.16 * smoothstep(0.3, 1.0, rr * rr);
-  vec3 back = c * 0.88 * (1.0 - F) * (1.0 - F) * absorb * vig * mix(1.0, lipAO, 0.5);
+  vec3 absorb = exp(-vec3(0.03, 0.02, 0.012) * 2.0 / cost);
+  float vig = 1.0 - 0.12 * smoothstep(0.3, 1.0, rr * rr);
+  vec3 back = c * 0.92 * (1.0 - F) * (1.0 - F) * absorb * vig * mix(1.0, lipAO, 0.5);
 
   // The front face is a dome, and it has to read as one. Its own reflection
   // is Schlick-weighted on the dome's curvature: the face's 14 degrees of
@@ -648,29 +718,31 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // spreads the grazing lobe inward), so the reflectance climbs toward the
   // rim, most on the side turned away from the eye, as a faint, cool sheen
   // of the sky over the image, the brightening a curved sheet has and a
-  // flat print does not.
+  // flat print does not. Head on, the front face's 4 % is the same sharp
+  // image as the back's, not a blurred sky laid over it: the sheen has no
+  // floor, so the middle of the glass carries no grey veil.
   vec3 tilt = Ng - uN * dot(Ng, uN);
   vec3 Nb = normalize(uN + tilt * 3.0);
   float cb = max(dot(-d, Nb), 0.0);
   float Fb = 0.04 + 0.96 * pow(1.0 - cb, 5.0);
   vec3 skyC = irradiance(normalize(Nb + vec3(0.0, 0.8, 0.0))) / PI * vec3(0.9, 1.0, 1.1);
   vec3 sheenL = mix(env(r, 6.5), skyC, 0.45);
-  float rimF = 1.6 * (Fb - 0.04) + 0.02 + 0.16 * pow(smoothstep(0.45, 1.0, rr), 2.0);
+  float rimF = 1.6 * (Fb - 0.04) + 0.06 * pow(smoothstep(0.6, 1.0, rr), 2.0);
   float fr = 0.88 * (1.0 - F) * (1.0 - F) * vig + F;
-  c = back + sheenL * (F * 1.3 + rimF * 0.9) * (0.5 + 0.5 * smoothstep(-0.3, 0.6, Nb.y)) * lipAO * (1.0 - 0.85 * hoodC);
+  c = back + c * F + sheenL * rimF * 0.9 * (0.5 + 0.5 * smoothstep(-0.3, 0.6, Nb.y)) * lipAO * (1.0 - 0.85 * hoodC);
 
   // The zenith's broad specular: the bright sky overhead laid across the
   // upper bulge as one soft gloss lobe (GGX, alpha 0.7, on the dome's
   // curvature), so the dome is lit from above like any rounded thing
-  // outdoors: a veil over the upper half that fades down the face, sliding
+  // outdoors: a gloss over the upper half that fades down the face, sliding
   // over it as it tips, cut off where the visor hangs over it.
   vec3 zen = env(vec3(0.0, 1.0, 0.0), 7.5);
   vec3 hz = normalize(vec3(0.0, 1.0, 0.0) - d);
   float nz = max(dot(Nb, hz), 0.0);
-  const float ZA2 = 0.5;
+  const float ZA2 = 0.3;
   float zl = ZA2 * ZA2 / pow(nz * nz * (ZA2 - 1.0) + 1.0, 2.0);
   float upper = smoothstep(-0.6, 0.7, q.y / A);
-  c += mix(zen, skyC, 0.3) * zl * upper * (0.22 + 2.0 * (Fb - 0.04)) * lipAO * (1.0 - hoodC);
+  c += mix(zen, skyC, 0.3) * zl * upper * (0.12 + 2.0 * (Fb - 0.04)) * lipAO * (1.0 - hoodC);
 
   // The shoulder: the last centimetre of the dome, where the thermoformed
   // sheet rolls over into its wall. Its normal turns out toward the rim, so
@@ -689,7 +761,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
 
   // dust and smudge scatter the sky a little into what the face returns
   vec3 sky = irradiance(Nn) / PI;
-  c = c * (1.0 - 0.1 * dust - 0.15 * smudge) + (dust * 0.03 + smudge * 0.07) * sky * lipAO;
+  c = c * (1.0 - 0.06 * dust - 0.12 * smudge) + (dust * 0.006 + smudge * 0.035) * sky * lipAO;
 
   // The sun. Everything it puts on the face is gathered apart from the
   // glass's image of the world, so it is developed as light instead of added
