@@ -6,21 +6,22 @@
 // swings on that first sort like a lever, a step at a time, its far end
 // first, so the line bends before it breaks into an uneven staircase
 // hinged on the margin. Display type, brass and the reversed slug all step
-// by one unit, the brass rule's face, so every riser in the forme is a whole
-// number of the same piece of brass. Sorts of the same ink are solid
+// by one unit, the brass rule's body, so every riser in the forme is a whole
+// number of the same piece of brass. Only the brass's fine face prints. Sorts of the same ink are solid
 // bodies: a line that comes down onto a neighbouring line shoves the sorts
 // it lands on a step, the line bends to them from the margin, and past that
 // knee it takes on the shoving line's own riser, sort for sort, and hands it
 // on down the chain, so a full push nests every line and the rule as
 // parallel stairs of one pitch. Lead stays in contact: no sort ever hangs
-// more than its own body below the one before it, and the brass rule and
-// the reversed slug step as one body, each joint filled by a riser, so they
-// break as continuous stairs, never as dashes or labels. The rule is cut to the
+// more than its own body below the one before it. The reversed slug steps as
+// one body, each joint filled by a riser, so it breaks as one cut ground,
+// never as labels; the brass rule breaks as what it is, separate lengths of
+// brass that sit at their own depths, ends butted. The rule is cut to the
 // red's measure: its last piece is never set across the figure's face. It
 // holds over the red's cap line as a head rule while the run behind it
-// steps, and when the push brings it to its datum it seats on the red's
-// baseline in one knock, so a full push ends with it as the red's own
-// baseline rule, from the 3 to the 5. When a
+// steps, and when the push brings it to its datum it seats in one knock
+// across the feet of the red, so a full push ends with it overprinting the
+// figure from the 3 to the 5. When a
 // step would need the margin to give, the whole run locks. Only the red
 // run, printed in a second pass, crosses the black, and where it does the
 // two inks make a third. At rest the forme is strict: the title on the
@@ -40,11 +41,20 @@ const DH = 600;
 // so its blocks fall as a shallow, wide stair of their own.
 const STEP_BODY = 1 / 3;
 const STEP_RUN = 0.5;
-// The forme's one riser: the brass rule's face. Display type, brass and the
-// reversed slug all step by it, so every stair in the forme, type or rule,
-// rises in whole multiples of the same piece of brass and they nest as one
-// system instead of three pitches colliding.
+// The forme's one riser: the brass rule's body, the lead it is cast on.
+// Display type, brass and the reversed slug all step by it, so every stair in
+// the forme, type or rule, rises in whole multiples of the same piece of
+// brass and they nest as one system instead of three pitches colliding.
 const UNIT = 12;
+// What prints of the brass: a fine face cast on that body, a third of it,
+// high on the shoulder. The step is the body's, never the face's, so a
+// lighter rule keeps the forme's rhythm.
+const FACE = 4;
+const FACE_AT = (UNIT - FACE) / 2;
+// How far the face stands above the figure's baseline when the rule seats on
+// it, design px: inside the feet of the figure, so the brass crosses the red
+// and overprints it instead of underlining it.
+const KISS = 4;
 // The steepest a line can swing: drop from one sort to the next over the
 // sort's average width. A line of small steps takes more of them to get there.
 const STEEP = 0.8;
@@ -59,7 +69,7 @@ const SIDE = 0.06;
 // colophon, set solid on their own small leading, less.
 const GAP = 8;
 const GAP_SMALL = 2;
-// Body above and below a rule's face, so it never sits on a baseline as an underline.
+// Lead above and below a rule's body, so it never sits on a baseline as an underline.
 const RULE_LEAD = 6;
 // A display sort's body above the baseline, in em; a reversed slug's ground, design px.
 const CAP = 0.74;
@@ -73,7 +83,7 @@ const PAPER = "#f7f6f2";
 const BLACK = "#141414";
 const RED = "#e3402a";
 // Black printed over red: not flat multiply but a third, darker ink.
-const OVER = "#561a12";
+const OVER = "#7c1a10";
 
 const law = (size) => -0.043 * (size - 12);
 
@@ -94,11 +104,11 @@ const FORME = [
   // is shoved, the run ahead takes on the riser of the line above, so a full
   // push carries it down to its datum as a fourth stair parallel to the
   // title. The last piece holds over the red's cap line until the run
-  // reaches its datum, then seats there in one knock. The red stands a whole
-  // number of faces below the rule, its cap line just under the rule's face,
-  // and two faces a joint across the pieces before it come out at exactly
-  // that datum, so a full push seats it with a full step.
-  { rule: true, pieces: [36, 36, 72, 72, 72, 72, 72, 48, 156], thick: UNIT, x: 0, y: 400, fit: "red" },
+  // reaches its datum, then seats there in one knock, its face across the
+  // feet of the red. The red stands a whole number of bodies below the rule,
+  // its cap line just under the rule's face, so a full push seats it with a
+  // full step.
+  { rule: true, pieces: [36, 36, 72, 72, 72, 72, 72, 48, 156], body: UNIT, x: 0, y: 400, fit: "red" },
   { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 520 },
   // The colophon is set flush left on the red's axis, the left edge of the
   // "3", where the rule's last piece starts, and hangs from the cap line of
@@ -140,13 +150,12 @@ export async function createWeingart(host) {
   // A line's own step, to the half pixel, and its reach: the most whole
   // steps one sort can sit below (or above) its left neighbour. That is its
   // own body height, so a sort never loses contact with the one before it:
-  // lead stays in contact, it does not float. A rule's joint is filled by a
-  // riser of the same brass stood on end, so a rule can drop three faces at
-  // a joint and still read as one stroke.
+  // lead stays in contact, it does not float. A rule's pieces are separate
+  // brass, so a rule can drop three bodies at a joint.
   const stepOf = (d) => {
     const step = d.rule || d.rev || d.hang || d.size >= LETTER_MIN ? UNIT : d.size * STEP_BODY;
     const sy = Math.round(step * 2) / 2;
-    const body = d.rule ? d.thick + RULE_LEAD * 2 : d.rev ? REV_H : d.size * CAP;
+    const body = d.rule ? d.body + RULE_LEAD * 2 : d.rev ? REV_H : d.size * CAP;
     const sx = d.rev ? sy * STEP_RUN : 0;
     return { sy, sx, reach: d.rule ? 3 : Math.max(1, Math.floor(body / sy + 1e-6)) };
   };
@@ -169,10 +178,10 @@ export async function createWeingart(host) {
   const sort = (x, w, extra) => ({ x, w, p: 0, v: 0, k: 0, q: 0, wait: 0, seat: 0, settled: true, vis: true, ...extra });
   // A rule fitted to a figure is locked up to its measured ink: the joint
   // before its last piece is cut to the figure's left edge, and the last
-  // piece runs to the figure's right edge. Its datum is the figure's
-  // baseline: that many faces below the rule, the brass seats on the line
-  // the figure stands on and goes no deeper, so a full push ends with the
-  // last tread as the figure's own baseline rule.
+  // piece runs to the figure's right edge. Its datum is the figure's feet:
+  // that many bodies below the rule, the brass's face crosses the figure just
+  // above the line it stands on and goes no deeper, so a full push ends with
+  // the last tread overprinting the figure.
   // A glyph measured as large as it can be without leaving the size the
   // browser draws it at (its ink bounds come back in whole pixels, and change
   // outline past about 256px), so an edge is placed to a fraction of a pixel.
@@ -203,20 +212,22 @@ export async function createWeingart(host) {
     const us = s.units;
     const lead = us[us.length - 1].x;
     // The last piece of case length before the figure is trimmed or packed to
-    // meet it. The joint sits half a face out, so when the rule steps there its
-    // riser (centred on the joint) stands against the figure's left edge, not
-    // on it: no brass prints over the figure except its own baseline rule.
-    const at = l - s.thick / 2;
+    // meet it. The joint sits half a body out, so when the rule steps there
+    // the piece before stands clear of the figure's left edge: no brass prints
+    // over the figure except its own rule.
+    const at = l - s.body / 2;
     us[us.length - 2].w += at - lead;
     us[us.length - 1].x = at;
     us[us.length - 1].w = r - at;
-    s.datum = Math.round((red.y - s.y) / s.thick);
+    // The deepest whole step at which the face still stands KISS above the
+    // baseline, so the rule seats across the feet of the figure.
+    s.datum = Math.floor((red.y - KISS - FACE - FACE_AT - s.y) / s.sy);
   };
   // The last piece of a fitted rule is the figure's own rule, so it is
   // never set across the figure's face: it holds where it was composed, a
   // head rule over the cap line, while the run behind it steps, and only
-  // when the push brings it to the datum does it go, in one knock, to the
-  // baseline. Its place in the line's state is still counted as the lever
+  // when the push brings it to the datum does it go, in one knock, across
+  // the feet. Its place in the line's state is still counted as the lever
   // and the chain move it; this is where it is printed.
   const shownAt = (s, v, j) => {
     if (!s.fit || j !== s.units.length - 1) return v[j];
@@ -432,7 +443,7 @@ export async function createWeingart(host) {
   const unitRect = (s, u, o) => {
     const x = s.x + u.x + o * s.sx;
     const y = s.y + o * s.sy;
-    if (s.rule) return { x, y: y - RULE_LEAD, w: u.w, h: s.thick + RULE_LEAD * 2 };
+    if (s.rule) return { x, y: y - RULE_LEAD, w: u.w, h: s.body + RULE_LEAD * 2 };
     if (s.rev) {
       const l = u.first ? 10 : 0;
       return { x: x - l, y: y - 17, w: u.w + l + (u.last ? 10 : 0), h: REV_H };
@@ -444,15 +455,15 @@ export async function createWeingart(host) {
     const side = s.kind === "letter" ? s.size * SIDE : 0;
     return { x: x + side, y: y - s.size * CAP, w: w - side * 2, h: s.size * CAP + desc };
   };
-  // What prints of one sort: a rule's face without its lead, a reversed
+  // One sort's solid body: a rule's body without its lead, a reversed
   // word's solid ground.
   const faceRect = (s, u, o) => {
     const r = unitRect(s, u, o);
-    return s.rule ? { x: r.x, y: r.y + RULE_LEAD, w: r.w, h: s.thick } : r;
+    return s.rule ? { x: r.x, y: r.y + RULE_LEAD, w: r.w, h: s.body } : r;
   };
-  // A rule or a reversed slug is one continuous ground, so where it steps,
-  // the joint is filled by a riser from the end of one piece to the start
-  // of the next, spanning both: a stepped rule, not a dashed one, and one
+  // A rule's bodies or a reversed slug's ground, so where it steps, the
+  // joint is filled by a riser from the end of one piece to the start of the
+  // next, spanning both: the lead under a broken rule stays solid, and one
   // reversed line cut into sorts, not a row of labels. off(u, j) is each
   // sort's offset in steps; face=false gives the bodies, lead and all.
   const ground = (s, off, face = true) => {
@@ -466,10 +477,10 @@ export async function createWeingart(host) {
       const alone = prev && s.fit && j === last && r.y < prev.y;
       if (prev && !alone) {
         const a = prev.x + prev.w;
-        // A brass rule drops straight down at its joints, so its riser is a
-        // piece of the same rule stood on end, as thick as its face, centred
-        // on the joint: one stroke weight all along the stair.
-        const half = s.rule && prev.y !== r.y ? s.thick / 2 : 0;
+        // A brass rule drops straight down at its joints; the lead between
+        // its pieces is as deep as its body, centred on the joint. It is
+        // blind: it holds the run in contact but never prints.
+        const half = s.rule && prev.y !== r.y ? s.body / 2 : 0;
         const x0 = Math.min(a, r.x) - half;
         const x1 = Math.max(a, r.x) + half;
         const y0 = Math.min(prev.y, r.y);
@@ -803,6 +814,15 @@ export async function createWeingart(host) {
     for (const r of ground(s, (u) => u.p)) g.rect(r.x, r.y, r.w, r.h);
     g.fill();
   };
+  // Brass prints only its face. Each piece is its own length of brass, so
+  // where the rule breaks the pieces just sit at their own depths, end butted
+  // to end: no riser is printed, the body's riser is lead and stays blind.
+  // A piece seats with the same small knock as a sort.
+  const fillBrass = (g, s) => {
+    g.beginPath();
+    for (const u of s.units) g.rect(s.x + u.x, s.y + u.p * s.sy + u.seat * u.seat * 0.8 + FACE_AT, u.w, FACE);
+    g.fill();
+  };
 
   // The knock: a sort just seated sits a hair deep for a moment.
   const sortAt = (s, u) => [s.x + u.p * s.sx, s.y + u.p * s.sy + u.seat * u.seat * 0.8];
@@ -858,10 +878,10 @@ export async function createWeingart(host) {
     for (const s of slugs) {
       if (s.layer !== layer) continue;
       if (s.rule) {
-        // Pieces and risers filled as one path, so the joins never show as seams.
+        // The brass faces, butted end to end where the run is level.
         toForme(g);
         g.fillStyle = ink;
-        fillGround(g, s);
+        fillBrass(g, s);
         continue;
       }
       if (s.rev) {
