@@ -10,11 +10,15 @@
 # Here, on the shipped bake, the sun is lit again about 2-3 stops brighter than
 # resun.py left it, on three things only, with the photograph's own texture riding
 # along as a ratio:
+#   0. the anchor crown's needle mass deepened (DEEP) around the sun, so it is the
+#      darkest silhouette in the frame;
 #   1. the tight circumsolar radiance, on each pixel's open-sky share: a near-white
 #      cyan aureole (the sky's own colour halfway to white) that falls off over a
-#      few degrees, AUR_A x the local sky at the sun and AUR_B x over ~AUR_W2 deg.
-#      Through the crown's own gaps within a couple of degrees of the sun it reaches
-#      the sun's disc: pin-points at the top of the encoding;
+#      few degrees, AUR_A x the local sky at the sun and AUR_B x over ~AUR_W2 deg;
+#   1b. a few sparkles of the disc in the crown's real pin-hole gaps near the sun:
+#      sharp points (one hot pixel with a faint, short glint on the needles
+#      around it), several stops above the sky, never blurred. A soft disc term on the sky share around the sun found no
+#      gap within its half degree and only fed the veil;
 #   2. a thin (RIM_PX) warm-white transmitted rim on the needles at the crown's
 #      open-sky edge, in the sun's forward lobe: backlit needles out-shine the sky
 #      beyond them by several stops. Mixed edge pixels (single needles against the
@@ -23,7 +27,9 @@
 #   3. the optics: diffusion and halation are rebaked from the change itself (both
 #      are linear in radiance), so the Pro-Mist bloom around the crown is cyan-white
 #      from the aureole and the halation ring on the dark needles inside the rim is
-#      warm.
+#      warm. The disc's own scattered light (sun_optics) is added as a tight
+#      cyan-white veil weighted by the sky share, so the crown stays a dark
+#      silhouette and the veil crosses it only as the exposure climbs.
 # The glow is also keyed into scene.webp's alpha (as cloud is, relight.py), with a
 # smooth falloff around the sun, so the printer's sky hold leaves it alone: as the
 # exposure rises the held sky stays cobalt while the glow climbs the shoulder,
@@ -44,12 +50,21 @@ LN = 0.035                       # the needles' own luminance (resun.py)
 AUR_A, AUR_W1 = 7.0, 1.6         # tight aureole: x local sky at the sun, e-fold in deg
 AUR_B, AUR_W2 = 2.2, 7.0         # its broader skirt
 AUR_WHITE = 0.55                 # share of the way from the sky's colour to white
-DISC_DEG, DISC_L = 0.45, 5.0      # gaps this close to the sun see its disc (luminance, near the encoding's top)
+SPARK_DEG, SPARK_N = 4.0, 6      # the disc sparkles in the crown's gaps this close to the sun, at most this many
+SPARK_PX = 12                    # pin-holes only: a bigger gap already prints as a pale patch of aureole, and a point in it is lost
+SPARK_L, SPARK_W = 5.5, 9.0      # sparkle luminance at the sun (the encoding's top is 5.66), its e-fold in deg
+SPARK_GAP = 8                    # px between sparkles, so a ragged gap reads as one point, not a cluster
+SPARK_COL = np.array([1.06, 1.0, 0.94])  # the disc through needles: white, a breath warm
+SPARK_KERN = [(0, 0, 1.0)] + [(dr, dc, 0.07) for dr in (-1, 1) for dc in (-1, 1)] \
+    + [(d * dr, d * dc, f) for d, f in ((1, 0.3), (2, 0.1), (3, 0.035)) for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))]
 RIM_K, RIM_W, RIM_PX = 40.0, 3.5, 1.5   # rim: x local sky at the lobe's peak; lobe e-fold in deg; depth in px
 RIM_COL = np.array([1.3, 1.0, 0.62])     # sunlight through needles: warm white
-SRC_D2, SRC_W = 0.5, 4.5        # diffusion only: the disc's own light, as luminance 2 deg out, and its falloff (deg)
-SRC_COL = np.array([1.3, 1.0, 0.68])     # warm white: sunlight that came through the needles
+SRC_D2, SRC_W = 0.125, 2.2      # diffusion only: the disc's own light, as luminance 2 deg out, and its falloff (deg)
+SRC_WHITE = 0.7                  # veil colour: the sky's own, this far to white (cyan-white)
+SRC_NEEDLE = 0.15                # share of the veil the needle mass keeps (it shows only as the exposure climbs)
 KEY_A, KEY_DEG = 0.85, 9.0       # alpha key: share of the sky hold the glow is spared, and its falloff (deg)
+KEY_NEEDLE = 0.2                 # share of that the needle mass gets: the crown is held nearly as the other pines
+DEEP, DEEP_DEG = 0.65, (7.0, 18.0)  # the backlit crown's needle mass, x this radiance within the first, eased out by the second (deg)
 
 def smooth(a, lo, hi):
     t = np.clip((a - lo) / (hi - lo), 0, 1)
@@ -79,9 +94,32 @@ def sunburst(pix):
     acol = scol + AUR_WHITE * (1 - scol)
     acol /= (acol @ LUMA)[..., None]
     aur = SY * (AUR_A * np.exp(-g / AUR_W1) + AUR_B * np.exp(-g / AUR_W2))
-    disc = DISC_L * smooth(-g, -DISC_DEG * 1.6, -DISC_DEG * 0.5)
     ts = smooth(t, 0.2, 0.75)                                          # needles stay dark: only real gaps see it
-    add_a = (ts * (aur + disc))[..., None] * acol
+    add_a = (ts * aur)[..., None] * acol
+    # 1b. the disc's sparkles: the most open pixel of each real gap in the crown
+    #     (not the open sky, nor its ragged edge) near the sun, nearest first
+    gap = (t > 0.35) & ~ndi.binary_dilation(open_sky, iterations=2) & (g < SPARK_DEG)
+    gl, gn = ndi.label(gap)
+    spark = np.zeros_like(t)
+    if gn:
+        idx = np.arange(1, gn + 1)
+        peak = ndi.maximum_position(t + 1e-3 * (SPARK_DEG - g), gl, idx)   # most open; ties go sunward
+        tpk = np.array([t[p] for p in peak])
+        gsz = ndi.sum(np.ones_like(t), gl, idx)
+        ok = np.flatnonzero((tpk > 0.5) & (gsz <= SPARK_PX))
+        ok = ok[np.argsort([g[peak[k]] for k in ok])]
+        placed = []
+        for k in ok:
+            r, c = peak[k]
+            if len(placed) == SPARK_N or any(abs(r - r2) + abs(c - c2) < SPARK_GAP for r2, c2 in placed):
+                continue
+            placed.append((r, c))
+            v = SPARK_L * np.exp(-g[r, c] / SPARK_W) * (0.5 + 0.5 * t[r, c])   # the more open the hole, the more disc
+            spark[r, c] = max(spark[r, c], v)
+            for dr, dc, f in SPARK_KERN:                                # the glint, sharp: no blur
+                spark[r + dr, c + dc] = max(spark[r + dr, c + dc], f * v)
+            print('sparkle at (%d,%d), %.2f deg, t %.2f, lum %.2f (x%.0f the sky)' % (r, c, g[r, c], t[r, c], v, v / SY[r, c]))
+    add_a = add_a + spark[..., None] * (SPARK_COL / (SPARK_COL @ LUMA))
     # 2. rim on needles at the open sky's edge, in the forward lobe
     rr = int(np.ceil(RIM_PX)); yy, xx = np.mgrid[-rr:rr + 1, -rr:rr + 1]
     fp = (xx * xx + yy * yy) <= RIM_PX ** 2 + 0.5
@@ -97,8 +135,15 @@ def sunburst(pix):
     # the lobe can no longer lift it a stop or more over that sky, it fades out
     lobe = lobe * smooth(RIM_K * lobe, 2.0, 5.0)
     rim = (RIM_K * edge * needle * thin * lobe * SY * near_sun)[..., None] * (RIM_COL / (RIM_COL @ LUMA))
-    out = pix + add_a + rim
-    key = KEY_A * np.exp(-g / KEY_DEG) * near_sun
+    # 0. the anchor crown, backlit, sits a little under the other pines: its needle
+    #    mass (not its gaps, rim or sky) is deepened around the sun, so at 1.67 EV
+    #    it prints near-black instead of the same mid green-grey as everything else
+    deep = 1 - (1 - DEEP) * smooth(-g, -DEEP_DEG[1], -DEEP_DEG[0]) * (1 - ts)
+    out = pix * deep[..., None] + add_a + rim
+    # spared on the sky share; the needles only KEY_NEEDLE of it, so the glow,
+    # not the crown, carries the overexposure, and the crown lifts only late
+    ksky = np.clip(ndi.gaussian_filter(t, 1.5), 0, 1)
+    key = KEY_A * np.exp(-g / KEY_DEG) * near_sun * (KEY_NEEDLE + (1 - KEY_NEEDLE) * ksky)
     for gg in (0.5, 1, 2, 4, 8, 16):
         ring = (np.abs(g - gg) < 0.3) & open_sky
         if ring.any():
@@ -108,24 +153,35 @@ def sunburst(pix):
     print('rim px %d, rim lum p50/p99 %.2f / %.2f, rim/sky p50 %.1f' % (int(sel.sum()), np.percentile(rl[sel], 50),
           np.percentile(rl[sel], 99), np.percentile(rl[sel] / SY[sel], 50)))
     print('max lum %.2f, px at the encoding top %d' % ((out @ LUMA).max(), int((out > 2 ** bw.HI).any(-1).sum())))
-    return out, key
+    # for sun_optics: the sky share, and the sky's colour around the sun taken towards white
+    ring = open_sky & (g > 2) & (g < 6)
+    vcol = S[ring].mean(0) / (S[ring].mean(0) @ LUMA)
+    vcol = vcol + SRC_WHITE * (1 - vcol)
+    return out, key, (t, vcol / (vcol @ LUMA))
 
-def sun_optics():
-    """The disc itself, for the diffusion only. Its pin-points through the crown
-    are thousands of times the sky, and the encoding holds them at its top, but
-    the filter sees all of that light. Most of it scatters wide (the Pro-Mist's
-    broad lobe; the narrow lobe and the halation would draw the hidden disc as a
-    pasted-on ball), so it is added to the diffusion half of the optics as a
-    smooth warm-white veil around the hidden sun, SRC_D2 two degrees out and
-    falling off over SRC_W deg. On the print it lifts the dark needles at the
-    crown's edge by under a stop at 0 EV; as the exposure rises it climbs out
-    of the toe with them and swallows the edge."""
+def sun_optics(t, vcol):
+    """The disc itself, for the diffusion only. The filter sees all of its light,
+    which the encoding cannot hold, and most of it scatters wide (the narrow
+    lobe and the halation would draw the hidden disc as a pasted-on ball). It is
+    added to the diffusion half of the optics as a tight cyan-white veil around
+    the hidden sun, SRC_D2 two degrees out and falling off over SRC_W deg,
+    weighted by the sky share (block-averaged, then softened by a couple of px):
+    the open sky around the crown takes it, the needle mass only SRC_NEEDLE of it.
+    The broad warm veil this replaces (4x as strong, 4.5 deg falloff, on the
+    needles too) washed the crown's middle to khaki at every exposure; now the
+    crown prints as dark as the other pines at 0 EV and the veil reaches across
+    it only as the exposure climbs and lifts those needles out of the toe."""
     _, g = deepen.geometry()
     n = 512
-    gs = g.reshape(n, g.shape[0] // n, n, g.shape[1] // n).mean((1, 3))
-    veil = SRC_D2 * np.exp(-(gs - 2.0) / SRC_W)[..., None] * (SRC_COL / (SRC_COL @ LUMA))
-    veil = bw.gblur(np.minimum(veil, SRC_D2 * np.exp(1.0 / SRC_W)), 4.0)   # rounded off at the centre
-    print('disc veil: diffusion at 0/2/4/8/16 deg', [round(float((veil @ LUMA)[np.abs(gs - d) < 0.4].mean()), 3) for d in (0.3, 2, 4, 8, 16)])
+    k = g.shape[0] // n
+    gs = g.reshape(n, k, n, k).mean((1, 3))
+    sky = bw.gblur(t.reshape(n, k, n, k).mean((1, 3)), 1.0)
+    w = SRC_NEEDLE + (1 - SRC_NEEDLE) * np.clip(sky, 0, 1)
+    f = SRC_D2 * np.exp(-(np.maximum(gs, 1.0) - 2.0) / SRC_W)            # rounded off inside 1 deg
+    veil = (bw.gblur(f, 2.0) * w)[..., None] * vcol
+    vl = veil @ LUMA
+    print('disc veil: diffusion at 0/2/4/8/16 deg', [round(float(vl[np.abs(gs - d) < 0.4].mean()), 3) for d in (0.3, 2, 4, 8, 16)],
+          'on needles (sky < 0.1) within 4 deg %.4f' % float(vl[(sky < 0.1) & (gs < 4)].mean()))
     return np.concatenate([veil, np.zeros_like(veil)], 1)
 
 if __name__ == '__main__':
@@ -133,14 +189,14 @@ if __name__ == '__main__':
     s8, a8 = s[..., :3], s[..., 3]
     g8 = np.asarray(Image.open(sys.argv[2]).convert('RGB'))
     pix = bw.dec_log(s8)
-    out, key = sunburst(pix)
+    out, key, (t, vcol) = sunburst(pix)
     m = 1 - (a8.astype(np.float64) - 3) / 252                    # relight.py's cloud share
     m = np.maximum(m, key)
     alpha = (3 + 4 * np.round(63 * (1 - np.clip(m, 0, 1)))).astype(np.uint8)
     rng = np.random.default_rng(13)
     changed = np.abs(np.log2(out / pix)).max(-1) > 1e-3
     s8n = np.where(changed[..., None], bw.enc_log(out, rng), s8).astype(np.uint8)
-    d_opt = bw.optics(out - pix) + sun_optics()
+    d_opt = bw.optics(out - pix) + sun_optics(t, vcol)
     glow = np.maximum(bw.dec_log(g8) + d_opt, 2.0 ** bw.LO)
     g8n = np.where((np.abs(d_opt) > 1e-5).any(-1, keepdims=True), bw.enc_log(glow, rng), g8).astype(np.uint8)
     if len(sys.argv) > 3:
