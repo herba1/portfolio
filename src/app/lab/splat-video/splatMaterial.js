@@ -36,6 +36,7 @@ uniform float uLowPass;
 uniform float uAperture;
 uniform float uFocusDepth;
 uniform float uStereo;
+uniform float uStereoShift;
 uniform vec2 uTopFade;
 uniform vec2 uSideFade;
 uniform float uNearDepth;
@@ -109,7 +110,7 @@ void main() {
     }
     vec2 p = 2.0 * v.xy / s;
     float aspect = uViewport.x / uViewport.y;
-    ndcCenter = p / vec2(uStereo * aspect, uStereo);
+    ndcCenter = (p - vec2(uStereoShift, 0.0)) / vec2(uStereo * aspect, uStereo);
     if (abs(ndcCenter.x) > FRUSTUM_GUARD || abs(ndcCenter.y) > FRUSTUM_GUARD) {
       cull();
       return;
@@ -472,6 +473,7 @@ const NO_FADE = [-1e6, -1e6 + 1];
 function remapUniforms() {
   return {
     uStereo: { value: 0 },
+    uStereoShift: { value: 0 },
     uTopFade: { value: new THREE.Vector2(...NO_FADE) },
     uSideFade: { value: new THREE.Vector2(-NO_FADE[1], -NO_FADE[0]) },
     uNearDepth: { value: 0 },

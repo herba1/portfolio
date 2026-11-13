@@ -31,6 +31,9 @@ import {
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 const MOBILE = `(max-width: ${RENDER.mobileBreakpoint - 1}px)`;
 const COPY_RESET_MS = 1600;
+// While it plays, the pill and its scrim step aside once the pointer has been
+// still this long, and come back on the next move, touch or key.
+const IDLE_AFTER_MS = 2400;
 
 function subscribeMedia(query) {
   return (callback) => {
@@ -201,7 +204,7 @@ export default function SplatVideoExperience() {
   const [look, setLook] = useState(LOOKS[0]);
   const [scrubbing, setScrubbing] = useState(false);
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
-  const [expanded, setExpanded] = useState(false);
+  const [idle, setIdle] = useState(false);
   const [requested, setRequested] = useState(null);
   const [clips, setClips] = useState([]);
   const [drawn, setDrawn] = useState(false);
@@ -337,7 +340,22 @@ export default function SplatVideoExperience() {
     engineRef.current.scrubbing = false;
     setScrubbing(false);
   }, []);
-  const handleToggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  useEffect(() => {
+    if (!ready) return undefined;
+    let timer = 0;
+    const wake = () => {
+      setIdle(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => setIdle(true), IDLE_AFTER_MS);
+    };
+    timer = setTimeout(() => setIdle(true), IDLE_AFTER_MS);
+    const events = ["pointermove", "pointerdown", "keydown", "wheel"];
+    for (const name of events) window.addEventListener(name, wake, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      for (const name of events) window.removeEventListener(name, wake);
+    };
+  }, [ready]);
   const handleSelectClip = useCallback(
     (name) => {
       if (name === load.clip && load.status !== "error") return;
@@ -360,18 +378,14 @@ export default function SplatVideoExperience() {
 
   return (
     <main
-      className="splat-video bg-surface text-ink"
+      className="splat-video text-ink"
       data-status={load.status}
+      data-playing={playing && !scrubbing}
+      data-idle={idle}
       style={{ "--splat-video-aspect": String(aspect) }}
     >
-      <header className="splat-video__head">
-        <h1 className="splat-video__title text-title-sm">Splat video</h1>
-        <p className="text-ui tabular-nums">{summary}</p>
-        <SplatVideoClips clips={clips} current={load.clip} onSelect={handleSelectClip} />
-      </header>
-
       <section
-        className="splat-video__stage piece-box"
+        className="splat-video__stage"
         data-ready={ready && drawn ? "" : undefined}
         aria-label="Splat video stage. Drag to lean, scroll to dolly."
       >
@@ -391,6 +405,14 @@ export default function SplatVideoExperience() {
         {streaming || (ready && isHybrid(meta)) ? <StageBuffering key={`${load.clip}-buffering`} engineRef={engineRef} /> : null}
       </section>
 
+      <header className="splat-video__head">
+        <h1 className="splat-video-sr">Splat video</h1>
+        <p className="splat-video-sr">{summary}</p>
+        {clips.length > 1 ? <SplatVideoClips clips={clips} current={load.clip} onSelect={handleSelectClip} /> : null}
+      </header>
+
+      {ready ? <div className="splat-video__scrim" aria-hidden="true" /> : null}
+
       {ready ? (
         <SplatVideoControls
           engineRef={engineRef}
@@ -398,7 +420,6 @@ export default function SplatVideoExperience() {
           playing={playing}
           scrubbing={scrubbing}
           speed={speed}
-          expanded={expanded}
           sound={(streaming || isRgbd(meta) || isHybrid(meta)) && Boolean(meta.audio)}
           muted={muted}
           onToggleMuted={handleToggleMuted}
@@ -410,7 +431,6 @@ export default function SplatVideoExperience() {
           onBackToLens={handleBackToLens}
           onScrubStart={handleScrubStart}
           onScrubEnd={handleScrubEnd}
-          onToggleExpanded={handleToggleExpanded}
         />
       ) : null}
     </main>

@@ -1,23 +1,30 @@
 "use client";
 
-import { Aperture, SlidersHorizontal, Volume2, VolumeX } from "lucide-react";
+import { Aperture, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 
-import { LOOKS, LOOK_LABELS, SPEEDS, clamp, formatSeconds, frameCursor, steppedFrameTime } from "./splatVideoParams";
+import { LOOKS, LOOK_LABELS, SPEEDS, clamp, formatSeconds, steppedFrameTime } from "./splatVideoParams";
 
 function speedLabel(speed) {
   return `${speed}×`;
 }
 
+function nextSpeed(speed) {
+  const index = SPEEDS.indexOf(speed);
+  return SPEEDS[(index + 1) % SPEEDS.length];
+}
+
+// One small pill floating over the sky: play, a short scrubber, the time, the
+// speed (one button that steps through the speeds) and back to lens. The
+// stage is the piece; the pill only ever sits on its lower edge.
 export default function SplatVideoControls({
   engineRef,
   meta,
   playing,
   scrubbing,
   speed,
-  expanded,
   sound = false,
   muted = true,
   onToggleMuted,
@@ -29,12 +36,10 @@ export default function SplatVideoControls({
   onBackToLens,
   onScrubStart,
   onScrubEnd,
-  onToggleExpanded,
 }) {
   const rootRef = useRef(null);
   const scrubRef = useRef(null);
   const timeRef = useRef(null);
-  const frameRef = useRef(null);
 
   useEffect(() => {
     let frame = 0;
@@ -49,11 +54,6 @@ export default function SplatVideoControls({
         if (scrubRef.current) scrubRef.current.setAttribute("aria-valuetext", `${formatSeconds(time)} of ${formatSeconds(meta.duration)}`);
         if (rootRef.current) rootRef.current.style.setProperty("--splat-video-progress", String(progress));
         if (timeRef.current) timeRef.current.textContent = formatSeconds(time);
-        if (frameRef.current) {
-          const cursor = frameCursor(time, meta);
-          const nearest = cursor.blend < 0.5 ? cursor.frame0 : cursor.frame1;
-          frameRef.current.textContent = `Frame ${nearest + 1} of ${meta.frames}`;
-        }
       }
       frame = requestAnimationFrame(tick);
     };
@@ -97,110 +97,74 @@ export default function SplatVideoControls({
   const state = scrubbing ? "scrubbing" : playing ? "playing" : "paused";
 
   return (
-    <div ref={rootRef} className="splat-video-controls" data-state={state} data-expanded={expanded} data-sound={sound}>
-      <div className="splat-video-controls__main">
+    <div ref={rootRef} className="splat-video-controls" data-state={state} role="group" aria-label="Player">
+      <button
+        type="button"
+        className="splat-video-controls__play"
+        onClick={onTogglePlay}
+        aria-label={playing ? "Pause" : "Play"}
+        aria-keyshortcuts="Space"
+      >
+        <PlayPauseIcon playing={playing} size={16} />
+      </button>
+
+      <label className="splat-video-controls__scrub">
+        <span className="splat-video-sr">Scrub through the clip</span>
+        <span className="splat-video-controls__track" aria-hidden="true">
+          <span className="splat-video-controls__fill" />
+        </span>
+        <input
+          ref={scrubRef}
+          type="range"
+          min={0}
+          max={meta.duration}
+          step="any"
+          defaultValue={0}
+          onInput={handleScrubInput}
+          onChange={handleScrubInput}
+          onKeyDown={handleScrubKey}
+          onPointerDown={handleScrubPointerDown}
+          onPointerUp={onScrubEnd}
+          onPointerCancel={onScrubEnd}
+          onBlur={onScrubEnd}
+        />
+      </label>
+
+      <p className="splat-video-controls__time text-ui tabular-nums">
+        <span ref={timeRef}>{formatSeconds(0)}</span>
+      </p>
+
+      <span className="splat-video-controls__rule" aria-hidden="true" />
+
+      <button
+        type="button"
+        className="splat-video-controls__chip text-ui tabular-nums"
+        onClick={() => onSpeed(nextSpeed(speed))}
+        aria-label={`Speed ${speedLabel(speed)}, switch to ${speedLabel(nextSpeed(speed))}`}
+      >
+        {speedLabel(speed)}
+      </button>
+
+      {look ? (
         <button
           type="button"
-          className="splat-video-controls__play"
-          onClick={onTogglePlay}
-          aria-label={playing ? "Pause" : "Play"}
-          aria-keyshortcuts="Space"
+          className="splat-video-controls__chip text-ui"
+          onClick={() => onLook(LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length])}
+          aria-label={`Subject look: ${LOOK_LABELS[look]}`}
         >
-          <PlayPauseIcon playing={playing} size={16} />
+          {LOOK_LABELS[look]}
         </button>
+      ) : null}
 
-        <label className="splat-video-controls__scrub">
-          <span className="splat-video-sr">Scrub through the clip</span>
-          <span className="splat-video-controls__track" aria-hidden="true">
-            <span className="splat-video-controls__fill" />
-          </span>
-          <input
-            ref={scrubRef}
-            type="range"
-            min={0}
-            max={meta.duration}
-            step="any"
-            defaultValue={0}
-            onInput={handleScrubInput}
-            onChange={handleScrubInput}
-            onKeyDown={handleScrubKey}
-            onPointerDown={handleScrubPointerDown}
-            onPointerUp={onScrubEnd}
-            onPointerCancel={onScrubEnd}
-            onBlur={onScrubEnd}
-          />
-        </label>
-
-        <p className="splat-video-controls__time text-ui tabular-nums">
-          <span ref={timeRef}>{formatSeconds(0)}</span>
-          <span className="splat-video-controls__of"> / {formatSeconds(meta.duration)}</span>
-        </p>
-
-        {sound ? (
-          <button type="button" className="splat-video-controls__sound text-ui" onClick={onToggleMuted}>
-            {muted ? (
-              <VolumeX size={16} strokeWidth={1.75} aria-hidden="true" />
-            ) : (
-              <Volume2 size={16} strokeWidth={1.75} aria-hidden="true" />
-            )}
-            <span className="splat-video-controls__sound-label">{muted ? "Unmute" : "Mute"}</span>
-          </button>
-        ) : null}
-
-        <button
-          type="button"
-          className="splat-video-controls__more"
-          onClick={onToggleExpanded}
-          aria-expanded={expanded}
-          aria-controls="splat-video-extra"
-          aria-label="More controls"
-        >
-          <SlidersHorizontal size={16} strokeWidth={1.75} aria-hidden="true" />
+      {sound ? (
+        <button type="button" className="splat-video-controls__icon" onClick={onToggleMuted} aria-label={muted ? "Unmute" : "Mute"}>
+          {muted ? <VolumeX size={16} strokeWidth={1.75} aria-hidden="true" /> : <Volume2 size={16} strokeWidth={1.75} aria-hidden="true" />}
         </button>
-      </div>
+      ) : null}
 
-      <div id="splat-video-extra" className="splat-video-controls__extra">
-        <p ref={frameRef} className="splat-video-controls__frame text-ui tabular-nums">
-          Frame 1 of {meta.frames}
-        </p>
-
-        <div className="splat-video-controls__speeds" role="group" aria-label="Playback speed">
-          {SPEEDS.map((option) => (
-            <button
-              key={option}
-              type="button"
-              className="splat-video-controls__speed text-ui tabular-nums"
-              data-active={option === speed}
-              aria-pressed={option === speed}
-              onClick={() => onSpeed(option)}
-            >
-              {speedLabel(option)}
-            </button>
-          ))}
-        </div>
-
-        {look ? (
-          <div className="splat-video-controls__speeds" role="group" aria-label="Subject look">
-            {LOOKS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className="splat-video-controls__speed text-ui"
-                data-active={option === look}
-                aria-pressed={option === look}
-                onClick={() => onLook(option)}
-              >
-                {LOOK_LABELS[option]}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        <button type="button" className="splat-video-controls__lens text-ui" onClick={onBackToLens}>
-          <Aperture size={16} strokeWidth={1.75} aria-hidden="true" />
-          Back to lens
-        </button>
-      </div>
+      <button type="button" className="splat-video-controls__icon" onClick={onBackToLens} aria-label="Back to lens" title="Back to lens">
+        <Aperture size={16} strokeWidth={1.75} aria-hidden="true" />
+      </button>
     </div>
   );
 }

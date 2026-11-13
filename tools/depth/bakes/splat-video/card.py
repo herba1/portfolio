@@ -10,6 +10,8 @@
 #       --depth /tmp/claude-0/library/depth/signal-cumulonimbus.png
 #   python3 -I tools/depth/bakes/splat-video/card.py $W/photo-full.jpg $W/sky-full.png \
 #       public/lab/splat-video/fumikiri-sky
+#   # then carry the wires and the truss on past the photo's edges
+#   python3 -I tools/depth/bakes/splat-video/card_extend.py public/lab/splat-video/fumikiri-sky
 #
 # What it writes into the export folder:
 #   card.webp  RGBA with lossless alpha, straight alpha, display (sRGB) values: the

@@ -77,6 +77,7 @@ uniform float uGrainFrame;
 uniform float uGrainCell;
 uniform float uSkyOn;
 uniform float uStereo;
+uniform float uStereoShift;
 uniform float uAspect;
 uniform mat3 uCameraBasis;
 ${SKY_GLSL}
@@ -126,7 +127,7 @@ vec3 shoulder(vec3 c) {
 // The analytic sky behind the splats, along each pixel's ray through the same
 // stereographic lens.
 vec3 skyAt(vec2 uv) {
-  vec2 p = (uv * 2.0 - 1.0) * vec2(uAspect, 1.0) * uStereo;
+  vec2 p = (uv * 2.0 - 1.0) * vec2(uAspect, 1.0) * uStereo + vec2(uStereoShift, 0.0);
   float r2 = dot(p, p);
   vec3 local = vec3(4.0 * p, r2 - 4.0) / (4.0 + r2);
   return skyColor(normalize(uCameraBasis * local));
@@ -226,6 +227,7 @@ export function createFilmPass() {
     uGrainCell: { value: 1 },
     uSkyOn: { value: 0 },
     uStereo: { value: 1 },
+    uStereoShift: { value: 0 },
     uAspect: { value: 1 },
     uCameraBasis: { value: new THREE.Matrix3() },
     ...skyUniforms(),
@@ -281,6 +283,7 @@ export function createFilmPass() {
       uniforms.uSkyOn.value = sky && camera ? 1 : 0;
       if (sky && camera) {
         uniforms.uStereo.value = sky.stereo;
+        uniforms.uStereoShift.value = sky.stereoShift ?? 0;
         uniforms.uAspect.value = width / height;
         uniforms.uCameraBasis.value.setFromMatrix4(camera.matrixWorld);
         bindSky(uniforms, sky);

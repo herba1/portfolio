@@ -1,6 +1,8 @@
 import SplatVideoExperience from "./SplatVideoExperience";
 import { notFound } from "next/navigation";
 
+import PieceBox from "@/app/experiments/PieceBox";
+
 import { isProdView } from "@/lib/viewMode";
 
 import manifest from "./experiment.json";
@@ -12,5 +14,9 @@ export const metadata = {
 
 export default function SplatVideoPage() {
   if (isProdView() && manifest.status !== "shipped") notFound();
-  return <SplatVideoExperience />;
+  return (
+    <PieceBox viewport className="splat-video-page">
+      <SplatVideoExperience />
+    </PieceBox>
+  );
 }

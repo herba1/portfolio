@@ -74,9 +74,16 @@ export const RENDER = {
 
 // The anchor card (meta.card): a grid fine enough that the stereographic lens
 // bends its straight rows as smoothly as it bends the splats, trilinear and
-// anisotropic sampling, and a film diffusion of half a device pixel each way.
+// anisotropic sampling, a film diffusion of half a device pixel each way, and
+// the strips the carried-on wires are drawn with.
 export const CARD = {
   segments: [192, 128],
+  wiresMax: 12,
+  // a carried-on wire: plane units per step of s / (1 - s), how far along
+  // the strip it stops (t = 999 reach, at the vanishing point), and its samples
+  wireReach: 1,
+  wireEnd: 0.999,
+  wireSegments: 768,
   anisotropy: 8,
   diffusion: 0.5,
 };
@@ -219,6 +226,37 @@ export function frameAspect(meta) {
 // the top edge of the frame.
 export function stereoScale(remap) {
   return 2 * Math.tan((remap.vfovDeg * Math.PI) / 720);
+}
+
+// The stage is full-bleed, so the viewport's aspect is whatever the window
+// is. The remap's frame (remap.aspect at remap.vfovDeg) is fitted like
+// object-fit: cover: a taller viewport keeps the full vertical view and loses
+// the sides, a wider one keeps the frame's horizontal view and gives up
+// height, so the lens never widens past the field the source was graded for.
+// FRAME.grow lets a wide window open the horizontal view a little (0 holds it,
+// 1 would hold the vertical view instead).
+export const FRAME = {
+  grow: 0.12,
+  portraitCentre: 0.34,
+};
+
+export function viewStereo(remap, width, height) {
+  const base = stereoScale(remap);
+  const aspect = width / Math.max(1, height);
+  if (!(aspect > remap.aspect)) return base;
+  return base * Math.pow(remap.aspect / aspect, 1 - FRAME.grow);
+}
+
+// A viewport narrower than the frame keeps only a vertical strip of it; the
+// strip is centred on the post (FRAME.portraitCentre across the frame), not
+// on the empty sky between post and cloud. The result is the lens centre's
+// offset in stereographic units.
+export function viewShift(remap, width, height) {
+  const aspect = width / Math.max(1, height);
+  if (!(aspect < remap.aspect)) return 0;
+  const strip = aspect / remap.aspect;
+  const centre = clamp(FRAME.portraitCentre, strip / 2, 1 - strip / 2);
+  return (centre - 0.5) * 2 * stereoScale(remap) * remap.aspect;
 }
 
 // OpenCV camera0 (x right, y down, z forward) into the three.js world: the

@@ -1,4 +1,4 @@
-import { BUNDLED_ROOT, CLIP_NAME_RE, DEFAULT_CLIP, EXPORTS_ROOT, HYBRID, RGBD, TEXTURE_WIDTH, clipKind, readRemap } from "./splatVideoParams";
+import { BUNDLED_ROOT, CARD, CLIP_NAME_RE, DEFAULT_CLIP, EXPORTS_ROOT, HYBRID, RGBD, TEXTURE_WIDTH, clipKind, readRemap } from "./splatVideoParams";
 
 const EVALUATION_PREFIX = "eval-";
 
@@ -311,7 +311,33 @@ function readCard(card, fail) {
   if (!(card.tan[0] > 0 && card.tan[1] > 0)) fail("has an invalid card extent.");
   const [u0, v0, u1, v1] = card.rect;
   if (!(u0 >= 0 && v0 >= 0 && u1 <= 1 && v1 <= 1 && u1 > u0 && v1 > v0)) fail("has an invalid card rect.");
-  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice() };
+  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice(), extend: readCardExtend(card.extend, finite) };
+}
+
+// How the card carries on past the photo's edges (card_extend.py): straight
+// wires run out to their vanishing points, a tiled truss on the card's
+// plane, and edge columns extruded outward. Anything malformed leaves the
+// card at the photo's own edge.
+function readCardExtend(extend, finite) {
+  if (!extend || typeof extend !== "object") return null;
+  const { rect, basis, wires, truss } = extend;
+  if (!finite(rect, 4) || !(rect[2] > rect[0] && rect[3] > rect[1])) return null;
+  if (!finite(extend.photo, 2) || !(extend.seamPx >= 0) || !(extend.edgeFade > 0)) return null;
+  if (!basis || !finite(basis.origin, 3) || !finite(basis.e1, 3) || !finite(basis.e2, 3)) return null;
+  const wireOk = (w) => w && finite(w.start, 3) && finite(w.run, 3) && finite(w.across, 3) && w.half > 0;
+  const lines = Array.isArray(wires) ? wires.filter(wireOk).slice(0, CARD.wiresMax) : [];
+  const trussOk = truss && finite(truss.ref, 2) && finite(truss.axis, 2) && finite(truss.window, 2) && finite(truss.band, 2) && truss.window[1] > truss.window[0];
+  return {
+    rect: rect.slice(),
+    photo: extend.photo.slice(),
+    seamPx: extend.seamPx,
+    edgeFade: extend.edgeFade,
+    basis: { origin: basis.origin.slice(), e1: basis.e1.slice(), e2: basis.e2.slice() },
+    wires: lines.map((w) => ({ start: w.start.slice(), run: w.run.slice(), across: w.across.slice(), half: w.half })),
+    wireColor: finite(extend.wireColor, 3) ? extend.wireColor.slice() : [0.08, 0.12, 0.18],
+    truss: trussOk ? { ref: truss.ref.slice(), axis: truss.axis.slice(), window: truss.window.slice(), band: truss.band.slice() } : null,
+    extrude: finite(extend.extrude, 2) ? extend.extrude.slice() : null,
+  };
 }
 
 async function fetchCard(folder, version, clip, card, signal) {

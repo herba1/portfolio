@@ -193,6 +193,10 @@ function HybridField({ clip, engineRef, isMobile }) {
     runtime.show(engine.look, scratch.viewport, Math.pow(leanAmount(engine), SURFEL.loosen.ease));
     const { uniforms } = runtime.splats.material;
     uniforms.uViewport.value.copy(scratch.viewport);
+    if (scratch.remap) {
+      uniforms.uStereo.value = scratch.remap.stereo;
+      uniforms.uStereoShift.value = scratch.remap.stereoShift;
+    }
     uniforms.uLowPass.value = lowPassFor(backdrop, scratch.viewport.y);
     runtime.splats.tick(0, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, backdrop);

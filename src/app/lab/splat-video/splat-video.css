@@ -1,12 +1,20 @@
+/* Full-bleed: the stage is the whole screen, so you are lying under the sky,
+   not watching a clip of it. The player is one small pill over a soft scrim on
+   the lower edge, and it steps aside while the clip plays untouched. */
+.splat-video-page.piece-box--viewport {
+  height: 100dvh;
+}
+
 .splat-video {
-  --splat-video-width: min(100%, 1120px, calc((100dvh - 276px) * var(--splat-video-aspect, 1.7778)));
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  padding: 32px 32px 48px;
+  --splat-video-on-sky: #fff;
+  --splat-video-glass: rgb(8 22 48 / 0.44);
+  --splat-video-glass-hover: rgb(8 22 48 / 0.6);
+  --splat-video-glass-line: rgb(255 255 255 / 0.16);
+  --splat-video-scrim: rgb(4 16 38 / 0.36);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--color-surface-sunken);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -14,20 +22,16 @@
 }
 
 .splat-video__head {
-  width: var(--splat-video-width);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  position: absolute;
+  top: 88px;
+  left: 24px;
+  right: 24px;
+  z-index: 2;
+  pointer-events: none;
 }
 
-.splat-video__head p {
-  margin: 0;
-  color: var(--color-ink-secondary);
-}
-
-.splat-video__title {
-  margin: 0;
-  text-wrap: balance;
+.splat-video__head > * {
+  pointer-events: auto;
 }
 
 .splat-video-clips {
@@ -86,21 +90,11 @@
 }
 
 .splat-video__stage {
-  position: relative;
-  width: var(--splat-video-width);
-  aspect-ratio: var(--splat-video-aspect, 1.7778);
-  border-radius: var(--radius-lg);
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   background: var(--color-surface-sunken);
   isolation: isolate;
-}
-
-/* The stage is the piece box the screenshot harness isolates; it keeps its own
-   aspect-ratio sizing even if the shared piece.css is on the page. */
-.splat-video__stage.piece-box {
-  height: auto;
-  container-type: normal;
-  contain: none;
 }
 
 .splat-video__canvas {
@@ -205,28 +199,56 @@
   transform: scale(0.97);
 }
 
+.splat-video__scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  height: 160px;
+  background: linear-gradient(to top, var(--splat-video-scrim), rgb(4 16 38 / 0.12) 52%, transparent);
+  pointer-events: none;
+  transition: opacity var(--duration-300) var(--ease-hover);
+}
+
 .splat-video-controls {
   --splat-video-progress: 0;
-  width: var(--splat-video-width);
+  position: absolute;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  z-index: 2;
   display: flex;
   align-items: center;
-  gap: 16px;
-  animation: splat-video-enter var(--duration-300) var(--ease-entrance) both;
+  gap: 8px;
+  height: 48px;
+  padding: 4px;
+  border: 1px solid var(--splat-video-glass-line);
+  border-radius: var(--radius-full);
+  background: var(--splat-video-glass);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  color: var(--splat-video-on-sky);
+  transform: translateX(-50%);
+  animation: splat-video-pill-enter var(--duration-300) var(--ease-entrance) backwards;
+  transition:
+    opacity var(--duration-300) var(--ease-hover),
+    transform var(--duration-300) var(--ease-hover),
+    visibility 0s linear 0s;
 }
 
-.splat-video-controls__main {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+/* Playing and untouched: the pill and its scrim step aside and leave the sky. */
+.splat-video[data-playing="true"][data-idle="true"] .splat-video-controls:not(:focus-within, :hover) {
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, 8px);
+  transition:
+    opacity var(--duration-300) var(--ease-hover),
+    transform var(--duration-300) var(--ease-hover),
+    visibility 0s linear var(--duration-300);
 }
 
-.splat-video-controls__extra {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.splat-video[data-playing="true"][data-idle="true"]:not(:has(.splat-video-controls:focus-within, .splat-video-controls:hover)) .splat-video__scrim {
+  opacity: 0;
 }
 
 .splat-video-controls button {
@@ -236,7 +258,11 @@
 }
 
 .splat-video-controls button:focus-visible,
-.splat-video-controls input:focus-visible,
+.splat-video-controls input:focus-visible {
+  outline: 2px solid var(--splat-video-on-sky);
+  outline-offset: 2px;
+}
+
 .splat-video__copy:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
@@ -250,16 +276,10 @@
   height: 40px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--color-button-inverse-bg);
-  color: var(--color-button-inverse-fg);
+  background: var(--splat-video-on-sky);
+  color: #0b1a33;
   cursor: pointer;
-  transition:
-    background-color var(--duration-120) var(--ease-hover),
-    transform var(--duration-120) var(--ease-hover);
-}
-
-.splat-video-controls__play:hover {
-  background: var(--color-button-inverse-bg-hover);
+  transition: transform var(--duration-120) var(--ease-hover);
 }
 
 .splat-video-controls__play:active {
@@ -268,9 +288,10 @@
 
 .splat-video-controls__scrub {
   position: relative;
-  flex: 1 1 auto;
-  min-width: 96px;
+  flex: none;
+  width: 176px;
   height: 24px;
+  margin-left: 4px;
   display: flex;
   align-items: center;
 }
@@ -282,7 +303,7 @@
   top: calc(50% - 2px);
   height: 4px;
   border-radius: var(--radius-full);
-  background: var(--color-line);
+  background: rgb(255 255 255 / 0.28);
   overflow: hidden;
   pointer-events: none;
 }
@@ -291,7 +312,7 @@
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--color-ink);
+  background: var(--splat-video-on-sky);
   transform-origin: left center;
   transform: scaleX(var(--splat-video-progress));
 }
@@ -324,8 +345,7 @@
   height: 12px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--color-ink);
-  box-shadow: 0 0 0 2px var(--color-surface);
+  background: var(--splat-video-on-sky);
   transition: transform var(--duration-150) var(--ease-hover);
 }
 
@@ -334,8 +354,7 @@
   height: 12px;
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--color-ink);
-  box-shadow: 0 0 0 2px var(--color-surface);
+  background: var(--splat-video-on-sky);
   transition: transform var(--duration-150) var(--ease-hover);
 }
 
@@ -349,104 +368,52 @@
   transform: scale(1.34);
 }
 
-.splat-video-controls__time,
-.splat-video-controls__frame {
+.splat-video-controls__time {
   flex: none;
+  min-width: 56px;
   margin: 0;
   white-space: nowrap;
+  text-align: right;
 }
 
-.splat-video-controls__of {
-  color: var(--color-ink-secondary);
+.splat-video-controls__rule {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--splat-video-glass-line);
 }
 
-.splat-video-controls__speeds {
-  display: inline-flex;
-  padding: 4px;
-  gap: 4px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-raised);
-}
-
-.splat-video-controls__speed {
-  height: 28px;
-  min-width: 44px;
-  padding: 0 10px;
+.splat-video-controls__chip,
+.splat-video-controls__icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;
-  color: var(--color-ink);
-  cursor: pointer;
-  transition:
-    background-color var(--duration-150) var(--ease-hover),
-    color var(--duration-150) var(--ease-hover);
-}
-
-.splat-video-controls__speed:hover {
-  background: var(--color-surface-sunken);
-}
-
-.splat-video-controls__speed[data-active="true"] {
-  background: var(--color-surface-inverse);
-  color: var(--color-ink-inverse);
-}
-
-.splat-video-controls__lens {
-  display: inline-flex;
-  align-items: center;
-  gap: 0 6px;
-  height: 38px;
-  padding: 0 14px 0 12px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  cursor: pointer;
+  color: var(--splat-video-on-sky);
   white-space: nowrap;
+  cursor: pointer;
   transition:
     background-color var(--duration-120) var(--ease-hover),
-    border-color var(--duration-120) var(--ease-hover),
     transform var(--duration-120) var(--ease-hover);
 }
 
-.splat-video-controls__lens:hover {
-  background: var(--color-surface-sunken);
-  border-color: var(--color-line-strong);
+.splat-video-controls__chip {
+  min-width: 48px;
 }
 
-.splat-video-controls__lens:active {
-  transform: scale(0.97);
+.splat-video-controls__chip:hover,
+.splat-video-controls__icon:hover {
+  background: rgb(255 255 255 / 0.14);
 }
 
-.splat-video-controls__sound {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0 6px;
-  height: 36px;
-  padding: 0 14px 0 12px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    background-color var(--duration-120) var(--ease-hover),
-    border-color var(--duration-120) var(--ease-hover),
-    transform var(--duration-120) var(--ease-hover);
-}
-
-.splat-video-controls__sound:hover {
-  background: var(--color-surface-sunken);
-  border-color: var(--color-line-strong);
-}
-
-.splat-video-controls__sound:active {
-  transform: scale(0.97);
+.splat-video-controls__chip:active,
+.splat-video-controls__icon:active {
+  transform: scale(0.94);
 }
 
 .splat-video__buffering {
@@ -488,26 +455,6 @@
   animation: splat-video-spin 900ms linear infinite;
 }
 
-.splat-video-controls__more {
-  display: none;
-  flex: none;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  cursor: pointer;
-  transition: background-color var(--duration-120) var(--ease-hover);
-}
-
-.splat-video-controls[data-expanded="true"] .splat-video-controls__more {
-  background: var(--color-surface-inverse);
-  border-color: var(--color-surface-inverse);
-  color: var(--color-ink-inverse);
-}
-
 .splat-video-sr {
   position: absolute;
   width: 1px;
@@ -536,95 +483,46 @@
   }
 }
 
-@media (max-width: 1100px) {
-  .splat-video-controls__frame {
-    display: none;
+@keyframes splat-video-pill-enter {
+  from {
+    opacity: 0;
+    filter: blur(4px);
   }
-}
-
-/* The near-square worm's-eye stage leaves the row narrower than the old 3:2
-   card did: below 760px the frame count and the duration step aside so the
-   elapsed time keeps one caption-tier item next to the scrubber. */
-.splat-video-controls {
-  container: splat-video-controls / inline-size;
-}
-
-@container splat-video-controls (max-width: 760px) {
-  .splat-video-controls__frame,
-  .splat-video-controls__of {
-    display: none;
+  to {
+    opacity: 1;
+    filter: none;
   }
 }
 
 @media (max-width: 899px) {
-  .splat-video {
-    --splat-video-width: 100%;
-    justify-content: flex-start;
-    gap: 16px;
-    padding: 24px 16px 32px;
-  }
-
-  .splat-video__stage {
-    border-radius: var(--radius-md);
+  .splat-video__head {
+    top: 72px;
+    left: 16px;
+    right: 16px;
   }
 
   .splat-video-controls {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .splat-video-controls__main {
-    gap: 12px;
-  }
-
-  .splat-video-controls__more {
-    display: grid;
-  }
-
-  .splat-video-controls__sound {
-    width: 36px;
-    padding: 0;
-  }
-
-  .splat-video-controls__sound-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  .splat-video-controls[data-sound="true"] .splat-video-controls__of {
-    display: none;
-  }
-
-  .splat-video-controls__extra {
-    display: none;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    opacity: 1;
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     transform: none;
-    transition:
-      opacity var(--duration-200) var(--ease-entrance),
-      transform var(--duration-200) var(--ease-entrance),
-      display var(--duration-200) allow-discrete;
   }
 
-  .splat-video-controls[data-expanded="true"] .splat-video-controls__extra {
-    display: flex;
+  .splat-video[data-playing="true"][data-idle="true"] .splat-video-controls:not(:focus-within, :hover) {
+    transform: translateY(8px);
   }
 
-  .splat-video-controls__frame {
-    display: block;
+  .splat-video-controls__scrub {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 64px;
   }
+}
 
-  @starting-style {
-    .splat-video-controls[data-expanded="true"] .splat-video-controls__extra {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
+@media (max-width: 379px) {
+  .splat-video-controls__time,
+  .splat-video-controls__rule {
+    display: none;
   }
 }
 
@@ -633,6 +531,11 @@
   .splat-video-controls,
   .splat-video__buffering svg {
     animation: none;
+  }
+
+  .splat-video-controls,
+  .splat-video__scrim {
+    transition: none;
   }
 
   .splat-video * {

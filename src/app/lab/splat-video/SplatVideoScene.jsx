@@ -37,6 +37,8 @@ import {
   sortCapacity,
   sourceMatrix,
   stereoScale,
+  viewShift,
+  viewStereo,
 } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
@@ -159,6 +161,7 @@ function remapRuntime(meta, source) {
     vfovDeg: remap.vfovDeg,
     lean: remap.lean,
     stereo: stereoScale(remap),
+    frame: remap,
     rest,
     zenith,
     horizon: top.dot(zenith),
@@ -232,7 +235,7 @@ function useResolvedRender(resolveRef, scratchRef, engineRef, cardRef = null, gr
       const group = groupRef?.current;
       const drawSplats = (gl) => {
         resolve.render(gl, state.scene, state.camera, width, height);
-        if (card && group) card.render(gl, state.camera, group.matrixWorld, width, height);
+        if (card && group) card.render(gl, state.camera, group.matrixWorld, width, height, scratch.remap?.stereo, scratch.remap?.stereoShift);
       };
       if (!film) drawSplats(state.gl);
       else {
@@ -259,6 +262,12 @@ export function aimAndMeasure(state, engine, meta, delta, scratch, group) {
   group.updateMatrixWorld();
   scratch.modelView.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);
   state.gl.getDrawingBufferSize(scratch.viewport);
+  // The lens fits the full-bleed viewport (cover), so its scale follows the
+  // window's aspect; the splats, the card and the film sky all read it here.
+  if (scratch.remap) {
+    scratch.remap.stereo = viewStereo(scratch.remap.frame, scratch.viewport.x, scratch.viewport.y);
+    scratch.remap.stereoShift = viewShift(scratch.remap.frame, scratch.viewport.x, scratch.viewport.y);
+  }
   const e = scratch.modelView.elements;
   return [e[2], e[6], e[10], e[14]];
 }
@@ -319,6 +328,10 @@ function SplatField({ clip, engineRef }) {
     uniforms.uFrame1.value = cursor.frame1;
     uniforms.uBlend.value = cursor.blend;
     uniforms.uViewport.value.copy(scratch.viewport);
+    if (scratch.remap) {
+      uniforms.uStereo.value = scratch.remap.stereo;
+      uniforms.uStereoShift.value = scratch.remap.stereoShift;
+    }
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
     runtime.tick(engine.time, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, meta);
@@ -392,6 +405,10 @@ function StreamField({ clip, engineRef }) {
     const zRow = aimAndMeasure(state, engine, meta, delta, scratch, group);
     const { uniforms } = runtime.material;
     uniforms.uViewport.value.copy(scratch.viewport);
+    if (scratch.remap) {
+      uniforms.uStereo.value = scratch.remap.stereo;
+      uniforms.uStereoShift.value = scratch.remap.stereoShift;
+    }
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
     runtime.tick(engine.time, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, meta);
