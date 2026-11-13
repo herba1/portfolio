@@ -139,6 +139,7 @@ uniform float uDScale;      // disparity factor at this time
 out vec2 vUv;
 out float vTrust;
 out float vConf;
+out float vStretch;
 ${PROJECT}
 vec2 flowAt(vec2 uv) {
   return (textureLod(uMotion, uv, 0.0).rg * 255.0 - 128.0) / 127.0 * uRange;
@@ -189,6 +190,23 @@ void main() {
   float conf = onBody * agree;
   vTrust = max(k * k * k * mix(0.3, 1.0, conf), 0.02);
   vConf = conf * smoothstep(0.3, 0.7, k) * shape;
+  // Stretch, held apart from the confidence above. Towards the middle of
+  // the half second the blend believes each frame's coverage whatever its
+  // confidence (a dark shirt gives the flow little to hold), so a needle
+  // the warp pulls off a fingertip (frame A's spread fingers drawn out
+  // towards frame B's closed hand, and back) still printed at mid-scrub as
+  // a talon. This is a pure measure of the warp's shape, 1 at the frame's
+  // own end (no warp, no stretch) and falling as a cell is drawn out or
+  // squeezed into a sliver; the blend caps the frame's coverage and colour
+  // by it at every t, so the frame that saw the hand whole draws it.
+  // Read over 4 plate px (a finger's width), not 2: inside the hand the
+  // flow's fine noise is no stretch; only a finger's worth of it is.
+  float ka2 = 1.0 + uW * dx.x, kb2 = uW * dy.x, kc2 = uW * dx.y, kd2 = 1.0 + uW * dy.y;
+  float r1 = ka2 * ka2 + kb2 * kb2 + kc2 * kc2 + kd2 * kd2;
+  float r2 = sqrt(max(pow(ka2 * ka2 + kb2 * kb2 - kc2 * kc2 - kd2 * kd2, 2.0) + 4.0 * pow(ka2 * kc2 + kb2 * kd2, 2.0), 0.0));
+  float wMax = sqrt(0.5 * (r1 + r2));
+  float wMin = sqrt(max(0.5 * (r1 - r2), 1e-6));
+  vStretch = (1.0 - smoothstep(1.4, 2.0, wMax)) * (1.0 - smoothstep(1.8, 2.8, wMax / wMin)) * smoothstep(0.15, 0.4, det);
   // nearer wins the depth test
   gl_Position = project(p, d, 1.0 - d);
 }`;
@@ -198,14 +216,15 @@ precision highp float;
 in vec2 vUv;
 in float vTrust;
 in float vConf;
+in float vStretch;
 uniform sampler2D uTex;
 layout(location = 0) out vec4 outColor;  // premultiplied
-layout(location = 1) out vec4 outCover;  // r coverage, g flow confidence, b colour trust
+layout(location = 1) out vec4 outCover;  // r coverage, g flow confidence, b colour trust, a warp shape
 void main() {
   vec4 c = texture(uTex, vUv);
   if (c.a < 0.004) discard;
   outColor = c;
-  outCover = vec4(c.a, vConf, vTrust, 1.0);
+  outCover = vec4(c.a, vConf, vTrust, vStretch);
   // the soft edge of a nearer limb loses the depth test to solid body
   // behind it (the rim of a hand over the chest), so no half-covered pixel
   // ever opens a seam inside him; where nothing is behind it still lands
@@ -242,20 +261,20 @@ out vec4 outColor;
 void main() {
   vec4 a = texture(uA, vUv);   // premultiplied
   vec4 b = texture(uB, vUv);
-  vec3 qa = texture(uCA, vUv).rgb; // warped coverage, flow confidence, colour trust
-  vec3 qb = texture(uCB, vUv).rgb;
+  vec4 qa = texture(uCA, vUv); // warped coverage, flow confidence, colour trust, warp shape
+  vec4 qb = texture(uCB, vUv);
   float ta = 1.0 - uT;
   float tb = uT;
-  float ka = mix(smoothstep(0.2, 0.5, qa.g), 1.0, smoothstep(0.2, 0.7, ta)) * smoothstep(0.0, 0.08, ta);
-  float kb = mix(smoothstep(0.2, 0.5, qb.g), 1.0, smoothstep(0.2, 0.7, tb)) * smoothstep(0.0, 0.08, tb);
+  float ka = mix(smoothstep(0.2, 0.5, qa.g), 1.0, smoothstep(0.2, 0.7, ta)) * smoothstep(0.0, 0.08, ta) * qa.a;
+  float kb = mix(smoothstep(0.2, 0.5, qb.g), 1.0, smoothstep(0.2, 0.7, tb)) * smoothstep(0.0, 0.08, tb) * qb.a;
   // where both frames cover him he is simply there (a dark shirt gives the
   // flow little to hold, and two doubtful frames that agree are not two
   // ghosts); only what one frame alone covers is held to its trust
   float alpha = max(min(qa.r, qb.r), max(qa.r * ka, qb.r * kb));
   // colour: each frame by its own warped alpha and trust, then by t; a
   // pixel only one frame covers takes that frame's colour whole
-  float sa = ta * qa.b;
-  float sb = tb * qb.b;
+  float sa = ta * qa.b * mix(0.05, 1.0, qa.a);
+  float sb = tb * qb.b * mix(0.05, 1.0, qb.a);
   float wa = sa * a.a;
   float wb = sb * b.a;
   vec3 col = wa + wb > 1e-5 ? (sa * a.rgb + sb * b.rgb) / (wa + wb)
@@ -322,8 +341,8 @@ void main() {
   // the body of the cloud (chroma under ~0.18, luma over ~0.55), with a
   // softer reach into the thin skirt where cloud turns to sky, so that
   // fringe takes the skylight too instead of staying violet
-  float inner = (1.0 - smoothstep(0.15, 0.22, chroma)) * smoothstep(0.5, 0.58, dot(sky, LUMA));
-  float skirt = (1.0 - smoothstep(0.22, 0.45, chroma)) * smoothstep(0.34, 0.55, dot(sky, LUMA));
+  float inner = (1.0 - smoothstep(0.13, 0.26, chroma)) * smoothstep(0.44, 0.62, dot(sky, LUMA));
+  float skirt = (1.0 - smoothstep(0.2, 0.5, chroma)) * smoothstep(0.3, 0.58, dot(sky, LUMA));
   float key = max(inner, 0.9 * skirt) * (1.0 - front);
   if (key < 1e-3) {
     outColor = vec4(col, 1.0);
@@ -359,7 +378,7 @@ void main() {
   vec2 t1 = 1.5 * uTexel;
   float yn = 0.25 * (dot(texture(uFilm, vUv + vec2(t1.x, 0.0)).rgb, LUMA) + dot(texture(uFilm, vUv - vec2(t1.x, 0.0)).rgb, LUMA)
     + dot(texture(uFilm, vUv + vec2(0.0, t1.y)).rgb, LUMA) + dot(texture(uFilm, vUv - vec2(0.0, t1.y)).rgb, LUMA));
-  float yt = ceiling(0.5 + (yb - 0.5) * 1.15 + clamp(0.3 * (yb - blur), -0.04, 0.04)) + (y0 - yn);
+  float yt = ceiling(0.5 + (yb - 0.5) * 1.08 + clamp(0.2 * (yb - blur), -0.03, 0.03)) + (y0 - yn);
   float yo = mix(shoulder(y), yt, smoothstep(0.36, 0.6, yb) * (1.0 - uOver));
   // colour by tier, as a ratio to luma
   vec3 shade = vec3(0.875, 1.025, 1.1);   // skylit fold, ~(160, 184, 195)
