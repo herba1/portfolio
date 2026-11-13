@@ -148,6 +148,15 @@ const SKY = {
   // midtones (1 is the ramp as aimed; below 1 lightens the blue back
   // toward a phone's mid-blue). The ramp is aimed at the density wanted.
   density: 1.0,
+  // the cloud's re-exposure (linear luminance): [ceiling its lit top is
+  // brought up under, power of the lift (1: none), the knee it comes in over].
+  // The plate's thin cumulus tops sit near 0.7 and its thick ones near 0.92;
+  // under 0.95 at 1.6 they land 0.84 and 0.95, so every top glows near white
+  // and none clips.
+  top4: [0.95, 1.7, 0.35, 0.7],
+  // the light that lifts it (linear, luminance 1): warm, so the print's
+  // shoulder rolls the top off warm-neutral, R a few levels over B, not grey
+  sun: [1.1, 1, 0.82],
 };
 
 // The print: what happens to the whole composited frame (plate, moved
@@ -156,7 +165,9 @@ const SKY = {
 const PRINT = {
   // local contrast taken out of the plate: detail inside a surface (the
   // grime on the mast, the platform's paint) is pulled this share toward an
-  // edge-aware local mean; steel against sky is an edge and keeps its line
+  // edge-aware local mean; steel against sky is an edge and keeps its line.
+  // The sky and cloud are left out (the scene's sky matte): they are not a
+  // sharpened surface, and flattened a cumulus loses its lit top
   flatten: 0.42,
   flattenRange: 1.1, // stops: what counts as the same surface
   // halation: red-leaning light round wherever bright sky meets dark steel
@@ -180,7 +191,10 @@ const FILM = {
   softness: 0.75,
   contrast: 1.14,
   shoulder: 0.9,
-  whitePoint: 1.35,
+  // the cloud is re-exposed in the sky grade (SKY.top4), so its tops arrive
+  // near 0.95 and, with the diffusion's headroom, print at ~235-250 / 255
+  // with nothing clipped; lower and the thick cloud's bloomed core blows
+  whitePoint: 1.3,
   toe: 0,
   // colour density comes from the sky grade, not from a global push
   saturation: 1.0,
@@ -248,6 +262,8 @@ uniform vec3 uUnderBlue;      // linear, relative
 uniform vec3 uUnder;          // luminance range of the underside tint, amount
 uniform float uGrade;
 uniform float uDensity;      // exponent on the graded sky's midtones
+uniform vec4 uCloudTop;       // the cloud's re-exposure: ceiling, power, knee from, to
+uniform vec3 uCloudSun;       // and the warmth its sunlit top takes on
 uniform sampler2D uWire;      // the live cables: a coverage, r disparity x coverage
 uniform vec3 uCable;          // their colour, linear
 uniform vec4 uPinA[${MAXK}];  // pinned member: mast end at rest (photo px), its axis at rest
@@ -380,6 +396,17 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   vec3 tint = mix(uWarmCloud, uUnderBlue, under);
   tint *= yc / dot(tint, vec3(0.2126, 0.7152, 0.0722));
   vec3 C = mix(own, tint, smoothstep(0.0, 0.5, w));
+  // Re-exposed: the cloud's lit side brought up under a ceiling, so a thin
+  // cumulus's top (the plate's ~0.7) glows near a thick one's (~0.92)
+  // instead of printing a step of grey below it; the knee keeps the
+  // shadowed undersides where they were, so the lit top stands off them.
+  // What is added is sunlight (warm-neutral, luminance 1), not more of the
+  // pixel's own colour: a lit top bleaches toward warm white rather than
+  // its blue being pushed up into a cyan.
+  float yt = min(yc, uCloudTop.x);
+  float lifted = uCloudTop.x * (1.0 - pow(1.0 - yt / uCloudTop.x, uCloudTop.y)) + max(yc - uCloudTop.x, 0.0);
+  float lit = smoothstep(uCloudTop.z, uCloudTop.w, yc);
+  C += uCloudSun * max(lifted - yc, 0.0) * lit * smoothstep(0.5, 1.0, w) * (Y / yc);
   // C over S, in linear light, w its opacity
   vec3 g = mix(S, C, w);
   // density held back in the midtones (the clear blue and the cloud's
@@ -437,6 +464,7 @@ void main() {
   vec3 col = B;
   float n1 = 0.0;
   float n2 = 0.0;
+  float skyW = 1.0; // how much of the pixel is still the sky behind it all
   for (int i = 0; i < ${MAXK}; i++) {
     if (i >= uCount) break;
     int k = uOrder[i];
@@ -510,12 +538,16 @@ void main() {
     float lo = dot(ob.rgb, vec3(0.2126, 0.7152, 0.0722));
     vec3 c = ob.rgb * mix(vec3(1.0), uSkylight, clamp(sh * smoothstep(0.03, 0.22, lo) * uShadow, 0.0, 1.0));
     col = c * ob.a + (1.0 - ob.a) * col;
+    skyW *= 1.0 - ob.a;
   }
   if (n1 < 0.5) col = frontFirst ? Fpm + (1.0 - aF) * col : mix(col, uCable, aW);
   if (n2 < 0.5) col = frontFirst ? mix(col, uCable, aW) : Fpm + (1.0 - aF) * col;
   vec3 s = toSrgb(col);
   s += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 7.3) - 1.0) / 255.0;
-  o = vec4(s, cover);
+  // the sky's share of the pixel rides in alpha for the development (see
+  // DEVELOP_FS): 1 off the print, 1 - skyW / 2 on it, so 0.5 is all sky
+  skyW *= (1.0 - aF) * (1.0 - aW);
+  o = vec4(s, cover * (1.0 - 0.5 * skyW));
 }`;
 
 // The development, between the composite and film.js, on the whole frame:
@@ -578,7 +610,12 @@ void main() {
     acc += w * ln;
     wsum += w;
   }
-  c *= exp2((acc / wsum - ly) * uFlatten);
+  // the sky and its cloud are not a sharpened surface: flattened, a
+  // cumulus loses its sunlit top to its own shade and its thin edge, pulled
+  // up toward the cloud's mean in luminance alone, prints a cyan fringe.
+  // The scene says how much of the pixel is sky (alpha: 1 - sky / 2).
+  float skyW = s.a > 0.25 ? clamp(2.0 * (1.0 - s.a), 0.0, 1.0) : 0.0;
+  c *= exp2((acc / wsum - ly) * uFlatten * (1.0 - skyW));
   y = dot(c, LUMA);
 
   // How much of the ring is bright decides where it lands: half (the
@@ -603,7 +640,7 @@ void main() {
   c += uHalColor * src * dark * edge * uHal;
 
   vec3 e = toSrgb(c) + (hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 5.1) - 1.0) / 255.0;
-  o = vec4(e, s.a);
+  o = vec4(e, step(0.25, s.a));
 }`;
 
 // After film.js: the scan's lifted black, then grain, the last thing to
@@ -639,7 +676,8 @@ float vnoise(vec2 p) {
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y) - 0.5;
 }
 void main() {
-  float cov = texture(uScene, vUv).a;
+  // off the print the scene's alpha is 0, on it 0.5 (sky) .. 1
+  float cov = clamp(texture(uScene, vUv).a * 4.0, 0.0, 1.0);
   vec3 f = texture(uFilm, vUv).rgb;
   // a toe, not a veil: the black comes up, the sky's midtones barely move
   float yf = clamp(dot(f, LUMA), 0.0, 1.0);
@@ -1700,6 +1738,8 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform3fv(U.uUnder, SKY.underRange);
     gl.uniform1f(U.uGrade, num("grade") ?? 1);
     gl.uniform1f(U.uDensity, SKY.density);
+    gl.uniform4fv(U.uCloudTop, SKY.top4);
+    gl.uniform3fv(U.uCloudSun, SKY.sun);
     const texs = [
       [gl.TEXTURE_2D, plateTex, U.uPlate],
       [gl.TEXTURE_2D, frontTex, U.uFront],
