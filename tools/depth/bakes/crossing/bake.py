@@ -35,7 +35,9 @@ which may run past the photo: rects in layers.json go below 0 and above 1),
 <outdir>/layers.json (crop rects, depth, sizes), plus previews in workdir.
 Then cumulus.py re-plates the sky with real cumulus on a card of its own
 (clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match, and
-wires.py redraws p2.webp with every wire as one whole catenary.
+wires.py redraws p2.webp with every wire as one whole catenary, and
+crossbuck.py takes the pale hood out from behind the crossbuck head on
+p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline.
 """
 import sys
 import os
