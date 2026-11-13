@@ -164,6 +164,7 @@ uniform float uSunDisc;    // gain on the sun's disc in the glass
 uniform vec3 uSunTone;     // the sun's shoulder, scene units: knee, ceiling, core
 uniform vec3 uHiTint;      // the film's highlight tint, which the shoulder is judged through
 uniform vec3 uSunW;        // the sun's colour in scene units, so it develops warm-neutral
+uniform vec3 uCloudW;      // a sunlit cumulus top in scene units, so it develops warm-neutral
 uniform vec3 uSH[9];
 uniform vec2 uDist;        // log2 range of the distance code
 uniform float uEnvW;
@@ -1030,6 +1031,19 @@ void main() {
   // the photograph
   vec3 col = enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize);
   vec4 aux = texture(uAux, p / uPhotoSize);
+  // The cumulus' sunlit tops. clouds.py lights them in the bake (tops a
+  // warm neutral, its TOP; bellies 2/3 stop under, toward the skylight's
+  // blue), but the plate is 8-bit: its whitest white develops through the
+  // film's shoulder and cool highlight tint to a blue-grey ~228, no brighter
+  // than the plaster. A sunlit cumulus top is the brightest thing in a
+  // summer sky, so, in the open sky only, the plate's cloud is carried past
+  // 1 by its own luminance: the belly as it is, the top to uCloudW, which
+  // develops to a warm neutral of about 245, R over G over B.
+  const vec3 CLOUD_TOP = vec3(0.93, 0.885, 0.80);  // clouds.py's TOP
+  // (a warm-neutral top passes; a board's yellow edge, blue under half its
+  // red, does not)
+  float cTop = aux.b * smoothstep(0.3, 0.9, dot(col, LUMA)) * smoothstep(-0.45, -0.25, (col.b - col.r) / max(col.r, 1e-3));
+  col = mix(col, col * uCloudW / CLOUD_TOP, cTop);
   // the assembly's shadow on it, through the point map
   if (aux.r < 0.995) {
     float z = exp2(mix(uDist.x, uDist.y, aux.r));
@@ -1595,6 +1609,13 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     const m = Math.max(...w.map((v, i) => v * LOOK.highlightTint[i]));
     return w.map((v) => v / m);
   })();
+  // a sunlit cumulus top (clouds.py's TOP), the same way: the scene
+  // colour that develops to a warm neutral just under white, R over G over B.
+  // The curve alone undershoots it: the film's Pro-Mist takes a share of a
+  // small highlight's light away and the vignette a little more, so it is
+  // set 15 % over, and a touch warmer, measured on the render (?aim=20,-15:
+  // the tops land at about 246, 243, 240, nothing at 250)
+  const CLOUD_W = [0.955, 0.94, 0.915].map((v, i) => (1.15 * [1, 0.98, 0.94][i] * sceneFor(v)) / LOOK.highlightTint[i]);
   // without a float target the scene is stored as the film's sRGB input
   const sunTone = () => (linear ? TONE : TONE.map((v) => linearToSrgb(Math.min(v, 1))));
 
@@ -1903,6 +1924,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       gl.uniform3fv(u.uSunTone, sunTone());
       gl.uniform3fv(u.uHiTint, LOOK.highlightTint);
       gl.uniform3fv(u.uSunW, SUN_W);
+      gl.uniform3fv(u.uCloudW, CLOUD_W);
       gl.uniform3fv(u.uSH, shFlat);
       gl.uniform2f(u.uDist, Math.log2(scene.dist[0]), Math.log2(scene.dist[1]));
       gl.uniform1f(u.uEnvW, scene.env[0]);
