@@ -2288,11 +2288,8 @@ print("splats.bin", os.path.getsize(f"{out}/splats.bin"))
 TW0 = int(sys.argv[5]) if len(sys.argv) > 5 else 2304
 TW, th = round(W * TW0 / W0), round(H * TW0 / W0)
 tex = cv2.resize(img8, (TW, th), interpolation=cv2.INTER_AREA)
-Image.fromarray(tex, "RGB").save(f"{out}/photo.webp", quality=86, method=6)
-print("photo.webp", os.path.getsize(f"{out}/photo.webp"), (TW, th))
-# the sky plate, over the same canvas at half its size (see "the sky plate")
-Image.fromarray(plate8, "RGB").save(f"{out}/plate.webp", quality=84, method=6)
-print("plate.webp", os.path.getsize(f"{out}/plate.webp"), plate8.shape[1::-1])
+# (photo.webp and plate.webp are saved below, once the depth map says where
+# the sky is: the cloud is developed in both first, see "develop")
 
 # ---- the depth map, texel for texel with the photo: how far away each pixel
 # was, from the same smoothed, step-respecting disparity the splats were fitted
@@ -2313,6 +2310,26 @@ del dtow, zt
 qd = cv2.resize(qd, (TW, th), interpolation=cv2.INTER_NEAREST)
 Image.fromarray(qd, "L").save(f"{out}/depth.png", optimize=True)
 print("depth.png", os.path.getsize(f"{out}/depth.png"))
+
+# ---- develop: the cloud like film, not like the phone (develop.py, next to
+# this script). The iPhone's HDR merge draws every cumulus with a gritty local
+# contrast and grey mottling a negative never has. Inside the sky (the depth
+# map's 254 and 255 on the texture, all of the plate) and only where it is
+# cloud, the fine clarity comes off, a wide warm-neutral Pro-Mist glow taken
+# once from the plate goes on both alike, and the whites roll off short of
+# clipping. The towers are left as they are.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import develop  # tools/depth/bakes/splat-towers/develop.py
+
+mist = develop.mist_of(plate8, 1 / PLATE_DIV)
+tex = develop.develop(tex, develop.sky_of_depth(qd), TW0 / W0, mist)
+plate8 = develop.develop(plate8, np.ones(plate8.shape[:2], np.float32), 1 / PLATE_DIV, mist)
+del mist
+Image.fromarray(tex, "RGB").save(f"{out}/photo.webp", quality=86, method=6)
+print("photo.webp", os.path.getsize(f"{out}/photo.webp"), (TW, th))
+# the sky plate, over the same canvas at half its size (see "the sky plate")
+Image.fromarray(plate8, "RGB").save(f"{out}/plate.webp", quality=84, method=6)
+print("plate.webp", os.path.getsize(f"{out}/plate.webp"), plate8.shape[1::-1])
 
 # preview masks for the eye
 if os.environ.get("KEEP"):

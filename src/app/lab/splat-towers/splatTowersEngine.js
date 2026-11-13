@@ -30,10 +30,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the texture and the splats ~12% past the frame, so the lookup runs right to
 // the edge of the view at any pose of the orbit. The edges go soft the way a
 // lens does: one round blur over the finished frame, nothing over the middle
-// and rising from halfway out to the corners (BLUR_FS).
+// and rising from halfway out to the corners (BLUR_FS). The same two passes
+// lay on halation: a thin warm ring where bright cloud meets the cobalt or a
+// tower's edge. The cloud itself was developed soft in the bake (develop.py).
 //
 // Query: ?yaw=&pitch= (degrees of orbit) hold a still; ?reveal=0..1 holds the
-// opening; ?blur= scales the lens (0: none).
+// opening; ?blur= scales the lens (0: none); ?hal= the halation ring (0: none).
 
 const ASSET = "/lab/splat-towers/";
 const DATA_W = 2048; // texels per row of the splat texture (2 per splat)
@@ -69,7 +71,7 @@ const FILM = {
   contrast: 1.16,
   shoulder: 0.95,
   halation: 0.42,
-  halationThreshold: 0.75,
+  halationThreshold: 0.55,
   bloom: 0.3,
   softness: 0.4,
   saturation: 1.08,
@@ -327,7 +329,20 @@ uniform vec2 uRes;
 uniform vec2 uDir;      // (1, 0) or (0, 1)
 uniform float uK;       // sigma in the corners, device px
 uniform float uR0;      // where the softening starts, as a share of the half-diagonal
+uniform int uPass;      // 0: horizontal (halation source into a), 1: vertical (and the halo laid on)
+uniform float uHalS;    // halation sigma, device px
+uniform vec3 uHal;      // threshold, knee, amount
+uniform vec3 uHalCol;   // its tint, linear
+uniform vec2 uHalGate;  // own luminance over which the ring is kept off the highlight
 out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// the light that reaches the film base: scene luminance past the threshold,
+// with a soft knee
+float halSrc(vec3 c) {
+  float l = dot(c, LUMA);
+  float x = clamp(l - uHal.x + uHal.y, 0.0, 2.0 * uHal.y);
+  return max(x * x / (4.0 * uHal.y + 1e-5), l - uHal.x);
+}
 void main() {
   vec2 fc = gl_FragCoord.xy;
   vec2 d = fc - 0.5 * uRes;
@@ -335,31 +350,70 @@ void main() {
   float r = length(d) / length(hd);
   float sigma = uK * pow(max(r - uR0, 0.0) / (1.0 - uR0), 1.5);
   ivec2 ij = ivec2(fc);
-  vec4 acc = texelFetch(uIn, ij, 0);
-  if (sigma < 0.3) {
-    outColor = acc;
+  vec4 c0 = texelFetch(uIn, ij, 0);
+  vec3 acc = c0.rgb;
+  // Halation, separable like the lens: one narrow Gaussian of the highlight
+  // light, its horizontal half carried in alpha between the two passes.
+  float hs = uHalS;
+  float hst = max(1.0, hs * 2.5 / 12.0);
+  int hn = int(ceil(hs * 2.5 / hst));
+  float hk = -0.5 / (hs * hs);
+  float h0 = uPass == 0 ? halSrc(c0.rgb) : c0.a;
+  float hacc = h0;
+  float hw = 1.0;
+  for (int i = 1; i <= 12; i++) {
+    if (i > hn) break;
+    float x = float(i) * hst;
+    float w = exp(hk * x * x);
+    vec4 a = texture(uIn, (fc + uDir * x) / uRes);
+    vec4 b = texture(uIn, (fc - uDir * x) / uRes);
+    hacc += w * (uPass == 0 ? halSrc(a.rgb) + halSrc(b.rgb) : a.a + b.a);
+    hw += 2.0 * w;
+  }
+  hacc /= hw;
+  if (sigma >= 0.3) {
+    // 2.5 sigma each side in at most 16 taps; past 6.4 px of sigma the taps
+    // spread out and the bilinear fetch prefilters between them
+    float st = max(1.0, sigma * 2.5 / 16.0);
+    int n = int(ceil(sigma * 2.5 / st));
+    float k = -0.5 / (sigma * sigma);
+    float wsum = 1.0;
+    for (int i = 1; i <= 16; i++) {
+      if (i > n) break;
+      float x = float(i) * st;
+      float w = exp(k * x * x);
+      acc += w * (texture(uIn, (fc + uDir * x) / uRes).rgb + texture(uIn, (fc - uDir * x) / uRes).rgb);
+      wsum += 2.0 * w;
+    }
+    acc /= wsum;
+  }
+  if (uPass == 0) {
+    outColor = vec4(acc, hacc);
     return;
   }
-  // 2.5 sigma each side in at most 16 taps; past 6.4 px of sigma the taps
-  // spread out and the bilinear fetch prefilters between them
-  float st = max(1.0, sigma * 2.5 / 16.0);
-  int n = int(ceil(sigma * 2.5 / st));
-  float k = -0.5 / (sigma * sigma);
-  float wsum = 1.0;
-  for (int i = 1; i <= 16; i++) {
-    if (i > n) break;
-    float x = float(i) * st;
-    float w = exp(k * x * x);
-    acc += w * (texture(uIn, (fc + uDir * x) / uRes) + texture(uIn, (fc - uDir * x) / uRes));
-    wsum += 2.0 * w;
-  }
-  outColor = acc / wsum;
+  // The red layer's extra exposure lands just outside the highlight: on the
+  // sky round a sunlit cloud edge, on a tower's edge against bright cloud.
+  // On the highlight itself the emulsion has already saturated.
+  float own = dot(c0.rgb, LUMA);
+  float ring = hacc * (1.0 - smoothstep(uHalGate.x, uHalGate.y, own));
+  outColor = vec4(acc + uHalCol * ring * uHal.z, 1.0);
 }`;
 // sigma in the corners as a share of the frame's height, at rest, and how much
 // more a full swing of the camera opens it
 const BLUR_CORNER = 0.0032;
 const BLUR_SWING = 0.0016;
 const LENS_R0 = 0.5;
+// Halation, laid on with the lens (BLUR_FS): a thin warm ring, sigma a share
+// of the frame's height, from scene light past the threshold (after HEADROOM
+// the cloud's body carries ~0.5-0.9 and its cores past 1.2, the cobalt
+// ~0.1-0.2 and the pale sky low over the towers ~0.35). The film's own
+// halation is wide (1-3% of the frame) and its blue-sky rendering takes most
+// of its red back off the cobalt, so this one is narrow, warm and strong
+// enough to survive it.
+const HAL_SIGMA = 0.0042;
+const HAL = [0.42, 0.18, 1.0]; // threshold, knee, amount
+const HAL_COL = [1, 0.6, 0.3];
+const HAL_GATE = [0.36, 0.85];
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -554,6 +608,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   const qPitch = num("pitch");
   const qReveal = num("reveal");
   const qBlur = num("blur"); // scales the lens (0 holds a still with no edge softening)
+  const qHal = num("hal"); // scales the halation ring (0: none)
   const held = qYaw != null || qPitch != null || qReveal != null;
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
@@ -832,13 +887,19 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.uniform2f(blurProg.u.uRes, w, h);
     gl.uniform1f(blurProg.u.uK, corner);
     gl.uniform1f(blurProg.u.uR0, LENS_R0);
+    gl.uniform1f(blurProg.u.uHalS, Math.max(0.5, HAL_SIGMA * h));
+    gl.uniform3f(blurProg.u.uHal, HAL[0], HAL[1], HAL[2] * (qHal ?? 1));
+    gl.uniform3fv(blurProg.u.uHalCol, HAL_COL);
+    gl.uniform2fv(blurProg.u.uHalGate, HAL_GATE);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.bindFramebuffer(gl.FRAMEBUFFER, blurA.fbo);
     gl.uniform2f(blurProg.u.uDir, 1, 0);
+    gl.uniform1i(blurProg.u.uPass, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindTexture(gl.TEXTURE_2D, blurA.tex);
     gl.bindFramebuffer(gl.FRAMEBUFFER, blurB.fbo);
     gl.uniform2f(blurProg.u.uDir, 0, 1);
+    gl.uniform1i(blurProg.u.uPass, 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
