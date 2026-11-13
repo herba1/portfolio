@@ -1,3 +1,6 @@
+# SUPERSEDED by clouds.py, which takes the whole cloud layer from one sky-only
+# HDRI and ships cover and light in aux.g / aux.b; kept for the record, it
+# reads the old single-channel log-ratio aux and no longer applies.
 # Regrade the zenith patch of the shipped cloud layer to the plate.
 #
 # zenith.py spliced cloud from a second HDRI inside 20 deg of the zenith
