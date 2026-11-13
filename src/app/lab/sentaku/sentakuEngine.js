@@ -25,7 +25,12 @@ import { createCloth, drift, PHANTOM, PX, ROPE } from "./cloth";
 // and the black-and-white top that face it, and pulls the exposure down most
 // of a stop on a spring, so a gust that uncovers it flares, the garments
 // sink toward rim-lit silhouettes against it, and the exposure breathes back
-// as the dress covers it again.
+// as the dress covers it again. In the tilted view the disc is also a source
+// of its own (SUN_SRC): the photograph's glow would land a quarter of the
+// near, magnified dress across, so a hot core and a bloom about a dress-width
+// across are put back about where the sun now is, through the sheer cloth and
+// on into the sky; the fabric's own light follows its forward lobe, and the
+// outline warms where it passes through that bloom.
 //
 // The view: the lens looks much further up than the photographer did, from
 // much nearer the dress. The eye has one constraint: at rest the sun must
@@ -124,6 +129,10 @@ const HALO = new Float32Array([
   0.001, 0.001, 0.001, 0, 0.001, 0.001, 0, 0, 0
 ]);
 const DISC = 20; // px, the disc the coverage is sampled over
+// The sun as a source in the tilted view (SUN_GLSL): linear light added
+// through the sheer cloth, its core and bloom (photograph px about the disc,
+// so angle), and the forward lobe the fabric's own light follows.
+const SUN_SRC = { core: 0.28, coreW: 60, bloom: 0.22, bloomW: 620, sky: 0.09, floor: 0.5, lobeW: 520, ring: 5 };
 const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the lens
 const ADAPT = 0.7; // stops the exposure gives back with the disc in clear view
 const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
@@ -257,6 +266,22 @@ const SUN_GLSL = `
 uniform vec2 uSun;    // image px
 uniform float uGlare; // the disc in view, the dress counting for a little
 uniform float uOpen;  // the share of the disc in clear view
+uniform float uHero;  // how far into the tilted view: 0 is the photograph
+// The sun as a source, in the tilted view. Distance in the photograph's px
+// from the disc is angle (the sky is at infinity), and the tilted lens draws
+// it at about half (0.49 px per px about the disc) while the eye, moved in,
+// draws the dress about twice its photographed size: the photograph's own
+// glow, some 200 px about the disc, would land a quarter of the dress
+// across, a milky patch. So in the tilted view the disc is a source of its
+// own: a hot core, and a bloom about a dress-width across, the light the
+// sheer cloth scatters forward about the sun's direction.
+float sunLight(float d) {
+  return ${SUN_SRC.core.toFixed(3)} * exp(-d * d / ${(SUN_SRC.coreW ** 2).toFixed(1)}) + ${SUN_SRC.bloom.toFixed(3)} * exp(-d * d / ${(SUN_SRC.bloomW ** 2).toFixed(1)});
+}
+// the fabric's own light (the bake's) is that forward scatter too: a lobe
+// about the sun over an even floor, so cloth carried off the sun's direction
+// dims toward the cobalt, and cloth carried onto it brightens
+float sunLobe(float d) { return ${SUN_SRC.floor.toFixed(3)} + ${(1 - SUN_SRC.floor).toFixed(3)} * exp(-d * d / ${(SUN_SRC.lobeW ** 2).toFixed(1)}); }
 vec3 veil(vec2 p) {
   vec2 d = p - uSun;
   float r2 = dot(d, d);
@@ -391,6 +416,10 @@ void main() {
   float ring = (r - mix(30.0, 72.0, uOpen)) / mix(7.0, 20.0, uOpen);
   float wr = exp(-ring * ring);
   c = mix(c, c * vec3(1.0, 0.84, 0.7) + vec3(0.1, 0.035, 0.0), mix(0.75, 0.35, uOpen) * wr);
+  // the tilted view's source, past the dress's edges: its bloom carries on
+  // into the sky, cyan and paling toward the disc, never grey
+  float sb = sunLight(r) - ${SUN_SRC.core.toFixed(3)} * exp(-r * r / ${(SUN_SRC.coreW ** 2).toFixed(1)});
+  c += uHero * ${SUN_SRC.sky.toFixed(3)} / ${SUN_SRC.bloom.toFixed(3)} * sb * vec3(0.32, 0.78, 1.0);
   c += veil(p);
   o = vec4(encode(c), 1.0);
 }`;
@@ -609,6 +638,10 @@ void main() {
   // the trough
   float shade = sheer ? 1.0 - 0.22 * fd.y * fd.z + 0.12 * lean : 1.0 - 0.34 * fd.y * fd.z + 0.22 * lean;
   vec3 f = L.rgb * vShade.x * max(shade, 0.4);
+  // where the sky behind this cloth is now, against where it was in the
+  // photograph: the fabric's light follows the sun's forward lobe there
+  float dn = distance(vPos, uSun);
+  if (sheer && uHero > 0.0) f *= mix(1.0, sunLobe(dn) / sunLobe(distance(vRest, uSun)), uHero);
   vec3 dye = vec3(1.0);
   if (sheer) {
     L.a = 1.0 - pow(1.0 - L.a, max(k, 1.0));
@@ -628,6 +661,13 @@ void main() {
     o = vec4(mix(vec3(1.0), r, L.a), 1.0);
     return;
   }
+  if (sheer && uHero > 0.0) {
+    // the sun through the sheer cloth: what it lets straight through goes as
+    // tau^k, so a billow seen edge-on, or a doubled hem, holds it back
+    float tl = dot(uTau, vec3(0.2126, 0.7152, 0.0722));
+    float through = pow(tl, max(k, 1.0) - 1.0);
+    col += uHero * through * sunLight(dn) * mix(vec3(1.0, 0.95, 0.88), dye, 0.25);
+  }
   vec2 ts = uSun - vPos;
   float ds = length(ts);
   vec2 dir = ts / max(ds, 1.0);
@@ -639,8 +679,26 @@ void main() {
     // pushed toward amber (red up, blue down) with a touch of sunlight, never
     // toward white, more the nearer the sun, wherever the cloth is now.
     float thin = clamp(L.a - 0.5 * (alphaAt(s + dir * 1.5) + alphaAt(s + dir * 3.0)), 0.0, 1.0);
-    float w = thin * uEdge * (0.45 + 1.2 * exp(-ds / 420.0));
+    // In the tilted view it is the same source: the edges nearest the sun
+    // warm, those well off it hardly.
+    float w = thin * uEdge * mix(0.45 + 1.2 * exp(-ds / 420.0), 0.12 + 2.4 * exp(-ds * ds / (460.0 * 460.0)), uHero);
     col = max(col + w * (col * vec3(0.5, 0.08, -0.3) + vec3(0.03, 0.011, 0.0)), 0.0);
+  }
+  if (uEdge > 0.0 && uHero > 0.0) {
+    // With the sun behind the cloth every edge has it inward, so the edge
+    // that faces it never shows. What shows instead is the film's: the
+    // source's light through the last fibres of the silhouette, scattered
+    // back through the red layer, a thin warm ring wherever the outline
+    // passes through the sun's bloom, the nearer the disc the stronger.
+    vec2 g = vec2(alphaAt(s + vec2(2.0, 0.0)) - alphaAt(s - vec2(2.0, 0.0)), alphaAt(s + vec2(0.0, 2.0)) - alphaAt(s - vec2(0.0, 2.0)));
+    float gl = length(g);
+    if (gl > 0.02) {
+      vec2 nOut = -g / gl;
+      float ring = clamp(L.a - 0.5 * (alphaAt(s + nOut * 3.0) + alphaAt(s + nOut * 8.0)), 0.0, 1.0);
+      float src = sunLight(dn) / ${(SUN_SRC.core + SUN_SRC.bloom).toFixed(3)};
+      float w = uHero * ring * src * ${SUN_SRC.ring.toFixed(2)};
+      col = max(col + w * (col * vec3(0.5, -0.06, -0.4) + vec3(0.07, 0.008, 0.0)), 0.0);
+    }
   }
   if (uRim * uOpen > 0.0) {
     // Rim: the edge that faces the sun, where the matte falls away towards
@@ -1059,6 +1117,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
     const k = (tiltP * tiltTo) / TILT;
     const view = viewOf(tiltTo * tiltP, 1 + (widenTo - 1) * k, LENS_C[1] + (oyTo - LENS_C[1]) * k, k);
     view.eye = eyeTo.map((e) => e * clamp(k, 0, 1.5));
+    view.hero = clamp(k, 0, 1);
     return view;
   };
   const stepTilt = (dt, age) => {
@@ -1180,6 +1239,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.uniform2f(plateP.u.uSun, sunPx[0], sunPx[1]);
     gl.uniform1f(plateP.u.uGlare, glare);
     gl.uniform1f(plateP.u.uOpen, open);
+    gl.uniform1f(plateP.u.uHero, view.hero);
     gl.uniform3fv(plateP.u["uHalo[0]"], HALO);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1195,6 +1255,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.uniform2f(clothP.u.uSun, sunPx[0], sunPx[1]);
     gl.uniform1f(clothP.u.uGlare, glare);
     gl.uniform1f(clothP.u.uOpen, open);
+    gl.uniform1f(clothP.u.uHero, view.hero);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, layersTex);
     gl.uniform1i(clothP.u.uLayers, 0);
