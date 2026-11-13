@@ -10,7 +10,7 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // twenty minutes after sunset run: the skylight falls about three and a half
 // stops while the shaft deepens from pale peach-cyan to cobalt, darkest
 // overhead, the clouds lose the sun on their own, faster curve (peach-white
-// to a dim rose-grey under the sky), the camera opens up as a photographer
+// to a deep slate-blue under the sky), the camera opens up as a photographer
 // would, and the lamp trips
 // on its photocell and warms slowly from pink to amber. All of it is
 // developed through _kit/film with its dusk preset easing into night, so the
@@ -105,7 +105,7 @@ uniform float uKnee;        // stops of lift kept linear
 uniform float uShoulder;    // and the most any pixel may reach
 uniform float uCloudKeep;   // how much skylight colour the cloud keeps (0..1)
 uniform float uCloudCeil;   // the brightest a cloud may print, scene units before uExpo
-uniform vec3 uCloudWhite;   // lit cloud, luminance 1: peach-white to rose-grey
+uniform vec3 uCloudWhite;   // lit tops, luminance 1: peach-white to a faint warm grey
 uniform vec3 uCloudPeach;   // afterglow on the undersides, luminance 1
 uniform float uAfter;       // afterglow left, 1 at sunset, 0 by mid-span
 uniform float uFgGain;      // building layer: linear gain (0.42, about 1.25 stops down)
@@ -121,25 +121,14 @@ const float FG_MID = 0.06;  // the plate's median facade luminance
 // aux.b above the light ids holds the cloud's light, 16..255 -> 0..1
 float lightOf(float b){ return clamp((b * 255.0 - 16.0) / 239.0, 0.0, 1.0); }
 // Cloud density for reading form: cover, heavier where the cloud is bright.
-float denAt(vec2 t){ vec4 x = texture(uAux, t); return x.g * (0.5 + 0.5 * lightOf(x.b)); }
-// World view direction of a plate uv.
-vec3 dirAt(vec2 t){
-  vec2 q = t * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
-  float r = length(q) + 1e-6;
-  float th = uK * atan(r / (uK * uF));
-  return uRot * vec3(q / r * sin(th), cos(th));
-}
-float facingAt(vec2 t){
-  vec3 d = dirAt(t);
-  return dot(normalize(vec2(d.x, d.z) + 1e-5), uSun);
-}
+float denAt(vec2 t){ vec4 x = textureLod(uAux, t, 1.5); return x.g * (0.5 + 0.5 * lightOf(x.b)); }
 
 void main(){
   vec2 p = gl_FragCoord.xy / uSize;
   vec2 uv = vec2(p.x, 1.0 - p.y);
   vec3 amb = textureLod(uAmb, uv, uLod).rgb;
   vec3 em = textureLod(uEmit, uv, uLod).rgb;
-  vec4 ax = texture(uAux, uv);
+  vec4 ax = textureLod(uAux, uv, 0.0);
   float a = ax.r;
   float cov = ax.g;
   float li = lightOf(ax.b);
@@ -175,40 +164,65 @@ void main(){
   // sky-only panorama through this same view (clouds.py), so the gaps between
   // puffs are clean sky and the zenith deepens by the gradient above alone,
   // with no patch, seam or pole pinch left in the layer to draw spokes.
-  // Sun side on screen: the gradient of the bearing term, in plate uv
-  // (analytic per pixel, so it does not step in 2x2 blocks).
-  vec2 tx = 4.0 / uTexSize;
-  vec2 fd = vec2(facingAt(uv + vec2(tx.x, 0.0)) - facingAt(uv - vec2(tx.x, 0.0)),
-                 facingAt(uv + vec2(0.0, tx.y)) - facingAt(uv - vec2(0.0, tx.y)));
-  vec2 sd = fd / (length(fd) + 1e-6) / uTexSize;
+  // Sun side on screen: a small step of this pixel's ray along the great
+  // circle towards the set sun, projected back onto the plate, in plate uv.
+  // (The gradient of the bearing term it replaces vanishes and flips along
+  // the sun's meridian, which cut a straight lit/lee seam through a puff.)
+  vec3 sunW = normalize(vec3(uSun.x, 0.06, uSun.y));
+  vec3 dc2 = normalize(d + 0.03 * sunW) * uRot;
+  float th2 = acos(clamp(dc2.z, -1.0, 1.0));
+  vec2 q2 = dc2.xy / (length(dc2.xy) + 1e-6) * uK * uF * tan(th2 / uK);
+  vec2 sd = normalize(q2 - q + 1e-6) / uTexSize;
   // A puff's sun-facing flank (light falling off towards the sun) is lit;
   // its lee is in skylight. Read at two broad scales, so a puff shades as a
   // form, not as its texture, and its rim does not outline it.
   float side = 0.5 * (denAt(uv - sd * 24.0) - denAt(uv + sd * 24.0) + denAt(uv - sd * 64.0) - denAt(uv + sd * 64.0));
   float lit = smoothstep(-0.16, 0.16, side);
-  // Cover and light come apart, so a puff's thin rim (low cover) is never
-  // mistaken for its grey, thick middle (full cover, low light).
-  float cw = smoothstep(0.0, 0.8, cov);             // cover
-  float core = li;                                  // sunlit tops and flanks
-  float body = smoothstep(0.6, 0.95, cov);          // inside, past the thin rim
-  // The cloud's light is two parts. Skylight: the shaft's own colour and
-  // level scattered on, less through the thick middles, so the shadows stay
-  // a cool, skylight blue-grey instead of a cut-out hole of sky. Sun: a lift
-  // in stops on the tops, more on the lit side, rolled into a soft shoulder
-  // past uKnee; peach while the afterglow lasts (strongest towards the sun's
-  // side), then a warm white. The sun's part leaves on its own, faster curve
-  // (uSunK, solved per frame so a lit core follows CLOUD_STOPS), so by blue
-  // hour the sky holds the light and the cloud sits dim against it, a dusty
-  // rose-grey, bluer in the lee.
-  float shade = exp2(-0.9 * (1.0 - core) * body * (1.0 - 0.4 * lit));
+  // Alpha. aux.g is the cloud's blue/red log-ratio below the local clear sky,
+  // linear (clouds.py no longer thresholds it), so cover is feathered here
+  // across most of its range: a puff thins into the sky through its wisps
+  // instead of stopping on a contour. A share of the ratio a few texels wide
+  // gives the edge the soft fall-off of a volume rather than a cut line.
+  float covW = textureLod(uAux, uv, 2.5).g;
+  float covM = textureLod(uAux, uv, 4.5).g;
+  float cw = smoothstep(0.06, 0.9, mix(cov, covW, 0.32));
+  // The buildings occlude the cloud, not the sky: alpha goes to zero a few
+  // texels inside the matte's edge (its eroded, blurred self), so no puff
+  // shows through balcony gaps or fringes a silhouette; the clear sky the
+  // matte already blends against the towers is what meets them.
+  float am = textureLod(uAux, uv, 1.5).r;
+  cw *= smoothstep(0.6, 1.0, min(a, am));
+  // Light and thickness come from the broad field, not from the texel, so a
+  // puff's colour is one function across its edge and fading alpha can only
+  // take it towards the sky, never paint a lighter rim around a darker body.
+  float liW = lightOf(textureLod(uAux, uv, 2.0).b);
+  float core = mix(li, liW, 0.5);                   // sunlit tops and flanks
+  float body = smoothstep(0.35, 0.9, covM);         // deep inside a puff
+  // Two parts. Skylight: the shaft's own colour scattered on. A cloud's lee
+  // and thick middles are lit by the blue sky around them, so their colour is
+  // a step from neutral towards the local sky (about half way where the
+  // cloud is dim, less on the lit tops), never a grey or lavender of its own.
+  // Sun: a lift in stops on the tops, more on the lit side, peach while the
+  // afterglow lasts (strongest towards the sun's side), then only a faint
+  // warm white. It leaves on its own, faster curve (uSunK), so by blue hour
+  // the cloud sits as deep slate-blue under the cobalt with a warm breath on
+  // its tops.
+  float sunny = clamp(core * (0.55 + 0.45 * lit), 0.0, 1.0);
+  float shade = exp2(-0.95 * (1.0 - sunny) * (0.35 + 0.65 * body));
   float glowK = clamp(uAfter * (0.45 + 0.55 * facing), 0.0, 1.0);
-  vec3 skyC = mix(col, uCloudWhite, (0.3 + 0.3 * lit + 0.25 * core) * (1.0 - uCloudKeep));
-  // the afterglow low in the west scatters peach onto the lit parts too
-  skyC = mix(skyC, uCloudPeach, glowK * 0.62 * (0.3 + 0.7 * core)) * shade;
-  float up = uCloudGain * (0.18 + 0.62 * core) * (0.65 + 0.5 * lit);
+  float topK = smoothstep(0.15, 0.95, sunny);         // the lit tops only
+  vec3 skyTint = mix(vec3(1.0), col, mix(0.68, 0.15, sunny) * (1.0 - 0.25 * uCloudKeep) + uCloudKeep);
+  vec3 skyC = skyTint;
+  // only the lit tops take the warm white and the afterglow's peach
+  vec3 warm = mix(uCloudWhite, uCloudPeach, glowK * 0.62);
+  skyC = mix(skyC, warm, topK * (0.2 + 0.4 * uAfter)) * shade;
+  float up = uCloudGain * (0.08 + 0.72 * core) * (0.6 + 0.5 * lit);
   float room = uShoulder - uKnee;
   up = up < uKnee ? up : uKnee + room * (1.0 - exp(-(up - uKnee) / room));
-  vec3 sunC = mix(uCloudWhite, uCloudPeach, glowK * (0.9 - 0.35 * core)) * (exp2(up) - 1.0) * uSunK;
+  // what of the sun reaches the lee arrives scattered through the puff, so
+  // it carries the sky's colour there; only the tops see it warm
+  vec3 sunCol = mix(uCloudWhite, uCloudPeach, glowK * (0.9 - 0.35 * core));
+  vec3 sunC = mix(skyTint, sunCol, 0.3 + 0.7 * topK) * (exp2(up) - 1.0) * uSunK;
   vec3 cl = (skyC + sunC) * uCloudSkyK * lum;
   // No cloud may print past the film's white: the brightest channel rolls
   // into uCloudCeil (scene units, before the camera's exposure), so the
@@ -217,7 +231,9 @@ void main(){
   float c0 = 0.62 * uCloudCeil;
   float pk2 = pk < c0 ? pk : c0 + (uCloudCeil - c0) * (1.0 - exp(-(pk - c0) / (uCloudCeil - c0)));
   cl *= pk2 / max(pk, 1e-6);
-  vec3 sky = mix(col * lum, cl, cw);
+  // premultiplied over: the cloud's radiance times its alpha, plus the sky
+  // it lets through
+  vec3 sky = col * lum * (1.0 - cw) + cl * cw;
 
   // The city is the frame, not the subject: about a stop down and a harder
   // log contrast about the plate's mid, so towers, crane and brick read as
@@ -345,7 +361,7 @@ const smooth = (a, b, x) => {
 const SKY0 = { zen: lin("#5b9ddc"), mid: lin("#8bbae6"), horSun: lin("#f0caa0"), horAnti: lin("#b7d0e6"), lum: 0.72, sat: 1.25, glow: 0.55, zenDeep: 0.6 };
 const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, sat: 0.95, glow: 1.4, zenDeep: 1.5 };
 const CLOUD_WHITE0 = lin("#f4e9df"); // peach-white, the sun still on the tops
-const CLOUD_WHITE1 = lin("#bcaeb9"); // dusty rose-grey, skylight only
+const CLOUD_WHITE1 = lin("#cfb8ae"); // a faint warm grey: what sun is left on the tops
 const CLOUD_PEACH = lin("#ffb98f");
 const CLOUD_GAIN = 2.2; // stops of sun on a fully lit top, fixed: the time lives in CLOUD_STOPS
 // The cloud's own curve. As printed (after the camera opens up) the shaft
@@ -433,6 +449,10 @@ export async function createBlueHour(host, { embedded = false } = {}) {
   const ambTex = decodeTo(ambImg, [LO, HI], false);
   const emitTex = decodeTo(emitImg, [ELO, EHI], true);
   const auxTex = upload(gl, auxImg, gl.LINEAR);
+  // mipmapped, so the cloud's feather, broad light and the matte's erosion
+  // are single taps (light ids are read with texelFetch at level 0)
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.deleteProgram(decode.p);
   const texW = auxImg.width;
   const texH = auxImg.height;

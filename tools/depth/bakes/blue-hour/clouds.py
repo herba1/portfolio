@@ -60,8 +60,9 @@ for _ in range(2):
     clear = b > bs - 0.25
 bs = mblur(b, clear, s0)
 S = mblur(L, clear, s0)
-c = np.clip((bs - b) / np.maximum(bs - 0.25, 0.3), 0, 1)
-c = c * c * (3 - 2 * c)
+# the log-ratio itself, linear: no threshold here, the shader feathers it
+c_lin = np.clip((bs - b) / np.maximum(bs - 0.25, 0.3), 0, 1)
+c = c_lin * c_lin * (3 - 2 * c_lin)
 r = np.log2(np.maximum(L, 1e-6) / np.maximum(S, 1e-6))
 inc = sky & (c > 0.5)
 lo, hi = np.percentile(r[inc], [4, 97])
@@ -73,7 +74,7 @@ print('light in cloud p10/50/90', np.percentile(s[inc], [10, 50, 90]).round(2))
 
 rng = np.random.default_rng(11)
 tp = lambda: rng.random(c.shape) + rng.random(c.shape) - 1.0
-g8 = np.clip(np.round(c * 255 + tp() * 0.5), 0, 255)
+g8 = np.clip(np.round(c_lin * 255 + tp() * 0.5), 0, 255)
 b8 = np.where(ids > 0, ids, np.clip(np.round(16 + s * 239 + tp() * 0.5), 16, 255))
 rgb = np.stack([a[..., 0], g8, b8], -1).astype(np.uint8)
 cv2.imwrite(aux_out, rgb[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])
