@@ -152,18 +152,26 @@ void main() {
 // exposure only pales the blue while the cloud stays grey), so the grade works
 // on the developed print, keyed on the sky matte (carried in the view's alpha)
 // and on how blue the scene light is there:
-//   - cloud: its luminance goes through a filmic shoulder with a toe, so the
-//     sunlit tops climb to a warm-neutral paper white (#F4F1EA, never past it)
-//     while the undersides keep their depth; the shadow side is toned
+//   - cloud: keeps the plate's own modelling. Its log luminance is read
+//     against a local mean (two rings round the pixel, sky only), the local
+//     contrast is opened up and the whole lot runs through a soft filmic
+//     shoulder that only reaches a warm near-white (#F4F1EA, never past it)
+//     at the true top few percent, so sunlit tops glow and bodies have volume;
+//     the side of a cloud that is darker than its surroundings is toned
 //     towards skylight blue (hue 208, sat 0.40), the colour of shade under an
-//     open sky, in proportion to how far the cloud sits below the shoulder;
+//     open sky, in proportion to how far below its neighbourhood it sits;
 //   - clear sky: recoloured along a zenith gradient, deep cobalt (#0E5FB0)
 //     straight up, opening towards the rim, carrying the print's own exposure,
 //     vignette and grain as a ratio so every print still meters for itself.
 const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const SKY_GRADE = {
-  cloudGain: 5.5, // gain on cloud luminance (linear) into the shoulder
-  cloudToe: 1.6, // power on cloud luminance before the shoulder: deepens the undersides
+  cloudGain: 0, // stops into the shoulder at the plate's mid cloud (x = 1 is the knee)
+  cloudToe: 3.4, // log contrast of the cloud's broad modelling: opens the plate's dull overcast
+  detail: 1.8, // log contrast of the fine detail against the local mean
+  depth: 1.5, // stops the shade side can fall below the knee, at most
+  cloudSlope: 0.3, // film's slope in the clouds (log out per log exposure), to take the meter out
+  cloudKeep: 1, // stops of the print's own exposure put back on the cloud, per stop
+  knee: 2.4, // hardness of the shoulder: higher holds the mids lower and the tops whiter
   splitTone: 1, // 0 leaves cloud neutral, 1 is the full skylight split
   keep: 0.5, // share of the print's own dye cast kept in the cloud
   skyKeep: 0.7, // power of the print's own exposure ratio kept in the clear sky
@@ -171,7 +179,6 @@ const SKY_GRADE = {
 };
 const CLOUD_HI = srgbHex("#F4F1EA");
 const CLOUD_SHADE = [0.552, 0.7483, 0.92]; // HSV(208, 0.40, 0.92)
-const CLOUD_SHADE_DEPTH = 0.84; // cloud luminance kept at full shade, past SHADE's V
 const SKY_ZENITH = srgbHex("#0E5FB0");
 const SKY_RIM = srgbHex("#3F8AD0");
 const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at the zenith
@@ -190,6 +197,8 @@ uniform vec3 uD;
 uniform float uF;
 uniform float uHalf;
 uniform vec4 uCloud;     // gain, toe, split, keep
+uniform vec4 uModel;     // detail, knee, exposure kept, shade depth
+uniform vec2 uEv;        // the print's exposure against the zenith print (stops), film slope there
 uniform vec2 uSky;       // keep, strength
 uniform float uSeed;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -197,8 +206,6 @@ const vec3 HI = ${vec3(CLOUD_HI)};
 const vec3 SHADE = ${vec3(CLOUD_SHADE)};
 const vec3 ZEN = ${vec3(SKY_ZENITH)};
 const vec3 RIM = ${vec3(SKY_RIM)};
-const float SHADE_V = ${Math.max(...CLOUD_SHADE).toFixed(4)};
-const float SHADE_DEPTH = ${CLOUD_SHADE_DEPTH.toFixed(4)};
 const float VREF = ${SKY_VREF.toFixed(4)};
 
 vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
@@ -237,28 +244,63 @@ void main() {
   vec3 lin = toLin(dev.rgb);
   float Y = dot(lin, LUMA);
 
-  // cloud: toe, then an exponential shoulder that lands on HI and stays there.
-  // The curve is steep in the mids, so it reads a grain-free luminance (a
-  // little blur of the print) and the grain rides back on as a plain ratio
-  // instead of being stretched with the cloud.
+  // cloud: the plate's own modelling, re-lit. The curve is steep, so it reads
+  // a grain-free luminance (a little blur of the print) and the grain rides
+  // back on as a ratio instead of being stretched with the cloud.
   vec2 tx = 1.5 / vec2(textureSize(uDev, 0));
   float Yb = 0.5 * Y + 0.125 * (dot(toLin(texture(uDev, vUv + vec2(tx.x, 0.0)).rgb), LUMA)
     + dot(toLin(texture(uDev, vUv - vec2(tx.x, 0.0)).rgb), LUMA)
     + dot(toLin(texture(uDev, vUv + vec2(0.0, tx.y)).rgb), LUMA)
     + dot(toLin(texture(uDev, vUv - vec2(0.0, tx.y)).rgb), LUMA));
+  float L = log2(Yb + 0.002);
+  // The local mean, in log luminance, over two rings a cumulus turret and a
+  // cloud body across (fractions of the print), weighted by the sky matte so
+  // a wall never reads as the cloud's surroundings and lights its edge.
+  float Lm = 0.0;
+  float wm = 0.0;
+  for (int i = 0; i < 8; i++) {
+    for (int j = 0; j < 2; j++) {
+      float a = float(i) * 0.785398 + float(j) * 0.392699;
+      vec2 p = vUv + vec2(cos(a), sin(a)) * (j == 0 ? 0.022 : 0.058);
+      p = 1.0 - abs(1.0 - abs(p)); // mirrored at the print's edge, never smeared
+      float w = 0.02 + texture(uRaw, p).a;
+      Lm += w * log2(dot(toLin(texture(uDev, p).rgb), LUMA) + 0.002);
+      wm += w;
+    }
+  }
+  Lm /= wm;
+  float rel = L - Lm; // stops above (+) or below (-) its neighbourhood
   vec3 hiL = toLin(HI);
   float W = dot(hiL, LUMA);
-  float x = pow(max(Yb, 0.0), uCloud.y) * uCloud.x;
-  float Yc = W * (1.0 - exp(-x / W)) * pow(clamp((Y + 0.004) / (Yb + 0.004), 0.8, 1.25), 0.75);
+  // Log contrast on the cloud's broad modelling (the local mean, the print's
+  // own exposure taken out first so a print metered down for a bright patch
+  // is not crushed three times over) and a gentler one on the fine detail
+  // against it, into a soft shoulder y = x / (1 + x^n)^(1/n): near linear in
+  // the bodies, a long roll into W that only the brightest few percent ever
+  // get near. The exposure goes back on as a plain ratio, so every print
+  // still meters for itself.
+  float Lf = Lm - uEv.x * uEv.y + 0.63; // stops from a mid cloud of the plate
+  float lx = uCloud.x + uCloud.y * Lf + uModel.x * rel;
+  // The thin, half-clear rim of a cloud is lit through, not in shade: it is
+  // held at a light body tone so it fades into the blue instead of drawing a
+  // dark contour round every cloud.
+  float bl = (sc.b - sc.r) / (sc.b + 1e-4);
+  lx = mix(lx, max(lx, -0.3), smoothstep(0.24, 0.5, bl));
+  // the shade side rolls off towards a floor: undersides go blue-grey, never
+  // to storm cloud
+  lx = lx < 0.0 ? -uModel.w * (1.0 - exp(lx / uModel.w)) : lx;
+  lx += uEv.x * uEv.y * uModel.z;
+  float xs = exp2(clamp(lx, -12.0, 8.0));
+  float yc = xs / pow(1.0 + pow(xs, uModel.y), 1.0 / uModel.y);
+  float Yc = W * yc * pow(clamp((Y + 0.004) / (Yb + 0.004), 0.75, 1.33), 1.1);
+  // Skylight in the shade: scaled by how dark the pixel sits, locally and
+  // overall, so undersides go blue-grey and the sunlit tops stay warm.
+  float bright = smoothstep(-1.9, 0.4, lx);
+  float shade = (1.0 - bright) * uCloud.z;
   vec3 shadeL = toLin(SHADE);
   shadeL /= dot(shadeL, LUMA);
-  // skylight shade by inverse cloud luminance, read before the shoulder (past
-  // it every cloud body is within a few percent of HI and the undersides
-  // would be lost): full in the undersides, gone on the sunlit tops. The
-  // shade sits lower as well as cooler (SHADE's V, then the shadow depth), so
-  // the body is modelled in value and the blue side never reads as clear sky.
-  float shade = (1.0 - smoothstep(0.8, 3.2, x / W)) * uCloud.z;
-  vec3 tint = mix(hiL / W, shadeL * SHADE_V * SHADE_DEPTH, shade);
+  vec3 tint = mix(vec3(1.0), shadeL, shade * 0.7);
+  tint = mix(tint, hiL / W, smoothstep(0.82, 0.985, yc)); // warm only at the very top
   vec3 own = mix(vec3(1.0), (lin + 0.002) / (Y + 0.002), uCloud.w);
   vec3 cloud = min(tint * Yc * own, hiL);
 
@@ -765,6 +807,8 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform1f(g.uF, F);
     gl.uniform1f(g.uHalf, (0.5 * img) / f);
     gl.uniform4f(g.uCloud, grade0.cloudGain, grade0.cloudToe, grade0.splitTone, grade0.keep);
+    gl.uniform4f(g.uModel, grade0.detail, grade0.knee, grade0.cloudKeep, grade0.depth);
+    gl.uniform2f(g.uEv, ev - ev0, grade0.cloudSlope);
     gl.uniform2f(g.uSky, grade0.skyKeep, grade0.grade);
     gl.uniform1f(g.uSeed, p.grain);
     gl.drawArrays(gl.TRIANGLES, 0, 6);

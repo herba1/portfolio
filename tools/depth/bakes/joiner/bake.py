@@ -3,7 +3,7 @@
 #               rim, image up = the panorama's yaw YAW0. RGB = log2 radiance
 #               mapped LO..HI to 0..255 with TPDF dither.
 #   mask.webp   same disk at 2048, sky matte (white = sky), lossless.
-#   sky.webp    1024^2 sky-only plate: the scene with structures filled from the
+#   sky.webp    2048^2 sky-only plate: the scene with structures filled from the
 #               surrounding sky (push-pull), same log encoding, so advected cloud
 #               never drags a wall or a lamp post with it.
 # usage: python3 -I bake.py docklands_01_8k.hdr upper-sky2.png outdir
@@ -48,9 +48,10 @@ m = np.clip(disk(full, S, 2, cv2.INTER_LINEAR), 0, 1)
 # the matte ships at half size (2048): ~8.5 px a degree still holds a lamp post
 Image.fromarray(np.round(m * 255).astype(np.uint8)).resize((S // 2, S // 2), Image.LANCZOS).convert("L").save(f"{OUT}/mask.webp", lossless=True, quality=100, method=6)
 
-# sky plate: push-pull fill of non-sky in log space at 1024
-s1 = cv2.resize(np.log2(scene), (1024, 1024), interpolation=cv2.INTER_AREA)
-w1 = cv2.resize(m, (1024, 1024), interpolation=cv2.INTER_AREA)
+# sky plate: push-pull fill of non-sky in log space at 2048 (1024 smeared
+# advected cloud edges; skyplate.py re-bakes it from the shipped disk)
+s1 = cv2.resize(np.log2(scene), (2048, 2048), interpolation=cv2.INTER_AREA)
+w1 = cv2.resize(m, (2048, 2048), interpolation=cv2.INTER_AREA)
 w1 = np.clip((w1 - .85) / .15, 0, 1) ** 2  # only clean sky feeds the fill
 def pushpull(img, w):
     if min(w.shape) <= 4:
