@@ -66,19 +66,34 @@ const float LENS = 1.034;
 // and its open blue sky's chroma (luma 1).
 const float SKY_U = 0.24;
 const vec3 SKY_BLUE = vec3(0.72, 1.0, 1.79);
-// The clouds' exposure against the graded blue: a sunlit top lands near
-// paper white, the way a polariser holds a cobalt sky under bright cumulus,
-// and the body of the cloud stays under the shoulder, where its shading
-// still reads.
-const float CLOUD = 1.3;
+// The clouds are graded as lit volumes, not shown as the photograph's white:
+// their sunlit crowns a warm paper white, their shadow side the open sky's
+// light. Both are given as the print would show them (display rgb) and taken
+// back through the tone curve, so the shoulder lands exactly there.
+const vec3 CLOUD_LIT = vec3(236.0, 230.0, 220.0) / 255.0;
+const vec3 CLOUD_SHADE = vec3(150.0, 175.0, 205.0) / 255.0;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
 
 vec3 toLin(vec3 c){ return pow(c, vec3(2.2)); }
 vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
+// Its inverse: the light that prints as y.
+vec3 untone(vec3 y){ vec3 t = pow(y, vec3(2.2)); return t / (1.0 - t) / EXPO; }
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // The dome's layers as stored: x = K s / (1 - s), s = y ^ 2.2.
 vec3 skyDecode(vec3 y, float k){ vec3 s = min(pow(y, vec3(2.2)), vec3(0.9975)); return k * s / (1.0 - s); }
+// The equirect's coordinate for a direction in the dome's frame.
+vec2 domeST(vec3 D){ return vec2(SKY_U + atan(D.y, D.x) / 6.2831853, 1.0 - asin(clamp(D.z, -1.0, 1.0)) / 1.5707963); }
+// How much cloud stands along a dome direction, read from a soft mip: the
+// clouds' layer is already what they add over the clear sky, so its
+// luminance is the cloud alone. A fixed mip, so the seam needs no care.
+float density(vec3 D, float lod){ return luma(skyDecode(textureLod(uSky, domeST(D), lod).rgb, 4.0)); }
+// D turned toward T by a (radians), along the great circle between them.
+vec3 toward(vec3 D, vec3 T, float a){
+  vec3 t = T - D * dot(T, D);
+  float l = length(t);
+  return l < 1e-4 ? D : normalize(D * cos(a) + t / l * sin(a));
+}
 
 void main(){
   vec2 frag = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
@@ -109,7 +124,7 @@ void main(){
   // equirect's seam passes, the derivative comes from a copy shifted half a
   // turn; otherwise the seam would pick the smallest mip as a hairline.
   vec3 D = V * uDome;
-  vec2 st = vec2(SKY_U + atan(D.y, D.x) / 6.2831853, 1.0 - asin(clamp(D.z, -1.0, 1.0)) / 1.5707963);
+  vec2 st = domeST(D);
   vec2 sx = dFdx(st), sy = dFdy(st);
   float wx = dFdx(fract(st.x + 0.5)), wy = dFdy(fract(st.x + 0.5));
   if (abs(wx) < abs(sx.x)) sx.x = wx;
@@ -132,27 +147,53 @@ void main(){
   // the wall tops, and to a deeper cyan than haze.
   float pale = 1.0 - smoothstep(0.35, 1.05, elev);
   vec3 blue = mix(vec3(0.014, 0.16, 0.66), vec3(0.24, 0.9, 1.85), pale * pale);
-  // The clouds' shoulder: a roll-off on their luminance ahead of the tone
-  // curve, so the tops near the sun come down to a warm paper white instead
-  // of clipping, and the sun's disc itself only just reaches it.
-  vec3 warm = mix(vec3(1.0), uSunCol / luma(uSunCol), mix(0.6, 0.3, uDay));
-  // What is left over the blue is mostly neutral; at thin edges where the
-  // dome's sky leans off SKY_BLUE the remainder turns violet, and the
-  // clouds' exposure would show it as a fringe. So it is held near grey.
-  cloud = mix(vec3(luma(cloud)), cloud, 0.3) * CLOUD;
-  // Cumulus is lit like a solid: the sunlit domes stand well clear of the
-  // body under them. The photograph's range is opened round its middle so
-  // the tops come forward and the bases fall back toward the blue.
-  cloud *= pow(max(luma(cloud), 1e-4) / 4.0, 0.45);
-  // A cloud's shadow side is not grey: the sun does not reach it, the open
-  // sky does, so it takes the sky's own blue (this ray's, cobalt high and
-  // cyan low) at the same luminance, and sits a little deeper. Only the
-  // sunlit tops keep the key's warm white.
-  float sunlit = smoothstep(2.0, 14.0, luma(cloud));
-  vec3 skyTint = mix(vec3(1.0), blue / luma(blue), 0.42);
-  cloud *= mix(skyTint * 0.5, warm, sunlit);
-  cloud /= 1.0 + luma(cloud) / 12.0;
-  vec3 skyL = (beta * blue + cloud) * mix(0.72, 1.0, uDay);
+  // The clouds as lit volumes. The photograph's own white only says how much
+  // cloud stands on the ray; how it is lit comes from where that cloud
+  // faces. First the mask: the cloud's luminance over the clear sky, thin
+  // wisps a partial veil, the body opaque.
+  float cl = luma(cloud);
+  float mask = sqrt(smoothstep(0.02, 1.2, cl));
+  // Then which way each part faces, from the cloud's own density read soft
+  // and a few degrees off along the ray: a part with less cloud between it
+  // and the sun is the sunlit face; one with clear sky under it and cloud
+  // over it is a belly. The sun as the dome sees it is DOME_SUN.
+  vec3 DOME_SUN = uSun * uDome;
+  const vec3 ZEN = vec3(0.0, 0.0, 1.0);
+  float d0 = density(D, 4.5);
+  float dSun = 0.6 * density(toward(D, DOME_SUN, 0.035), 4.5) + 0.4 * density(toward(D, DOME_SUN, 0.08), 5.5);
+  float dUp = 0.6 * density(toward(D, ZEN, 0.035), 4.5) + 0.4 * density(toward(D, ZEN, 0.08), 5.5);
+  float dDown = 0.6 * density(toward(D, -ZEN, 0.035), 4.5) + 0.4 * density(toward(D, -ZEN, 0.08), 5.5);
+  // And the same, finer: the lobes inside the body, each bulge with its
+  // own lit face and its own shade under it.
+  float d1 = density(D, 3.0);
+  float fine = clamp((d1 - density(toward(D, DOME_SUN, 0.012), 3.0)) + (density(toward(D, -ZEN, 0.012), 3.0) - density(toward(D, ZEN, 0.012), 3.0)), -2.0, 2.0) / max(d1, 0.6);
+  float norm = max(d0, 0.6);
+  float sunEdge = clamp((d0 - dSun) / norm, -1.0, 1.0);
+  float topEdge = clamp((dDown - dUp) / norm, -1.0, 1.0);
+  // The photograph's own modelling, kept as detail inside that: a part
+  // brighter than the cloud round it was lit in the photograph too.
+  float model = clamp(log2(max(cl, 1e-3) / max(d0, 0.05)), -1.5, 1.5);
+  // And the volume as a whole: the side toward the sun (the dot of the ray
+  // with DOME_SUN) carries more light, and the cloud thickens toward its
+  // base, low in the dome, where the light that gets in is the sky's.
+  float facing = dot(D, DOME_SUN);
+  float low = 1.0 - smoothstep(0.05, 0.5, D.z);
+  float thick = smoothstep(1.5, 6.0, d0);
+  float light = 0.5 + 0.55 * sunEdge + 0.4 * topEdge + 0.6 * fine + 0.45 * model + 0.2 * facing - 0.14 * low * thick - 0.12 * thick;
+  // A soft shoulder into the crown; the belly keeps its slope, so the
+  // photograph's modelling still reads in the shade.
+  light = clamp(light, 0.0, 1.5);
+  light = light < 0.6 ? light : 0.6 + 0.4 * (1.0 - exp(-(light - 0.6) / 0.28));
+  // The crown warms toward the key when the sun is low; the belly takes the
+  // open sky's light. Graded in print values, then taken back to light.
+  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.95, 0.86) + vec3(0.016, 0.0, 0.0), 1.0 - uDay);
+  float dusk = mix(0.72, 1.0, uDay);
+  vec3 cloudP = tone(untone(min(mix(CLOUD_SHADE, crown, light), vec3(0.94))) * dusk);
+  // The clouds stand in front of the blue: where they are dense they hide
+  // it, where thin they veil it. The veil is laid in print values: in light,
+  // a crown's red, high up the shoulder, swamped the blue's green and turned
+  // every thin edge lilac.
+  vec3 skyL = untone(min(mix(tone(beta * blue * dusk), cloudP, mask), vec3(0.995)));
   // The sun: the dome's own was taken out with its haze offline, so it is
   // drawn here where the key light stands, a half-degree disc and a tight
   // glow, warm, peaking under paper white. It sits in the sky layer, so the
