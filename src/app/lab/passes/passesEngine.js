@@ -10,6 +10,10 @@ import { createStage, clamp } from "../_kit/stage";
 // whole sky: R with the holes in the tower's lattice added, keyed and unmixed
 // at the source's full 4000 px (tools/depth/bakes/passes-gaps.py), and the
 // albedo there holds the steel alone, the plate's haze taken out of it.
+// That key only believed a gap beside clean sky, so the white mid-section,
+// where every gap is a mix of haze and cream paint, kept its haze; a finer
+// key of the tower's box (tools/depth/bakes/passes/lattice.py) is taken over
+// it by max, with the steel in its gaps unmixed from the haze the same way.
 //
 // The drag is the sun: across is its azimuth around the camera (straight
 // ahead, behind the tower, in the middle; behind your shoulder at either
@@ -38,7 +42,7 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uSky, uSkyBlue;
+uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uLattice, uSteel, uSky, uSkyBlue;
 uniform vec2 uRes;        // canvas px
 uniform vec4 uMap;        // image uv = frag * uMap.xy + uMap.zw (cover fit)
 uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y up, z to the viewer)
@@ -50,6 +54,9 @@ out vec4 o;
 
 const vec2 TEX = vec2(2048.0, 1536.0);
 const float ASPECT = 2048.0 / 1536.0;
+// The lattice key's box in the plate, px: x, y, width, height
+// (tools/depth/bakes/passes/lattice.py, BOX).
+const vec4 LATTICE = vec4(752.0, 448.0, 512.0, 1088.0);
 // The plate's lens, 2 tan(fov_x / 2): 55 degrees across. Its verticals meet
 // 0.9 frame heights above the centre; with the camera pitched 55 degrees up
 // (PITCH) that is where the zenith stands for this lens, so sky rays through
@@ -82,6 +89,18 @@ void main(){
   vec3 mt = texture(uMatte, uv).rgb;
   float sky = clamp((mt.b - 0.02) / 0.98, 0.0, 1.0);
   float tower = mt.g;
+  // And the plate's haze between the girders, keyed fine at the source's
+  // full resolution, read inside the tower's box only: every gap shows the
+  // dome, not the haze brought up and lit as a milky fill.
+  vec2 lb = (uv * TEX - LATTICE.xy) / LATTICE.zw;
+  float inBox = step(0.0, lb.x) * step(lb.x, 1.0) * step(0.0, lb.y) * step(lb.y, 1.0);
+  lb = clamp(lb, 0.0, 1.0);
+  float gap = texture(uLattice, lb).r * inBox;
+  // Where that key is open and the first one was not, the steel comes from
+  // the same bake, with the haze's share taken out of each pixel: a gap a
+  // pixel wide stays a partial key, and the rest of it is paint, not haze.
+  float steelW = smoothstep(0.02, 0.15, gap) * (1.0 - smoothstep(0.0, 0.25, sky - gap));
+  sky = max(sky, gap);
 
   // The camera ray through this pixel, from the plate's lens.
   vec3 V = normalize(vec3((uv.x - 0.5) * LENS, -(uv.y - 0.5) * LENS / ASPECT, -1.0));
@@ -149,7 +168,8 @@ void main(){
   // On the walls a half-step softer mip: brought up from shade, the plate's
   // compression noise would otherwise come up with it. The lattice keeps the
   // full mip, its members are a pixel or two wide.
-  vec3 alb = toLin(texture(uAlbedo, uv, mix(0.6, 0.0, tower)).rgb);
+  float bias = mix(0.6, 0.0, tower);
+  vec3 alb = toLin(mix(texture(uAlbedo, uv, bias).rgb, texture(uSteel, lb, bias).rgb, steelW));
   alb = mix(vec3(luma(alb)), alb, mix(0.18, 1.0, tower)) * mix(vec3(1.0, 0.97, 0.93), vec3(1.0), tower);
   // The walls clip at a pale concrete. The tower's paint rolls off into it
   // instead: brought up four times, its white members and the half-lit steel
@@ -364,8 +384,8 @@ function domeFor(az) {
 }
 
 export async function createPasses(host) {
-  const [albedo, depth, normal, matte, skyCloud, skyBlue] = await Promise.all(
-    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "sky-cloud.avif", "sky-blue.avif"].map(
+  const [albedo, depth, normal, matte, lattice, steel, skyCloud, skyBlue] = await Promise.all(
+    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "lattice.png", "lattice-steel.webp", "sky-cloud.avif", "sky-blue.avif"].map(
       (f) => loadImage(SRC + f),
     ),
   );
@@ -432,6 +452,8 @@ export async function createPasses(host) {
   tex(normal, 2, "uNormal", true);
   tex(albedo, 3, "uAlbedo", true);
   tex(matte, 4, "uMatte", true);
+  tex(lattice, 5, "uLattice", true);
+  tex(steel, 7, "uSteel", true);
 
   // The sky dome's two layers: azimuth repeats, and anisotropic filtering
   // where the GPU has it, since the equirect stretches across toward the
