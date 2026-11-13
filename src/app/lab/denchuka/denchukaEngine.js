@@ -37,7 +37,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // matte plus every hole the plates fill with sky, times whatever still stands
 // in front), to a summer cobalt that deepens with elevation (sky.png G: how far
 // up the sky each pixel looks, from the camera), with skylight-blue shade and
-// warm sunlit tops on the cloud; the film then adds only its optics.
+// warm sunlit tops on the cloud; the film then adds only its optics: a thin
+// diffusion and a warm halation ring keyed on luminance (GLOW), so the crowns
+// and the sunlit shaft bleed into the cobalt beside them, then its curve.
 //
 // Behind the pole, rising from the lower right behind the shaft, stands a
 // real towering cumulus (cloud.py: Poly Haven's Skidpan HDRI, CC0, placed
@@ -71,6 +73,9 @@ const WIRE_W = 2.6;
 const WIRE_STREAK = (2.5 * WIRE_W).toFixed(2);
 // the streak is sampled half a pixel apart
 const STREAK_SAMPLES = 14;
+// the emulsion's light (GLOW): how much of the highlights' light spreads, and
+// how much comes back warm off the base as a ring
+const OPTIC = { diffusion: 0.2, halation: 0.75, halationColor: [1, 0.6, 0.3] };
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -162,18 +167,34 @@ vec3 skyGrade(vec3 c, float zen) {
 }
 // The towering cumulus (cloud.py: a photographed tower, unclipped, placed
 // under this camera) graded into the same light, so it glows: its sunlit
-// crowns warm-neutral and lifted to just under white (the film's shoulder
-// lands them at ~0.97, never clipped); its body, in its own shade, lit only by
+// crowns lit by the sun's own warm neutral and lifted to just under white
+// (the film's shoulder lands them at ~250-252, never clipped); its body, in its own shade, lit only by
 // the sky, takes the skylight's blue (~205, s ~0.35, ~0.6 of the crowns'
 // value), a little deeper and bluer the higher up the sky it is (the cobalt
 // ramp, zen). Value comes from the bake, so the billows carry through.
+vec3 toLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+// The sun on the crowns: the same sun as the concrete, so their lit faces are
+// its colour (#fff6ea, a warm neutral) at ~0.95 linear, reached through a soft
+// shoulder from the bake's own value, so every billow keeps its drawing and
+// none of it clips; the film's shoulder then lands them at ~250-252.
+const vec3 SUN = vec3(1.0, 0.922, 0.823);
 vec3 cloudGrade(vec3 c, float zen) {
   float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float top = smoothstep(0.78, 0.97, v);
+  float top = smoothstep(0.75, 0.96, v);
   float shade = 1.0 - smoothstep(0.5, 0.86, v);
   float val = min(v * mix(1.03, mix(1.1, 1.05, zen), shade), 1.0);
   vec3 shadeC = hsv2rgb(vec3((205.0 + 4.0 * zen) / 360.0, mix(0.07, mix(0.33, 0.38, zen), shade), val));
-  vec3 sunC = hsv2rgb(vec3(40.0 / 360.0, 0.055, min(v * 1.035, 1.0)));
+  // linear light through a shoulder that runs out at 0.95: lifts the crowns,
+  // leaves the lit flanks below them their gradation
+  float vl = toLin(vec3(v)).x * 1.04;
+  float lit = vl < 0.84 ? vl : 0.84 + 0.11 * (1.0 - exp(-(vl - 0.84) / 0.11));
+  vec3 sunC = toSrgb(SUN * lit);
   return mix(shadeC, sunC, top);
 }
 // A wire's matte at a plate point, filtered bilinearly over its own texels
@@ -352,6 +373,104 @@ void main() {
   }
 
   outColor = vec4(col, 1.0);
+}`;
+
+// The film's own light, before its curve: what the emulsion does with the
+// brightest things in the frame. Keyed on luminance, so only the sunlit crowns
+// and the lit face of the shaft take part. Their light is spread a short way
+// (diffusion: a thin veil of their own colour over their edges) and, through
+// the base, comes back warm (halation: the sun's colour with the blue taken
+// out, a thin ring outside every bright edge, never on the highlight itself).
+// Both bleed into the cobalt beside them, the way the cloud and the concrete
+// would on the negative, so the two read as lit by one sun.
+const LIN = `
+vec3 toLin(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+float hiKey(vec3 l) {
+  return smoothstep(0.42, 0.9, dot(l, vec3(0.2126, 0.7152, 0.0722)));
+}`;
+
+// full res -> half res: the highlights' light (rgb) and their key (a)
+const GLOW_KEY = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+${LIN}
+void main() {
+  vec4 acc = vec4(0.0);
+  for (int k = 0; k < 4; k++) {
+    vec2 o = (vec2(k & 1, k >> 1) - 0.5) * uTexel;
+    vec3 l = toLin(texture(uTex, vUv + o).rgb);
+    float h = hiKey(l);
+    acc += vec4(l * h, h);
+  }
+  outColor = acc * 0.25;
+}`;
+
+// separable gaussian at half res, sigma ~4 texels (~8 device px), 9 taps
+// paired into bilinear fetches
+const GLOW_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uTex;
+uniform vec2 uStep;
+void main() {
+  vec4 c = texture(uTex, vUv) * 0.1370;
+  c += (texture(uTex, vUv + uStep * 1.4612) + texture(uTex, vUv - uStep * 1.4612)) * 0.2399;
+  c += (texture(uTex, vUv + uStep * 3.4078) + texture(uTex, vUv - uStep * 3.4078)) * 0.1437;
+  c += (texture(uTex, vUv + uStep * 5.3561) + texture(uTex, vUv - uStep * 5.3561)) * 0.0532;
+  c += (texture(uTex, vUv + uStep * 7.3077) + texture(uTex, vUv - uStep * 7.3077)) * 0.0121;
+  c += (texture(uTex, vUv + uStep * 9.2625) + texture(uTex, vUv - uStep * 9.2625)) * 0.0017;
+  outColor = c / 0.9322;
+}`;
+
+const GLOW = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uTex;
+uniform sampler2D uGlow;
+uniform vec2 uTexel;
+uniform float uDiff;
+uniform float uHal;
+uniform vec3 uHalC;
+${LIN}
+vec3 toSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+float lumAt(vec2 uv) {
+  return dot(toLin(texture(uTex, uv).rgb), vec3(0.2126, 0.7152, 0.0722));
+}
+void main() {
+  vec3 l = toLin(texture(uTex, vUv).rgb);
+  vec4 g = texture(uGlow, vUv);
+  float self = hiKey(l);
+  float y = dot(l, vec3(0.2126, 0.7152, 0.0722));
+  // a hairline (a wire across the cloud) is darker than both its sides; an
+  // edge only than one. A hairline keeps its darkness: the emulsion under it
+  // got no light of its own to scatter back, so it takes no ring.
+  float hair = 0.0;
+  for (int k = 0; k < 4; k++) {
+    float a = float(k) * 0.7853982;
+    vec2 o = vec2(cos(a), sin(a)) * 3.0 * uTexel;
+    hair = max(hair, min(lumAt(vUv + o), lumAt(vUv - o)) - y);
+  }
+  float keep = 1.0 - smoothstep(0.04, 0.25, hair);
+  // diffusion: the highlights' own light, spread; it lands off them, so the
+  // billows inside a crown keep their shadows
+  l += g.rgb * uDiff * (1.0 - self) * mix(1.0, keep, 0.6);
+  // halation: the ring outside the bright edge, in the sun's warm colour, on
+  // what is darker than the cloud's shade (the cobalt, the hardware), never
+  // filling the cloud's own folds
+  float ring = max(g.a - self, 0.0) * (1.0 - smoothstep(0.2, 0.5, y)) * keep;
+  l += uHalC * ring * uHal;
+  outColor = vec4(toSrgb(l), 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -619,11 +738,17 @@ export async function createDenchuka(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  const P = { comp: program(gl, VERT, COMP), blit: program(gl, VERT, BLIT) };
+  const P = {
+    comp: program(gl, VERT, COMP),
+    blit: program(gl, VERT, BLIT),
+    key: program(gl, VERT, GLOW_KEY),
+    blur: program(gl, VERT, GLOW_BLUR),
+    glow: program(gl, VERT, GLOW),
+  };
   const film = createFilm(gl, { width: 2, height: 2 });
 
   const L = { x: 0, y: 0, w: 1, h: 1 };
-  const T = { scene: null, film: null };
+  const T = { scene: null, film: null, optic: null, g0: null, g1: null };
   let dirty = true;
   const layout = (W, H, dpr) => {
     const ar = PW / PH;
@@ -645,6 +770,9 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     Object.values(T).forEach((t) => freeTarget(gl, t));
     T.scene = target(gl, L.pw, L.ph);
     T.film = target(gl, L.pw, L.ph);
+    T.optic = target(gl, L.pw, L.ph);
+    T.g0 = target(gl, Math.max(2, Math.ceil(L.pw / 2)), Math.max(2, Math.ceil(L.ph / 2)));
+    T.g1 = target(gl, T.g0.w, T.g0.h);
     film.resize(L.pw, L.ph);
     dirty = true;
   };
@@ -812,8 +940,35 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     if (!raw) {
+      // the emulsion's light: highlight key, a short blur, diffusion + halation
+      const pass = (prog, out) => {
+        gl.useProgram(prog.p);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
+        gl.viewport(0, 0, out.w, out.h);
+      };
+      pass(P.key, T.g0);
+      bindTex(0, T.scene.tex, P.key.u.uTex);
+      gl.uniform2f(P.key.u.uTexel, 1 / T.scene.w, 1 / T.scene.h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      pass(P.blur, T.g1);
+      bindTex(0, T.g0.tex, P.blur.u.uTex);
+      gl.uniform2f(P.blur.u.uStep, 1 / T.g0.w, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      pass(P.blur, T.g0);
+      bindTex(0, T.g1.tex, P.blur.u.uTex);
+      gl.uniform2f(P.blur.u.uStep, 0, 1 / T.g0.h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      pass(P.glow, T.optic);
+      bindTex(0, T.scene.tex, P.glow.u.uTex);
+      bindTex(1, T.g0.tex, P.glow.u.uGlow);
+      gl.uniform2f(P.glow.u.uTexel, 1 / T.scene.w, 1 / T.scene.h);
+      gl.uniform1f(P.glow.u.uDiff, OPTIC.diffusion);
+      gl.uniform1f(P.glow.u.uHal, OPTIC.halation);
+      gl.uniform3fv(P.glow.u.uHalC, OPTIC.halationColor);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
       film.render(
-        T.scene.tex,
+        T.optic.tex,
         {
           ...FILM_PRESETS.summer,
           // The scan already carries its grade; the film adds the optics.
@@ -823,13 +978,21 @@ export async function createDenchuka(host, { embedded = false } = {}) {
           saturation: 1.1,
           blueDepth: 0.45,
           shadowTint: [0.97, 1, 1.03],
-          highlightTint: [0.99, 1, 1.01],
+          highlightTint: [1, 1, 1],
           vignette: 0.22,
-          // the sunlit cloud is brighter against a deeper blue now: keep the
-          // red fringe off its edge
-          halation: 0.22,
-          halationThreshold: 0.96,
-          whitePoint: 1.25,
+          // Diffusion keyed on luminance: only the light past the threshold
+          // (the sunlit crowns, the lit face of the shaft) leaves its pixel
+          // and veils, so the cobalt keeps its own drawing.
+          bloom: 0.14,
+          bloomThreshold: 0.6,
+          // Halation from the same highlights, warm rather than red: the sun's
+          // own colour come back through the red and green layers, a thin
+          // ring bleeding off the cloud's edge and the shaft into the blue.
+          halation: 0.3,
+          halationThreshold: 0.8,
+          halationColor: [1, 0.52, 0.24],
+          // the crowns (~0.95 linear in the scene) land at ~250-252
+          whitePoint: 1.0,
           grainSeed: seed,
         },
         T.film.fbo,
