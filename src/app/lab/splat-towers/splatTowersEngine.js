@@ -16,13 +16,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // plane, and that point, seen from the original camera, is where the colour
 // comes from. From the original camera every splat agrees, so the photograph
 // comes back exactly, at full resolution. Move the camera and the splats move
-// as the surfaces they are. That lookup is depth-tested: a depth map ships
-// with the photo, texel for texel, and a splat only takes the photo's colour
-// where the photo shows its own surface. Where the photo shows something
-// further off (the splat hanging past its tower's edge into sky) it lets the
-// fragment go; where something nearer stood in front (a tower that has since
-// moved aside) it shows its own colour. The bake never lets one splat bridge a
-// depth step, so no colour is smeared across a silhouette. The bake outpaints
+// as the surfaces they are. A tower's lookup is depth-tested: a depth map
+// ships with the photo, texel for texel, and a tower splat only takes the
+// photo's colour where the photo shows its own surface. Where the photo shows
+// something further off (the splat hanging past its tower's edge into sky) it
+// lets the fragment go; where something nearer stood in front (a tower that
+// has since moved aside) it shows its own colour. The bake never lets one
+// splat bridge a depth step, so no colour is smeared across a silhouette. The
+// dome is not depth-tested: it takes the photo where the photo shows sky and
+// a sky plate (plate.webp, the sky the bake painted in behind every tower)
+// everywhere else, so a tower that swings aside uncovers cloud and blue, never
+// a hole or a flat patch. The bake outpaints
 // the texture and the splats ~12% past the frame, so the lookup runs right to
 // the edge of the view at any pose of the orbit. The edges go soft the way a
 // lens does: one round blur over the finished frame, growing with the square
@@ -33,7 +37,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 const ASSET = "/lab/splat-towers/";
 const DATA_W = 2048; // texels per row of the splat texture (2 per splat)
-// depth.png: 0..254 is log Z from DEPTH_LO to DEPTH_HI metres, 255 is sky (bake.py)
+// depth.png: 0..253 is log Z from DEPTH_LO to DEPTH_HI metres, 255 is sky, 254
+// is sky in the ring round a tower where the photo carries the lens's halo and
+// the dome takes the sky plate instead (bake.py)
 const DEPTH_LO = 20;
 const DEPTH_HI = 400;
 // How far (in log depth) a photo texel may sit off a splat's own plane and
@@ -43,9 +49,11 @@ const DEPTH_TOL = [0.035, 0.07];
 
 // Orbit range before the rubber band. The bake puts every step between two
 // structures (and between a tower and the sky) on the photograph's own edge,
-// one pixel wide, so the towers can part from each other and from the dome a
-// full ten degrees without tearing.
-const MAX_DEG = 10;
+// one pixel wide, and paints the sky in behind every tower, so the towers part
+// from each other and from the dome without tearing. Held at six degrees:
+// past that the near towers uncover sky deep behind them, where the painted
+// plate is furthest from any real cloud (?yaw=&pitch= stills go further).
+const MAX_DEG = 6;
 // the swing over which the lens softens the edges (it stops softening there)
 const SOFT_DEG = 5;
 const PIVOT = 70; // metres up the optical axis: the camera swings round this point
@@ -181,7 +189,8 @@ flat in float vTex;
 flat in vec4 vPlane;
 flat in float vTower;
 uniform sampler2D uPhoto;
-uniform sampler2D uDepth; // R8, nearest: log Z per photo texel, 1.0 = sky
+uniform sampler2D uPlate; // the sky with no towers in it, same canvas (bake.py)
+uniform sampler2D uDepth; // R8, nearest: log Z per photo texel, 254 and 255 = sky
 uniform vec2 uDr;       // log(DEPTH_LO), log(DEPTH_HI / DEPTH_LO) / 254
 uniform vec2 uTol;
 uniform mat3 uRotT;     // view -> world
@@ -195,18 +204,22 @@ uniform vec2 uRes;
 uniform float uHeadroom;
 out vec4 outColor;
 
-// One photo texel against this fragment's own surface, at log depth lp.
+// One photo texel against a tower fragment's own surface, at log depth lp.
 // x: the texel is this surface (take the photo); y: something nearer stood in
 // front of it in the photo (take the splat's own colour). Neither: the texel
 // is further off, beyond this surface's edge, and the fragment lets go.
 vec2 tapClass(ivec2 ij, ivec2 size, float lp) {
   if (any(lessThan(ij, ivec2(0))) || any(greaterThanEqual(ij, size))) return vec2(0.0, 1.0);
   float d = texelFetch(uDepth, ij, 0).r * 255.0;
-  if (d > 254.5) return vTower > 0.5 ? vec2(0.0) : vec2(1.0, 0.0);
-  if (vTower < 0.5) return vec2(0.0, 1.0);
+  if (d > 253.5) return vec2(0.0); // sky, beyond this tower's edge
   float dz = uDr.x + d * uDr.y - lp;
   float same = 1.0 - smoothstep(uTol.x, uTol.y, abs(dz));
   return vec2(same, dz < 0.0 ? 1.0 - same : 0.0);
+}
+
+float isSky(ivec2 ij, ivec2 size) {
+  if (any(lessThan(ij, ivec2(0))) || any(greaterThanEqual(ij, size))) return 0.0;
+  return texelFetch(uDepth, ij, 0).r * 255.0 > 254.5 ? 1.0 : 0.0;
 }
 
 void main() {
@@ -228,7 +241,31 @@ void main() {
     vec2 uv = (uF * P.xy / max(P.z, 1e-3) + uC + uPad) / (uSrc + 2.0 * uPad);
     float keep = 0.0;
     vec3 look = vec3(0.0);
-    if (t > 0.0 && P.z > 0.1) {
+    if (vTower < 0.5 && t > 0.0 && P.z > 0.1) {
+      // The dome never lets go and is never depth tested: where the photo
+      // shows sky it takes the photo, and wherever a tower stood in front it
+      // takes the sky plate, the sky the bake painted in behind the towers.
+      ivec2 size = textureSize(uDepth, 0);
+      vec2 tp = uv * vec2(size) - 0.5;
+      ivec2 i0 = ivec2(floor(tp));
+      vec2 f = tp - floor(tp);
+      vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+      vec4 sm = w * vec4(isSky(i0, size), isSky(i0 + ivec2(1, 0), size), isSky(i0 + ivec2(0, 1), size), isSky(i0 + ivec2(1, 1), size));
+      float sky = sm.x + sm.y + sm.z + sm.w;
+      vec3 pl = texture(uPlate, uv).rgb;
+      vec3 ph = pl;
+      if (sky > 0.999) {
+        ph = texture(uPhoto, uv).rgb;
+      } else if (sky > 0.0) {
+        ivec2 cl = size - 1;
+        ph = (sm.x * texelFetch(uPhoto, clamp(i0, ivec2(0), cl), 0).rgb
+            + sm.y * texelFetch(uPhoto, clamp(i0 + ivec2(1, 0), ivec2(0), cl), 0).rgb
+            + sm.z * texelFetch(uPhoto, clamp(i0 + ivec2(0, 1), ivec2(0), cl), 0).rgb
+            + sm.w * texelFetch(uPhoto, clamp(i0 + ivec2(1, 1), ivec2(0), cl), 0).rgb) / sky;
+      }
+      look = mix(pl, ph, sky);
+      keep = 1.0;
+    } else if (t > 0.0 && P.z > 0.1) {
       // Depth test the lookup on the four texels around it, unfiltered, and
       // weigh them bilinearly so the cut is antialiased, not texel-stepped.
       ivec2 size = textureSize(uDepth, 0);
@@ -535,13 +572,14 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
         return r.blob();
       })
       .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }));
-  const [buf, bitmap, depthBitmap] = await Promise.all([
+  const [buf, bitmap, depthBitmap, plateBitmap] = await Promise.all([
     fetch(`${ASSET}splats.bin`).then((r) => {
       if (!r.ok) throw new Error(`splats.bin ${r.status}`);
       return r.arrayBuffer();
     }),
     loadBitmap("photo.webp"),
     loadBitmap("depth.png"),
+    loadBitmap("plate.webp"),
   ]);
   const D = decode(buf);
 
@@ -567,6 +605,18 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+
+  // The sky plate: the dome's sky behind the towers, filtered like the photo.
+  const plate = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, plate);
+  gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(plateBitmap.width, plateBitmap.height))) + 1, gl.SRGB8_ALPHA8, plateBitmap.width, plateBitmap.height);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, plateBitmap);
+  plateBitmap.close?.();
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   // The depth map: read texel by texel, never filtered across a silhouette.
   const depthTex = gl.createTexture();
@@ -737,6 +787,9 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, depthTex);
     gl.uniform1i(u.uDepth, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, plate);
+    gl.uniform1i(u.uPlate, 3);
     gl.uniform2f(u.uDr, Math.log(DEPTH_LO), Math.log(DEPTH_HI / DEPTH_LO) / 254);
     gl.uniform2f(u.uTol, DEPTH_TOL[0], DEPTH_TOL[1]);
     // world -> view is R^T: R row major read as column major is exactly R^T.
@@ -854,7 +907,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     if (grab) {
       const [ix, iy] = toImage(V, p.x - grab.x, p.y - grab.y);
       // The rubber band acts on the swing's radius, so a diagonal drag stops
-      // at the same ten degrees as a straight one.
+      // at the same MAX_DEG as a straight one.
       const ty = grab.y0 + ix * DEG_PER_PX;
       const tp = grab.p0 - iy * DEG_PER_PX;
       const r = Math.hypot(ty, tp);
@@ -955,6 +1008,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
       gl.deleteTexture(dataTex);
       gl.deleteTexture(photo);
       gl.deleteTexture(depthTex);
+      gl.deleteTexture(plate);
       gl.deleteBuffer(corners);
       gl.deleteBuffer(order);
       gl.deleteVertexArray(vao);

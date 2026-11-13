@@ -8,8 +8,9 @@
 # every labelled structure is rebuilt as a plane or a corner of two (see "hard
 # layers"), so its edges stay straight and solid when the camera swings.
 # Writes outdir/splats.bin (quantised, structure of arrays), outdir/photo.webp
-# (the texture every splat samples through its own plane) and outdir/depth.png
-# (its depth, texel for texel, which the renderer tests every lookup against).
+# (the texture every splat samples through its own plane), outdir/depth.png
+# (its depth, texel for texel, which the renderer tests every tower lookup
+# against) and outdir/plate.webp (the sky alone, which the dome samples).
 #
 # The image is cut by a quadtree whose cells split where the picture or the
 # geometry asks for it: a silhouette (tower against sky), a depth step (one
@@ -26,9 +27,9 @@
 #     grazing angle it really has.
 # Cells of 16 and 8 px that split also keep a splat of their own, so the
 # renderer can stop one or two levels early (adaptive count).
-# A back layer of large untextured splats carries sky colour behind the
-# towers and past the frame, filled by push-pull from the visible sky, so
-# moving the camera never opens a hole. The frame is outpainted by ~12% on
+# A back layer of large splats carries the dome behind the towers and past
+# the frame, so moving the camera never opens a hole; every dome splat samples
+# plate.webp, a sky plate with the towers painted out (see "the sky plate"). The frame is outpainted by ~12% on
 # every side first (see "outpaint a margin"), so the texture, the depth map and
 # the splats all run past the photograph's edge.
 
@@ -365,13 +366,118 @@ def hard_layers(dep, labels):
     return out.astype(np.float32)
 
 
+# ---- shards and specks: structure past a depth step with nothing to hold it
+# A tower glimpsed between two nearer ones (a few bays of facade under the
+# lattice crown, a strip of glass behind the tip of a near tower) is a surface
+# of its own, a depth step behind everything round it. Once the camera swings,
+# the nearer structure that framed it slides off, the rest of its own tower
+# (which the photograph never saw) is not there, and it hangs alone in the sky:
+# a loose shard. The snap also leaves specks, a few px to a few hundred, cut
+# off from the body of their own surface along a ragged edge; they part from
+# it as debris. So no splat may sit past such a step on its own:
+#   - a shard (a surface, or a piece of one, under SHARD_MAX px, bordered
+#     mostly by nearer structure and hardly at all by farther) is taken onto
+#     the surface in front of it;
+#   - a speck (a piece under SPECK_MAX px, no run of it SPECK_RUN px long, so
+#     not a rail) is taken onto the surface it sits against, or, with no
+#     structure round it, given to the sky.
+# "Taken onto" is on that surface's own plane (fitted to its pixels within
+# ~300 px), so from the original camera nothing changes, and once the camera
+# moves the piece travels with the structure that frames it.
+SHARD_MAX = 60000  # px: about 0.5% of the frame
+SPECK_MAX, SPECK_RUN = 400, 48  # px
+SHARD_RING = 15  # px of border tested round each piece
+
+
+def hang_shards(dep, labels):
+    H_, W_ = dep.shape
+    tow = dep >= SKY_T
+    lz = logz(dep)
+    lab_ = np.where(tow, labels.astype(np.int32), -1)
+    # every connected piece of every surface (a labelled layer, or a run of
+    # unlabelled structure) is tested on its own; the largest piece of a
+    # labelled layer is its body and keeps the layer's id
+    seg = np.full(dep.shape, -1, np.int32)
+    box = {}
+    nid = 1000
+    for k in np.unique(lab_):
+        if k < 0:
+            continue
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats((lab_ == k).astype(np.uint8), connectivity=8)
+        body = 1 + int(np.argmax(st_[1:, cv2.CC_STAT_AREA])) if (k > 0 and n_ > 1) else -1
+        ids_ = np.zeros(n_, np.int32)
+        for i in range(1, n_):
+            x, y, w, h, a = st_[i]
+            if i == body:
+                ids_[i] = k
+                box[int(k)] = (x, y, x + w, y + h, a, True)
+                continue
+            ids_[i] = nid
+            box[nid] = (x, y, x + w, y + h, a, False)
+            nid += 1
+        m_ = cc_ > 0
+        seg[m_] = ids_[cc_[m_]]
+        del cc_, m_
+    out = dep.copy()
+    kr = np.ones((SHARD_RING, SHARD_RING), np.uint8)
+    hung = specks = dropped = 0
+    for k, (x0, y0, x1, y1, a, isbody) in box.items():
+        speck = not isbody and a < SPECK_MAX and max(x1 - x0, y1 - y0) < SPECK_RUN
+        if not speck and (a < 200 or a > SHARD_MAX):
+            continue
+        P = 320
+        bx0, by0, bx1, by1 = max(x0 - P, 0), max(y0 - P, 0), min(x1 + P, W_), min(y1 + P, H_)
+        sg = seg[by0:by1, bx0:bx1]
+        m = sg == k
+        ring = (cv2.dilate(m.astype(np.uint8), kr) > 0) & ~m
+        me = float(np.median(lz[by0:by1, bx0:bx1][m]))
+        rl = lz[by0:by1, bx0:bx1][ring]
+        rs = sg[ring]
+        rt = rs >= 0
+        near = rt & (rl < me - DISC_T)
+        far = rt & (rl > me + DISC_T)
+        mys, mxs = np.nonzero(m)
+        if speck:
+            if rt.mean() < 0.3:
+                out[mys + by0, mxs + bx0] = SKY_T * 0.6
+                dropped += 1
+                continue
+            cand = rs[rt]
+        else:
+            if near.mean() < 0.45 or far.mean() > 0.15:
+                continue
+            cand = rs[near]
+        vals, cnt = np.unique(cand, return_counts=True)
+        host = vals[np.argmax(cnt)]
+        hm = sg == host
+        hy, hx = np.nonzero(hm)
+        if len(hy) < 50:
+            continue
+        sel = np.arange(0, len(hy), max(1, len(hy) // 40000))
+        X, Y = (hx[sel] + bx0) / 1000.0, (hy[sel] + by0) / 1000.0
+        p = plane_irls(X, Y, dep[by0:by1, bx0:bx1][hm][sel].astype(np.float64), np.ones(len(sel)))
+        v = p[0] * (mxs + bx0) / 1000.0 + p[1] * (mys + by0) / 1000.0 + p[2]
+        if not speck:
+            # the host's plane, carried over the shard, must stand in front of it
+            if np.median(logz(v.astype(np.float32))) > me - DISC_T * 0.5:
+                continue
+            print(f"shard: {int(a)} px at {int(mxs.mean()) + bx0},{int(mys.mean()) + by0}, z {np.exp(me):.0f} m,"
+                  f" near {near.mean():.2f} far {far.mean():.2f}: hung on the surface in front")
+            hung += 1
+        else:
+            specks += 1
+        out[mys + by0, mxs + bx0] = np.maximum(v, SKY_T + 0.01)
+    print("shards hung on the surface in front of them", hung, "; specks taken onto their surface", specks,
+          ", given to the sky", dropped)
+    return out.astype(np.float32)
+
+
 LAYERS = os.environ.get("LAYERS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "layers.png"))
 if os.path.exists(LAYERS):
     labels = np.array(Image.open(LAYERS))
     if labels.shape != dep.shape:
         labels = cv2.resize(labels, (W, H), interpolation=cv2.INTER_NEAREST)
     dep = hard_layers(dep, labels)
-    del labels
     lzs_ = logz(dep)
     k5_ = np.ones((5, 5), np.uint8)
     ln_, lf_ = cv2.erode(lzs_, k5_), cv2.dilate(lzs_, k5_)
@@ -380,6 +486,8 @@ if os.path.exists(LAYERS):
     mid_ = ((lf_ - ln_) > DISC_T) & (lzs_ - ln_ > DISC_T * 0.5) & (lf_ - lzs_ > DISC_T * 0.5) & (dep >= SKY_T)
     print("hard layers: tower px left between layers", int(mid_.sum()))
     del lzs_, ln_, lf_, mid_
+    dep = hang_shards(dep, labels)
+    del labels
 img8 = grade(img8, (dep < SKY_T).astype(np.uint8))
 lin = s2l(img8.astype(np.float32) / 255.0).astype(np.float32)
 
@@ -609,6 +717,93 @@ del low_r, wq, cq, low_e, dlow, dist, rw, skw
 # inside the frame the photograph stays byte for byte as graded
 img8 = np.where(frame[..., None], pad(img8), np.clip(np.round(l2s(lin) * 255), 0, 255)).astype(np.uint8)
 print("outpainted margin", PX, PY, "->", W, H)
+
+
+# ---- the sky plate: the sky with no towers in it
+# Once the camera swings, the dome shows sky the photograph never saw: the sky
+# behind every tower. Sampling the photo there gave the dome nothing but its
+# splats' own flat colours, which read as pale slabs with hard rectangular
+# edges where one splat's colour met the next. So the bake paints that sky in.
+# Every tower pixel (and a ring of 4 px round it, where the iPhone's sharpening
+# leaves a halo) is a hole, filled by LaMa (tools/depth/fill.py) on the whole
+# canvas at a quarter of its size: one coarse pass for the layout, then tiles
+# peeled from the sky's edge inward, so the cumulus and the blue carry on
+# behind each tower from the sky beside it; deeper in, where LaMa has no sky in
+# reach, the plate hands over to clear deep blue. The plate ships at half the
+# canvas's size, with the visible sky taken from the photograph itself and the
+# photograph's own grain put back into the painted sky. The dome samples it
+# with no depth test, so wherever a tower moves off, sky and cloud are there.
+# PLATE_CACHE=file.npy keeps the quarter-size fill between bakes (it takes
+# 10-30 minutes on a loaded box); it is checked against the hole it was made for.
+PLATE_DIV = 2  # canvas px per plate texel
+PLATE_D0, PLATE_R0 = 100.0, 120.0  # canvas px: the LaMa fill is kept to D0 in, then fades over R0
+PLATE_RB = 500.0  # canvas px: the blue beside the towers settles to one deep blue over this
+
+
+# the ring the plate paints over round each tower (towD is 3 px wider than the
+# sky mask; this is 4 px more): the sharpening halo the iPhone drew on the sky
+# beside every edge. The depth map marks it, so the dome takes the plate there
+# and leaves no bright outline of a tower on the sky once the tower moves.
+halo = (cv2.dilate(towD.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0) & ~towD
+
+
+def sky_plate():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    import fill  # tools/depth/fill.py
+
+    hole = halo | towD
+    q = 4
+    Wq, Hq = W // q, H // q
+    hq = cv2.resize(hole.astype(np.float32), (Wq, Hq), interpolation=cv2.INTER_AREA) > 0.01
+    imq = cv2.resize(img8, (Wq, Hq), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
+    cache = os.environ.get("PLATE_CACHE", "")
+    fq = None
+    if cache and os.path.exists(cache):
+        z = np.load(cache)
+        # (LaMa feathers its paste ~6 px into the known sky, so compare clear of that)
+        far_ = cv2.erode((~hq).astype(np.uint8), np.ones((17, 17), np.uint8)) > 0
+        if z.shape == imq.shape and np.abs(z[far_] - imq[far_]).max() < 0.02:
+            fq = z.astype(np.float32)
+            print("sky plate: fill from", cache)
+    if fq is None:
+        lama = fill.Lama(threads=2)
+        fq = fill.lama_fill(imq, hq, lama, tile=640, step=160, log=print)
+        print(f"sky plate: {lama.calls} LaMa calls, {lama.secs:.0f} s")
+        if cache:
+            np.save(cache, fq.astype(np.float16))
+    Wp_, Hp_ = W // PLATE_DIV, H // PLATE_DIV
+    hp = cv2.resize(hole.astype(np.float32), (Wp_, Hp_), interpolation=cv2.INTER_AREA) > 0.01
+    ip = s2l(cv2.resize(img8, (Wp_, Hp_), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0).astype(np.float32)
+    up = s2l(np.clip(cv2.resize(fq, (Wp_, Hp_), interpolation=cv2.INTER_CUBIC), 0, 1)).astype(np.float32)
+    # LaMa carries the cloud a few hundred px in from the sky's edge and does
+    # it well; further in, with no sky within reach, it only smears the
+    # cloud's colour into a pale milky haze. So the fill is kept near the edge
+    # and handed over, from PLATE_D0 px in, to clear blue sky: the visible
+    # blue (the bluest 45% of the sky, push-pulled, its clouds left out) near
+    # the towers, settling ~PLATE_RB px in to one deep blue, the darker half of
+    # that blue, so the far sky never drifts pale, dark or grey.
+    src = cv2.erode((~hp).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    bl = (ip[..., 2] - ip[..., 0]) / np.maximum(ip[..., 2], 1e-4)
+    blue = src & (bl > np.percentile(bl[src], 55))
+    Yb = ip[blue] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    deep = ip[blue][Yb <= np.percentile(Yb, 40)].mean(0)
+    near = cv2.GaussianBlur(pushfill(ip, blue.astype(np.float32)), (0, 0), 40)
+    d = cv2.distanceTransform(hp.astype(np.uint8), cv2.DIST_L2, 5) * PLATE_DIV  # canvas px into the hole
+    g = np.exp(-d / PLATE_RB)[..., None]
+    base = near * g + deep * (1 - g)
+    keep = np.exp(-np.maximum(d - PLATE_D0, 0) / PLATE_R0)[..., None]
+    paint = base + (up - base) * keep
+    # the fill keeps the sky's own colour field across its edge: blend it in
+    # over a texel and a half, never over the visible sky's first texel and
+    # never letting the halo back in
+    a = np.clip(d / (1.5 * PLATE_DIV), 0, 1)[..., None]
+    plate = l2s(ip * (1 - a) + paint * a)
+    plate = fill.match_grain(plate.astype(np.float32), l2s(ip).astype(np.float32), hp & (d > 3 * PLATE_DIV))
+    print("sky plate", (Wp_, Hp_), "hidden", round(float(hp.mean()), 3), "deep blue", np.round(l2s(deep) * 255))
+    return np.clip(np.round(plate * 255), 0, 255).astype(np.uint8)
+
+
+plate8 = sky_plate()
 
 # ---- analysis at half resolution
 A = 2
@@ -931,33 +1126,6 @@ for D, name in ((L, "leaves"), (I, "stand-ins")):
 # ---- back layer: sky behind the towers and past the frame
 M = int(round(0.14 * max(W0, H0)))  # past the outpainted canvas
 G = 28
-Wp, Hp = W + 2 * M, H + 2 * M
-lw = 4  # fill at 1/4, so the colour behind a tower is the sky right beside it
-fw, fh = Wp // lw, Hp // lw
-skyc = np.zeros((Hp, Wp, 3), np.float32)
-skyw = np.zeros((Hp, Wp), np.float32)
-pure = cv2.erode(sky, k5, iterations=3)
-skyc[M:M + H, M:M + W] = lin * pure[..., None]
-skyw[M:M + H, M:M + W] = pure
-cs = cv2.resize(skyc, (fw, fh), interpolation=cv2.INTER_AREA)
-ws = cv2.resize(skyw, (fw, fh), interpolation=cv2.INTER_AREA)
-
-
-def pushpull(c, w):
-    if min(c.shape[:2]) <= 2:
-        m = (c * w[..., None]).sum((0, 1)) / max(w.sum(), 1e-6)
-        return np.broadcast_to(m, c.shape).copy()
-    h2, w2 = (c.shape[0] + 1) // 2, (c.shape[1] + 1) // 2
-    cw = cv2.resize(c * w[..., None], (w2, h2), interpolation=cv2.INTER_AREA)
-    ww = cv2.resize(w, (w2, h2), interpolation=cv2.INTER_AREA)
-    coarse = pushpull(cw / np.maximum(ww, 1e-6)[..., None], np.minimum(ww * 2, 1))
-    up = cv2.resize(coarse, (c.shape[1], c.shape[0]), interpolation=cv2.INTER_LINEAR)
-    a = np.clip(w, 0, 1)[..., None]
-    return c * a + up * (1 - a)
-
-
-fill = pushpull(cs / np.maximum(ws, 1e-6)[..., None], ws)
-fill = cv2.GaussianBlur(fill, (0, 0), 1.5)
 bx, by = np.meshgrid(np.arange(-M, W + M, G) + G / 2, np.arange(-M, H + M, G) + G / 2)
 bx, by = bx.ravel(), by.ravel()
 inside = (bx >= 0) & (bx < W) & (by >= 0) & (by < H)
@@ -966,12 +1134,15 @@ iy = np.clip(by.astype(int), 0, H - 1)
 skyhere = cv2.blur(sky.astype(np.float32), (G, G))[iy, ix]
 need = ~inside | (skyhere < 0.98)
 bx, by = bx[need], by[need]
-bcol = fill[np.clip(((by + M) / lw).astype(int), 0, fh - 1), np.clip(((bx + M) / lw).astype(int), 0, fw - 1)]
+# their colour (seen only while the picture first comes up) is the sky plate's;
+# once up, they sample the plate like every other dome splat
+bcol = s2l(plate8[np.clip((by / PLATE_DIV).astype(int), 0, plate8.shape[0] - 1),
+                  np.clip((bx / PLATE_DIV).astype(int), 0, plate8.shape[1] - 1)].astype(np.float32) / 255.0)
 br = np.stack([(bx - CX) / F, (by - CY) / F, np.ones_like(bx)], -1)
 brn = br / np.linalg.norm(br, axis=-1, keepdims=True)
 B = dict(u=bx, v=by, Z=R_DOME * 1.02 / np.linalg.norm(br, axis=-1), n=-brn,
          s1=np.full(bx.shape, 0.6 * G), s2=np.full(bx.shape, 0.6 * G), ang=np.zeros_like(bx), col=bcol,
-         tex=np.zeros(bx.shape, bool), leaf=np.ones(bx.shape, bool), level=np.zeros(bx.shape, int), tower=np.zeros(bx.shape, bool))
+         tex=np.ones(bx.shape, bool), leaf=np.ones(bx.shape, bool), level=np.zeros(bx.shape, int), tower=np.zeros(bx.shape, bool))
 print("back layer", len(bx))
 
 ALL = {k: np.concatenate([B[k], L[k], I[k]]) for k in L}
@@ -1013,12 +1184,16 @@ TW, th = round(W * TW0 / W0), round(H * TW0 / W0)
 tex = cv2.resize(img8, (TW, th), interpolation=cv2.INTER_AREA)
 Image.fromarray(tex, "RGB").save(f"{out}/photo.webp", quality=86, method=6)
 print("photo.webp", os.path.getsize(f"{out}/photo.webp"), (TW, th))
+# the sky plate, over the same canvas at half its size (see "the sky plate")
+Image.fromarray(plate8, "RGB").save(f"{out}/plate.webp", quality=84, method=6)
+print("plate.webp", os.path.getsize(f"{out}/plate.webp"), plate8.shape[1::-1])
 
 # ---- the depth map, texel for texel with the photo: how far away each pixel
 # was, from the same smoothed, step-respecting disparity the splats were fitted
 # to. The renderer reads it unfiltered and lets a splat take the photo's colour
-# only where the photo shows its own surface. 0..254 is log Z from DEPTH_LO to
-# DEPTH_HI metres (~1.2% a step); 255 is sky.
+# only where the photo shows its own surface. 0..253 is log Z from DEPTH_LO to
+# DEPTH_HI metres (~1.2% a step); 255 is sky; 254 is sky in the halo ring round
+# a tower (see "the sky plate"), where the dome takes the plate, not the photo.
 DEPTH_LO, DEPTH_HI = 20.0, 400.0
 # The depth map widens every tower by 3 px over the sky mask (towD above,
 # taking the nearest tower pixel's depth), so a tower's edge pixels go with it.
@@ -1026,8 +1201,8 @@ _, nt = cv2.distanceTransformWithLabels(sky.astype(np.uint8), cv2.DIST_L2, 5, la
 dtow = np.where(tower, dep, dep[tower][np.maximum(nt, 1) - 1])
 del nt
 zt = 1 / (ALPHA * np.clip(dtow, SKY_T + 0.01, 1) + BETA)
-qd = np.clip(np.round(np.log(np.clip(zt, DEPTH_LO, DEPTH_HI) / DEPTH_LO) / np.log(DEPTH_HI / DEPTH_LO) * 254), 0, 254)
-qd = np.where(towD, qd, 255).astype(np.uint8)
+qd = np.clip(np.round(np.log(np.clip(zt, DEPTH_LO, DEPTH_HI) / DEPTH_LO) / np.log(DEPTH_HI / DEPTH_LO) * 254), 0, 253)
+qd = np.where(towD, qd, np.where(halo, 254, 255)).astype(np.uint8)
 del dtow, zt
 qd = cv2.resize(qd, (TW, th), interpolation=cv2.INTER_NEAREST)
 Image.fromarray(qd, "L").save(f"{out}/depth.png", optimize=True)
