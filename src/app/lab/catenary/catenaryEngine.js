@@ -77,7 +77,7 @@ const FILM = {
   input: "linear",
   // A plate that is already a soft film scan: less extra veil. The sunlit
   // cloud is developed up to just under white (about 0.96, nothing at 255);
-  // the print (PRINT_CURVE) then lays it down on ref 3's density, ~225.
+  // the print (PRINT_CURVE) then lays it down luminous, cores ~240-246.
   bloom: 0.2,
   softness: 0.4,
   halation: 0.32,
@@ -109,7 +109,7 @@ const FILM = {
 //    steepened every edge into a hard rim). An S-curve over the cloud's own
 //    range, driven by the blurred plate: the lit masses take CLOUD_LIFT of
 //    the headroom left and draw toward warm-neutral paper (CLOUD_TOP,
-//    #f2eee6), bending toward white and never reaching it; the shade masses
+//    #f6f3ec), bending toward white and never reaching it; the shade masses
 //    sink toward the blue of skylight (CLOUD_SHADE, #9db6cf). Each mass is
 //    also read for which side faces the sun (SUN): its sun-facing flank is
 //    lit and warmed with the cores, its far side and base sink to skylight,
@@ -124,11 +124,13 @@ const STRUCT = 0.88;
 const STRUCT_GAIN = 0.45;
 const STRUCT_FLOOR = 0.006;
 const STRUCT_TINT = [1.06, 1, 0.9]; // linear, luminance-normalised
-const CLOUD_TOP = [0xf2, 0xee, 0xe6];
-// The print bleaches colour on its shoulder (saturation eases off toward
-// white), so the plate aims this much warmer (linear) to land on CLOUD_TOP.
-const CLOUD_AIM = [1.04, 1, 0.9];
-const CLOUD_LIFT = 0.56;
+const CLOUD_TOP = [0xf6, 0xf3, 0xec];
+// A touch warmer in the plate (linear) than the print's white: the film eases
+// saturation off on its shoulder. Kept small: the print owns the cores'
+// chroma (PRINT_WHITE), and a strong aim only made a cream patch beside the
+// pale-blue body of a small cloud.
+const CLOUD_AIM = [1.02, 1, 0.95];
+const CLOUD_LIFT = 0.64;
 // The cloud's modelling (see PLATE): where its range starts (blurred luma,
 // gamma), how far the S-curve goes (0 straight, 1 the doubled smoothstep),
 // and how far the shade masses draw toward CLOUD_SHADE, the blue-grey of a
@@ -156,6 +158,10 @@ const DIFFUSE_STEEL = 0.28;
 // toward the local sky lifted to skylight. RELIEF is the gain of the wide
 // unsharp mask that gives the cumulus back its lobes.
 const WARM_KEY = [0.8, 0.93];
+// Over the key the plate's chroma is clamped toward CLOUD_TOP this far, lit
+// or shaded: as shot, the cores carry the scan's green-grey and yellow
+// blotches, which the warm key and the print would push to olive.
+const CORE_NEUTRAL = 0.8;
 const EDGE_BLUE = 0.4;
 const RELIEF = 0.2;
 // Halation, the film's own optics rather than its grade: light that went
@@ -215,16 +221,17 @@ const VIB_V = 0.045;
 // densitometer reads a print), monotone cubic through PRINT_CURVE (film in,
 // print out, 0-255), pinned at PRINT_PIN (the cobalt's own luma, ~100) so
 // the sky keeps its mean and hue. Measured against herb ref 3:
-//  - Shoulder: the sunlit cloud tops land at about #dfe1de-#e3e4e0 (top 1%
-//    ~225), not hot cream near paper white. A long shoulder from just over
-//    the sky: the light sky stays near slope 1, the cloud bodies give, and
-//    the cores (film 205-242) take a slope a little over 1, so the lobes and
-//    grain the plate's veil had flattened into a cream plateau come back;
-//    only the last dozen levels roll hard, and nothing reaches 255. Above
-//    the pin each pixel is scaled by the curve's ratio (hue and saturation
-//    kept), and its colour eased toward the paper's neutral, PRINT_WB, from
-//    PRINT_NEUTRAL[0] to [1] of print luma: the warm-cream cores come out
-//    neutral-cool.
+//  - Shoulder: the sunlit cloud tops glow, landing at about 240-246 (top
+//    0.5% near #f6f3ec), lit white masses against the cobalt, never a grey
+//    wash. Near slope 1 from the pin up through the cloud bodies (so they
+//    stay bright, not compressed toward grey), a slope a little over 1
+//    through the cores (film 205-238) so the lobes the plate's veil had
+//    flattened come back, and only the last dozen levels roll off, to 250:
+//    nothing reaches 255. Above the pin each pixel is scaled by the curve's
+//    ratio (hue and saturation kept), then its chroma is clamped toward
+//    paper white, PRINT_WHITE (warm-neutral, R >= G > B), from
+//    PRINT_NEUTRAL[0] to [1] of print luma, PRINT_NEUTRAL[2] of the way. The
+//    warm bias itself comes in only over the last of the shoulder.
 //  - Toe: a scan's lifted black, not a crushed one. Below the pin the lift
 //    is added, tinted PRINT_TOE (slightly cyan, luma 1), so the darkest steel
 //    sits near rgb(40,48,56) and p5 near 60: the mast a soft silhouette, its
@@ -241,22 +248,23 @@ const PRINT_CURVE = [
   [70, 81],
   [85, 91],
   [100, 100],
-  [120, 119],
-  [150, 142],
-  [180, 162],
-  [205, 182],
-  [225, 204],
-  [242, 225],
-  [250, 230],
-  [255, 233],
+  [120, 120],
+  [150, 146],
+  [180, 172],
+  [205, 198],
+  [225, 222],
+  [238, 238],
+  [245, 244],
+  [250, 247],
+  [255, 250],
 ];
 const PRINT_PIN = 100;
 const PRINT_TOE = [0.94, 1, 1.06];
 const PRINT_TOE_SAT = [0.6, 0.8];
-// Warm cream (245,241,231 as the film leaves it) to the paper's neutral
-// (#dfe1de), luminance-normalised.
-const PRINT_WB = [0.98, 1.003, 1.028];
-const PRINT_NEUTRAL = [185, 222];
+// Paper white, display values (luma-normalised at load). ?neutral=,
+// ?neutralFrom=, ?neutralTo= override PRINT_NEUTRAL.
+const PRINT_WHITE = [246, 243, 236];
+const PRINT_NEUTRAL = [196, 236, 0.92];
 
 // Structure toward graphite: luminance kept, lifted out of the black, a
 // slight warm bias. Shared by the plate and the live wires.
@@ -301,7 +309,7 @@ uniform vec4 uStruct;  // amount, gain, floor, zenith
 uniform vec3 uStructTint;
 uniform vec3 uCloudTop; // linear
 uniform vec2 uGlow;     // cloud lift, diffusion
-uniform vec3 uSculpt;   // cloud range floor (gamma), S-curve amount, shade tint
+uniform vec4 uSculpt;   // cloud range floor (gamma), S-curve amount, shade tint, core neutral
 uniform vec3 uCloudShade; // linear
 uniform vec2 uSun;     // toward the sun, image px direction (unit)
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
@@ -352,10 +360,13 @@ void main() {
   // Zenith: straight top-down, so the sky is deepest at the top edge.
   float zt = 1.0 - f.y;
   h.z *= 1.0 - uStruct.w * sky * zt * zt;
-  // Vibrance floor: the whole open sky, not graduated.
+  // Vibrance floor: the whole open sky, not graduated. Never in a cloud's
+  // lit core (bright and nearly grey as shot): the floor there only fans the
+  // plate's faint chroma blotches into colour, olive once the warm key lands.
+  float vsky = sky * (1.0 - smoothstep(0.8, 0.9, hm.z) * (1.0 - smoothstep(0.12, 0.28, hm.y)));
   float dv = fract(uVib.z - h.x + 0.5) - 0.5;
-  h.x = fract(h.x + dv * 0.8 * sky);
-  h.y = mix(h.y, max(h.y, mix(h.y, uVib.y, uVib.x)), sky);
+  h.x = fract(h.x + dv * 0.8 * vsky);
+  h.y = mix(h.y, max(h.y, mix(h.y, uVib.y, uVib.x)), vsky);
   h.z *= 1.0 - uVib.w * sky * smoothstep(0.6, 0.8, h.z);
   c = pow(hsv2rgb(h), vec3(2.2));
 
@@ -443,7 +454,12 @@ void main() {
   // is cloud and cobalt mixed, and warm paper mixed into blue is khaki-grey.
   float yk = pow(clamp(dot(textureLod(uPlate, uv, 1.5).rgb, LUMA) * ratio, 0.0, 1.0), 1.0 / 2.2);
   float core = smoothstep(uEdge.x, uEdge.y, yk);
-  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), lit * core);
+  // Above the core's light the plate's own chroma is clamped toward the same
+  // warm-neutral, lit or not: the scan's colour blotches (green-grey,
+  // yellow) are noise there, and the warm key alone only half-covered them,
+  // a yellow patch in a blue-white core. Squared, so it holds off the fringe.
+  float hot = core * core * (1.0 - key.r) * uSculpt.w;
+  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), max(lit * core, hot));
   c = mix(c, uCloudShade * (yt / dot(uCloudShade, LUMA)), uSculpt.z * shade);
 
   // Below the key the edge goes blue, not grey. The local sky is read on a
@@ -692,8 +708,8 @@ out vec4 outColor;
 uniform sampler2D uFilm;
 uniform sampler2D uLut;
 uniform vec3 uToeTint;
-uniform vec3 uWb;
-uniform vec3 uPrint;   // pin, neutral from, to (0..1)
+uniform vec3 uWb;      // paper white, luma-normalised (display)
+uniform vec4 uPrint;   // pin, neutral from, to (0..1), neutral amount
 uniform vec2 uToeSat;  // the toe's lift eases out over this saturation
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 float paper(float y) {
@@ -713,7 +729,16 @@ void main() {
   float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-4);
   float lift = (t - y) * (1.0 - smoothstep(uToeSat.x, uToeSat.y, sat));
   c = y < uPrint.x ? c + lift * uToeTint : c * (t / max(y, 1e-4));
-  c *= mix(vec3(1.0), uWb, smoothstep(uPrint.y, uPrint.z, t));
+  // Paper white: over the shoulder the colour is drawn toward PRINT_WHITE
+  // at the pixel's own luma, so whatever chroma the plate carried into a
+  // core (an olive blotch where the warm key met a green-grey patch, a cool
+  // cast) lands warm-neutral, R >= G > B. Eased in with the print luma, so
+  // the shaded bodies keep their skylight blue and the cores alone go white.
+  // The white itself warms only over the last of the shoulder: a small
+  // cloud's lit streak (~230) goes clean white beside its pale-blue body,
+  // not cream, and only the tops of the big masses take the warm bias.
+  vec3 wt = mix(vec3(1.0), uWb, smoothstep(uPrint.z - 0.06, uPrint.z + 0.03, t));
+  c = mix(c, wt * dot(c, LUMA), uPrint.w * smoothstep(uPrint.y, uPrint.z, t));
   outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
@@ -833,7 +858,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     clamp(num("halWide", HAL_WIDE[1]), 0, 2),
   ];
   const halThr = clamp(num("halThr", HAL_THRESHOLD), 0.05, 4);
-  const sculpt = [clamp(num("cloudFrom", CLOUD_FROM), 0.3, 0.9), clamp(num("sculpt", SCULPT), 0, 1), clamp(num("shadeTint", SHADE_TINT), 0, 1)];
+  const sculpt = [clamp(num("cloudFrom", CLOUD_FROM), 0.3, 0.9), clamp(num("sculpt", SCULPT), 0, 1), clamp(num("shadeTint", SHADE_TINT), 0, 1), clamp(num("coreNeutral", CORE_NEUTRAL), 0, 1)];
   const cloudShade = CLOUD_SHADE.map((v) => toLin(v / 255));
   const sunA = (num("sun", SUN) * Math.PI) / 180;
   const sun = [Math.cos(sunA), -Math.sin(sunA)];
@@ -858,7 +883,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
     .filter((v) => v.length === 2 && v.every(Number.isFinite))
     .sort((a, b) => a[0] - b[0]);
   const printLut = printTable(printQ.length > 1 ? printQ : PRINT_CURVE, 1024);
-  const printU = [num("printPin", PRINT_PIN) / 255, PRINT_NEUTRAL[0] / 255, PRINT_NEUTRAL[1] / 255];
+  const printU = [
+    num("printPin", PRINT_PIN) / 255,
+    num("neutralFrom", PRINT_NEUTRAL[0]) / 255,
+    num("neutralTo", PRINT_NEUTRAL[1]) / 255,
+    clamp(num("neutral", PRINT_NEUTRAL[2]), 0, 1),
+  ];
+  const printWhite = PRINT_WHITE.map((v) => v / (0.2126 * PRINT_WHITE[0] + 0.7152 * PRINT_WHITE[1] + 0.0722 * PRINT_WHITE[2]));
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
     if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
@@ -1161,7 +1192,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform3fv(pr.u.uCloudTop, cloudTop);
     gl.uniform2fv(pr.u.uGlow, glow);
     gl.uniform3fv(pr.u.uMist, mistU);
-    gl.uniform3fv(pr.u.uSculpt, sculpt);
+    gl.uniform4fv(pr.u.uSculpt, sculpt);
     gl.uniform3fv(pr.u.uCloudShade, cloudShade);
   };
   const drawScene = () => {
@@ -1380,8 +1411,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, filmed.tex);
     gl.uniform1i(printP.u.uFilm, 0);
     gl.uniform3fv(printP.u.uToeTint, PRINT_TOE);
-    gl.uniform3fv(printP.u.uWb, PRINT_WB);
-    gl.uniform3fv(printP.u.uPrint, printU);
+    gl.uniform3fv(printP.u.uWb, printWhite);
+    gl.uniform4fv(printP.u.uPrint, printU);
     gl.uniform2fv(printP.u.uToeSat, PRINT_TOE_SAT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
