@@ -53,6 +53,9 @@ grades the whole panorama as it grades the photograph's own pixels.
 Also: a distance panorama (for parallax across the 0.8 m face), SH9 irradiance
 of the panorama (for lighting the paint), and aux.png for the photo: log depth
 (for the mirror's shadow on the house) and how sunlit each pixel is.
+
+After it, clouds.py re-lights the cumulus in the plate and the panorama as
+sunlit heaps (warm tops, blue bellies), once, then grade.py.
 """
 import json
 import os

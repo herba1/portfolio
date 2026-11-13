@@ -1032,17 +1032,18 @@ void main() {
   vec3 col = enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize);
   vec4 aux = texture(uAux, p / uPhotoSize);
   // The cumulus' sunlit tops. clouds.py lights them in the bake (tops a
-  // warm neutral, its TOP; bellies 2/3 stop under, toward the skylight's
-  // blue), but the plate is 8-bit: its whitest white develops through the
+  // warm neutral, its TOP; sides and bellies 0.9 stop under, toward the
+  // skylight's blue), but the plate is 8-bit: its whitest white develops through the
   // film's shoulder and cool highlight tint to a blue-grey ~228, no brighter
   // than the plaster. A sunlit cumulus top is the brightest thing in a
   // summer sky, so, in the open sky only, the plate's cloud is carried past
-  // 1 by its own luminance: the belly as it is, the top to uCloudW, which
-  // develops to a warm neutral of about 245, R over G over B.
+  // 1 by its own luminance: the belly as it is (the lift starts above it,
+  // so the shade between a heap's towers keeps its stop), the top to
+  // uCloudW, which develops to a warm neutral of about 246, R over G over B.
   const vec3 CLOUD_TOP = vec3(0.93, 0.885, 0.80);  // clouds.py's TOP
   // (a warm-neutral top passes; a board's yellow edge, blue under half its
   // red, does not)
-  float cTop = aux.b * smoothstep(0.3, 0.9, dot(col, LUMA)) * smoothstep(-0.45, -0.25, (col.b - col.r) / max(col.r, 1e-3));
+  float cTop = aux.b * smoothstep(0.42, 0.86, dot(col, LUMA)) * smoothstep(-0.45, -0.25, (col.b - col.r) / max(col.r, 1e-3));
   col = mix(col, col * uCloudW / CLOUD_TOP, cTop);
   // the assembly's shadow on it, through the point map
   if (aux.r < 0.995) {
