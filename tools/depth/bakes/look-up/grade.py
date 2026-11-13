@@ -280,6 +280,9 @@ def _sky2(K, P, w, elev, prof):
     K /= np.maximum(K @ LUMA, 1e-5)[..., None]
     # a touch of form contrast around the cloud's mid level
     Yc *= np.clip(Yown / P['s2Mid'], 0.2, 5) ** P['s2Form'] * P['s2CloudGain']
+    # skylight lift: the shaded bases are lit by the whole blue dome, so on
+    # film they open up cool instead of sinking to grey
+    Yc *= 1 + P.get('s2ShadeLift', 0) * (1 - smooth(P['s2ShLo'], P['s2ShHi'], Yown))
     del Yown
     K *= Yc[..., None]
     del Yc
@@ -394,13 +397,19 @@ def _buildings1(rest, wsky, w, P):
 # the HDRI) stands at 200, behind the engine's resting view (YAW0 = 20): the
 # clouds overhead are front-lit, white tops over skylit bases, as in ref 3.
 # bLit/bWarm*: the sunlit stone is the one warm note against the cobalt.
+# skyHex is a soft film cobalt, not polariser ink: lighter and less
+# saturated (the engine's film pass adds only a little blue depth on top), so
+# the frame lands near #1f5fae at the zenith and #3f8fcf toward the edges.
+# cloudShade/s2Keep/s2ShadeLift: the cloud bases take the dome's skylight,
+# opened up and cool; the warm cream of the tops comes from the engine's
+# print shoulder.
 P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
-         skyHex=['#08408f', '#1462b4', '#4592cf', '#9cc2e6'], skyGain=0.8, gapTex=0.6,
-         expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.68, 0.8, 1.0],
+         skyHex=['#1a63c0', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
+         expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.52, 0.72, 1.0],
          restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3,
-         bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#1b2633', bLit='#d6c3a2', bLitGain=1.0, bFloor=0.75,
+         bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#1b2633', bLit='#d6c3a2', bLitGain=1.12, bFloor=0.75,
          bDetail=1.0, bHlLo=0.35, bHlHi=1.0, bWarmR=0.2, bWarmB=0.2, bKeep=0.12,
          # the second sky (see _sky2)
          sky2Yaw=-14.0, s2Clamp=40.0, s2Expo=0.8, s2Denoise=1.0, s2Lo=0.45, s2Hi=0.9,
-         s2Gap1=1.5, s2Gap2=8.0, s2ShLo=0.25, s2ShHi=1.1, s2Keep=0.25, s2Mid=0.7, s2Form=0.35,
+         s2Gap1=1.5, s2Gap2=8.0, s2ShLo=0.25, s2ShHi=1.1, s2Keep=0.1, s2Mid=0.7, s2Form=0.25, s2ShadeLift=0.3,
          s2CloudGain=1.0, s2Glow=0.5, eRad=2.0)

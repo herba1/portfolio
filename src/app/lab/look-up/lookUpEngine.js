@@ -44,6 +44,19 @@ uniform float uHalf;    // half field angle across uR, radians
 uniform float uK;       // 1 rectilinear .. 2 stereographic
 uniform vec2 uPY;       // pitch, yaw (radians)
 uniform float uGain;
+uniform vec3 uPrint;    // shoulder start, shoulder end, warm amount
+uniform vec3 uRing;     // threshold, radius (device px), strength
+uniform float uTexPerRad; // cube texels per radian at a face centre
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+// Light past the halation threshold, with the film kit's soft knee (half
+// the threshold wide), so the halo grows smoothly out of the cloud body.
+float pastKnee(float l) {
+  float k = uRing.x * 0.5;
+  float x = clamp(l - uRing.x + k, 0.0, 2.0 * k);
+  return max(x * x / (4.0 * k + 1e-5), l - uRing.x);
+}
 
 void main() {
   vec2 p = gl_FragCoord.xy - 0.5 * uRes;
@@ -57,28 +70,80 @@ void main() {
   float cy = cos(uPY.y), sy = sin(uPY.y);
   vec3 w = vec3(e.x * cy + e.z * sy, e.y, -e.x * sy + e.z * cy);
   vec3 c = texture(uSky, w).rgb * uGain;
+  float y = dot(c, LUMA);
+
+  // Halation, the thin part: light past the threshold that went through the
+  // emulsion, bounced off the base and came back through the red layer, a
+  // few pixels out from every bright edge (cloud and sunlit stone against
+  // the blue, bright cloud against a dark tower). Read from a small ring of
+  // blurred taps on the cube; kept off the highlight itself. The kit's wide
+  // halation then adds the broad glow round it.
+  float pxRad = 1.0 / max(f * (1.0 + r * r / (f * f * uK * uK)), 1e-4); // radians per device px here
+  float ang = uRing.y * pxRad;
+  float lod = max(log2(ang * uTexPerRad * 0.8), 0.0);
+  vec3 up = abs(w.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 t1 = normalize(cross(w, up));
+  vec3 t2 = cross(w, t1);
+  // Two rings of taps (r and 2r), so the bright core of a cloud reaches
+  // its soft grey fringe and the blue just past it.
+  float src = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.7853982 + 0.3927;
+    vec3 dir = cos(a) * t1 + sin(a) * t2;
+    float y1 = dot(textureLod(uSky, normalize(w + ang * dir), lod).rgb, LUMA) * uGain;
+    float y2 = dot(textureLod(uSky, normalize(w + 2.0 * ang * dir), lod + 1.0).rgb, LUMA) * uGain;
+    src += pastKnee(y1) * 0.6 + pastKnee(y2) * 0.4;
+  }
+  src *= 0.125;
+  // Kept off the cloud itself (its shaded folds would blush pink): it shows
+  // on the blue just past the edge and on dark stone beside bright cloud.
+  float ring = src * (1.0 - smoothstep(0.24, 0.44, y));
+  // Over the blue the red alone reads violet; the dyes it exposes also hold
+  // back a little blue, so the ring lands warm.
+  float h = ring * uRing.z;
+  c = (c + vec3(1.0, 0.45, 0.06) * h) * vec3(1.0, 1.0, 1.0 / (1.0 + 1.6 * h));
+
+  // Print shoulder: daylight negative printed on warm paper. Light climbing
+  // into the shoulder rolls to cream (the blue dye layer gives out first),
+  // so cloud tops and sunlit stone land warm instead of neutral white.
+  float s = smoothstep(uPrint.x, uPrint.y, y) * uPrint.z;
+  c *= mix(vec3(1.0), vec3(1.07, 1.0, 0.84), s);
   outColor = vec4(c, 1.0);
 }`;
 
+// Developed like daylight negative, not a clean HDR: a soft cobalt rather
+// than polariser ink (low saturation, a little blue depth), cloud and sunlit
+// stone rolled into a warm print shoulder (PRINT, in the scene pass), a thin
+// red halation ring where the bright cloud meets the blue, a Pro-Mist bleed
+// of the highlights only, and grain coarse enough to see at DPR 2.
 const FILM = {
   input: "linear",
   headroom: 0,
   exposure: 0,
   whitePoint: 1.55,
-  contrast: 1.18,
+  contrast: 1.12,
   shoulder: 0.95,
-  halation: 0.22,
-  halationThreshold: 0.95,
-  bloom: 0.1,
-  softness: 0.22,
-  saturation: 1.08,
-  blueDepth: 0.6,
-  // Neutral highlights: the bake already rolls the cloud tops off
-  // warm-neutral, and the kit's cool default would cancel that.
+  halation: 0.34,
+  halationThreshold: 0.78,
+  bloom: 0.24,
+  bloomThreshold: 0.55,
+  softness: 0.3,
+  saturation: 0.95,
+  blueDepth: 0.12,
+  // The warmth of the highlights comes from the print shoulder below; the
+  // kit's cool default highlight tint would cancel it.
   highlightTint: [1.0, 1.0, 0.99],
-  grain: 0.32,
+  shadowTint: [0.95, 1, 1.04],
+  grain: 0.55,
+  grainSize: 1.7,
   vignette: 0.22,
 };
+
+// Print shoulder (scene light): from where it starts to where it is full,
+// and how far toward cream it goes.
+// ring is the thin halation (see SCENE): its radius in device px at a
+// 2560 wide frame, and its strength.
+const PRINT = { from: 0.62, to: 1.25, warm: 1, ringPx: 10, ring: 5 };
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const smooth = (a, b, x) => {
@@ -144,6 +209,11 @@ export async function createLookUp(host, { embedded = false } = {}) {
     const v = q.get(key);
     if (typeof FILM[key] === "number" && v != null && v !== "" && Number.isFinite(+v)) film0[key] = +v;
   }
+  const print0 = { ...PRINT };
+  const qw = q.get("printWarm");
+  if (qw != null && qw !== "" && Number.isFinite(+qw)) print0.warm = +qw;
+  const qr = q.get("ring");
+  if (qr != null && qr !== "" && Number.isFinite(+qr)) print0.ring = +qr;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   // The colour field the sky opens from.
@@ -298,6 +368,9 @@ export async function createLookUp(host, { embedded = false } = {}) {
     gl.uniform1f(scene.u.uK, kOf(s));
     gl.uniform2f(scene.u.uPY, (pitchDeg * Math.PI) / 180, (yawDeg * Math.PI) / 180);
     gl.uniform1f(scene.u.uGain, ENC * enc);
+    gl.uniform3f(scene.u.uPrint, print0.from, print0.to, print0.warm);
+    gl.uniform3f(scene.u.uRing, film0.halationThreshold, print0.ringPx * (w / 2560), print0.ring);
+    gl.uniform1f(scene.u.uTexPerRad, N / (Math.PI / 2));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
