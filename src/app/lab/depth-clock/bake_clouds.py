@@ -19,6 +19,10 @@
 #      clear sky, the capture's own trees and ground are refused by colour and
 #      by elevation, and the one connected mass under PX, PY is taken (the
 #      rest of the capture's sky, its altocumulus and small cumulus, is not);
+#      of what the gates leave, only the largest connected body survives (no
+#      wisp or scrap floats free of it), feathered, and the patch of its left
+#      flank crossed by the capture's own branches is closed and filled from
+#      the cloud around it;
 #   3. the clear sky around it is drawn new, from the conifers' own cobalt: a
 #      pale, less saturated band of scattered light in the air beside the
 #      cloud, deepening to a saturated cobalt away from it and toward the top
@@ -28,11 +32,13 @@
 #      the air's unevenness is drawn (AIR);
 #   4. the cloud is set to its light (its brightest sunlit crown at TOP, so on
 #      film it glows and never clips), its capture's grey cast taken off, and
-#      then lit as cloud is: its sunlit crown and flanks warm from the low sun,
-#      its bellies a little down (DARK) in skylight blue (SHADE of a paled
-#      cobalt, mixed in as light), never a grey smear; then its whole body
-#      under the crown is lifted LIFT stops, so the tower glows as one
-#      luminous mass well over the blue, not a grey cut-out with white tops;
+#      then lit as cloud is: its sunlit crown warm from the low sun and its
+#      whole body WARM of that warmth, its bellies in skylight blue (SHADE of
+#      a paled cobalt, mixed in as light), barely darkened (DARK), never a
+#      grey smear; then its whole body under the crown is lifted up to LIFT
+#      stops along a monotone curve of its broad light, so the tower glows as
+#      one luminous mass well over the blue, not a grey cut-out with white
+#      tops, and no lifted billow passes the crown above it;
 #   5. its billows crisped in light only (SHARP, EDGE), so the cloud at
 #      infinity draws as crisply as the needles in front of it, and a last
 #      soft shoulder holds the odd brightest texel under the file's ceiling.
@@ -162,6 +168,19 @@ g = np.clip((gate - 0.5 + env('BILLOW', 0.9) * bil) * 8.0 + 0.5, 0, 1)
 g = cv2.GaussianBlur(g, (0, 0), 1.5) * np.clip(gate * 4, 0, 1)
 w = np.maximum(w, solid * (1 - ground)) * g
 del Lg, bil
+# One body. The chroma matte and its gates leave islands: wisps the gate cut
+# off the crown (they hung alone above the 1) and the scraps of the lower
+# flank between the capture's own branches (low left of the column). Only
+# the largest connected mass of the matte is kept, down to its faint fringe
+# (KEEP), so the tower is one shape; what remains is feathered (FEATHER px),
+# so its rim reads as cloud thinning into air and not as a cut.
+KEEP, FEATHER = env('KEEP', 0.04), env('FEATHER', 2.5)
+n1, lab1, st1, _ = cv2.connectedComponentsWithStats((w > KEEP).astype(np.uint8), 8)
+one = (lab1 == 1 + st1[1:, cv2.CC_STAT_AREA].argmax()).astype(np.uint8)
+print('matte: %d islands dropped (%d px), one body of %d px' % (n1 - 2, st1[1:, 4].sum() - one.sum(), one.sum()))
+one = cv2.dilate(one, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+w = cv2.GaussianBlur(w * one, (0, 0), FEATHER)
+del lab1, one
 print('hero cloud: %.1f%% of the plate, bbox x %d..%d y %d..%d' % (100 * (w > 0.5).mean(), st[hero, 0], st[hero, 0] + st[hero, 2], st[hero, 1], st[hero, 1] + st[hero, 3]))
 
 # --- 3. the clear sky, drawn new
@@ -218,7 +237,7 @@ print('cloud cast', own.round(3), 'gain %.3f' % gl)
 # alone): the billows keep their own sunlit tops and shaded folds, and
 # DETAIL widens them a little, so the lift never flattens the form.
 Lc = np.maximum(C @ LUMA, 1e-6)
-GAM, DETAIL = env('GAM', 0.72), env('DETAIL', 1.4)
+GAM, DETAIL = env('GAM', 0.72), env('DETAIL', 1.6)
 lg = np.log(Lc)
 wb = cv2.GaussianBlur(w, (0, 0), env('BROAD', 30.0))
 broad = cv2.GaussianBlur(lg * w, (0, 0), env('BROAD', 30.0)) / np.maximum(wb, 1e-4)
@@ -228,27 +247,84 @@ lb2 = np.where(broad < lt, lt + GAM * (broad - lt), broad)
 C *= np.exp(lb2 + DETAIL * (lg - broad) - lg)[..., None]
 del Lc, lg, wb, broad, lb2
 # how far round toward the sun each billow faces, from its broad light
-Lbro = cv2.GaussianBlur(C @ LUMA, (0, 0), 4.0)
+Lbro = cv2.GaussianBlur(C @ LUMA, (0, 0), env('LITBLUR', 14.0))
 lo, hi = np.percentile(Lbro[cl], 3), np.percentile(Lbro[cl], 99.5)
 lit = np.clip((Lbro - lo) / max(hi - lo, 1e-4), 0, 1)
 lit = lit * lit * (3 - 2 * lit)
 lit = lit ** env('LITG', 1.4)
-SHADE, SKYL = env('SHADE', 0.25), env('SKYLIGHT', 0.5)
+SHADE, SKYL = env('SHADE', 0.35), env('SKYLIGHT', 0.35)
 SUN = np.array([1.0, 0.955, 0.875], np.float32)  # low, warm
 sk = blue ** SKYL
 sk /= sk @ LUMA
-sh = (SHADE * (1 - lit))[..., None]
-tint = ((1 - sh) + sh * sk) * (1 + lit[..., None] * (SUN - 1))
+# The bellies are lit by the blue sky, so their shade is skylight blue, never
+# a neutral grey: SHADE of it in the deepest folds, less as a billow turns
+# toward the sun. The sun's warmth is not the crown's alone: the low sun
+# reaches round the whole tower, so its body takes WARM of the crown's warmth
+# under the blue of its shade, and the crown all of it.
+sh = (SHADE * (1 - lit) ** 1.2)[..., None]
+warm = (env('WARM', 0.5) + (1 - env('WARM', 0.5)) * lit)[..., None]
+tint = ((1 - sh) + sh * sk) * (1 + warm * (SUN - 1))
 tint /= (tint @ LUMA)[..., None]
-DARK = env('DARK', 0.15)
+DARK = env('DARK', 0.03)
 tint *= (1 - DARK * (1 - lit))[..., None]
 C = C * tint
-# Above the trees the tower glows as one mass: everything under its sunlit
-# crown is lifted LIFT stops, wholly in its shaded body, tapering to nothing
+# Above the trees the tower glows as one mass: its body under the sunlit
+# crown is lifted, up to LIFT stops in its deepest shade, tapering to nothing
 # on the crown (which already stands at TOP), so its bellies come up into a
 # luminous skylight blue well over the cobalt around it instead of a dim grey
 # a little over it, and the popcorn tops no longer stand alone in white.
-C *= np.exp2(env('LIFT', 0.8) * (1 - lit))[..., None]
+# The lift follows the cloud's broad light (over LIFTBLUR px) in stops, so it
+# is a monotone curve: a lifted billow never passes the crown above it (that
+# turned the crown's edges into flat, posterised patches), and each billow's
+# own shading rides on it untouched.
+lb = np.log2(np.maximum(cv2.GaussianBlur(C @ LUMA, (0, 0), env('LIFTBLUR', 10.0)), 1e-6))
+llo, lhi = np.percentile(lb[cl], 3), np.percentile(lb[cl], 99.5)
+LIFT = min(env('LIFT', 1.3), 0.7 * (lhi - llo))
+C *= np.exp2(LIFT * np.clip((lhi - lb) / max(lhi - llo, 1e-3), 0, 1))[..., None]
+print('body lifted %.2f stops (its broad light spans %.2f)' % (LIFT, lhi - llo))
+del lb
+# The capture's own branches cross the tower's lower left flank as dark
+# twigs with blue between them. They are found as thin dark lines in the
+# cloud's light (a black-hat over TWIGR px), and their one dense cluster is
+# taken as the patch to mend: its matte is closed over (TWIGC px) and its
+# twigs and gaps are filled from the cloud around them, the broad light by
+# normalised blurs out from the clean body, the billows' fine texture from
+# the nearest clean patch of the same body, so the flank reads as cloud.
+lc = np.log(np.maximum(C @ LUMA, 1e-4))
+ell = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))  # noqa: E731
+twig = (cv2.morphologyEx(lc, cv2.MORPH_BLACKHAT, ell(int(env('TWIGR', 5)))) > env('TWIG', 0.2)) & (w > 0.2)
+dens = cv2.GaussianBlur(twig.astype(np.float32), (0, 0), 20)
+n2, lab2, _, _ = cv2.connectedComponentsWithStats((dens > env('TWIGD', 0.03)).astype(np.uint8), 8)
+if n2 > 1:
+    best = 1 + np.bincount(lab2.ravel(), dens.ravel(), n2)[1:].argmax()
+    zone = cv2.dilate((lab2 == best).astype(np.uint8), ell(24))
+    wfill = cv2.morphologyEx(w, cv2.MORPH_CLOSE, ell(int(env('TWIGC', 40))))
+    hole = zone.astype(bool) & (cv2.dilate(twig.astype(np.uint8), ell(4)).astype(bool) | (w < 0.95)
+                                | (lc < cv2.GaussianBlur(lc, (0, 0), 25) - 0.12))
+    valid = ((w > 0.9) & ~hole).astype(np.float32)
+    Cv = np.minimum(C, 4.0) * valid[..., None]
+    fill = np.zeros_like(C)
+    got = np.zeros((H, W), np.float32)
+    for sig in (3, 8, 20, 50):
+        den = cv2.GaussianBlur(valid, (0, 0), sig)
+        ok = np.clip(den / 0.3, 0, 1) * (1 - got)
+        fill += cv2.GaussianBlur(Cv, (0, 0), sig) / np.maximum(den, 1e-6)[..., None] * ok[..., None]
+        got += ok
+    fill /= np.maximum(got, 1e-6)[..., None]
+    Lr = np.maximum(np.minimum(C, 4.0) @ LUMA, 1e-4)
+    det = Lr / np.maximum(cv2.GaussianBlur(Lr, (0, 0), 10), 1e-4)
+    hy, hx = np.nonzero(hole)
+    off = min(((w[np.clip(hy + dy, 0, H - 1), np.clip(hx + dx, 0, W - 1)] < 0.95).mean(), np.hypot(dx, dy), dx, dy)
+              for dx in range(-440, 441, 40) for dy in range(-440, 441, 40))
+    det = cv2.warpAffine(det, np.float32([[1, 0, off[2]], [0, 1, off[3]]]), (W, H),
+                         flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REFLECT)
+    hs = cv2.GaussianBlur(hole.astype(np.float32), (0, 0), 1.0)[..., None]
+    C = C * (1 - hs) + fill * np.clip(det, 0.5, 1.6)[..., None] * hs
+    zf = cv2.GaussianBlur(zone.astype(np.float32), (0, 0), 6)
+    w = w + (np.maximum(w, cv2.GaussianBlur(wfill, (0, 0), 2)) - w) * zf
+    print('twigs: %d px of the flank mended, texture from %+d,%+d' % (hole.sum(), off[2], off[3]))
+    del zone, wfill, hole, valid, Cv, fill, got, Lr, det, hs
+del lc, twig, dens, lab2
 # --- 5. crisp, in light only, inside the cloud
 SHARP, EDGE = env('SHARP', 0.5), env('EDGE', 0.35)
 lc = C @ LUMA
@@ -256,6 +332,7 @@ d = SHARP * (lc - cv2.GaussianBlur(lc, (0, 0), 1.5)) + EDGE * (lc - cv2.Gaussian
 C *= (np.maximum(lc + d, 0.02 * lc) / np.maximum(lc, 1e-6))[..., None]
 del lc, d, Lbro, Lsm
 
+C = np.minimum(C, 2.0)  # what lies under the matte's zero (the capture's sun) never leaks through its tail
 out_ = S * (1 - w[..., None]) + C * w[..., None]
 SAFE, LIMIT = env('SAFE', 0.8), env('LIMIT', 0.92)
 m = out_.max(2)
