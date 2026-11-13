@@ -30,7 +30,7 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape, sam
 // wires are drawn analytically (erf of a blurred box, the measured shade) in
 // linear light at device resolution, along the fitted catenary evaluated
 // exactly plus a cubic through the nodes' displacement, then the frame is
-// haloed through the shared film kit (summer).
+// haloed through the shared film kit (summer) and printed (PRINT_CURVE).
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1.5>, 1.5 the fullest give of a
@@ -39,7 +39,8 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape, sam
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, halNarrow, halWide,
 // diffuse, diffuseR, diffuseSteel, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
-// override the grade; halThr sets the HALO pass's threshold.
+// override the grade; halThr sets the HALO pass's threshold; print and
+// printPin the PRINT curve.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
@@ -75,8 +76,8 @@ const FILM = {
   exposure: 0,
   input: "linear",
   // A plate that is already a soft film scan: less extra veil. The sunlit
-  // cloud is printed up to just under paper white (about 0.96, nothing at
-  // 255) so it glows; the shoulder still rolls it off instead of clipping.
+  // cloud is developed up to just under white (about 0.96, nothing at 255);
+  // the print (PRINT_CURVE) then lays it down on ref 3's density, ~225.
   bloom: 0.2,
   softness: 0.4,
   halation: 0.32,
@@ -207,6 +208,55 @@ const VIB = 0.4;
 const VIB_FLOOR = 0.85;
 const VIB_HUE = 208;
 const VIB_V = 0.045;
+
+// The print: the film kit develops the negative; this is the paper it is
+// printed on, a last pass over the finished frame (see PRINT_F). One curve on
+// the frame's luma (Rec. 709 weights on the display values, the way a
+// densitometer reads a print), monotone cubic through PRINT_CURVE (film in,
+// print out, 0-255), pinned at PRINT_PIN (the cobalt's own luma, ~100) so
+// the sky keeps its mean and hue. Measured against herb ref 3:
+//  - Shoulder: the sunlit cloud tops land at about #dfe1de-#e3e4e0 (top 1%
+//    ~225), not hot cream near paper white. A long shoulder from just over
+//    the sky: the light sky stays near slope 1, the cloud bodies give, and
+//    the cores (film 205-242) take a slope a little over 1, so the lobes and
+//    grain the plate's veil had flattened into a cream plateau come back;
+//    only the last dozen levels roll hard, and nothing reaches 255. Above
+//    the pin each pixel is scaled by the curve's ratio (hue and saturation
+//    kept), and its colour eased toward the paper's neutral, PRINT_WB, from
+//    PRINT_NEUTRAL[0] to [1] of print luma: the warm-cream cores come out
+//    neutral-cool.
+//  - Toe: a scan's lifted black, not a crushed one. Below the pin the lift
+//    is added, tinted PRINT_TOE (slightly cyan, luma 1), so the darkest steel
+//    sits near rgb(40,48,56) and p5 near 60: the mast a soft silhouette, its
+//    rust and banding still in it. The cobalt is as dark as the steel's
+//    lit faces but far more saturated (S 0.8-0.9 against the steel's ~0.4), so
+//    the lift eases out over PRINT_TOE_SAT (saturation): the zenith keeps
+//    its polariser depth instead of greying toward the toe.
+// ?print=x:y,x:y,... overrides the curve.
+const PRINT_CURVE = [
+  [0, 22],
+  [28, 50],
+  [38, 61],
+  [55, 72],
+  [70, 81],
+  [85, 91],
+  [100, 100],
+  [120, 119],
+  [150, 142],
+  [180, 162],
+  [205, 182],
+  [225, 204],
+  [242, 225],
+  [250, 230],
+  [255, 233],
+];
+const PRINT_PIN = 100;
+const PRINT_TOE = [0.94, 1, 1.06];
+const PRINT_TOE_SAT = [0.6, 0.8];
+// Warm cream (245,241,231 as the film leaves it) to the paper's neutral
+// (#dfe1de), luminance-normalised.
+const PRINT_WB = [0.98, 1.003, 1.028];
+const PRINT_NEUTRAL = [185, 222];
 
 // Structure toward graphite: luminance kept, lifted out of the black, a
 // slight warm bias. Shared by the plate and the live wires.
@@ -634,6 +684,77 @@ void main() {
   outColor = vec4(c, 1.0);
 }`;
 
+// PRINT: the paper. Film luma through the curve (a 1024-entry table, read
+// with texelFetch and interpolated, so a float table needs no filtering).
+const PRINT_F = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uFilm;
+uniform sampler2D uLut;
+uniform vec3 uToeTint;
+uniform vec3 uWb;
+uniform vec3 uPrint;   // pin, neutral from, to (0..1)
+uniform vec2 uToeSat;  // the toe's lift eases out over this saturation
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+float paper(float y) {
+  float x = clamp(y, 0.0, 1.0) * 1023.0;
+  int i = int(floor(x));
+  float a = texelFetch(uLut, ivec2(i, 0), 0).r;
+  float b = texelFetch(uLut, ivec2(min(i + 1, 1023), 0), 0).r;
+  return mix(a, b, x - float(i));
+}
+void main() {
+  vec3 c = texelFetch(uFilm, ivec2(gl_FragCoord.xy), 0).rgb;
+  float y = dot(c, LUMA);
+  float t = paper(y);
+  // Toe: the lift added, tinted, on the steel, not the cobalt. Shoulder: the
+  // ratio, so colour holds.
+  float mx = max(c.r, max(c.g, c.b));
+  float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-4);
+  float lift = (t - y) * (1.0 - smoothstep(uToeSat.x, uToeSat.y, sat));
+  c = y < uPrint.x ? c + lift * uToeTint : c * (t / max(y, 1e-4));
+  c *= mix(vec3(1.0), uWb, smoothstep(uPrint.y, uPrint.z, t));
+  outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
+// Monotone cubic (Fritsch-Carlson) through [x, y] points, sampled n times
+// over 0..255, out 0..1.
+function printTable(pts, n) {
+  const k = pts.length;
+  const d = [];
+  for (let i = 0; i < k - 1; i++) d.push((pts[i + 1][1] - pts[i][1]) / (pts[i + 1][0] - pts[i][0]));
+  const m = pts.map((_, i) => (i === 0 ? d[0] : i === k - 1 ? d[k - 2] : d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2));
+  for (let i = 0; i < k - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const h = a * a + b * b;
+    if (h > 9) {
+      m[i] = (3 * a * d[i]) / Math.sqrt(h);
+      m[i + 1] = (3 * b * d[i]) / Math.sqrt(h);
+    }
+  }
+  const out = new Float32Array(n);
+  let j = 0;
+  for (let s = 0; s < n; s++) {
+    const x = (s / (n - 1)) * 255;
+    while (j < k - 2 && x > pts[j + 1][0]) j++;
+    const [x0, y0] = pts[j];
+    const [x1, y1] = pts[j + 1];
+    const h = x1 - x0;
+    const t = clamp((x - x0) / h, 0, 1);
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const y = (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m[j] + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m[j + 1];
+    out[s] = y / 255;
+  }
+  return out;
+}
+
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
 function compile(gl, vs, fs, attribs = ["aPos"]) {
@@ -731,6 +852,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
     num("vibHue", VIB_HUE) / 360,
     clamp(num("vibV", VIB_V), 0, 0.5),
   ];
+  const printQ = (q.get("print") || "")
+    .split(",")
+    .map((v) => v.split(":").map(Number))
+    .filter((v) => v.length === 2 && v.every(Number.isFinite))
+    .sort((a, b) => a[0] - b[0]);
+  const printLut = printTable(printQ.length > 1 ? printQ : PRINT_CURVE, 1024);
+  const printU = [num("printPin", PRINT_PIN) / 255, PRINT_NEUTRAL[0] / 255, PRINT_NEUTRAL[1] / 255];
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
     if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
@@ -770,6 +898,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const haloSrcP = compile(gl, VERT_FULL, HALO_SRC);
   const haloHP = compile(gl, VERT_FULL, HALO_H);
   const haloCP = compile(gl, VERT_FULL, HALO_C);
+  const printP = compile(gl, VERT_FULL, PRINT_F);
+  const lutTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, lutTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 1024, 1, 0, gl.RED, gl.FLOAT, printLut);
+  for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -816,11 +951,16 @@ export async function createCatenary(host, { embedded = false } = {}) {
   // Render targets, half float when the GPU can draw to it (linear light
   // with headroom), else 8 bit (sRGB for the colour, so it stays linear to
   // sample). The scene, then the HALO pass: its source (one channel), the
-  // across blur (narrow, wide), and the scene with the halo on it.
+  // across blur (narrow, wide), and the scene with the halo on it; last the
+  // developed film, display values, for the PRINT pass.
   const FORMATS = {
     rgba: [
       [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT],
       [gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE],
+    ],
+    disp: [
+      [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT],
+      [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE],
     ],
     rg: [
       [gl.RG16F, gl.RG, gl.HALF_FLOAT],
@@ -857,16 +997,18 @@ export async function createCatenary(host, { embedded = false } = {}) {
   let haloSrc = null;
   let haloH = null;
   let haloed = null;
+  let filmed = null;
   let lastKey = "";
   let map = { ox: 0, oy: 0, k: 1, kRef: 1 };
   const build = () => {
     const w = stage.canvas.width;
     const h = stage.canvas.height;
-    [scene, haloSrc, haloH, haloed].forEach(free);
+    [scene, haloSrc, haloH, haloed, filmed].forEach(free);
     scene = target(w, h, "rgba");
     haloSrc = target(w, h, "r");
     haloH = target(w, h, "rg");
     haloed = target(w, h, "rgba");
+    filmed = target(w, h, "disp");
     film.resize(w, h);
     // Cover the box with the photograph, then crop in to the view, inside
     // the turned photograph. Rows stay rows under a pitch, so the plate's
@@ -1224,6 +1366,27 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
 
+  // PRINT: the developed frame onto the paper, to the canvas.
+  const printPass = () => {
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
+    gl.bindVertexArray(quadVao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(printP.p);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, lutTex);
+    gl.uniform1i(printP.u.uLut, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, filmed.tex);
+    gl.uniform1i(printP.u.uFilm, 0);
+    gl.uniform3fv(printP.u.uToeTint, PRINT_TOE);
+    gl.uniform3fv(printP.u.uWb, PRINT_WB);
+    gl.uniform3fv(printP.u.uPrint, printU);
+    gl.uniform2fv(printP.u.uToeSat, PRINT_TOE_SAT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+  };
+
   let born = performance.now();
   let acc = 0;
   let lastGrain = -1;
@@ -1265,7 +1428,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
     if (key !== lastKey || tick !== lastGrain) {
       drawScene();
       halation();
-      film.render(haloed.tex, { ...film0, exposure, grainSeed: tick * 7.31 });
+      film.render(haloed.tex, { ...film0, exposure, grainSeed: tick * 7.31 }, filmed.fbo);
+      printPass();
       lastKey = key;
       lastGrain = tick;
     }
@@ -1284,13 +1448,14 @@ export async function createCatenary(host, { embedded = false } = {}) {
     destroy() {
       sound.destroy();
       film.destroy();
-      [scene, haloSrc, haloH, haloed].forEach(free);
+      [scene, haloSrc, haloH, haloed, filmed].forEach(free);
       gl.deleteTexture(plateTex);
+      gl.deleteTexture(lutTex);
       gl.deleteTexture(atlasTex);
       gl.deleteTexture(keyTex);
       for (const b of [quad, wireBuf, riderBuf]) gl.deleteBuffer(b);
       for (const v of [quadVao, wireVao, riderVao]) gl.deleteVertexArray(v);
-      for (const pr of [plateP, wireP, riderP, haloSrcP, haloHP, haloCP]) gl.deleteProgram(pr.p);
+      for (const pr of [plateP, wireP, riderP, haloSrcP, haloHP, haloCP, printP]) gl.deleteProgram(pr.p);
       stage.destroy();
     },
   };
