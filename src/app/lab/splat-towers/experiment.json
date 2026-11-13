@@ -20,7 +20,7 @@
       "file": "https://images.unsplash.com/photo-1627327053419-fe894c4650ed",
       "author": "Davi Rezende (@davirezende)",
       "licence": "Unsplash License",
-      "note": "Toronto Financial District, iPhone 12 Pro. Depth from Depth Anything V2 Small (tools/depth/depth_hr.py); baked by tools/depth/bakes/splat-towers/bake.py into quantised splats (splats.bin), a 2857x3810 texture (photo.webp, the frame at 2304x3072 with a 12% margin outpainted round it), its depth map (depth.png), which every tower splat's photo lookup is depth-tested against, and a sky plate (plate.webp: the towers painted out with LaMa near the sky's edge and clear deep blue further in), which the dome samples behind every tower."
+      "note": "Toronto Financial District, iPhone 12 Pro. Depth from Depth Anything V2 Small (tools/depth/depth_hr.py); baked by tools/depth/bakes/splat-towers/bake.py (each tower rebuilt as RANSAC-fitted facade planes, its truss and cables hung on the facade they attach to) into quantised splats (splats.bin), a 2857x3810 texture (photo.webp, the frame at 2304x3072 with a 12% margin outpainted round it), its depth map (depth.png), which every tower splat's photo lookup is depth-tested against, and a sky plate (plate.webp: the towers painted out with LaMa near the sky's edge and clear deep blue further in), which the dome samples behind every tower."
     }
   ]
 }

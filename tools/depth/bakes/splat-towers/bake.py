@@ -27,6 +27,10 @@
 #     grazing angle it really has.
 # Cells of 16 and 8 px that split also keep a splat of their own, so the
 # renderer can stop one or two levels early (adaptive count).
+# Every tower is then rebuilt as facades (see "facades"): split by surface
+# normal, a RANSAC plane per facade, every tower splat laid on its facade's
+# plane, and every thin thing (truss, cables, masts) on the plane of the thick
+# facade it hangs from, so curtain walls and steel move as rigid planes.
 # Every tower's outline is a crisp matte, refined against the photograph and
 # redrawn as straight polylines (see "crisp mattes"), and is laid again as a
 # ribbon of thin Gaussians along it (see "edge splats"), so a silhouette stays
@@ -495,8 +499,9 @@ dep_key = np.array([dep.sum(dtype=np.float64), img8[::7, ::7].sum(dtype=np.float
 cached = None
 if DEP_CACHE and os.path.exists(DEP_CACHE):
     z_ = np.load(DEP_CACHE)
-    if "planes" in z_ and z_["dep"].shape == dep.shape and np.allclose(z_["key"], dep_key):
+    if "planes" in z_ and "snap" in z_ and z_["dep"].shape == dep.shape and np.allclose(z_["key"], dep_key):
         cached = z_["dep"].astype(np.float32)
+        dep_snap = z_["snap"].astype(np.float32)
         for row in z_["planes"]:
             mode = ("one", "min", "max")[int(row[1])]
             LAYER_PLANES[int(row[0])] = (mode, [row[2:5], row[5:8]][:1 if mode == "one" else 2])
@@ -505,6 +510,7 @@ if cached is not None:
     dep = cached
 else:
     dep = snap_depth(dep, img8)
+    dep_snap = dep  # the model's own depth inside each structure, for the facades
     if labels is not None:
         dep = hard_layers(dep, labels)
         lzs_ = logz(dep)
@@ -518,7 +524,7 @@ else:
         dep = hang_shards(dep, labels)
     if DEP_CACHE:
         planes = np.array([[k, ("one", "min", "max").index(m)] + list(P[0]) + list(P[-1]) for k, (m, P) in LAYER_PLANES.items()])
-        np.savez(DEP_CACHE, dep=dep, key=dep_key, planes=planes)
+        np.savez(DEP_CACHE, dep=dep, key=dep_key, planes=planes, snap=dep_snap)
 del cached
 
 # ---- crisp mattes: one clean outline per tower
@@ -959,9 +965,295 @@ def crisp_matte(dep, labels, img8):
 
 
 LAB = None
+SCRUB = None  # photo px of structure that ended as sky: the dome shows the plate there, not the photo
 if labels is not None:
+    struct_in = dep >= SKY_T
     dep, LAB, POLYS, RANK = crisp_matte(dep, labels, img8)
-del labels
+
+
+# ---- facades: every tower is planes, and the thin things on it hang on them
+# The hard layers above put each tower on a plane (or a corner of two), but a
+# piece of a tower the matte took from elsewhere keeps the depth it came with,
+# and structure too thin for the model to see (the canopy's open steel truss,
+# the cables and rails hung off it, masts and antennas) keeps a depth the
+# model blended between the tower and the sky. Once the camera swings, those
+# stretch like rubber and part from the steel they hang from. So the towers
+# are rebuilt as facades:
+#   1. each tower's matte is opened (FAC_OPEN px): what the opening keeps is
+#      its thick body, what it takes away (under ~8 px across) is thin;
+#   2. the body is split into its facades by surface normal: the gradient of
+#      the snapped depth over its core, clustered in two, and a plane is
+#      RANSAC-fitted to each cluster's depth (a plane in space is a plane in
+#      disparity). Two facades are kept when they explain the core clearly
+#      better than one, meeting on the line where their planes cross (the
+#      farther face shows at a convex corner, the nearer at a concave one);
+#   3. every pixel of the body takes its facade's plane, exactly;
+#   4. a thin piece takes the plane of the thick facade it is attached to:
+#      a short scrap (an edge's tooth) the facade of its own tower it touches;
+#      a long run (a rail, a cable, a strut, a mast) the nearest facade it
+#      touches, since it stands in front of whatever lies behind it in the
+#      photograph. It never uses its own depth samples. A thin piece that
+#      touches no thick facade at all is a loose wire in the sky: it goes.
+# FAC (frame px) is each tower pixel's facade id, FAC_PL its plane: d = p0 X +
+# p1 Y + p2 with X, Y in frame px / 1000 from the centre, as the hard layers.
+# Everything below that lays a tower splat (the quadtree's cells, the edge
+# ribbons, the underlays) lays it on its facade's plane, so a curtain wall
+# moves as one rigid plane.
+FAC_OPEN = 9  # px: the opening (an ellipse); structure narrower than ~8 px is thin
+FAC_RUN = 40  # px: a thin piece this long is a rail, a cable or a mast, not an edge's tooth
+FAC_BODY = 1500  # px: the least piece of a tower's opened matte that is a body of its own
+FAC_BACK = 300  # px: the least piece of a tower's mask taken back from the sky
+FAC_GLIMPSE = 20000  # px: a body under this, framed by nearer structure, is a glimpse
+FAC_TWO = 60000  # px: the least body that may show two facades
+FAC_T = 0.006  # disparity: RANSAC inlier band (a facade's core scatters ~0.002-0.005)
+FAC_PL = {}  # facade id -> plane (3,)
+FAC_OWN = {}  # facade id -> tower label
+FAC = None
+
+
+def ransac_plane(x, y, d, rng, it=400, t=FAC_T):
+    # plane through the best-supported triple, then least squares on its
+    # inliers; the band widens to the data's own scatter where that is wider
+    n = len(d)
+    if n < 30:
+        return plane_ls(x, y, d, np.ones(n)), np.ones(n, bool)
+    p0 = plane_irls(x, y, d, np.ones(n), it=4)
+    t = max(t, 2.0 * 1.4826 * float(np.median(np.abs(d - (p0[0] * x + p0[1] * y + p0[2])))))
+    tri = rng.integers(0, n, (it, 3))
+    M = np.stack([x[tri], y[tri], np.ones((it, 3))], -1)
+    ok = np.abs(np.linalg.det(M)) > 1e-9
+    P = np.zeros((it, 3))
+    P[ok] = np.linalg.solve(M[ok], d[tri][ok][..., None])[..., 0]
+    sub = rng.choice(n, min(n, 4000), replace=False)
+    r = np.abs(d[sub][None] - (P[:, :1] * x[sub][None] + P[:, 1:2] * y[sub][None] + P[:, 2:]))
+    cnt = np.where(ok, (r < t).sum(1), -1)
+    p = P[int(np.argmax(cnt))]
+    for _ in range(3):
+        inl = np.abs(d - (p[0] * x + p[1] * y + p[2])) < t
+        if inl.sum() < 10:
+            break
+        p = plane_ls(x[inl], y[inl], d[inl], np.ones(int(inl.sum())))
+    return p, np.abs(d - (p[0] * x + p[1] * y + p[2])) < t
+
+
+def facade_split(x, y, d, grads, rng):
+    # one facade, or two meeting at a corner: the core clustered in two by
+    # its normal, a plane RANSAC-fitted to each cluster. grads: the disparity
+    # gradient fields to cluster on (the model's own, and the hard layers').
+    p1, _ = ransac_plane(x, y, d, rng)
+    ev = lambda r: 1.4826 * np.median(np.abs(r))
+    e1 = ev(d - (p1[0] * x + p1[1] * y + p1[2]))
+    best = ([p1], "one", e1)
+    if len(d) < 2000:
+        return best
+    for gx, gy in grads:
+        g = np.stack([gx, gy], -1)
+        s = np.std(g, 0).sum()
+        if s < 1e-6:
+            continue
+        g = g / s
+        # 2-means on the normal (the disparity gradient), seeded at its extremes
+        ax = np.linalg.svd(g - g.mean(0), full_matrices=False)[2][0]
+        pr = (g - g.mean(0)) @ ax
+        c = np.stack([g[pr <= np.percentile(pr, 10)].mean(0), g[pr >= np.percentile(pr, 90)].mean(0)])
+        for _ in range(12):
+            side = ((g - c[0]) ** 2).sum(1) <= ((g - c[1]) ** 2).sum(1)
+            if side.mean() < 0.03 or side.mean() > 0.97:
+                break
+            c = np.stack([g[side].mean(0), g[~side].mean(0)])
+        if side.mean() < 0.03 or side.mean() > 0.97:
+            continue
+        P = [ransac_plane(x[m], y[m], d[m], rng)[0] for m in (side, ~side)]
+        for mode, red in (("min", np.minimum), ("max", np.maximum)):
+            Q = list(P)
+            for _ in range(3):  # the corner moves to where the planes cross
+                v = [q[0] * x + q[1] * y + q[2] for q in Q]
+                sd = v[0] == red(v[0], v[1])
+                if sd.mean() < 0.03 or sd.mean() > 0.97:
+                    break
+                Q = [ransac_plane(x[m], y[m], d[m], rng)[0] for m in (sd, ~sd)]
+            v = [q[0] * x + q[1] * y + q[2] for q in Q]
+            sd = v[0] == red(v[0], v[1])
+            if sd.mean() < 0.03 or sd.mean() > 0.97:
+                continue
+            err = ev(d - red(v[0], v[1]))
+            # a second facade has to earn its place
+            if err < e1 * 0.7 and err < e1 - 0.002 and err < best[2]:
+                best = (Q, mode, err)
+    return best
+
+
+def facades(dep, LAB, dsnap, labels):
+    H_, W_ = dep.shape
+    dep = dep.copy()
+    rng = np.random.default_rng(7)
+    # 0. A piece of a tower's own SAM mask the snap's colour vote gave to the
+    # sky (pale glass at a tower's tip, a window full of reflected cloud), at
+    # least FAC_OPEN px across and FAC_BACK px big and touching its tower, is
+    # that tower: on the sky it would stay painted on the dome and drift off
+    # the tower as a pale chip once the camera swings.
+    ko_ = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (FAC_OPEN, FAC_OPEN))
+    back = 0
+    for k in sorted(int(v) for v in np.unique(labels) if v > 0):
+        cand = (labels == k) & (LAB < 0)
+        if not cand.any():
+            continue
+        y0, y1, x0, x1 = bbox_of(cand, FAC_OPEN, (H_, W_))
+        m = cv2.morphologyEx(cand[y0:y1, x0:x1].astype(np.uint8), cv2.MORPH_OPEN, ko_)
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+        near = cv2.dilate((LAB[y0:y1, x0:x1] == k).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        for i in range(1, n_):
+            pc = cc_ == i
+            if st_[i, cv2.CC_STAT_AREA] < FAC_BACK or not (near & pc).any():
+                continue
+            LAB[y0:y1, x0:x1][pc] = k
+            back += int(pc.sum())
+    print("facades: px of a tower's own mask taken back from the sky", back)
+    fac = np.full((H_, W_), -1, np.int32)
+    thick = np.zeros((H_, W_), bool)
+    ko = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (FAC_OPEN, FAC_OPEN))
+    yy_, xx_ = np.mgrid[0:H_, 0:W_]
+    fid = 0
+    nfac = {}
+    for k in sorted(int(v) for v in np.unique(LAB) if v >= 0):
+        mk = LAB == k
+        y0, y1, x0, x1 = bbox_of(mk, FAC_OPEN, (H_, W_))
+        m = mk[y0:y1, x0:x1].astype(np.uint8)
+        body = cv2.morphologyEx(m, cv2.MORPH_OPEN, ko)
+        # (a knot where struts cross survives the opening too: only a piece
+        # of FAC_BODY px is a body, the rest is thin)
+        nb_, cb_, sb_, _ = cv2.connectedComponentsWithStats(body, connectivity=8)
+        okb = sb_[:, cv2.CC_STAT_AREA] >= FAC_BODY
+        okb[0] = False
+        body = okb[cb_]
+        if not body.any():
+            continue
+        if body.sum() < FAC_GLIMPSE:
+            # a glimpse of a tower between nearer ones (bordered mostly by
+            # nearer structure): on its own plane it would hang loose in the
+            # sky once they slide off it, on theirs it would read as a pale
+            # copy of a facade behind them. It goes, and the plate paints the
+            # sky in where it was.
+            ring = (cv2.dilate(m, np.ones((SHARD_RING, SHARD_RING), np.uint8)) > 0) & (m == 0)
+            lzr = logz(dep[y0:y1, x0:x1])
+            other = ring & (LAB[y0:y1, x0:x1] >= 0)
+            me = float(np.median(logz(dsnap[y0:y1, x0:x1][body])))
+            if (other & (lzr < me - DISC_T)).sum() >= 0.45 * ring.sum():
+                LAB[mk] = -1
+                dep[mk] = SKY_T * 0.6
+                print(f"facades: tower {k}: a glimpse of {int(mk.sum())} px between nearer structure, given to the sky")
+                continue
+        dist = cv2.distanceTransform(body.astype(np.uint8), cv2.DIST_L2, 5)
+        core = body & (dist > min(RB, 0.5 * float(dist.max())))
+        ds = dsnap[y0:y1, x0:x1]
+        core &= ds >= SKY_T
+        # the normal: the gradient of the snapped depth, and of the hard
+        # layers' planes, each smoothed within the body
+        bf = body.astype(np.float32)
+        den = np.maximum(cv2.GaussianBlur(bf, (0, 0), 6), 1e-4)
+        grads = []
+        for src_ in (ds, dep[y0:y1, x0:x1]):
+            dsm = cv2.GaussianBlur(src_ * bf, (0, 0), 6) / den
+            grads.append((cv2.Sobel(dsm, cv2.CV_32F, 1, 0, ksize=3) / 8.0 * 1000,
+                          cv2.Sobel(dsm, cv2.CV_32F, 0, 1, ksize=3) / 8.0 * 1000))
+        iy, ix = np.nonzero(core)
+        if len(iy) < 300:
+            iy, ix = np.nonzero(body & (ds >= SKY_T))
+        if len(iy) < 50:
+            continue
+        thick[y0:y1, x0:x1] |= body
+        sel = np.arange(0, len(iy), max(1, len(iy) // 30000))
+        iy, ix = iy[sel], ix[sel]
+        X = (ix + x0 - W_ / 2) / 1000.0
+        Y = (iy + y0 - H_ / 2) / 1000.0
+        # (three tries, the best kept: RANSAC is a draw; a glimpse of a tower,
+        # under FAC_TWO px or thinner than RB, cannot tell two faces from one
+        # tilted one)
+        grads = [(gx[iy, ix].astype(np.float64), gy[iy, ix].astype(np.float64)) for gx, gy in grads]
+        P, mode, err = min((facade_split(X.astype(np.float64), Y.astype(np.float64), ds[iy, ix].astype(np.float64),
+                                         grads if (dist.max() >= RB and body.sum() >= FAC_TWO) else [], rng) for _ in range(3)), key=lambda r: r[2])
+        by_, bx_ = np.nonzero(body)
+        Xb = (bx_ + x0 - W_ / 2) / 1000.0
+        Yb = (by_ + y0 - H_ / 2) / 1000.0
+        v = np.stack([p[0] * Xb + p[1] * Yb + p[2] for p in P])
+        j = np.zeros(len(by_), np.int64) if mode == "one" else (np.argmin if mode == "min" else np.argmax)(v, 0)
+        vb = np.take_along_axis(v, j[None], 0)[0]
+        old = dep[by_ + y0, bx_ + x0]
+        moved = np.abs(logz(np.maximum(vb, SKY_T + 0.01).astype(np.float32)) - logz(old)) > DISC_T
+        dep[by_ + y0, bx_ + x0] = np.maximum(vb, SKY_T + 0.01)
+        fac[by_ + y0, bx_ + x0] = fid + j
+        for i, p in enumerate(P):
+            FAC_PL[fid + i] = np.asarray(p, np.float64)
+            FAC_OWN[fid + i] = k
+        nfac[k] = len(P)
+        print(f"facades: tower {k}: {len(P)} facade(s) ({mode}), core residual {err:.4f},"
+              f" {int(moved.sum())} of {len(by_)} px moved past a step")
+        fid += len(P)
+    del yy_, xx_
+    # thin structure: hung on the thick facade it is attached to
+    thin = (LAB >= 0) & ~thick
+    n_, cc, st_, _ = cv2.connectedComponentsWithStats(thin.astype(np.uint8), connectivity=8)
+    k5 = np.ones((5, 5), np.uint8)
+    hung = gone = 0
+    hung_px = gone_px = 0
+    lz = logz(dep)
+    for i in range(1, n_):
+        x, y, w, h, a = st_[i]
+        y0, y1, x0, x1 = max(y - 3, 0), min(y + h + 3, H_), max(x - 3, 0), min(x + w + 3, W_)
+        m = cc[y0:y1, x0:x1] == i
+        ring = (cv2.dilate(m.astype(np.uint8), k5) > 0) & ~m & thick[y0:y1, x0:x1]
+        my, mx = np.nonzero(m)
+        if not ring.any():
+            LAB[my + y0, mx + x0] = -1
+            dep[my + y0, mx + x0] = SKY_T * 0.6
+            gone += 1
+            gone_px += int(a)
+            continue
+        cf = fac[y0:y1, x0:x1][ring]
+        lv, lc = np.unique(LAB[my + y0, mx + x0], return_counts=True)
+        own = lv[np.argmax(lc)]
+        lab_c = np.array([FAC_OWN[int(f)] for f in cf])
+        if max(w, h) < FAC_RUN and (lab_c == own).any():
+            pick = cf[lab_c == own]
+        else:
+            # a long run belongs to the nearest tower it touches (the largest
+            # median disparity at the contact), on that tower's facade it
+            # touches most
+            lzc = lz[y0:y1, x0:x1][ring]
+            best_l, best_z = None, 1e9
+            for l in np.unique(lab_c):
+                sl = lab_c == l
+                if sl.sum() < 3 and len(np.unique(lab_c)) > 1:
+                    continue
+                zl = float(np.median(lzc[sl]))
+                if zl < best_z:
+                    best_l, best_z = l, zl
+            pick = cf[lab_c == best_l]
+        vals, cnt = np.unique(pick, return_counts=True)
+        f = int(vals[np.argmax(cnt)])
+        p = FAC_PL[f]
+        X = (mx + x0 - W_ / 2) / 1000.0
+        Y = (my + y0 - H_ / 2) / 1000.0
+        dep[my + y0, mx + x0] = np.maximum(p[0] * X + p[1] * Y + p[2], SKY_T + 0.01)
+        fac[my + y0, mx + x0] = f
+        hung += 1
+        hung_px += int(a)
+    print(f"facades: {len(FAC_PL)} facades on {len(nfac)} towers; thin pieces hung on a facade {hung} ({hung_px} px),"
+          f" loose ones gone {gone} ({gone_px} px)")
+    dep = np.where(LAB < 0, np.minimum(dep, np.float32(SKY_T * 0.6)), dep).astype(np.float32)
+    return dep, fac, thin & (LAB >= 0)
+
+
+THIN_F = None
+if LAB is not None:
+    dep, FAC, THIN_F = facades(dep, LAB, dep_snap, labels)
+    # structure the matte or the facades gave to the sky (crumbs, loose
+    # wires, scraps outside an outline) is not sky in the photograph: the dome
+    # shows the plate there, never the photo's scrap of steel
+    SCRUB = cv2.dilate((struct_in & (LAB < 0)).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    print("facades: structure px scrubbed from the sky", int(SCRUB.sum()))
+    del struct_in
+del dep_snap, labels
 img8 = grade(img8, (dep < SKY_T).astype(np.uint8))
 lin = s2l(img8.astype(np.float32) / 255.0).astype(np.float32)
 # The matte's outline is the tower's edge, so the photograph's last two pixels
@@ -1111,15 +1403,16 @@ del dkey
 dep_plane = dep
 dep = np.where(tower, np.maximum(dsm, SKY_T + 0.01), dep).astype(np.float32)
 if LAB is not None:
-    # Every tower is a plane (or a corner of two) already. The smoothing is
-    # for the model's ripple, and at an edge, where its support is all on one
-    # side, it bends the plane a little toward the inside: the outline would
-    # part from itself as the camera moves. So each tower keeps its plane,
-    # unless the smoothing hung it on another surface (a rail on the crown).
-    keep_ = tower & (np.abs(logz(dep) - logz(dep_plane)) < DISC_T)
-    print("matte: tower px kept on their own plane", int(keep_.sum()), "of", int(tower.sum()))
-    dep = np.where(keep_, dep_plane, dep).astype(np.float32)
-    del keep_
+    # Every tower pixel is on its facade's plane already, the thin ones on
+    # the facade they hang from (see "facades"): the smoothing, the walk and
+    # the ridges are for a depth map without them, and would only bend a
+    # facade toward its edge or pull a rail off the steel it hangs from. The
+    # facades stand as they are, and the depth key (where the steps run) is
+    # their own log depth.
+    dep = np.where(tower, dep_plane, dep).astype(np.float32)
+    key = np.where(tower, logz(dep_plane), key).astype(np.float32)
+    thin |= THIN_F & tower
+    print("facades: tower px on their facade's plane", int((FAC[tower] >= 0).sum()), "of", int(tower.sum()))
 del dep_plane
 del accn, accd, dsm, hs, hk, nu, du, w_in
 
@@ -1134,6 +1427,15 @@ gden = cv2.GaussianBlur(gok, (0, 0), 4)
 gdx = np.where(gok > 0, gdx, cv2.GaussianBlur(gdx * gok, (0, 0), 4) / np.maximum(gden, 1e-4))
 gdy = np.where(gok > 0, gdy, cv2.GaussianBlur(gdy * gok, (0, 0), 4) / np.maximum(gden, 1e-4))
 del gok, gden
+if LAB is not None:
+    # on a facade, its plane's own slope (per px), exactly
+    fp_ = np.zeros((max(FAC_PL) + 2, 3), np.float32)
+    for f_, p_ in FAC_PL.items():
+        fp_[f_] = p_
+    on_ = FAC >= 0
+    gdx = np.where(on_, fp_[np.maximum(FAC, 0), 0] / 1000.0, gdx).astype(np.float32)
+    gdy = np.where(on_, fp_[np.maximum(FAC, 0), 1] / 1000.0, gdy).astype(np.float32)
+    del fp_, on_
 
 # A step runs between two pixels whose keys differ: a 1 px line that cells
 # must not straddle.
@@ -1154,6 +1456,8 @@ del kx, ky
 # (With layers the matte puts the edge on the photograph's own edge; towD is
 # still the region the sky's colours and the plate keep clear of.)
 towD = cv2.dilate(tower.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
+if SCRUB is not None:
+    towD |= SCRUB  # (the plate paints these over, and the depth map hands them to it)
 clean = ((sky > 0) & ~towD).astype(np.float32)
 cden = cv2.GaussianBlur(clean, (0, 0), 6)
 cfill = cv2.GaussianBlur(lin * clean[..., None], (0, 0), 6) / np.maximum(cden, 1e-4)[..., None]
@@ -1204,6 +1508,10 @@ H, W = dep.shape
 CX, CY = CX0 + PX, CY0 + PY
 frame = np.zeros((H, W), bool)
 frame[PY:PY + H0, PX:PX + W0] = True
+# the facades are the frame's own: the margin's mirrored depth is no facade
+FACc = np.full((H, W), -1, np.int32)
+if FAC is not None:
+    FACc[PY:PY + H0, PX:PX + W0] = FAC
 # the sky's low frequencies, extrapolated outward from the frame's own sky
 q8 = 8
 SL = 48.0  # px: the scale below which the reflected sky keeps its own detail
@@ -1248,6 +1556,7 @@ print("outpainted margin", PX, PY, "->", W, H)
 PLATE_DIV = 2  # canvas px per plate texel
 PLATE_D0, PLATE_R0 = 100.0, 120.0  # canvas px: the LaMa fill is kept to D0 in, then fades over R0
 PLATE_RB = 500.0  # canvas px: the blue beside the towers settles to one deep blue over this
+GHOST_NCC, GHOST_E, GHOST_MIN = 0.5, 0.02, 6  # a plate texel that follows its tower's texture this closely, with this much of it, in a patch this big
 
 
 # the ring the plate paints over round each tower (towD is 3 px wider than the
@@ -1317,7 +1626,33 @@ def sky_plate():
     # over a texel and a half, never over the visible sky's first texel and
     # never letting the halo back in
     a = np.clip(d / (1.5 * PLATE_DIV), 0, 1)[..., None]
-    plate = l2s(ip * (1 - a) + paint * a)
+    plate = l2s(ip * (1 - a) + paint * a).astype(np.float32)
+    # No tower may survive in the plate: where the fill, inside the hole,
+    # follows the texture of the tower that hid that sky (its mullions, its
+    # edges, a glint: the high-passed fill correlates with the photograph's
+    # tower there, NCC over ~3 texels), the camera would show a pale copy of
+    # the tower behind itself once it swings. Those texels are painted again
+    # as sky, by LaMa, from the clean plate round them.
+    lum = lambda c: c @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    Yp, Yi = lum(plate), lum(l2s(ip).astype(np.float32))
+    hpp = Yp - cv2.GaussianBlur(Yp, (0, 0), 4)
+    hpi = Yi - cv2.GaussianBlur(Yi, (0, 0), 4)
+    bl_ = lambda x: cv2.GaussianBlur(x, (0, 0), 3)
+    ep = np.sqrt(bl_(hpp * hpp))
+    ncc = bl_(hpp * hpi) / np.maximum(ep * np.sqrt(bl_(hpi * hpi)), 1e-6)
+    ghost = hp & (d > 1.5 * PLATE_DIV) & (ncc > GHOST_NCC) & (ep > GHOST_E)
+    # (a lone texel that happens to follow the tower is cloud texture: only a
+    # patch of GHOST_MIN texels is a copy)
+    ng_, cg_, sg_, _ = cv2.connectedComponentsWithStats(ghost.astype(np.uint8), connectivity=8)
+    okg = sg_[:, cv2.CC_STAT_AREA] >= GHOST_MIN
+    okg[0] = False
+    ghost = okg[cg_].astype(np.uint8)
+    ghost = (cv2.dilate(ghost, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0) & hp
+    print("sky plate: texels that carry their tower's texture", int(ghost.sum()))
+    if ghost.any():
+        lama = fill.Lama(threads=2)
+        plate = fill.lama_fill(np.clip(plate, 0, 1), ghost, lama, log=print).astype(np.float32)
+        print(f"sky plate: tower texture painted out, {lama.calls} LaMa calls")
     plate = fill.match_grain(plate.astype(np.float32), l2s(ip).astype(np.float32), hp & (d > 3 * PLATE_DIV))
     print("sky plate", (Wp_, Hp_), "hidden", round(float(hp.mean()), 3), "deep blue", np.round(l2s(deep) * 255))
     return np.clip(np.round(plate * 255), 0, 255).astype(np.uint8)
@@ -1345,6 +1680,10 @@ gy = cv2.Sobel(ya, cv2.CV_32F, 0, 1, ksize=3) / 8.0
 dA = dep[A // 2::A, A // 2::A][:Ha, :Wa]
 keyA = key[A // 2::A, A // 2::A][:Ha, :Wa]
 towA = tower[A // 2::A, A // 2::A][:Ha, :Wa]
+FACA = FACc[A // 2::A, A // 2::A][:Ha, :Wa]
+FPL = np.zeros((max(FAC_PL) + 2 if FAC_PL else 1, 3), np.float64)  # facade id -> plane
+for f_, p_ in FAC_PL.items():
+    FPL[f_] = p_
 gxA = gdx[A // 2::A, A // 2::A][:Ha, :Wa] * A  # per analysis pixel
 gyA = gdy[A // 2::A, A // 2::A][:Ha, :Wa] * A
 kdA = kd[:Ha * A, :Wa * A].reshape(Ha, A, Wa, A).any((1, 3))
@@ -1491,6 +1830,35 @@ def octenc(n):
     return np.clip(np.round(np.stack([ox, oy], -1) * 127), -127, 127).astype(np.int8)
 
 
+def row_mode(F, ok):
+    # per row, the most frequent value of F among ok (-1 where none)
+    n, m = F.shape
+    r = np.repeat(np.arange(n), m)[ok.ravel()]
+    v = F.ravel()[ok.ravel()].astype(np.int64)
+    out = np.full(n, -1, np.int64)
+    if len(v) == 0:
+        return out
+    key_, cnt = np.unique(r * (1 << 20) + v, return_counts=True)
+    rr, vv = key_ >> 20, key_ & ((1 << 20) - 1)
+    o = np.lexsort((-cnt, rr))
+    first = np.ones(len(o), bool)
+    first[1:] = rr[o][1:] != rr[o][:-1]
+    out[rr[o][first]] = vv[o][first]
+    return out
+
+
+def cell_facade(X0, Y0, S):
+    # the facade most of a cell's tower pixels lie on (up to 8 x 8 samples)
+    n_ = np.maximum(S // A, 1)
+    g = 8
+    t = (np.arange(g) + 0.5) / g
+    ii = np.minimum((Y0 // A)[:, None, None] + (t[None, :, None] * n_[:, None, None]).astype(np.int64), Ha - 1)
+    jj = np.minimum((X0 // A)[:, None, None] + (t[None, None, :] * n_[:, None, None]).astype(np.int64), Wa - 1)
+    ii, jj = np.broadcast_arrays(ii, jj)
+    F = FACA[ii, jj].reshape(len(X0), -1)
+    return row_mode(F, F >= 0)
+
+
 def splats(X0, Y0, S, is_leaf):
     q = stats(X0, Y0, S)
     area = np.maximum(q["area"], 1)
@@ -1515,6 +1883,7 @@ def splats(X0, Y0, S, is_leaf):
     # plane come from that side alone, the plane from the smoothed disparity
     # and its gradient there, so the splat stays on its own surface.
     st = np.nonzero(tower & (q["kd"] > 0))[0]
+    fac_ = cell_facade(X0, Y0, S) if FAC is not None else np.full(len(X0), -1, np.int64)
     for s_ in np.unique(S[st]):
         sel = st[S[st] == s_]
         n_ = max(int(s_) // A, 1)
@@ -1552,6 +1921,20 @@ def splats(X0, Y0, S, is_leaf):
         col[o] = col_[ok_]
         a[o], b[o] = a_[ok_], b_[ok_]
         c[o] = dm_[ok_] - a_[ok_] * cu_[ok_] - b_[ok_] * cv_[ok_]
+        # on a step, the facade of the side it keeps
+        fs_ = FACA[ii, jj].reshape(len(sel), -1)
+        fm_ = row_mode(fs_, (wsel & (FACA[ii, jj] >= 0)).reshape(len(sel), -1))
+        fac_[sel] = np.where(fm_ >= 0, fm_, -1)
+    # Every tower splat inside the frame lies on its facade's plane, exactly:
+    # a cell over a corner takes the face most of it shows, never a plane
+    # averaged across both, so a curtain wall moves as one rigid plane.
+    cx_, cy_ = X0 + S / 2, Y0 + S / 2
+    inf = (cx_ >= PX) & (cx_ < PX + W0) & (cy_ >= PY) & (cy_ < PY + H0)
+    onf = tower & inf & (fac_ >= 0)
+    pf = FPL[np.maximum(fac_, 0)]
+    a = np.where(onf, pf[:, 0] * A, a)
+    b = np.where(onf, pf[:, 1] * A, b)
+    c = np.where(onf, pf[:, 2], c)
     u, v, Z, nrm = place(cu, cv, a, b, c, tower)
     # shape from the structure tensor
     jxx, jxy, jyy = q["gxx"] / area, q["gxy"] / area, q["gyy"] / area
@@ -1728,6 +2111,12 @@ def edge_splats():
     a = gxA[ia, ja].astype(np.float64) * 1000.0
     b = gyA[ia, ja].astype(np.float64) * 1000.0
     c = dep[iy, ix].astype(np.float64) - a * cu - b * cv
+    # on the facade of the pixel just inside, its plane exactly
+    f_ = FACc[iy, ix]
+    pf = FPL[np.maximum(f_, 0)]
+    a = np.where(f_ >= 0, pf[:, 0] * A, a)
+    b = np.where(f_ >= 0, pf[:, 1] * A, b)
+    c = np.where(f_ >= 0, pf[:, 2], c)
     tw = np.ones(len(u), bool)
     u, v, Z, nrm = place(cu, cv, a, b, c, tw)
     n = len(u)
@@ -1763,25 +2152,21 @@ def underlays():
         mk = LAB == k
         if not mk.any():
             continue
-        if k in LAYER_PLANES and k not in HUNG:
-            mode, P = LAYER_PLANES[k]
-        else:
-            # a layer hung on another surface: the plane it hangs on, fitted
-            iy, ix = np.nonzero(mk)
-            sel = np.arange(0, len(iy), max(1, len(iy) // 40000))
-            X, Y = (ix[sel] - W0 / 2) / 1000.0, (iy[sel] - H0 / 2) / 1000.0
-            mode, P = "one", [plane_irls(X, Y, dep[iy[sel] + PY, ix[sel] + PX].astype(np.float64), np.ones(len(sel)))]
-            del iy, ix, sel, X, Y
+        # its facades, each carried on past its edge as far as it is the
+        # facade nearest
         y0, y1, x0, x1 = bbox_of(mk, UNDER_GAP, (H0, W0))
+        fc = FAC[y0:y1, x0:x1]
+        own = np.isin(fc, [f_ for f_, o_ in FAC_OWN.items() if o_ == k])
+        if not own.any():
+            continue
+        _, nl_ = cv2.distanceTransformWithLabels((~own).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+        fmap = fc[own][np.maximum(nl_, 1) - 1]
+        del nl_
         gy, gx = np.mgrid[y0:y1, x0:x1]
         X, Y = (gx - W0 / 2) / 1000.0, (gy - H0 / 2) / 1000.0
-        vals = [p[0] * X + p[1] * Y + p[2] for p in P]
-        if mode == "one":
-            vp, j_ = vals[0], np.zeros(X.shape, np.int64)
-        else:
-            j_ = (np.argmin if mode == "min" else np.argmax)(np.stack(vals), 0)
-            vp = np.choose(j_, vals)
-        del gy, gx, X, Y, vals
+        pf = FPL[fmap]
+        vp = pf[..., 0] * X + pf[..., 1] * Y + pf[..., 2]
+        del gy, gx, X, Y
         # against the depth the splats were laid on: on this plane, or nearer
         dl_ = logz(dep[y0 + PY:y1 + PY, x0 + PX:x1 + PX]) - logz(np.maximum(vp, SKY_T + 0.01).astype(np.float32))
         tw_c = tower[y0 + PY:y1 + PY, x0 + PX:x1 + PX]
@@ -1795,7 +2180,7 @@ def underlays():
             continue
         py, px = sy[sel] + y0, sx[sel] + x0
         v = vp[py - y0, px - x0]
-        g_ = np.array([[p[0], p[1]] for p in P])[j_[py - y0, px - x0]]
+        g_ = pf[py - y0, px - x0, :2]
         # colour: the tower's own, round the slit (normalised blur over its pixels)
         w_ = cv2.GaussianBlur(m.astype(np.float32), (0, 0), 5)
         cl = cv2.GaussianBlur(lin[y0 + PY:y1 + PY, x0 + PX:x1 + PX] * m[..., None], (0, 0), 5) / np.maximum(w_, 1e-4)[..., None]
