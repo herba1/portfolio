@@ -1,13 +1,18 @@
 import numpy as np, cv2, sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grade import grade, P, CAP, smooth
+from grade import grade, align_sky2, P, CAP, smooth
 from PIL import Image
-src, outdir = sys.argv[1], sys.argv[2]
-if len(sys.argv) > 3: P.update(json.loads(sys.argv[3]))
+# usage: bake.py street.npy sky.npy outdir [json overrides]
+# Both npy files come from load.py: the street (Poly Haven canary_wharf_8k.hdr)
+# and the cumulus that replaces its sky (Poly Haven
+# kloofendal_48d_partly_cloudy_puresky_8k.hdr), both CC0.
+src, skysrc, outdir = sys.argv[1], sys.argv[2], sys.argv[3]
+if len(sys.argv) > 4: P.update(json.loads(sys.argv[4]))
 os.makedirs(outdir, exist_ok=True)
 eq = np.load(src).astype(np.float32)
-g, _, _, cap = grade(eq, P)
-del eq
+sky2 = align_sky2(np.load(skysrc).astype(np.float32), eq, P['sky2Yaw'])
+g, _, _, cap = grade(eq, P, sky2)
+del eq, sky2
 h, w, _ = g.shape
 span = 180.0 * h / (w / 2)
 pad = 16

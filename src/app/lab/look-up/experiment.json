@@ -20,7 +20,14 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/canary_wharf_8k.hdr",
       "author": "Andreas Mischok",
       "licence": "CC0",
-      "note": "8K HDR, sky graded offline toward the natsu targets (cobalt zenith, unclipped cloud), baked to a 2048 sRGB cubemap storing scene light / 1.35."
+      "note": "8K HDR, the street and towers. Its sky is replaced inside the sky matte by the cumulus below; baked to a 2048 sRGB cubemap storing scene light / 1.35."
+    },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
+      "author": "Greg Zaal, Jarod Guest",
+      "licence": "CC0",
+      "note": "8K HDR, the sky above the towers: fair-weather cumulus turned so its sun stands behind the resting view, open blue regraded to a smooth cobalt ramp from zenith to horizon."
     }
   ]
 }
