@@ -33,8 +33,8 @@ import { takes } from "./shutterTakes";
 // it carries the zenith ramp), the gaps fall back to that sky's depth, the
 // streaks' crests are printed up toward a cloud's white, and past ~3 s the
 // ND eases so a longer hold smooths the silk without flattening it. Every
-// cloud, live or smeared, then takes its light back (cloudTone): a warm
-// sunlit side toward the sun, a skylight-blue shade turned away.
+// cloud, live or smeared, then takes its light back (cloudTone): a pale
+// near-white on its true crests, skylight blue everywhere below them.
 //
 // Sharpness: the moving layers are low resolution (sky is smooth, and smeared
 // sky smoother). A still plate at full resolution (the mean of the whole loop)
@@ -107,7 +107,7 @@ const CREST = 1; // the crests' rise toward a cloud's white, at full keep
 // plate's width; sunlit hue and chroma, and the shade's skylight chroma.
 const SUN = [-0.5, -0.866];
 const SUN_TAP = 0.012;
-const TONE = { k: 1, hue: (72 * Math.PI) / 180, warm: 0.03, shade: 0.05, edge: 0.06 };
+const TONE = { k: 1, hue: (72 * Math.PI) / 180, warm: 0.012, shade: 0.09, edge: 0.06 };
 
 const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0 };
 // The top end (FINISH_FS): the highlights above the knee are printed back up
@@ -318,6 +318,7 @@ float srcL(vec2 iuv){
   vec3 e = textureLod(uExp, vec2(iuv.x, 1.0 - iuv.y), uLodT.y).rgb;
   return pow(max(dot(mix(f, e, uWB), LUMA), 0.0), 1.0 / 3.0);
 }
+const float TONE_PALE = 0.04; // the thick silk's chroma, a blue-white
 vec3 cloudTone(vec3 sl, vec2 iuv){
   vec3 p = toLab(sl);
   vec3 s = toLab(lin(texture(uSky, iuv).rgb));
@@ -334,19 +335,26 @@ vec3 cloudTone(vec3 sl, vec2 iuv){
   g /= max(ws, 1e-3);
   float top = smoothstep(0.0, uEdge, g);
   float under = smoothstep(0.0, uEdge, -g);
-  // Sunlit is the cloud's bright body, most of all its sun-facing edge;
-  // warmth goes only into light that is already near neutral, so a blue
-  // streak never passes through green on its way to cream, and a mid-grey
-  // never turns khaki. The rest of the cloud, its flanks and the side turned
-  // away, is the shade: skylight blue, a little darker.
-  float bright = smoothstep(0.6, 0.92, c);
+  // Sunlit is only the true crest, most of all its sun-facing edge, and it
+  // is a pale near-white with the faintest warmth: the tower's glint is the
+  // one warm accent in the frame. Warmth goes only into light that is
+  // already near neutral, so a blue streak never passes through green on
+  // its way to white. Everything below the crest, a partly covered pixel of
+  // the integral as much as a cloud's flank or the side turned away, is the
+  // shade: skylight hue at full mix, so the silk reads as luminous
+  // blue-white and never as a grey-beige smear. Its chroma is the sky's at
+  // the thin fringes and pales toward a blue-white as the cover thickens, so
+  // the silk stays light and is still printed up by the shoulder (FINISH_FS),
+  // not painted a flat mid blue; only the side turned away is a little darker.
+  float bright = smoothstep(0.85, 0.97, c);
   float Cp = length(p.yz);
   float sun = bright * clamp(0.4 + 0.6 * top - 0.4 * under, 0.0, 1.0) * (1.0 - smoothstep(0.03, 0.07, Cp));
-  float shade = smoothstep(0.06, 0.4, c) * (1.0 - bright) * (0.45 + 0.55 * under);
+  float shade = smoothstep(0.06, 0.4, c) * (1.0 - bright);
   vec2 sky = s.yz / max(length(s.yz), 1e-4);
   vec2 ab = mix(p.yz, vec2(cos(uTone.y), sin(uTone.y)) * uTone.z, sun * uTone.x);
-  ab = mix(ab, sky * max(Cp, uTone.w), shade * uTone.x);
-  float L = p.x + (0.025 * sun - 0.04 * shade) * uTone.x;
+  float Ct = mix(max(Cp, uTone.w), TONE_PALE, smoothstep(0.3, 0.9, c));
+  ab = mix(ab, sky * Ct, shade * uTone.x);
+  float L = p.x + (0.05 * sun - 0.04 * shade * under) * uTone.x;
   return max(fromLab(vec3(L, ab)), 0.0);
 }
 void main(){
