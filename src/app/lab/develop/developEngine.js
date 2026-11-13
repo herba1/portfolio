@@ -1,28 +1,32 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Develop. A photograph (a railway mast in Ine, Kyoto, from below, against
-// summer cumulus) comes up like a print in a darkroom tray, but the
-// developer runs through the scene's depth, not across the paper.
+// Develop. A photograph (a wooden utility pole shot from its foot, straight up
+// through its crossarms and cables into summer cumulus, the pole's sides
+// converging on the zenith in the upper third of the frame) comes up like a
+// print in a darkroom tray, but the developer runs through the scene's depth,
+// not across the paper: from the foot of the pole up its length, out along the
+// cables, and into the cloud overhead.
 //
 // Offline (tools/depth/bakes/develop/bake.py) the photo is taken apart into
-// two layers: the sky with every pole, girder and wire painted out, and the
+// two layers: the sky with the pole, its crossarms, braces and every cable painted out, and the
 // structure as a premultiplied matte over it, with a depth key for each.
 //  - Sky key (baked, key.png B): mostly the cloud itself, density from the
 //    fill's whiteness and light blurred to the scale of the masses (sigma 3%
 //    of the width), so a cumulus mass is nearer than its edge and its edge
 //    nearer than the blue; a third from distance (cloud at a fixed height is
-//    nearer overhead, ~ 1 / sin(elevation)). Rank-equalised, so the front
+//    nearer overhead, ~ 1 / sin(elevation), elevation measured from the
+//    zenith the pole points at). Rank-equalised, so the front
 //    covers the sky at an even pace. Low-frequency on purpose: read at the
 //    scale of the curds, the front was an iso-contour round every puff, a
 //    tide line round dozens of islands; at this scale it is a few large
 //    lobes threading the cumulus.
 //  - Structure key: Depth Anything V2, percentile-normalised, median-
 //    filtered, near values dilated, half rank-equalised so the front spends
-//    its time evenly along the girder.
+//    its time evenly up the pole and out along the cables.
 //
 // A front sweeps that key, far to near (press on the sky) or near to far
-// (press on the mast). Behind it, the photograph. Ahead of it, per layer:
+// (press on the pole). Behind it, the photograph. Ahead of it, per layer:
 //  - defocus, a real disc gather (scatter-as-gather, cat's-eye towards the
 //    corners) whose circle of confusion grows with the depth still to cover.
 //    On the structure bright taps weigh more, so its specular hardware
@@ -62,7 +66,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Everything renders through _kit/film.js (summer) in linear light.
 //
 // Query: ?front=0..1 holds the front (0 blank, 1 developed); ?from=far runs
-// it from the far sky in (the default is from the mast outward); ?still=1
+// it from the far sky in (the default is from the pole outward); ?still=1
 // skips the opening.
 
 const BASE = "/lab/develop/";
@@ -84,8 +88,8 @@ const F_START = -0.1;
 const F_END = 1.06;
 
 // Drag progress to the front. The key runs structure 1..FG_LO and sky
-// SKY_SPAN..0 (from the mast) or the other way (from the far sky). From the
-// mast the structure takes the first SPLIT of the drag and the sky the rest,
+// SKY_SPAN..0 (from the pole) or the other way (from the far sky). From the
+// pole the structure takes the first SPLIT of the drag and the sky the rest,
 // at an even pace (the sky key is rank-equalised, so its share developed is
 // t^SKY_GAMMA): by mid-drag about three tenths of the sky has developed,
 // by three quarters nearly two thirds, rather than a pale sheet that rushes in
@@ -281,7 +285,7 @@ const GRADE = `
 // clear sky: cloud cores (white, little chroma, bright) keep their light, and
 // the shadow sides between, grey and a little blue, take part of the gain, so
 // they pick up the skylight's blue instead of going grey.
-const vec3 SKY_REF = vec3(0.205, 0.347, 0.571);  // the photo's clear blue, linear
+const vec3 SKY_REF = vec3(0.101, 0.276, 0.487);  // the photo's clear blue, linear
 const vec3 SKY_TOP = vec3(0.055, 0.118, 0.34);   // through the film: ~hue 212, sat .8, value .58
 const vec3 SKY_BOT = vec3(0.095, 0.2, 0.5);      // ...easing to ~sat .72, value .7
 float skyness(vec3 c) {
@@ -444,7 +448,7 @@ vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
 // The latent steel. Ahead of the front the structure is not drawn at all as
 // itself: it is the sky round it with a little density in it, sky times
 // (1 - LATENT x matte x strength), the way an undeveloped image sits in an
-// emulsion, a faint darker shadow of the mast in the sky's own colour, never
+// emulsion, a faint darker shadow of the pole in the sky's own colour, never
 // a lighter, greyer copy over it. strength comes in from the front (a
 // structure just ahead is already most of the way to latent) and the density
 // builds in log light, so the steel comes up through the sky's tones into
@@ -503,7 +507,7 @@ vec3 smoothAt(sampler2D t, vec2 uv) {
 // skyline glows. Halation: the same spill, from the narrow level, where it
 // lands on something dark (steel and wire against cloud: the matte, a, and
 // not the bright hardware) exposes the red layer, a thin warm ring where the
-// mast crosses cumulus; plain blue next to cloud is lit by it too but is not
+// pole and cables cross cumulus; plain blue next to cloud is lit by it too but is not
 // steel, so it takes none (and the ring is only round the steel against
 // cloud). Both
 // held softly under the developed cloud round the pixel (cap), so no white
@@ -664,7 +668,7 @@ export async function createDevelop(host, { embedded = false } = {}) {
 
   const [plateImg, fillImg, alphaImg, keyImg] = await Promise.all(["plate.webp", "fill.webp", "alpha.png", "key.png"].map((n) => bitmap(BASE + n)));
 
-  // A small copy of the matte, to know whether a press landed on the mast.
+  // A small copy of the matte, to know whether a press landed on the pole.
   const probe = (() => {
     const c = new OffscreenCanvas(240, 160);
     const x = c.getContext("2d", { willReadFrequently: true });
@@ -837,8 +841,8 @@ export async function createDevelop(host, { embedded = false } = {}) {
     opening = null;
     if (st.p < 0.015 && Math.abs(st.v) < 0.05) {
       // From blank, where you press decides the order: the sky, and the
-      // developer comes in from the far sky towards you; the mast, and it
-      // spreads from the nearest steel outward.
+      // developer comes in from the far sky towards you; the pole, and it
+      // spreads from the foot of the pole outward.
       const u = (p.x - rect.x) / rect.w;
       const v = (p.y - rect.y) / rect.h;
       st.dir = alphaAt(u, v) > 0.4 ? -1 : 1;

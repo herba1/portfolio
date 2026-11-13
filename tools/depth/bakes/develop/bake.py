@@ -48,14 +48,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "spatial-photos"))
 from common import pushpull, smoothstep, disk  # noqa: E402
 
-SRC = os.environ.get("SRC", "/tmp/claude-0/library/photos/ine-catenary-clouds.jpg")
-DEPTH = os.environ.get("DEPTH", "/tmp/claude-0/library/depth/ine-catenary-clouds.png")
+SRC = os.environ.get("SRC", "/tmp/claude-0/library/photos/pole-zenith-wires.jpg")
+DEPTH = os.environ.get("DEPTH", "/tmp/claude-0/library/depth/pole-zenith-wires.png")
+# The source is 3593x2736 (4:3); the print is 3:2, so a full-width band of it,
+# 2395 rows from y = 200 (x0, y0, w, h in source px). The depth map is at the
+# photo's own resolution and takes the same crop.
+CROP = tuple(int(v) for v in os.environ.get("CROP", "0,200,3593,2395").split(","))
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 FILL_ONLY = "--fill-only" in sys.argv
 OUT = ARGS[0]
 WK = ARGS[1] if len(ARGS) > 1 else OUT
 LAMA = os.environ.get("LAMA", "/tmp/claude-0/models/lama-carve/lama_fp32.onnx")
 W, H = 2400, 1600
+# Hang droppers on the matte (catenary plates only; see relight_fill).
+DROPPERS = os.environ.get("DROPPERS", "0") == "1"
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
 
@@ -171,6 +177,9 @@ def relight_fill(srgb, lin, alpha, prev, model=LAMA, scale=2):
     m1 = cv2.dilate(_u8(s01 | cells), disk(9)) > 0
     near = cv2.dilate(_u8(alpha > 0.3), disk(90)) > 0
     rod = (vl > 0.018) & (np.abs(dx) > 0.04) & near & ~m1
+    # (a catenary has droppers; a utility pole has none, and on this plate
+    # the search only finds the vertical grain of cloud beside the wires)
+    rod &= DROPPERS
     rod = cv2.dilate(_u8(rod), disk(2)) > 0
     touch = cv2.dilate(_u8(m1), disk(8)) > 0
     n, lab, st_, _ = cv2.connectedComponentsWithStats(_u8(rod), connectivity=8)
@@ -262,13 +271,18 @@ if FILL_ONLY:
     sys.exit(0)
 
 
-bgr = cv2.imread(SRC, cv2.IMREAD_COLOR)
+def crop(a):
+    x0, y0, cw, ch = CROP
+    return a[y0:y0 + ch, x0:x0 + cw]
+
+
+bgr = crop(cv2.imread(SRC, cv2.IMREAD_COLOR))
 bgr = cv2.resize(bgr, (W, H), interpolation=cv2.INTER_AREA)
 srgb = bgr[:, :, ::-1].astype(np.float32) / 255
 lin = s2l(srgb)
 
 # --- depth prep ---------------------------------------------------------
-d = cv2.imread(DEPTH, cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535
+d = crop(cv2.imread(DEPTH, cv2.IMREAD_UNCHANGED)).astype(np.float32) / 65535
 d = cv2.resize(d, (W, H), interpolation=cv2.INTER_AREA)
 lo, hi = np.percentile(d, 2), np.percentile(d, 99.7)
 dn_raw = np.clip((d - lo) / (hi - lo), 0, 1).astype(np.float32)
@@ -295,6 +309,12 @@ roi = cv2.dilate(((dn_raw > T_LO) | thin).astype(np.uint8), disk(5)) > 0
 # The depth model's halo round the mast is sky-bright, so it is not core.
 lum_lin = lin @ LUMA
 core = (cv2.erode((dn_raw > T_HI).astype(np.uint8), disk(3)) > 0) & (lum_lin < 0.12)
+# ...except where the sun reaches it: the pole's lit upper wood, the galvanised
+# braces and the bracket plates at the crossarms are pale grey, as light as
+# the sky. Well inside what the depth calls near (eroded past its halo) and
+# neutral rather than the sky's blue, they are structure too.
+_sat = (srgb.max(2) - srgb.min(2)) / np.maximum(srgb.max(2), 1e-3)
+core |= (cv2.erode((dn_raw > 0.3).astype(np.uint8), disk(5)) > 0) & (_sat < 0.3)
 known = ~cv2.dilate(roi.astype(np.uint8), disk(3)).astype(bool)
 
 # --- sky fill (B) -------------------------------------------------------
@@ -405,6 +425,12 @@ def _bright_hardware(alpha):
         span = np.hypot(st_[:, cv2.CC_STAT_WIDTH], st_[:, cv2.CC_STAT_HEIGHT]).astype(np.float32)
         rod = (area < 5.0 * span) & (span > 16)
         att &= rod if rod_only else (rod | (area < 160))
+        if not rod_only:
+            # A lit fitting (a cable clamp, a bracket) sits on the cable, so
+            # the depth sees it near; a puff of cloud caught against a cable
+            # is as far as the sky. Mean depth over the component.
+            dsum = np.bincount(lab.ravel(), weights=dn_raw.ravel(), minlength=n)
+            att &= dsum / np.maximum(area, 1) > 0.1
         att[0] = False
         return att[lab]
 
@@ -479,17 +505,27 @@ cloud = (cloud - cloud.min()) / max(1e-4, cloud.max() - cloud.min())
 # distance (cloud at a fixed height is nearer overhead, ~ 1 / sin(elevation)),
 # and rank-equalised over the open sky so the front covers it at an even pace.
 KD_W = 0.35
-PITCH, VFOV = np.radians(34), np.radians(40)
 wh = fill.min(2) / np.maximum(fill.max(2), 1e-4)
 dens = smoothstep(0.15, 0.9, wh) * smoothstep(0.12, 0.7, y)
 dens = cv2.GaussianBlur(dens.astype(np.float32), (0, 0), 0.03 * W)
 sky_px = alpha < 0.5
 lo, hi = np.percentile(dens[sky_px], 1), np.percentile(dens[sky_px], 99)
 dens = np.clip((dens - lo) / max(1e-4, hi - lo), 0, 1)
-vv = (np.arange(H, dtype=np.float32) + 0.5) / H
-el = PITCH + np.arctan((0.5 - vv) * 2 * np.tan(VFOV / 2))
+# The camera looks almost straight up the pole: its verticals meet at the
+# zenith, in the upper third of the print, at ZEN (print px; found by running
+# the pole's two edges, rows 1100-1575, up to where they cross). F_PX is the focal
+# length in print px (a ~24 mm-equivalent field, 74 degrees across). A ray's
+# elevation is its angle from the zenith's ray, so the cloud overhead, round
+# the vanishing point, is nearest and the bottom corners furthest.
+ZEN, F_PX = (1128.0, 270.0), 1600.0
+xx, yy = np.meshgrid(np.arange(W, dtype=np.float32) + 0.5, np.arange(H, dtype=np.float32) + 0.5)
+ray = np.stack([xx - W / 2, yy - H / 2, np.full_like(xx, F_PX)], 2)
+ray /= np.linalg.norm(ray, axis=2, keepdims=True)
+zr = np.array([ZEN[0] - W / 2, ZEN[1] - H / 2, F_PX], np.float32)
+zr /= np.linalg.norm(zr)
+el = np.arcsin(np.clip(ray @ zr, 1e-3, 1))
 dist = np.log(1 / np.sin(el))
-kd = ((dist[-1] - dist) / (dist[-1] - dist[0]))[:, None] * np.ones((1, W), np.float32)
+kd = ((dist.max() - dist) / (dist.max() - dist.min())).astype(np.float32)
 ks = (KD_W * kd + (1 - KD_W) * dens).astype(np.float32)
 order = np.sort(ks[sky_px])
 sky_key = (np.searchsorted(order, ks, side="left") / max(1, len(order) - 1)).astype(np.float32)
