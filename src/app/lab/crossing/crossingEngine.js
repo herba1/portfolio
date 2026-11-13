@@ -76,7 +76,7 @@ const PLANES = [
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
   // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [-0.16406, 0.09587, 0.94629, 1.20059], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  { file: "clouds", rect: [-0.11816, 0.09587, 0.89844, 1.20059], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
@@ -114,6 +114,15 @@ const SAFE = PLANES.map(({ rect: r, ends = [], clean = [] }) =>
   ].map((v, i) => clean[i] ?? v),
 );
 const SPREAD = 1.0; // plane offsets are o * SPREAD * print width at split 1
+// Past SPLIT_KNEE the split eases into SPLIT_MAX, however far the hand pulls.
+// Further apart, the cable bunch under the eave (cut from the photo where it
+// crossed the far roofs, and kept as cut) slides off the roofs it was cut
+// against and breaks into dashes hanging in the sky, and the near cards'
+// defocus swallows the signal.
+const SPLIT_KNEE = 0.55;
+const SPLIT_MAX = 0.78;
+const easeSplit = (x) =>
+  x <= SPLIT_KNEE ? x : SPLIT_KNEE + (SPLIT_MAX - SPLIT_KNEE) * Math.tanh((x - SPLIT_KNEE) / (SPLIT_MAX - SPLIT_KNEE));
 const FOVY = 30; // degrees
 const MAX_YAW = 21;
 const MAX_PITCH = 14;
@@ -539,7 +548,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   // Which plane is under the pointer (nearest first), by casting the ray from
   // the eye through the window into each plane's matte.
   const pick = (px, py) => {
-    const G = geometry(split.x);
+    const G = geometry(easeSplit(clamp(split.x, 0, 1.08)));
     const E = eyeFor(G.pivot, swing.yaw, swing.pitch);
     for (let k = N - 1; k >= 1; k--) {
       const [u, v] = castUv(G, E, px - G.W / 2, -(py - G.H / 2), k);
@@ -799,7 +808,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     if (!held && (grab || p.inside) && split.x > 0.04) focusK.to = pick(p.x, p.y);
     else if (!held && split.x < 0.02) focusK.to = focusDefault;
     focusK.x = damp(focusK.x, focusK.to, 1 / 0.28, dt);
-    const s = clamp(split.x, 0, 1.08);
+    const s = easeSplit(clamp(split.x, 0, 1.08));
     const G = geometry(s);
     const fk = focusK.x;
     const k0 = Math.floor(clamp(fk, 0, N - 1));

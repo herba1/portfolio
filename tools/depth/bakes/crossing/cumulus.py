@@ -43,12 +43,17 @@ a swing slides it against the rooftops.
              modelled by the silhouette's relief lit from the sun. Only where
              the sun reaches (the faces of the big lobes turned up and right,
              high in the cloud) may it run up to the warm white that rolls off
-             below clipping. Everywhere else the same billows are kept at a
-             lower exposure, their lobes boosted harder (the sky-lit underside
-             is low in contrast), spread over the whole skylight blue-grey
-             range (hue 210-214) from deep crevices to lit lobe tops, so the
-             left flank and the lower body read as lobed cloud in shade, not
-             as one flat fill.
+             below clipping. Everywhere else the cloud stands in skylight: its
+             billows are read from the HDRI's luminance as shot (the un-mixed
+             colour is noise or flat fill in the pockets of shade), band by
+             band, each band taken at its own local strength (the sky-lit
+             underside is low in contrast, and lower still in the haze near
+             the horizon), each lobe lit on its sunward side, and laid over
+             the body's own tone across a skylight blue-grey ramp (hue
+             210-214) from deep crevice to shaded lobe (#9fb6d0) to the lobe
+             tops that face the open sky, so the left flank, the lower body
+             and the foot read as lobed volume in shade, not as one flat fill.
+             Below the roofline the foot thins out lobe by lobe.
              Both views are rectilinear; the tower's is stretched upright
              (STRETCH) and scaled so the cloud towers from behind the roofs to
              well above the crossbuck's arms, in the middle of the frame. The
@@ -130,38 +135,49 @@ MIN_AREA = 30000  # pano px: cumulus, not the scraps round them
 BANK_LAT, BANK_V = (4.0, 16.5), (1.1, 0.5)
 BANK_LON0, BANK_PXDEG = 144.0, 40.0
 BANK_U = ((-0.05, 0.15), (0.68, 0.84))
+# FOOT_V: below the roofline the foot thins out (photo v); FOOT_LOBE, how
+# far its own lobes hold the fade back
+FOOT_V, FOOT_LOBE = (0.9, 1.14), 0.45
 PAD = 0.07  # transparent margin round the cloud, photo widths
 # The silhouette, in pano px: bays of sky narrower than 2 CLOSE_R are closed,
 # the key's thin rim is eroded by ERODE and the edge feathered again by
 # FEATHER (sigma: the sun-facing edges, the shaded ones).
-CLOSE_R, ERODE, FEATHER = 6, 5, (1.5, 2.5)
+CLOSE_R, ERODE, FEATHER = 6, 5, (1.5, 1.8)
 # The shaded edges, rebuilt from the cloud's billows: the band-pass (sigma,
 # px) of its log luminance that moves the edge, and how far (px).
 EDGE_BAND, EDGE_AMP = (28, 110), 40.0
 # Relit cloud, sRGB: a warm sunlit white that the film lands just under
-# clipping, a skylight blue-grey for the shaded billows (k = K_SHADE) and a
-# deeper one for the lobes turned furthest from the sun (k = 0), all near
-# hue 210-214 so the shade reads as sky light, not grey.
+# clipping; in the sun's shade a ramp of skylight blue-greys (hue 210-214, so
+# the shade reads as sky light, not grey) from the deepest crevice to the
+# lobe tops that face the open sky: SHADE_RAMP, at the shade tone s in
+# SHADE_AT (-1 .. 1). CLOUD_SHADE is the shaded lobe itself.
 CLOUD_TOP = (0xFF, 0xF6, 0xE4)
-CLOUD_SHADE = (0x99, 0xAF, 0xC9)
-CLOUD_DEEP = (0x72, 0x89, 0xA6)
-CLOUD_DEEPER = (0x5E, 0x74, 0x93)
-K_SHADE = 0.45
-# local contrast of the billows (log luminance), band by band: the band
-# edges (px) and the gains, coarse to fine (big lobes, lobes, billows,
-# cauliflower) in the sun and in the shade
+CLOUD_SHADE = (0x9F, 0xB6, 0xD0)
+SHADE_RAMP = ((0x5C, 0x73, 0x93), (0x76, 0x90, 0xB0), CLOUD_SHADE, (0xC3, 0xD3, 0xE5))
+SHADE_AT = (-1.0, -0.45, 0.3, 1.0)
+K_SHADE = 0.45  # the sunlit ramp: crevice (k 0) to CLOUD_SHADE (K_SHADE) to the top
+# local contrast of the billows in the sun (log luminance), band by band: the
+# band edges (px) and the gains, coarse to fine (big lobes, lobes, billows,
+# cauliflower)
 DETAIL_SIG = (3.0, 14.0, 40.0, 90.0)
-DETAIL, DETAIL_SH = (1.0, 1.0, 2.3, 3.0), (2.2, 3.2, 2.3, 2.0)
+DETAIL = (1.0, 1.0, 2.3, 3.0)
+# In the shade the HDRI's billows are faint (lit by the sky alone) and their
+# contrast falls off toward the hazy horizon, so each band of them is taken
+# at its own local strength: band-passes of the log luminance between
+# BILLOW_SIG (px; cauliflower, billows, lobes, big lobes, the body), each
+# divided by its own local RMS, weighted BILLOW_W. The whole cloud then
+# carries lobes of the same strength, the flat lower body and left flank
+# included. SH_TEX: how far they swing the shade tone; SH_BASE: the body's
+# own large-scale tone; SH_EMBOSS: each lobe lit on its side toward the sun.
+BILLOW_SIG = (4.0, 10.0, 24.0, 60.0, 140.0)
+BILLOW_W = (0.06, 0.22, 0.44, 0.5, 0.36)
+BILLOW_DENOISE = 1.3
+SH_TEX, SH_BASE, SH_EMBOSS, SH_MID, SH_BODY = 1.2, 0.8, 1.0, 0.35, 0.4
 FORM = 0.55  # how much the silhouette's own relief, lit from the sun, models it
 SUN2D = (0.62, -0.78)  # the sun's direction across the view (x right, y down): up and right
 # Where the sun reaches: the big lobes' relief (weight SUN_W[0]) and the
 # height in the cloud (lat SUN_LAT, weight SUN_W[1]).
-SUN_LAT, SUN_W = (23.0, 33.0), (1.4, 1.6)
-# Out of it a lobe keeps its billows at a lower exposure: the tone (log
-# luminance plus relief, 0 at the cloud's 8th percentile and 1 at its 96th)
-# from SHADE_T[0] to SHADE_T[1] spans deep to shade; below it the deepest
-# crevices ease on toward CLOUD_DEEPER.
-SHADE_T = (0.05, 0.8)
+SUN_LAT, SUN_W = (26.0, 36.0), (1.8, 1.2)
 SHARPEN = 0.5  # unsharp mask on the card, inside the cloud
 LW = np.array([0.2126, 0.7152, 0.0722], np.float32)
 PX_DEG = 16384 / 360  # the 16k pano's px per degree
@@ -204,16 +220,24 @@ BLAT = BANK_LAT[1] + (V - BANK_V[1]) * (BANK_LAT[0] - BANK_LAT[1]) / (BANK_V[0] 
 BLON = BANK_LON0 + (U - UC) * EW / BANK_PXDEG
 
 # ---- the HDRI around the cloud, at its native resolution
-print("reading", HDR)
-pano = cv2.imread(HDR, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-if pano is None:
-    sys.exit("cannot read " + HDR)
-PH, PW = pano.shape[:2]
 (lo0, lo1), (la0, la1) = SUB_LON, SUB_LAT
+CACHE = os.environ.get("CUMULUS_CACHE")  # a .npy of the window, to iterate fast
+if CACHE and os.path.exists(CACHE):
+    sub = np.load(CACHE).astype(np.float32)
+    PW, PH = 16384, 8192
+else:
+    print("reading", HDR)
+    pano = cv2.imread(HDR, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+    if pano is None:
+        sys.exit("cannot read " + HDR)
+    PH, PW = pano.shape[:2]
 x0, x1 = int(lo0 / 360 * PW), int(lo1 / 360 * PW)
 y0, y1 = int((0.5 - la1 / 180) * PH), int((0.5 - la0 / 180) * PH)
-sub = np.ascontiguousarray(pano[y0:y1, x0:x1, ::-1]).astype(np.float32)
-del pano
+if not (CACHE and os.path.exists(CACHE)):
+    sub = np.ascontiguousarray(pano[y0:y1, x0:x1, ::-1]).astype(np.float32)
+    del pano
+    if CACHE:
+        np.save(CACHE, sub)
 sub = np.maximum(np.minimum(np.nan_to_num(sub, posinf=50.0), 50.0), 1e-5)
 sh_, sw_ = sub.shape[:2]
 slon = lo0 + (np.arange(sw_, dtype=np.float32) + 0.5) / PW * 360
@@ -350,14 +374,25 @@ a_out = np.where(a_out < 1 / 255, 0, a_out)
 del hgt, gx, gy, facing
 
 # ---- relight
-LF = np.maximum(F @ LW, 1e-4)
-# the billows: a local-contrast boost in log luminance, band by band (the
-# big lobes, the billows, the cauliflower: DETAIL over the bands between
-# DETAIL_SIG), measured inside the cloud only (the sky round it would pull
-# the edges down into a dark rim). The shade gets its own gains (DETAIL_SH),
-# heavier on the big lobes: in the HDRI the shaded lower body is lit by the
-# sky alone and its lobes barely differ in brightness.
-mb = [np.log(LF)] + [cv2.GaussianBlur(np.log(LF) * ac, (0, 0), sg) / (cv2.GaussianBlur(ac, (0, 0), sg) + 1e-4) for sg in DETAIL_SIG]
+# The billows are read from the HDRI's own luminance as it was shot (L): the
+# un-mixed colour F is noise where the key read a pocket of shade as half
+# sky, and flat where a pocket was filled, and those pockets lie all through
+# the shaded body. A light blur first (the HDRI's sensor noise, strongest in
+# the hazy rows near the horizon).
+lgR = cv2.GaussianBlur(np.log(np.maximum(L, 1e-4)), (0, 0), BILLOW_DENOISE)
+del L
+
+
+def mblur(x, sg):
+    """Mean of x over the cloud only (the sky round it would pull the edges
+    down into a dark rim)."""
+    return cv2.GaussianBlur(x * ac, (0, 0), sg) / (cv2.GaussianBlur(ac, (0, 0), sg) + 1e-4)
+
+
+# the billows in the sun: a local-contrast boost in log luminance, band by
+# band (the big lobes, the billows, the cauliflower: DETAIL over the bands
+# between DETAIL_SIG)
+mb = [lgR] + [mblur(lgR, sg) for sg in DETAIL_SIG]
 
 
 def boost(bands, gains):
@@ -368,12 +403,45 @@ def boost(bands, gains):
 
 
 lg = boost(mb, DETAIL)
-lg_sh = boost(mb, DETAIL_SH)
 del mb
 LF = np.exp(lg)
 top = float(np.percentile(LF[inside], 96))
 low = float(np.percentile(LF[inside], 8))
 t = (np.log(LF) - np.log(low)) / (np.log(top) - np.log(low))
+# The billows in the shade, each band at its own local strength (BILLOW_SIG):
+# each band's local RMS is floored at a third of its typical strength in the
+# cloud, so a band is lifted at most about three times where the cloud is
+# smooth and noise is not blown up into texture.
+# nb, every scale; nlo, the lobes and up (it also breaks up the foot).
+lev = [lgR]
+nb = np.zeros_like(lgR)
+nlo = np.zeros_like(lgR)
+for i, (sg, w) in enumerate(zip(BILLOW_SIG, BILLOW_W)):
+    lev.append(mblur(lgR, sg))
+    bnd = lev[-2] - lev[-1]
+    ms = mblur(bnd * bnd, 2.5 * sg)
+    floor = 0.12 * float(np.median(ms[inside]))
+    q = bnd / (1.5 * np.sqrt(ms + floor))
+    q = 1.5 * np.tanh(q / 1.5)
+    nb += w * q
+    if sg >= 20.0:
+        nlo += w * q
+    lev[-2] = None
+del lev, bnd, ms, q
+sdv = float(nb[inside].std()) + 1e-4
+nb /= sdv
+nlo /= float(nlo[inside].std()) + 1e-4
+# the body's own large-scale tone (brighter high and toward the sun, darker
+# in the underside), 0 at its median
+body_t = mblur(lgR, BILLOW_SIG[-1])
+del lgR
+body_t = (body_t - float(np.median(body_t[inside]))) / (np.log(top) - np.log(low))
+# each lobe lit on its side toward the sun: the lobes' own relief (nlo,
+# smoothed) along the sun's direction
+lob = cv2.GaussianBlur(nlo, (0, 0), 5.0)
+emb = (cv2.Sobel(lob, cv2.CV_32F, 1, 0, ksize=3) * SUN2D[0] + cv2.Sobel(lob, cv2.CV_32F, 0, 1, ksize=3) * SUN2D[1]) / 8
+emb = -emb / (float(emb[inside].std()) + 1e-4)
+del lob
 # The HDRI's shaded flank is low in contrast (it is lit by the sky alone). The
 # silhouette's relief (its blurred coverage, at the scale of the big lobes and
 # of the billows), lit from the sun's side, puts the form back: the turrets'
@@ -394,8 +462,6 @@ for sig, w in ((90.0, 0.5), (36.0, 0.5), (12.0, 0.4)):
         big += w * lam
 del hgt, gx, gy, nx, ny, lam
 t = t + FORM * rel
-t_sh = (lg_sh - np.log(low)) / (np.log(top) - np.log(low)) + FORM * rel
-del lg_sh
 # Where the sun reaches. A cumulus is lit on the faces that turn to the sun
 # (up and right) and stands in its own shade everywhere else: the left flank,
 # the lower lobes, the underside. The big lobes' relief and the height in the
@@ -407,31 +473,43 @@ del big, hl
 k_lit = np.clip(t, 0, 1.3)
 k_lit = 0.5 * k_lit ** 1.25 + 0.5 * smoothstep(0.08, 1.0, k_lit)
 k_lit = np.where(k_lit > 0.8, 0.8 + 0.2 * np.tanh((k_lit - 0.8) / 0.2), k_lit)
-# In the shade the same billows are kept, at a lower exposure: the HDRI's own
-# luminance (and the relief) over SHADE_T spread across the whole skylight
-# range, deep to shade, rather than squeezed into its dark end, so the lower
-# lobes and the left flank hold their texture instead of going to one flat
-# blue-grey.
-k_sh = np.minimum((t_sh - SHADE_T[0]) / (SHADE_T[1] - SHADE_T[0]), 1)
-k_sh = K_SHADE * np.where(k_sh > 0, k_sh, -0.4 * np.tanh(-k_sh / 0.4))
-k = k_sh + (k_lit - k_sh) * sun
-del k_lit, k_sh, sun, t_sh
+# In the shade: the billows at their own strength over the body's tone, the
+# relief and each lobe's sunward side, softly limited to -1 .. 1 and spread
+# over the whole skylight ramp, deep crevice to the lobe tops.
+# The body's tone is limited first and the billows laid over it after, so
+# they keep their full swing at the bright top of the shade and in the
+# darkest underside alike, rather than going flat where the body saturates.
+s_sh = SH_BODY * np.tanh(SH_MID + SH_BASE * body_t + FORM * rel) + SH_TEX * np.tanh(0.9 * nb + SH_EMBOSS * 0.35 * emb)
+s_sh = np.tanh(s_sh / 0.9) * 0.9 / np.tanh(1 / 0.9)
+del nb, body_t, emb
 if WORK:
     os.makedirs(WORK, exist_ok=True)
-    for nm, im in (("k", k), ("rel", 0.5 + rel), ("a_out", a_out)):
+    for nm, im in (("k", k_lit * sun + (0.5 + 0.5 * s_sh) * (1 - sun)), ("rel", 0.5 + rel), ("a_out", a_out), ("sh", 0.5 + 0.5 * s_sh), ("nlo", 0.5 + 0.2 * nlo)):
         cv2.imwrite(os.path.join(WORK, nm + ".jpg"), (np.clip(im * (ac > 0.02), 0, 1) * 255).astype(np.uint8)[::2, ::2])
-# three stops, mixed in sRGB (perceptual): the deep skylight blue-grey of the
-# lobes turned furthest from the sun, the lighter blue-grey of the shaded
-# billows, the warm white of the sunlit tops
-deep = np.array(CLOUD_DEEP, np.float32) / 255
+
+
+def ramp(x, at, cols):
+    """Piecewise-linear colour ramp (sRGB) over x."""
+    out = np.zeros(x.shape + (3,), np.float32)
+    cs = [np.array(c, np.float32) / 255 for c in cols]
+    xx = np.clip(x, at[0], at[-1])[..., None]
+    out += cs[0]
+    for i in range(len(at) - 1):
+        f = np.clip((xx - at[i]) / (at[i + 1] - at[i]), 0, 1)
+        out += f * (cs[i + 1] - cs[i])
+    return out
+
+
+# in the sun: crevice (the shade's deep stop) to the shaded lobe to the warm
+# white of the sunlit tops; in the shade: the skylight ramp. Mixed in sRGB
+# (perceptual).
 shade = np.array(CLOUD_SHADE, np.float32) / 255
 lit = np.array(CLOUD_TOP, np.float32) / 255
-k3 = k[..., None]
-deeper = np.array(CLOUD_DEEPER, np.float32) / 255
-lo_ = deep + (shade - deep) * np.clip(k3 / K_SHADE, 0, 1)
-lo_ = np.where(k3 < 0, deep + (deeper - deep) * np.clip(-k3 / (0.4 * K_SHADE), 0, 1), lo_)
-col = _lin(np.where(k3 < K_SHADE, lo_, shade + (lit - shade) * np.clip((k3 - K_SHADE) / (1 - K_SHADE), 0, 1) ** 1.3))
-del k3, lo_
+k3 = k_lit[..., None]
+c_lit = np.where(k3 < K_SHADE, ramp(k_lit / K_SHADE, (0.0, 1.0), (SHADE_RAMP[1], CLOUD_SHADE)), shade + (lit - shade) * np.clip((k3 - K_SHADE) / (1 - K_SHADE), 0, 1) ** 1.3)
+c_sh = ramp(s_sh, SHADE_AT, SHADE_RAMP)
+col = _lin(c_sh + (c_lit - c_sh) * sun[..., None])
+del k3, c_lit, c_sh, k_lit, sun, s_sh
 # The colour at the silhouette is un-mixed from very little cloud: every px
 # off the cloud's solid body takes the colour of the body just inside it.
 wf = smoothstep(0.5, 0.95, ae)[..., None]
@@ -459,7 +537,8 @@ def through(pm_, lon, lat):
 
 card = through(pm * sel_t[..., None], LON, LAT)
 foot = through(pm * sel_b[..., None], BLON, BLAT)
-del pm, sel_t, sel_b
+nlo_f = through(nlo, BLON, BLAT)
+del pm, sel_t, sel_b, nlo
 rng_ = np.random.default_rng(5)
 wob = cv2.resize(rng_.standard_normal((ch // 48 + 2, cw // 48 + 2)).astype(np.float32), (cw, ch), interpolation=cv2.INTER_CUBIC)
 wob = cv2.GaussianBlur(wob, (0, 0), 16)
@@ -467,9 +546,13 @@ wob /= max(float(wob.std()), 1e-6)
 uw = U + 0.035 * wob
 del wob
 wu = smoothstep(*BANK_U[0], uw) * (1 - smoothstep(*BANK_U[1], uw))
-wu = wu * smoothstep(BANK_LAT[0] - 2, BANK_LAT[0], BLAT)
+# and below the roofline (FOOT_V) it thins out lobe by lobe toward the
+# horizon rather than going on as one flat slab: where it fades, the lobes
+# (nlo) hold on longest and the hollows between them go first
+wu = wu * (1 - 0.85 * smoothstep(*FOOT_V, V)) * smoothstep(BANK_LAT[0] - 2, BANK_LAT[0], BLAT)
+wu = smoothstep(0.12, 0.88, wu + FOOT_LOBE * np.tanh(nlo_f) * 4 * wu * (1 - wu))
 card = card + foot * (wu[..., None] * (1 - np.clip(card[..., 3:], 0, 1)))
-del foot, wu, uw
+del foot, wu, uw, nlo_f
 ca_ = np.clip(card[..., 3], 0, 1)
 ca_ = np.where(ca_ < 1 / 255, 0, ca_)
 cc_ = np.clip(card[..., :3] / np.maximum(card[..., 3:], 1e-4), 0, 1)
