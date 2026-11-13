@@ -424,6 +424,172 @@ def _read_lin(path):
     return s2l(cv2.imread(path, cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255)
 
 
+# --- sky key, 0 far .. 1 near (key.png B, G) -----------------------------
+# The developer reaches a cumulus core before its edge and the blue beyond,
+# so the sky's key is mostly cloud density. Read at the scale of the curds it
+# makes the front an iso-contour round every puff: dozens of islands, each
+# outlined. Blurred to the scale of the masses (sigma 3% of the width) it
+# makes a few large, smooth lobes that thread the cumulus. Then a third from
+# distance (cloud at a fixed height is nearer overhead, ~ 1 / sin(elevation)),
+# and rank-equalised over the open sky so the front covers it at an even pace.
+KD_W = 0.35
+
+
+def sky_key_of(fill, alpha):
+    y = fill @ LUMA
+    wh = fill.min(2) / np.maximum(fill.max(2), 1e-4)
+    dens = smoothstep(0.15, 0.9, wh) * smoothstep(0.12, 0.7, y)
+    dens = cv2.GaussianBlur(dens.astype(np.float32), (0, 0), 0.03 * W)
+    sky_px = alpha < 0.5
+    lo, hi = np.percentile(dens[sky_px], 1), np.percentile(dens[sky_px], 99)
+    dens = np.clip((dens - lo) / max(1e-4, hi - lo), 0, 1)
+    # A ray's elevation is its angle from the zenith's ray (ZEN, F_PX above), so
+    # the cloud overhead, round the vanishing point, is nearest and the bottom
+    # corners furthest.
+    el = np.arcsin(np.clip(np.cos(zenith_angle()), 1e-3, 1))
+    dist = np.log(1 / np.sin(el))
+    kd = ((dist.max() - dist) / (dist.max() - dist.min())).astype(np.float32)
+    ks = (KD_W * kd + (1 - KD_W) * dens).astype(np.float32)
+    order = np.sort(ks[sky_px])
+    key = (np.searchsorted(order, ks, side="left") / max(1, len(order) - 1)).astype(np.float32)
+    return cv2.GaussianBlur(key, (0, 0), 4)
+
+
+def write_sky_key(path, sky_key, key_r8):
+    """key.png: B = sky key high byte, G = low byte (16 bit), R = the
+    structure key (8 bit), at half size, BGR on disk."""
+    ks = cv2.resize(sky_key, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
+    ks16 = np.clip(np.round(ks * 65535), 0, 65535).astype(np.uint32)
+    kc = np.stack([(ks16 >> 8).astype(np.uint8), (ks16 & 255).astype(np.uint8), key_r8], 2)
+    cv2.imwrite(path, kc)
+
+
+# --- --sky: a new sky behind the same structure ---------------------------
+# The plate's own sky (a pale cerulean with small, soft, flat-white curds)
+# reads as blurred blobs between the wires. --sky <photo> puts a photographed
+# cumulus sky behind the structure instead (SKY_SRC, CC0), graded to the same
+# radial cobalt, and leaves the structure, its matte and its depth key exactly
+# as they are: the structure is plate - (1 - alpha) * fill, premultiplied,
+# taken from the layers as first shipped (kept in WK as orig-*.webp), and the
+# new plate is that over the new sky. The sky key is measured again from the
+# new cloud.
+#
+# The cloud is graded as cumulus in sun is lit: its tops by the sun, a warm
+# neutral, rolled off on a shoulder well under paper white (sRGB luma <= TOP,
+# so no channel reaches 250 even after the warm tint); its shadowed undersides
+# lit only by the sky, so they take the sky's blue (SHADE_COL), more the
+# deeper the shade; the clear sky between takes the cobalt by a gain in log
+# light, so the photograph's own grain and drawing ride on it.
+SKY_SRC = os.environ.get("SKY_SRC", "/tmp/claude-0/climb/develop/work/cc0/big.jpg")
+# (fx, fy, scale): the print's window into the sky photo, centre in 0..1 and
+# the share of the photo's width it takes
+SKY_WIN = tuple(float(v) for v in os.environ.get("SKY_WIN", "0.5,0.5,1.0").split(","))
+SKY_FLIP = os.environ.get("SKY_FLIP", "0") == "1"
+TOP = float(os.environ.get("TOP", "0.9"))
+SHADE_COL = _hex(os.environ.get("SHADE_COL", "#8aa6c8"))
+SHADE = float(os.environ.get("SHADE", "0.7"))
+
+
+def _sky_window(path):
+    bgr = cv2.imread(path, cv2.IMREAD_COLOR)
+    if SKY_FLIP:
+        bgr = bgr[:, ::-1]
+    h0, w0 = bgr.shape[:2]
+    fx, fy, sc = SKY_WIN
+    cw = w0 * sc
+    ch = cw / (W / H)
+    if ch > h0:
+        ch = h0
+        cw = ch * (W / H)
+    x0 = int(round(np.clip(fx * w0 - cw / 2, 0, w0 - cw)))
+    y0 = int(round(np.clip(fy * h0 - ch / 2, 0, h0 - ch)))
+    sub = bgr[y0:y0 + int(round(ch)), x0:x0 + int(round(cw))]
+    sub = cv2.resize(sub, (W, H), interpolation=cv2.INTER_AREA)
+    return s2l(sub[:, :, ::-1].astype(np.float32) / 255)
+
+
+def regrade_cumulus(P):
+    """A photographed cumulus sky (linear) graded for the print: cobalt round
+    the zenith opening to cyan, sunlit warm-neutral tops, skylight-blue
+    undersides. Returns linear."""
+    h, w = P.shape[:2]
+    s = _skyness(P)
+    q = 4
+    lg = np.log(np.maximum(P, 1e-4))
+    lq = cv2.resize(lg, (w // q, h // q), interpolation=cv2.INTER_AREA)
+    sq = cv2.resize(s, (w // q, h // q), interpolation=cv2.INTER_AREA)
+    wq = (sq > 0.85).astype(np.float32) * sq
+    num = cv2.GaussianBlur(lq * wq[..., None], (0, 0), 20)
+    den = cv2.GaussianBlur(wq, (0, 0), 20)
+    est = pushpull(num / np.maximum(den, 1e-5)[..., None], np.clip(den / 0.25, 0, 1))
+    S = np.exp(cv2.resize(est, (w, h), interpolation=cv2.INTER_CUBIC))
+    th = zenith_angle(h, w)
+    t = np.clip(th / th.max(), 0, 1) ** GRADE_EASE
+    t = t * t * (3 - 2 * t) * 0.35 + t * 0.65
+    T = np.exp(np.log(s2l(GRADE_ZEN)) * (1 - t[..., None]) + np.log(s2l(GRADE_RIM)) * t[..., None])
+    # Cloud's share of each pixel: how far it has gone from the clear sky
+    # behind it towards neutral white (in linear light, by whiteness).
+    wh = P.min(2) / np.maximum(P.max(2), 1e-4)
+    wS = (S.min(2) / np.maximum(S.max(2), 1e-4))
+    op = np.clip((wh - wS) / np.maximum(0.92 - wS, 1e-3), 0, 1)
+    op = smoothstep(0.0, 1.0, op).astype(np.float32)
+    # the sky's share swapped: a gain where it is clear, additively under a
+    # thin edge (a gain on a pale edge tints all of its light)
+    clear = (1 - op)[..., None]
+    mul = P * (T / S)
+    add = np.maximum(P + clear * (T - S), 0.2 * P)
+    k = clear ** 2
+    B = mul * k + add * (1 - k)
+    # The cloud's own light: its luminance, on a shoulder under TOP (sRGB)
+    Y = l2s(np.clip(B @ LUMA, 0, 1))
+    knee = TOP - 0.16
+    Ys = np.where(Y < knee, Y, knee + (TOP - knee) * np.tanh((Y - knee) / (TOP - knee)))
+    Yl = s2l(Ys)
+    # lit by the sun (warm neutral) at the tops, by the sky (blue) in shade:
+    # shade is how far under the cloud's own sunlit level round it this is
+    # (a cumulus mass's sunlit level, reached over ~150 px: at 1/4 size)
+    top = cv2.resize(Yl * op, (w // 4, h // 4), interpolation=cv2.INTER_AREA)
+    top = cv2.GaussianBlur(cv2.dilate(top, disk(36)), (0, 0), 12)
+    top = cv2.resize(top, (w, h), interpolation=cv2.INTER_CUBIC)
+    rel = Yl / np.maximum(top, 1e-3)
+    shade = (1 - smoothstep(0.35, 0.95, rel)) * SHADE
+    warm = HI_COL / float(HI_COL @ LUMA)
+    blue = SHADE_COL / float(SHADE_COL @ LUMA)
+    tint = warm * (1 - shade[..., None]) + blue * shade[..., None]
+    cloud = Yl[..., None] * tint
+    # over the clear sky the graded blue stays as it is; the cloud's tint
+    # comes in with its share
+    o = op[..., None] ** 0.8
+    out = B * (Yl / np.maximum(B @ LUMA, 1e-5))[..., None] * (1 - o) + cloud * o
+    g = l2s(np.clip(out, 0, 1))
+    cl = op > 0.6
+    print("sky: cloud px", round(float(cl.mean()), 3), "top sRGB max", np.round(g[cl].max(0) * 255, 1) if cl.any() else "-",
+          "p99.9", np.round(np.percentile(g[cl], 99.9, axis=0) * 255, 1) if cl.any() else "-")
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
+if "--sky" in sys.argv:
+    alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+    os.makedirs(WK, exist_ok=True)
+    for n in ("plate.webp", "fill.webp", "key.png"):
+        if not os.path.exists(os.path.join(WK, "orig-" + n)):
+            import shutil
+            shutil.copyfile(os.path.join(OUT, n), os.path.join(WK, "orig-" + n))
+    plate0 = _read_lin(os.path.join(WK, "orig-plate.webp"))
+    fill0 = _read_lin(os.path.join(WK, "orig-fill.webp"))
+    a3 = alpha[..., None]
+    pm = np.minimum(np.maximum(plate0 - (1 - a3) * fill0, 0), a3) * (a3 > 0.004)
+    sky = regrade_cumulus(_sky_window(SKY_SRC))
+    plate = np.clip(pm + (1 - a3) * sky, 0, 1)
+    write_srgb(os.path.join(OUT, "plate.webp"), plate, 11)
+    write_srgb(os.path.join(OUT, "fill.webp"), sky, 12)
+    key0 = cv2.imread(os.path.join(WK, "orig-key.png"), cv2.IMREAD_COLOR)
+    write_sky_key(os.path.join(OUT, "key.png"), sky_key_of(sky, alpha), key0[:, :, 2])
+    save8(os.path.join(WK, "p-sky.png"), l2s(sky)[:, :, ::-1])
+    print("sky: wrote plate.webp, fill.webp, key.png")
+    sys.exit(0)
+
+
 # --grade-only: re-grade from the ungraded layers a bake left in WK
 # (raw-plate.webp, raw-fill.webp) and OUT's alpha.png.
 if "--grade-only" in sys.argv:
@@ -677,42 +843,14 @@ cloud = (1 - smoothstep(0.35, 0.75, sat)) * smoothstep(0.15, 0.5, y)
 cloud = cv2.GaussianBlur(cloud.astype(np.float32), (0, 0), 48)
 cloud = (cloud - cloud.min()) / max(1e-4, cloud.max() - cloud.min())
 
-# --- sky key, 0 far .. 1 near (B) ----------------------------------------
-# The developer reaches a cumulus core before its edge and the blue beyond,
-# so the sky's key is mostly cloud density. Read at the scale of the curds it
-# makes the front an iso-contour round every puff: dozens of islands, each
-# outlined. Blurred to the scale of the masses (sigma 3% of the width) it
-# makes a few large, smooth lobes that thread the cumulus. Then a third from
-# distance (cloud at a fixed height is nearer overhead, ~ 1 / sin(elevation)),
-# and rank-equalised over the open sky so the front covers it at an even pace.
-KD_W = 0.35
-wh = fill.min(2) / np.maximum(fill.max(2), 1e-4)
-dens = smoothstep(0.15, 0.9, wh) * smoothstep(0.12, 0.7, y)
-dens = cv2.GaussianBlur(dens.astype(np.float32), (0, 0), 0.03 * W)
-sky_px = alpha < 0.5
-lo, hi = np.percentile(dens[sky_px], 1), np.percentile(dens[sky_px], 99)
-dens = np.clip((dens - lo) / max(1e-4, hi - lo), 0, 1)
-# A ray's elevation is its angle from the zenith's ray (ZEN, F_PX above), so
-# the cloud overhead, round the vanishing point, is nearest and the bottom
-# corners furthest.
-el = np.arcsin(np.clip(np.cos(zenith_angle()), 1e-3, 1))
-dist = np.log(1 / np.sin(el))
-kd = ((dist.max() - dist) / (dist.max() - dist.min())).astype(np.float32)
-ks = (KD_W * kd + (1 - KD_W) * dens).astype(np.float32)
-order = np.sort(ks[sky_px])
-sky_key = (np.searchsorted(order, ks, side="left") / max(1, len(order) - 1)).astype(np.float32)
-sky_key = cv2.GaussianBlur(sky_key, (0, 0), 4)
+sky_key = sky_key_of(fill, alpha)
 
 write_layers(lin, fill, alpha)
 # alpha at full size (wires stay crisp); key and cloudness are smooth, so half
 save8(os.path.join(OUT, "alpha.png"), alpha)
-ks = cv2.resize(sky_key, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
-ks16 = np.clip(np.round(ks * 65535), 0, 65535).astype(np.uint32)
 kr = cv2.resize(key_full, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
 kr8 = np.clip(np.round(kr * 255), 0, 255).astype(np.uint8)
-# BGR on disk: B = sky high byte, G = sky low byte, R = structure key
-kc = np.stack([(ks16 >> 8).astype(np.uint8), (ks16 & 255).astype(np.uint8), kr8], 2)
-cv2.imwrite(os.path.join(OUT, "key.png"), kc)
+write_sky_key(os.path.join(OUT, "key.png"), sky_key, kr8)
 
 # previews
 save8(os.path.join(WK, "p-alpha.png"), alpha)

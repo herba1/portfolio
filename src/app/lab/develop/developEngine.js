@@ -9,9 +9,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // cables, and into the cloud overhead.
 //
 // Offline (tools/depth/bakes/develop/bake.py) the photo is taken apart into
-// two layers: the sky with the pole, its crossarms, braces and every cable painted out, and the
-// structure as a premultiplied matte over it, with a depth key for each.
-//  - Sky key (baked, key.png B): mostly the cloud itself, density from the
+// two layers: the structure (the pole, its crossarms, braces and every cable)
+// as a premultiplied matte, and behind it a sky. The sky is not the
+// photograph's own (a pale cerulean with small, soft, flat-white curds that
+// read as blurred blobs between the wires) but a photographed cumulus sky,
+// CC0, put in behind the same matte and graded for this frame (bake --sky),
+// with a depth key for each layer.
+//  - Sky key (baked, key.png B, G): mostly the cloud itself, density from the
 //    fill's whiteness and light blurred to the scale of the masses (sigma 3%
 //    of the width), so a cumulus mass is nearer than its edge and its edge
 //    nearer than the blue; a third from distance (cloud at a fixed height is
@@ -26,36 +30,32 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    its time evenly up the pole and out along the cables.
 //
 // A front sweeps that key, far to near (press on the sky) or near to far
-// (press on the pole). Behind it, the photograph. Ahead of it, per layer:
-//  - defocus, a real disc gather (scatter-as-gather, cat's-eye towards the
-//    corners) whose circle of confusion grows with the depth still to cover.
-//    On the structure bright taps weigh more, so its specular hardware
-//    (insulator rims, hangers) opens into discs; the sky is a plain energy-
-//    conserving average, because cloud is a diffuse source, not a highlight,
-//    and out of focus it only softens, it never sparkles;
-//  - the latent image. On the sky it holds the developed sky's own chroma:
-//    the blue is lifted, not greyed, the cloud left as it is, so it comes up
-//    from a soft, light field of the same blue into the deep one, and none of
-//    that lift lands inside a developed structure's matte (dilated a few
-//    pixels), so wires, hangers and insulators never pick it up. The steel
-//    is not drawn as itself at all: it is a density in the sky round it,
-//    sky x (1 - 0.25 x matte), a faint darker shadow in the sky's own colour
-//    that builds into the steel in log light, never a lighter, greyer copy
-//    laid over the sky;
-//  - the strata lifted towards you in z (a scale about the principal point
-//    in proportion to nearness), held clean by the fill behind them.
+// (press on the pole). Behind it, the photograph. Ahead of it:
+//  - the sky is out of focus, a real disc gather (scatter-as-gather, cat's-
+//    eye towards the corners) whose circle of confusion grows with the depth
+//    still to cover, a plain energy-conserving average, because cloud is a
+//    diffuse source, not a highlight: out of focus it only melts;
+//  - the sky's latent image holds the developed sky's own chroma: the blue
+//    is lifted, not greyed, the cloud left as it is, so it comes up from a
+//    soft, light field of the same blue into the deep one, and none of that
+//    lift lands on a developed wire (the matte, dilated a few pixels);
+//  - the steel is not there. It is one layer, registered to the photograph
+//    and always sharp, the frame's one crisp anchor: never defocused, never
+//    lifted or offset, never drawn as a faint copy of itself. Ahead of the
+//    front there is only the sky behind it; at the front it comes up out of
+//    that sky, its density building in log light over a narrow band.
 // The front itself is the film's halation: a thin amber line along the
 // depth's iso-band only, a few device pixels wide, weighted by the light
 // under it, so it glows where it crosses cloud, all but vanishes over the
 // blue and is nothing on dark steel or wire. On the sky the developed and
 // latent states meet in a soft band (an eighth of the sky's key, never
 // narrower on screen than a few dozen pixels where the key is steep) with no
-// light of its own. Release and it carries the hand's speed with friction;
-// the strata, stirred by that speed, settle on a spring.
+// light of its own. Release and it carries the hand's speed with friction.
 //
 // The sky is graded in the bake, round the vanishing point: a deep cobalt at
 // the zenith the pole points at, opening paler and more cyan towards the
-// corners, the cloud's rims a cyan-grey and its tops a warm neutral, so the
+// corners; the cumulus's tops sunlit, a warm neutral rolled off well under
+// paper white, its shadowed undersides lit by the sky and so its blue. The
 // latent, developed and far-first states all carry the same sky.
 //
 // The developed print gets a film finish of its own (finish, grain): a
@@ -84,7 +84,6 @@ const SKY_PX = 80; // ...and never narrower on screen than this, in print px
 const HALO = 0.22; // the front's halation line over cloud, linear
 const ISO = 0.02; // ...drawn only within this key distance of the front
 const LINE_PX = 2.5; // ...and this wide on screen (device px, Gaussian)
-const LATENT = 0.25; // the latent steel's density in the sky, at full matte
 const F_START = -0.1;
 const F_END = 1.06;
 
@@ -109,7 +108,6 @@ const frontOf = (p, dir) => {
 // The opening stops partway through the first layer, handing over.
 const OPEN_FRONT = 0.29;
 
-const Z = 0.05; // strata lift at full: 5% scale for the nearest stratum
 const COC = 15; // max circle of confusion, half-res px of the print
 const BAND = 0.62; // light in the front, linear
 
@@ -146,10 +144,8 @@ uniform sampler2D uAlpha;
 uniform sampler2D uKey;    // r structure key, b g sky key (16 bit)
 uniform float uFront;
 uniform float uDir;
-uniform float uZ;
 uniform float uCoC;
 uniform float uTime;
-uniform float uDrift;
 const float SKY_SPAN = ${f(SKY_SPAN)};
 const float FG_LO = ${f(FG_LO)};
 const float AHEAD = ${f(AHEAD)};
@@ -177,20 +173,6 @@ float cocOf(float d) {
   float t = smoothstep(0.0, AHEAD, d);
   return uCoC * t * (0.35 + 0.65 * t);
 }
-// Strata lifted towards the camera: a point at depth z brought nearer by dz
-// grows by z / (z - dz) about the principal point, more the nearer it is.
-// Inverse-mapped by fixed-point iteration (the lift is a few percent).
-vec2 fgWarp(vec2 iuv) {
-  vec2 q = iuv;
-  for (int i = 0; i < 3; i++) {
-    float k8 = textureLod(uKey, q, 0.0).r;
-    float d = ahead(toFg(k8));
-    float near = 0.12 + 0.88 * k8 * k8;
-    float s = uZ * smoothstep(0.0, AHEAD * 0.8, d) * near * (1.0 + uDrift * sin(uTime * 0.6 + k8 * 7.0));
-    q = 0.5 + (iuv - 0.5) / (1.0 + s);
-  }
-  return q;
-}
 `;
 
 // Half res, two targets: the layer's light, and its circle of confusion / 32.
@@ -210,28 +192,10 @@ void main() {
   o1 = vec4(min(31.0, SKY_COC * cocOf(d)) / 32.0, 0.0, 0.0, 1.0);
 }`;
 
-const PREP_FG = `#version 300 es
-precision highp float;
-in vec2 vUv;
-layout(location = 0) out vec4 o0;
-layout(location = 1) out vec4 o1;
-${COMMON}
-void main() {
-  vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
-  vec2 q = fgWarp(iuv);
-  float a = texture(uAlpha, q).r;
-  vec3 pm = max(texture(uPlate, q).rgb - (1.0 - a) * texture(uFill, q).rgb, 0.0);
-  pm = min(pm, vec3(a)) * step(0.004, a);
-  o0 = vec4(pm, a);
-  o1 = vec4(cocOf(ahead(toFg(texture(uKey, q).r))) / 32.0, 0.0, 0.0, 1.0);
-}`;
-
 // Disc defocus as a gather: each tap counts if its own circle reaches this
 // pixel; towards the corners the aperture is cut by the barrel into a cat's
-// eye. On the structure bright taps weigh more (a highlight's disc is what
-// you see), and its bright points are real specular hardware: insulator
-// rims, hangers. The sky (uSky) has no highlights. Cloud is a broad diffuse
-// source, so it is a plain normalised average (its light conserved), and
+// eye. Only the sky is defocused, and it has no highlights: cloud is a broad
+// diffuse source, so it is a plain normalised average (its light conserved), and
 // through a soft-edged aperture (weight (1 - u^2)^2, spread to keep the same
 // width): a hard disc stamps every small curd as a flat round blotch, a
 // polka-dot over the blue, where out-of-focus cloud only melts.
@@ -243,14 +207,12 @@ uniform sampler2D uCol;
 uniform sampler2D uCocT;
 uniform vec2 uTexel;
 uniform float uAspect;
-uniform float uSky;
-const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const int N = __N__;
 void main() {
   vec4 c0 = texture(uCol, vUv);
   float r0 = texture(uCocT, vUv).r * 32.0;
   if (r0 < 0.6) { o = c0; return; }
-  float spread = 1.0 + 0.35 * uSky;
+  float spread = 1.35;
   r0 *= spread;
   float lod = max(0.0, log2(r0 * 1.7725 / sqrt(float(N))) - 0.6);
   vec2 fpos = (vUv - 0.5) * vec2(uAspect, 1.0) * 0.55;
@@ -266,9 +228,8 @@ void main() {
     vec4 s = textureLod(uCol, uv, lod);
     float cs = textureLod(uCocT, uv, lod).r * 32.0 * spread;
     float w = smoothstep(r - 1.0, r + 0.5, cs + 0.5);
-    float l = dot(s.rgb, LUMA) / max(s.a, 0.08);
     float u = 1.0 - t;
-    w *= mix(1.0 + 3.0 * l * l, u * u, uSky);
+    w *= u * u;
     acc += s * w;
     ws += w;
   }
@@ -336,7 +297,6 @@ precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uBgBlur;
-uniform sampler2D uFgBlur;
 uniform sampler2D uHk4;  // the developed print's high-key light, 1/4 res
 uniform sampler2D uHk8;  // ...1/8
 uniform sampler2D uHk16; // ...1/16
@@ -358,7 +318,6 @@ const float HALO = ${f(HALO)};
 const vec3 AMBER = vec3(1.0, 0.5, 0.12);
 // The level the latent sky's blue is lifted towards (linear luminance).
 const float SKY_LAT = 0.2;
-const float LATENT = ${f(LATENT)};
 const float LINE_PX = ${f(LINE_PX)};
 const float ISO = ${f(ISO)};
 
@@ -424,24 +383,15 @@ vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   return mix(c, latentSky(c, d, dev, iuv), 1.0 - cov);
 }
 
-// The latent steel. Ahead of the front the structure is not drawn at all as
-// itself: it is the sky round it with a little density in it, sky times
-// (1 - LATENT x matte x strength), the way an undeveloped image sits in an
-// emulsion, a faint darker shadow of the pole in the sky's own colour, never
-// a lighter, greyer copy over it. strength comes in from the front (a
-// structure just ahead is already most of the way to latent) and the density
-// builds in log light, so the steel comes up through the sky's tones into
-// its own, rather than as a grey cross-fade. The defocus (fg, by the depth
-// still to cover) has already spread both the steel and its matte.
-vec3 develop(vec3 c, float d, float dev, vec3 sky, float a) {
-  float an = clamp(d / AHEAD, 0.0, 1.0);
-  float L = (1.0 - dev) * mix(0.7, 1.0, an);
-  // as straight colour (the caller premultiplies by a): sky * (1 - LATENT L a)
-  // over the matte, so the pixel ends as that, with the sky behind
-  // (a shade cooler than neutral, as a shadow in skylight is, so over the
-  // cumulus it is the cloud's own shade, not a grey fog laid on it)
-  vec3 lat = sky * (1.0 - LATENT * L * vec3(1.12, 1.0, 0.78));
-  return exp(mix(log(max(c, 1e-4)), log(max(lat, 1e-4)), L));
+// The latent steel. A latent image is invisible: ahead of the front the
+// structure is not in the print at all, only the sky behind it (the fill, a
+// whole photographed sky with no structure in it), so there is never a
+// second, ghosted copy of a wire. The steel comes up at the front out of
+// that sky, its density building in log light over the front's band (dev),
+// so it climbs into its own tones rather than cross-fading in grey. c is the
+// developed pixel, the steel over the sky by its matte.
+vec3 develop(vec3 c, float dev, vec3 sky) {
+  return exp(mix(log(max(sky, 1e-4)), log(max(c, 1e-4)), dev));
 }
 
 // The front, as the film's halation: a thin line along the depth's iso-band
@@ -524,24 +474,24 @@ vec3 grain(vec3 c) {
 void main() {
   vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
 
-  // Structure, lifted: premultiplied, with its own matte.
-  vec2 q = fgWarp(iuv);
-  float a = texture(uAlpha, q).r;
-  vec3 pm = max(texture(uPlate, q).rgb - (1.0 - a) * texture(uFill, q).rgb, 0.0);
+  // The structure: one layer, registered to the photograph and always sharp
+  // (premultiplied, with its own matte). It is the frame's anchor: only
+  // the sky behind it is out of focus, so nothing of the steel is ever
+  // drawn twice, offset or spread.
+  float a = texture(uAlpha, iuv).r;
+  vec3 pm = max(texture(uPlate, iuv).rgb - (1.0 - a) * texture(uFill, iuv).rgb, 0.0);
   pm = min(pm, vec3(a)) * step(0.004, a);
-  float dF = ahead(toFg(texture(uKey, q).r));
-  float mF = smoothstep(0.25, 1.25, cocOf(dF));
-  vec4 fg = mix(vec4(pm, a), texture(uFgBlur, vUv), mF);
-  // Where the structure is on screen and where it was baked, dilated. Where
-  // the steel is defocused it covers the sky only as far as its disc does:
-  // held to the sharp matte, the sky's latent lift stopped at the steel's
-  // in-focus silhouette, a hard second contour inside the soft one, and the
-  // wires' paths showed through the latent truss as seams.
-  float cov = mix(max(cover(q), cover(iuv)), clamp(1.5 * fg.a, 0.0, 1.0), mF);
+  float dF = ahead(toFg(texture(uKey, iuv).r));
+  vec4 fg = vec4(pm, a);
+  // Where the structure is, dilated, so the latent sky's lift never lands on
+  // a wire's edge.
+  float cov = cover(iuv);
 
   // How developed the structure is here. Where it has developed, the
   // sky's latent lift stays off it (cov); where it is still latent it is
-  // only a density in that same lifted sky, so the lift runs under it.
+  // not there at all, and the lift runs under it. (A share of the steel's
+  // density let in just ahead of the front made it translucent there, a
+  // ghost of the steel over the cloud: a second exposure, not a print.)
   float devF = 1.0 - smoothstep(-0.3 * uSig, 0.7 * uSig, dF);
 
   // Sky, as the lens sees it. The cap, for the print's finish: the developed
@@ -554,9 +504,10 @@ void main() {
   vec3 sky = mix(skyDev, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, rB));
   sky = developSky(sky, dB, iuv, cov * devF);
 
-  // The steel over it: developed, or a density in that sky (develop()).
-  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, devF, sky, fg.a) * fg.a;
-  vec3 col = fgP + sky * (1.0 - fg.a);
+  // The steel over it, as the developed pixel (steel over that sky), coming
+  // up out of the sky alone (develop()). Never divided out of its matte:
+  // at a wire's faint edge that would blow the plate's noise up into light.
+  vec3 col = develop(fg.rgb + sky * (1.0 - fg.a), devF, sky);
 
   // How developed this pixel is: the sky's band and the steel's, by cover.
   float wB = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(dB));
@@ -591,13 +542,15 @@ function compile(gl, vs, fs) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
     gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error(gl.getShaderInfoLog(s));
     gl.attachShader(p, s);
     gl.deleteShader(s);
   }
   gl.bindAttribLocation(p, 0, "aPos");
   gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(p));
   const u = {};
   const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
   for (let i = 0; i < n; i++) {
@@ -610,7 +563,10 @@ function compile(gl, vs, fs) {
 async function bitmap(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
-  return createImageBitmap(await res.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+  return createImageBitmap(await res.blob(), {
+    colorSpaceConversion: "none",
+    premultiplyAlpha: "none",
+  });
 }
 
 function upload(gl, img, srgb, red = false) {
@@ -619,10 +575,23 @@ function upload(gl, img, srgb, red = false) {
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  if (red) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, img);
-  else gl.texImage2D(gl.TEXTURE_2D, 0, srgb ? gl.SRGB8_ALPHA8 : gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  if (red)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, img);
+  else
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      srgb ? gl.SRGB8_ALPHA8 : gl.RGBA8,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      img,
+    );
   gl.generateMipmap(gl.TEXTURE_2D);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(
+    gl.TEXTURE_2D,
+    gl.TEXTURE_MIN_FILTER,
+    gl.LINEAR_MIPMAP_LINEAR,
+  );
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -631,7 +600,7 @@ function upload(gl, img, srgb, red = false) {
 
 // Rubber band past the ends.
 const rubber = (v, lo, hi) => {
-  const r = (x) => 0.35 * (1 - 1 / (1 + x / 0.35 * 0.55));
+  const r = (x) => 0.35 * (1 - 1 / (1 + (x / 0.35) * 0.55));
   if (v > hi) return hi + r(v - hi);
   if (v < lo) return lo - r(lo - v);
   return v;
@@ -641,11 +610,19 @@ const easeOutExpo = (t) => (t >= 1 ? 1 : 1 - 2 ** (-10 * t));
 
 export async function createDevelop(host, { embedded = false } = {}) {
   const params = new URLSearchParams(window.location.search);
-  const fixed = params.has("front") ? clamp(parseFloat(params.get("front")) || 0, 0, 1) : null;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const fixed = params.has("front")
+    ? clamp(parseFloat(params.get("front")) || 0, 0, 1)
+    : null;
+  const reduced = window.matchMedia?.(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
   const still = fixed != null || params.has("still");
 
-  const [plateImg, fillImg, alphaImg, keyImg] = await Promise.all(["plate.webp", "fill.webp", "alpha.png", "key.png"].map((n) => bitmap(BASE + n)));
+  const [plateImg, fillImg, alphaImg, keyImg] = await Promise.all(
+    ["plate.webp", "fill.webp", "alpha.png", "key.png"].map((n) =>
+      bitmap(BASE + n),
+    ),
+  );
 
   // A small copy of the matte, to know whether a press landed on the pole.
   const probe = (() => {
@@ -654,10 +631,20 @@ export async function createDevelop(host, { embedded = false } = {}) {
     x.drawImage(alphaImg, 0, 0, 240, 160);
     return x.getImageData(0, 0, 240, 160).data;
   })();
-  const alphaAt = (u, v) => probe[(clamp(Math.floor(v * 160), 0, 159) * 240 + clamp(Math.floor(u * 240), 0, 239)) * 4] / 255;
+  const alphaAt = (u, v) =>
+    probe[
+      (clamp(Math.floor(v * 160), 0, 159) * 240 +
+        clamp(Math.floor(u * 240), 0, 239)) *
+        4
+    ] / 255;
 
   host.style.background = "#f2f0eb";
-  const stage = createStage(host, { webgl: true, dpr: 2, alpha: true, antialias: false });
+  const stage = createStage(host, {
+    webgl: true,
+    dpr: 2,
+    alpha: true,
+    antialias: false,
+  });
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
   const canvas = stage.canvas;
@@ -673,7 +660,11 @@ export async function createDevelop(host, { embedded = false } = {}) {
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 3, -1, -1, 3]),
+    gl.STATIC_DRAW,
+  );
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   gl.enableVertexAttribArray(0);
@@ -682,7 +673,6 @@ export async function createDevelop(host, { embedded = false } = {}) {
 
   const P = {
     bg: compile(gl, VERT, PREP_BG),
-    fg: compile(gl, VERT, PREP_FG),
     gather: compile(gl, VERT, GATHER.replace("__N__", "72")),
     comp: compile(gl, VERT, COMPOSITE),
     hikey: compile(gl, VERT, HIKEY),
@@ -705,9 +695,19 @@ export async function createDevelop(host, { embedded = false } = {}) {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
     const levels = mips ? Math.floor(Math.log2(Math.max(w, h))) + 1 : 1;
-    const fmt = red ? (floatOk ? gl.R16F : gl.R8) : half && floatOk ? gl.RGBA16F : gl.RGBA8;
+    const fmt = red
+      ? floatOk
+        ? gl.R16F
+        : gl.R8
+      : half && floatOk
+        ? gl.RGBA16F
+        : gl.RGBA8;
     gl.texStorage2D(gl.TEXTURE_2D, levels, fmt, w, h);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+    gl.texParameteri(
+      gl.TEXTURE_2D,
+      gl.TEXTURE_MIN_FILTER,
+      mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR,
+    );
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -716,7 +716,15 @@ export async function createDevelop(host, { embedded = false } = {}) {
   const fbo = (...ts) => {
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    ts.forEach((x, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, x.t, 0));
+    ts.forEach((x, i) =>
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0 + i,
+        gl.TEXTURE_2D,
+        x.t,
+        0,
+      ),
+    );
     gl.drawBuffers(ts.map((_, i) => gl.COLOR_ATTACHMENT0 + i));
     return fb;
   };
@@ -738,21 +746,22 @@ export async function createDevelop(host, { embedded = false } = {}) {
     const t = {
       bgCol: target(hw, hh, { mips: true }),
       bgCoc: target(hw, hh, { mips: true, red: true }),
-      fgCol: target(hw, hh, { mips: true }),
-      fgCoc: target(hw, hh, { mips: true, red: true }),
       bgBlur: target(hw, hh),
-      fgBlur: target(hw, hh),
       scene: target(w, h),
       out: target(w, h, { half: false }),
       hk4: target(Math.max(2, Math.ceil(w / 4)), Math.max(2, Math.ceil(h / 4))),
       hk8: target(Math.max(2, Math.ceil(w / 8)), Math.max(2, Math.ceil(h / 8))),
-      hk16: target(Math.max(2, Math.ceil(w / 16)), Math.max(2, Math.ceil(h / 16))),
-      hk16b: target(Math.max(2, Math.ceil(w / 16)), Math.max(2, Math.ceil(h / 16))),
+      hk16: target(
+        Math.max(2, Math.ceil(w / 16)),
+        Math.max(2, Math.ceil(h / 16)),
+      ),
+      hk16b: target(
+        Math.max(2, Math.ceil(w / 16)),
+        Math.max(2, Math.ceil(h / 16)),
+      ),
     };
     t.bgFb = fbo(t.bgCol, t.bgCoc);
-    t.fgFb = fbo(t.fgCol, t.fgCoc);
     t.bgBlurFb = fbo(t.bgBlur);
-    t.fgBlurFb = fbo(t.fgBlur);
     t.sceneFb = fbo(t.scene);
     t.outFb = fbo(t.out);
     t.hk4Fb = fbo(t.hk4);
@@ -787,16 +796,14 @@ export async function createDevelop(host, { embedded = false } = {}) {
   };
 
   // State: progress 0 (blank) .. 1 (developed), its velocity, which way the
-  // front runs through depth, the axis a drag moves it along, and how
-  // stirred the strata are.
+  // front runs through depth, the axis a drag moves it along, and how fast
+  // the front is moving.
   const st = {
     p: fixed ?? 0,
     v: 0,
     // The opening runs as a print comes up: the darkest, nearest steel first.
     dir: params.get("from") === "far" ? 1 : -1,
     axis: null,
-    stir: 0,
-    stirV: 0,
     speed: 0,
   };
   let opening = fixed == null && !still ? { t: -0.5, dur: 2.6 } : null;
@@ -812,7 +819,11 @@ export async function createDevelop(host, { embedded = false } = {}) {
   let seed = 7;
   let time = 0;
 
-  const inside = (p, slop = 24) => p.x > rect.x - slop && p.x < rect.x + rect.w + slop && p.y > rect.y - slop && p.y < rect.y + rect.h + slop;
+  const inside = (p, slop = 24) =>
+    p.x > rect.x - slop &&
+    p.x < rect.x + rect.w + slop &&
+    p.y > rect.y - slop &&
+    p.y < rect.y + rect.h + slop;
   const span = () => Math.max(220, Math.min(rect.w, rect.h * 1.25) * 0.85);
 
   stage.on("down", (p) => {
@@ -856,12 +867,18 @@ export async function createDevelop(host, { embedded = false } = {}) {
     if (!drag) return;
     drag = null;
     canvas.style.cursor = inside(p, 0) ? "grab" : "";
-    if (st.axis) st.v = clamp((p.vx * st.axis[0] + p.vy * st.axis[1]) / span(), -5, 5);
+    if (st.axis)
+      st.v = clamp((p.vx * st.axis[0] + p.vy * st.axis[1]) / span(), -5, 5);
     dirty = true;
   });
 
   const onKey = (e) => {
-    const step = e.key === "ArrowUp" || e.key === "ArrowRight" ? 1 : e.key === "ArrowDown" || e.key === "ArrowLeft" ? -1 : 0;
+    const step =
+      e.key === "ArrowUp" || e.key === "ArrowRight"
+        ? 1
+        : e.key === "ArrowDown" || e.key === "ArrowLeft"
+          ? -1
+          : 0;
     if (!step) return;
     e.preventDefault();
     opening = null;
@@ -887,10 +904,8 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.uniform1i(u.uKey, 3);
     gl.uniform1f(u.uFront, frontOf(st.p, st.dir));
     gl.uniform1f(u.uDir, st.dir);
-    gl.uniform1f(u.uZ, Z * (1 + 1.3 * st.stir));
     gl.uniform1f(u.uCoC, (COC * pw) / 2 / 1100);
     gl.uniform1f(u.uTime, time);
-    gl.uniform1f(u.uDrift, still || reduced ? 0 : 0.14);
   };
 
   const begin = () => {
@@ -904,27 +919,24 @@ export async function createDevelop(host, { embedded = false } = {}) {
     bindTex(3, tex.key);
   };
 
-  // 1. Layers at half res: light + circle of confusion.
+  // 1. The sky at half res: light + circle of confusion. (The structure is
+  // never defocused: it is drawn sharp, straight from the plate, in the
+  // composite.)
   const drawLayers = () => {
     begin();
     gl.viewport(0, 0, T.bgCol.w, T.bgCol.h);
-    for (const [prog, fb] of [
-      [P.bg, T.bgFb],
-      [P.fg, T.fgFb],
-    ]) {
-      gl.useProgram(prog.p);
-      common(prog);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
-    for (const x of [T.bgCol, T.bgCoc, T.fgCol, T.fgCoc]) {
+    gl.useProgram(P.bg.p);
+    common(P.bg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, T.bgFb);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    for (const x of [T.bgCol, T.bgCoc]) {
       gl.bindTexture(gl.TEXTURE_2D, x.t);
       gl.generateMipmap(gl.TEXTURE_2D);
     }
   };
 
-  // 2. Defocus one layer (0 sky, 1 structure), optionally one band of rows.
-  const drawGather = (layer, band = 0, bands = 1) => {
+  // 2. Defocus the sky, optionally one band of rows.
+  const drawGather = (band = 0, bands = 1) => {
     const hw = T.bgCol.w;
     const hh = T.bgCol.h;
     gl.bindVertexArray(vao);
@@ -934,11 +946,9 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.uniform1i(P.gather.u.uCocT, 5);
     gl.uniform2f(P.gather.u.uTexel, 1 / hw, 1 / hh);
     gl.uniform1f(P.gather.u.uAspect, ASPECT);
-    gl.uniform1f(P.gather.u.uSky, layer === 0 ? 1 : 0);
-    const [col, coc, fb] = layer === 0 ? [T.bgCol, T.bgCoc, T.bgBlurFb] : [T.fgCol, T.fgCoc, T.fgBlurFb];
-    bindTex(4, col.t);
-    bindTex(5, coc.t);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    bindTex(4, T.bgCol.t);
+    bindTex(5, T.bgCoc.t);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, T.bgBlurFb);
     if (bands > 1) {
       const y0 = Math.floor((hh * band) / bands);
       gl.enable(gl.SCISSOR_TEST);
@@ -988,9 +998,7 @@ export async function createDevelop(host, { embedded = false } = {}) {
     bindTex(2, tex.alpha);
     bindTex(3, tex.key);
     bindTex(4, T.bgBlur.t);
-    bindTex(5, T.fgBlur.t);
     gl.uniform1i(P.comp.u.uBgBlur, 4);
-    gl.uniform1i(P.comp.u.uFgBlur, 5);
     bindTex(6, T.hk4.t);
     bindTex(7, T.hk8.t);
     bindTex(8, T.hk16.t);
@@ -999,7 +1007,10 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.uniform1i(P.comp.u.uHk16, 8);
     gl.uniform1f(P.comp.u.uGrainSeed, seed);
     gl.uniform1f(P.comp.u.uGrainPx, Math.max(1, (GRAIN_PX * stage.dpr) / 2));
-    gl.uniform1f(P.comp.u.uSig, SIGMA * (1 + 0.9 * Math.min(1, Math.abs(st.speed) * 0.8)));
+    gl.uniform1f(
+      P.comp.u.uSig,
+      SIGMA * (1 + 0.9 * Math.min(1, Math.abs(st.speed) * 0.8)),
+    );
     const ends = clamp(st.p / 0.03, 0, 1) * clamp((1 - st.p) / 0.03, 0, 1);
     gl.uniform1f(P.comp.u.uBand, BAND * ends * ends * (3 - 2 * ends));
     gl.viewport(0, 0, pw, ph);
@@ -1021,14 +1032,16 @@ export async function createDevelop(host, { embedded = false } = {}) {
     bindTex(0, T.out.t);
     gl.uniform1i(P.blit.u.uSrc, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    canvas.setAttribute("aria-valuenow", String(Math.round(clamp(st.p, 0, 1) * 100)));
+    canvas.setAttribute(
+      "aria-valuenow",
+      String(Math.round(clamp(st.p, 0, 1) * 100)),
+    );
   };
 
   const draw = () => {
     if (!T) return;
     drawLayers();
-    drawGather(0);
-    drawGather(1);
+    drawGather();
     drawFinal();
   };
 
@@ -1067,27 +1080,9 @@ export async function createDevelop(host, { embedded = false } = {}) {
     const rate = (st.p - before) / Math.max(dt, 1e-3);
     if (!drag) st.speed += (rate - st.speed) * Math.min(1, dt / 0.06);
     else if (performance.now() - drag.t > 60) st.speed *= Math.exp(-dt / 0.08);
-    // The strata are stirred by the front's speed and settle on a spring
-    // (damping ratio 0.85).
-    const target = Math.min(1, Math.abs(st.speed) * 0.9);
-    {
-      const w = 7;
-      const z = 0.85;
-      const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
-      const h = dt / steps;
-      for (let i = 0; i < steps; i++) {
-        st.stirV += (-2 * z * w * st.stirV - w * w * (st.stir - target)) * h;
-        st.stir += st.stirV * h;
-      }
-      if (Math.abs(st.stir - target) > 1e-4 || Math.abs(st.stirV) > 1e-4) dirty = true;
-      else {
-        st.stir = target;
-        st.stirV = 0;
-      }
-    }
     if (Math.abs(st.speed) > 1e-4) dirty = true;
     else st.speed = 0;
-    // Grain and the strata's slow drift move at 24 fps, never at 60.
+    // Grain moves at 24 fps, never at 60.
     if (!still && !reduced) {
       grainT += dt;
       if (grainT >= 1 / 24) {
@@ -1116,13 +1111,11 @@ export async function createDevelop(host, { embedded = false } = {}) {
     drawLayers();
     gl.finish();
     await wait();
-    for (let l = 0; l < 2; l++) {
-      for (let b = 0; b < 16; b++) {
-        if (!T) return;
-        drawGather(l, b, 16);
-        gl.finish();
-        await wait();
-      }
+    for (let b = 0; b < 16; b++) {
+      if (!T) return;
+      drawGather(b, 16);
+      gl.finish();
+      await wait();
     }
     if (T) drawFinal();
   };
