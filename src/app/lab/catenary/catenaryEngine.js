@@ -36,7 +36,7 @@ import { NODES, createWorld, locate, offsetAt, pitchView, pullShape, sampleY } f
 // ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, halNarrow, halWide,
-// diffuse, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
+// diffuse, diffuseR, diffuseSteel, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
 // override the grade; halThr sets the HALO pass's threshold.
 
 const ASSET = "/lab/catenary/";
@@ -111,8 +111,8 @@ const FILM = {
 //    also read for which side faces the sun (SUN): its sun-facing flank is
 //    lit and warmed with the cores, its far side and base sink to skylight,
 //    so a cumulus has a sunlit top and a blue underside, not one grey value.
-//  - Diffusion: the cloud light, blurred wide, screened in at DIFFUSE, veils
-//    the cobalt near the cloud. Halation is not in the plate: it is a pass of
+//  - Diffusion: the cloud light, bloomed wide (see DIFFUSE), screened in,
+//    veils the cobalt round the cloud and bleeds softly over the steel. Halation is not in the plate: it is a pass of
 //    its own over the finished scene (see HALO), so the steel, the live wires
 //    and the insulators all bleed the same way.
 const STRUCT = 0.88;
@@ -131,21 +131,30 @@ const CLOUD_LIFT = 0.56;
 // and how far the shade masses draw toward CLOUD_SHADE, the blue-grey of a
 // cumulus underside lit only by the sky.
 const CLOUD_FROM = 0.6;
-const SCULPT = 1;
+const SCULPT = 0.6;
 const SHADE_TINT = 0.6;
 const CLOUD_SHADE = [0x9d, 0xb6, 0xcf];
 // Toward the sun, degrees in the photograph (0 right, 90 up): upper left,
 // where the cumulus tops are brightest as shot.
 const SUN = 125;
-const DIFFUSE = 0.22;
+// Diffusion, a Pro-Mist bloom: the sunlit cloud light spread wide and
+// screened in at DIFFUSE. The baked wide key (B, sigma ~1.4% of the width)
+// is the bloom's core; two rings of it, DIFFUSE_RADIUS (fractions of the
+// image width) out, are its long tail, so the cloud's light veils the cobalt
+// a cloud's width round it and slips softly over the steel's edges. The
+// steel takes DIFFUSE_STEEL of it: enough that the bloom overlaps a member
+// beside the cloud, not so much that the one silhouette goes grey.
+const DIFFUSE = 0.45;
+const DIFFUSE_RADIUS = 1.3; // scale on the rings (0.022, 0.05 of the width)
+const DIFFUSE_STEEL = 0.28;
 // The cloud's edge (see PLATE): the warm tint is keyed tight on the modelled
 // cloud light (gamma, WARM_KEY from-to), so only the sunlit cores warm; below
 // the key, EDGE_BLUE of each fringe pixel's shortfall in blue is made up
 // toward the local sky lifted to skylight. RELIEF is the gain of the wide
 // unsharp mask that gives the cumulus back its lobes.
 const WARM_KEY = [0.8, 0.93];
-const EDGE_BLUE = 1;
-const RELIEF = 0.7;
+const EDGE_BLUE = 0.4;
+const RELIEF = 0.2;
 // Halation, the film's own optics rather than its grade: light that went
 // through the emulsion, bounced off the base (no remjet) and came back
 // through the red layer a little way off. Over the finished linear scene,
@@ -205,6 +214,24 @@ vec3 graphite(vec3 c) {
   return (y * uStruct.y + uStruct.z) * uStructTint / dot(uStructTint, LUMA);
 }`;
 
+// The bloom's spread (see DIFFUSE): the wide key at the pixel, then two
+// rings of it further out. Sampled at the resting image position, so the
+// plate and the live wires take the same veil.
+const MIST = `uniform vec3 uMist;   // ring radius scale, steel share, unused
+float mist(sampler2D k, vec2 uv) {
+  vec2 r = vec2(1.0, float(textureSize(k, 0).x) / float(textureSize(k, 0).y)) * uMist.x;
+  float m1 = 0.0, m2 = 0.0;
+  for (int i = 0; i < 12; i++) {
+    float a = float(i) * 0.5235988;
+    m1 += texture(k, uv + vec2(cos(a), sin(a)) * r * 0.022).b;
+  }
+  for (int i = 0; i < 16; i++) {
+    float a = float(i) * 0.3926991 + 0.19635;
+    m2 += texture(k, uv + vec2(cos(a), sin(a)) * r * 0.05).b;
+  }
+  return 0.3 * texture(k, uv).b + 0.4 * m1 / 12.0 + 0.3 * m2 / 16.0;
+}`;
+
 const VERT_FULL = `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
@@ -228,6 +255,7 @@ uniform vec2 uSun;     // toward the sun, image px direction (unit)
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 uniform vec4 uEdge;    // warm key from, to (gamma); relief gain; skylight edge amount
+${MIST}
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
   vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -407,15 +435,24 @@ void main() {
   float eAmt = uEdge.w * steel * steel * (1.0 - core) * smoothstep(0.3, 0.45, yk) * smoothstep(0.0, 0.3, need);
   c = max(dot(c, LUMA) + mix(cc, tc, eAmt), 0.0);
 
-  // Wide diffusion: screened, so it lifts the cobalt and never clips. Masked
-  // off the steel: the mast stays graphite where it crosses lit cloud, one
-  // sharp silhouette against the soft cloud light. (Halation is its own pass,
-  // over the whole scene: HALO.)
-  float bare = 1.0 - 0.85 * key.r;
+  // Wide diffusion: screened, so it lifts the cobalt and never clips. The
+  // steel takes only its share (uMist.y): the bloom slips over a member's
+  // edge beside the cloud, but the mast stays graphite where it crosses lit
+  // cloud, one silhouette against the soft cloud light. (Halation is its own
+  // pass, over the whole scene: HALO.)
+  // The steel's mask is eased in over its first few px (the least of it and
+  // its ring a few key px out), so at a member's edge the bloom fades over
+  // the steel instead of stopping on a line.
+  float rIn = 0.0;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982;
+    rIn += texture(uKey, uv + vec2(cos(a), sin(a)) * vec2(5.0) / vec2(textureSize(uKey, 0))).r;
+  }
+  float bare = 1.0 - (1.0 - uMist.y) * min(key.r, rIn / 8.0);
   // Its colour follows the same key: warm paper off the sunlit cores,
   // skylight over the cobalt, so the veil never greys the blue it lifts.
   vec3 skyl = uCloudShade * (dot(uCloudTop, LUMA) / dot(uCloudShade, LUMA));
-  vec3 veil = mix(skyl, uCloudTop, core) * key.b * key.b * uGlow.y * bare;
+  vec3 veil = mix(skyl, uCloudTop, core) * mist(uKey, uv) * uGlow.y * bare;
   c = 1.0 - (1.0 - c) * (1.0 - veil);
   outColor = vec4(c, 1.0);
 }`;
@@ -456,6 +493,7 @@ uniform vec3 uStructTint;
 uniform vec3 uCloudTop;
 uniform vec2 uGlow;
 ${GRAPHITE}
+${MIST}
 float erf_(float x) {
   float s = sign(x);
   x = abs(x);
@@ -491,9 +529,8 @@ void main() {
   // its halation comes from the HALO pass over the finished scene, exactly
   // as the plate's steel takes it, wherever the wire has moved to.
   col = mix(col, graphite(col), uStruct.x);
-  vec3 key = texture(uKey, vRest / uImg).rgb;
-  float bare = 0.15;
-  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.y * bare);
+  vec2 kuv = vRest / uImg;
+  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * mist(uKey, kuv) * uGlow.y * uMist.y);
   outColor = vec4(col, a);
 }`;
 
@@ -666,6 +703,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
   ];
   const cloudTop = CLOUD_TOP.map((v, i) => toLin(v / 255) * CLOUD_AIM[i]);
   const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("diffuse", DIFFUSE), 0, 1)];
+  const mistU = [clamp(num("diffuseR", DIFFUSE_RADIUS), 0, 3), clamp(num("diffuseSteel", DIFFUSE_STEEL), 0, 1), 0];
   const halo = [
     clamp(num("hal", HAL), 0, 4),
     clamp(num("halNarrow", HAL_NARROW[1]), 0, 2),
@@ -979,6 +1017,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform3fv(pr.u.uStructTint, STRUCT_TINT);
     gl.uniform3fv(pr.u.uCloudTop, cloudTop);
     gl.uniform2fv(pr.u.uGlow, glow);
+    gl.uniform3fv(pr.u.uMist, mistU);
     gl.uniform3fv(pr.u.uSculpt, sculpt);
     gl.uniform3fv(pr.u.uCloudShade, cloudShade);
   };
