@@ -34,7 +34,10 @@ photo's vertical vanishing point):
     own clear sky by elevation: unmixed under a feathered, grown matte (the
     open sky, and the pockets of it seen through the canopy), so leaves, twigs
     and its wires stay and no rim of the old sky survives; the photo's own
-    cumulus carried over the zenith on a cloud plane. (A Poly Haven .hdr
+    cumulus carried over the zenith on one finite cloud plane CLOUD_H up
+    (ray-plane from the mirror, no copies or wrap, so each cloud is in the
+    glass once; read through a mip pyramid by each pixel's footprint, and
+    faded out toward the horizon by the grazing angle and the haze). (A Poly Haven .hdr
     also works: turned to the photo's sun, its sun disc taken out; the engine
     draws the sun analytically, at HDR.)
   - the seam is feathered over ~9 degrees inside the photo's coverage.
@@ -77,7 +80,11 @@ PANO = os.environ.get("PANO", "/tmp/claude-0/dl-curve-mirror/venetian_crossroads
 PANO_ROT = float(os.environ.get("PANO_ROT", "0"))
 PANO_SKY = os.environ.get("PANO_SKY", "")  # sky matte of an 8-bit pano (segment.py sky)
 EW, EH = 4096, 2048
-CLOUD_SHIFT = (0.2, -0.96)  # the cloud plane slid back over the mirror (cloud heights)
+CLOUD_H = 1800.0  # the cumulus' base over the lens, m (a fair-weather summer cumulus)
+CLOUD_SLIDE = (-0.2 * CLOUD_H, 0.96 * CLOUD_H)  # the cloud plane slid back over the mirror, once, m
+CLOUD_TEXEL = 0.003 * CLOUD_H  # the plane's texel, m (about the photo's own pixel there at 45 deg)
+CLOUD_MIN_EL = 16.0  # the plane fades in over 18 deg from here (grazing, and the photo's own sky)
+CLOUD_VIS = 30000.0  # the haze's visibility, m: far cloud low down goes to sky
 K = 0.62  # MoGe metric -> real metres (crossbuck board ~0.22 m wide, pole ~0.2 m)
 CAM_H = 1.45  # lens height above the road, m (the frame shows no ground)
 MIRROR_PX = (640.0, 430.0)  # face centre in photo px (2464 wide)
@@ -275,6 +282,17 @@ else:
     yy = np.arange(hh)[:, None]
     el_h = 90.0 - (yy + 0.5) / hh * 180.0
     m = cv2.resize(kit.load_gray(PANO_SKY), (hw, hh), interpolation=cv2.INTER_LINEAR)
+    # where a wire crosses a white cloud, segment.py leaves a band of "not
+    # sky" along it (the white is unmixed against a blue sky model), and the
+    # old cloud would stay there as a white rim on every wire: a gap of up to
+    # ~1 deg between sky above and sky below, as bright as the sky round it
+    # and neither green nor warm (a cloud, not a leaf, bark or a wall's
+    # shadow), is sky (the wire itself, dark, is not; step 1 bridges it)
+    mc = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((int(41 * sx) | 1, 3), np.uint8))
+    Lb = cv2.GaussianBlur(cv2.dilate(L, np.ones((int(31 * sx) | 1,) * 2, np.uint8)), (0, 0), 8 * sx)
+    neutral = ((hdr[..., 0] - hdr[..., 2]) < 0.06 * L) & ((hdr[..., 1] - hdr[..., 2]) < 0.25 * L)
+    m = np.where(neutral & (L > 0.6 * Lb) & (el_h > 4.0), np.maximum(m, mc), m).astype(np.float32)
+    del mc, Lb, neutral
     # 1. the open sky: segment.py's matte (clouds included, > 0.3), limited to
     # what is connected to the zenith down each column (a white apartment wall
     # is not sky), wires bridged
@@ -354,7 +372,10 @@ Hy = Ev * hh - 0.5
 env_h = cv2.remap(hdr_c, Hx.astype(np.float32), Hy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 if not PANO.endswith(".hdr"):
     rm = lambda a: cv2.remap(a, Hx.astype(np.float32), Hy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-    sky_e, wire_e, sold_e = rm(p_sky), rm(p_wire), rm(S_old)
+    # the old sky's share of each pixel (p * S_old) is resampled as one
+    # product: resampled apart, a wire's dark pixel (S_old = C / W, small)
+    # and the bright halo beside it mix into a pale grey rim along the wire
+    sky_e, wire_e, sold_e = rm(p_sky), rm(p_wire), rm(p_sky[..., None] * S_old)
     del S_old
 hole_e = cv2.remap(cv2.dilate(hole.astype(np.uint8), np.ones((9, 9), np.uint8)).astype(np.float32), Hx.astype(np.float32), Hy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 del hdr, hdr_c
@@ -403,13 +424,16 @@ glare = kit.smoothstep(16, 9, g_h) * kit.smoothstep(0.9, 1.3, kit.luma(env_h) / 
 hsky = np.maximum(hsky, cv2.GaussianBlur(glare.astype(np.float32), (0, 0), 2))
 if not PANO.endswith(".hdr"):
     hsky = sky_e
-    # The photo's own cumulus and wires, carried over the zenith. The fitted
-    # sky is smooth; the photo's sky is not. Its departure from its own clear
-    # sky (clouds up, wires down) is laid on a cloud plane (P = d.xz / d.y),
-    # where the photo sees it in front of the lens, and the plane is slid
-    # back over the mirror (CLOUD_SHIFT): what the mirror sees overhead is
-    # the same sky a few hundred metres on, at the same scale, the wires still
-    # straight lines (great circles from the mirror).
+    # The photo's own cumulus and wires, carried over the zenith on one cloud
+    # plane. The fitted sky is smooth; the photo's sky is not. Its departure
+    # from its own clear sky (clouds up, wires down) is cast from the lens
+    # onto a finite plane CLOUD_H above it (a fair-weather cumulus base),
+    # where the photo saw it, and the plane is slid back over the mirror
+    # once (CLOUD_SLIDE), so what the mirror sees overhead is that same sky a
+    # little way on. The panorama reads it by ray-plane intersection from
+    # the mirror: no copies, no wrap, so each cloud is in the glass once;
+    # outside what the photo saw (and behind the crossbuck's boards) the
+    # plane is clear sky.
     Lp = kit.luma(lin)
     Lm = cv2.erode(np.where(sky > 0.9, Lp, 9.0).astype(np.float32), np.ones((41, 41), np.uint8))
     Lm = cv2.GaussianBlur(Lm, (0, 0), 20)
@@ -418,66 +442,121 @@ if not PANO.endswith(".hdr"):
     solidish = cv2.morphologyEx((sky < 0.5).astype(np.uint8), cv2.MORPH_OPEN, np.ones((11, 11), np.uint8)) > 0
     okp = (~kit.dilate(solidish, 4)) & (rw[..., 1] > 0.12)
     Dp = (lin - cbase)[okp]
-    Px, Pz = rw[..., 0][okp] / rw[..., 1][okp], rw[..., 2][okp] / rw[..., 1][okp]
-    G, gx0, gz0 = 0.003, -4.0, -7.0
-    gw, gh = int(8.0 / G), int(7.0 / G)
-    ix, iz = ((Px - gx0) / G).astype(np.int64), ((Pz - gz0) / G).astype(np.int64)
+    # where each of the photo's sky rays meets the plane (the lens at the
+    # origin), in metres, slid
+    tp = CLOUD_H / rw[..., 1][okp]
+    Px = rw[..., 0][okp] * tp + CLOUD_SLIDE[0]
+    Pz = rw[..., 2][okp] * tp + CLOUD_SLIDE[1]
+    G = CLOUD_TEXEL
+    gx0, gz0 = -4.0 * CLOUD_H + CLOUD_SLIDE[0], -7.0 * CLOUD_H + CLOUD_SLIDE[1]
+    gw, gh = int(8.0 * CLOUD_H / G), int(7.0 * CLOUD_H / G)
+    ix, iz = np.floor((Px - gx0) / G).astype(np.int64), np.floor((Pz - gz0) / G).astype(np.int64)
     kk = (ix >= 0) & (ix < gw) & (iz >= 0) & (iz < gh)
     gi = iz[kk] * gw + ix[kk]
     cnt = np.bincount(gi, None, gh * gw).astype(np.float32).reshape(gh, gw)
     ctex = np.stack([np.bincount(gi, Dp[kk][:, c], gh * gw) for c in range(3)], -1).astype(np.float32).reshape(gh, gw, 3)
     ctex = kit.pushpull(ctex / np.maximum(cnt, 1)[..., None], (cnt > 0).astype(np.float32))
+    # only the clouds and wires: the plate's clear sky sits a little off its
+    # own clear-sky fit, broadly (the haze over the roofs, the deeper blue
+    # between puffs), and on a finite plane that offset would print its
+    # outline on the sky; taken out at ~300 m and over
+    flat = (np.abs(kit.luma(ctex)) < 0.03) & (cnt > 0)
+    sg = 0.17 * CLOUD_H / G
+    num = cv2.GaussianBlur(ctex * flat[..., None], (0, 0), sg)
+    den = cv2.GaussianBlur(flat.astype(np.float32), (0, 0), sg)
+    low = kit.pushpull(num / np.maximum(den, 1e-4)[..., None], np.clip(den * 4, 0, 1))
+    ctex = (ctex - low).astype(np.float32)
+    del flat, num, den, low
     # the wires (the dark side of it), drawn thinner and greyer: a wire
     # overhead is nearer than the clouds, but not that much wider
     dk = np.minimum(kit.luma(ctex), 0)
     # only long dark lines are wires; specks are the crossbuck's and the
     # poles' fringes, and go
     nw, wl, wst, _ = cv2.connectedComponentsWithStats((dk < -0.05).astype(np.uint8), connectivity=8)
-    longw = np.hypot(wst[:, cv2.CC_STAT_WIDTH], wst[:, cv2.CC_STAT_HEIGHT]) > 0.6 / G
+    longw = np.hypot(wst[:, cv2.CC_STAT_WIDTH], wst[:, cv2.CC_STAT_HEIGHT]) > 0.6 * CLOUD_H / G
     longw[0] = False
     dk = np.where(longw[wl] | (dk >= -0.05), dk, 0.0).astype(np.float32)
     nearw = cv2.dilate((dk < -0.05).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
     ctex = np.where((cv2.dilate(((wl > 0) & ~longw[wl]).astype(np.uint8), np.ones((5, 5), np.uint8)) > 0)[..., None], np.maximum(ctex, 0), ctex)
     thin = cv2.dilate(dk, np.ones((5, 5), np.uint8))
     ctex = np.where(nearw[..., None], 0.7 * thin[..., None], ctex).astype(np.float32)
-    ccov = cv2.morphologyEx((cnt > 0).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8)).astype(np.float32)
-    ccov = cv2.GaussianBlur(cv2.erode(ccov, np.ones((41, 41), np.uint8)), (0, 0), 14)
-    # what the photo could not see of the plane (behind the crossbuck, its
-    # lamps and poles, and beyond the frame) is taken from beside it: first
-    # the plane turned about the zenith (the sky at the same distance, so the
-    # same scale, a little round), then, for the disc overhead the photo never
-    # saw, slid; each copy only where the ones before left a gap, cross-faded
-    acc, wsum = ctex * ccov[..., None], ccov.copy()
-    c0 = (-gx0 / G, -gz0 / G)  # the zenith, in grid px
-    moves = [cv2.getRotationMatrix2D(c0, a, 1.0) for a in (6, -6, 13, -13, 22, -22, 34, -34, 50, -50, 70, -70, 95, -95, 125, -125, 155, -155, 180)]
-    st = int(round(0.55 / G))
-    moves += [np.float32([[1, 0, i * st], [0, 1, j * st]]) for i, j in sorted({(i, j) for i in range(-4, 5) for j in range(-4, 5)} - {(0, 0)}, key=lambda o: (abs(o[0]) + abs(o[1]), o))]
-    for Mt in moves:
-        if wsum.min() > 0.98:
-            break
-        ts = cv2.warpAffine(ctex, Mt, (gw, gh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        cs = cv2.warpAffine(ccov, Mt, (gw, gh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        c_ = np.clip(1 - wsum, 0, 1) * cs
-        acc += ts * c_[..., None]
-        wsum += c_
-    ctex = acc / np.maximum(wsum, 1e-4)[..., None]
-    ccov = np.clip(wsum, 0, 1)
-    del acc, wsum
-    Ey = np.maximum(E[..., 1], 1e-3)
-    qx = (E[..., 0] / Ey + CLOUD_SHIFT[0] - gx0) / G
-    qz = (E[..., 2] / Ey + CLOUD_SHIFT[1] - gz0) / G
-    qx, qz = qx.astype(np.float32), qz.astype(np.float32)
-    cl = cv2.remap(ctex, qx, qz, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    cw = cv2.remap(ccov, qx, qz, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    # (low down, the plane is far and its copies crowd; the fitted sky alone)
+    # the plane's extent: what the photo saw of it, the gaps between its
+    # sparse far rows closed and the holes behind the crossbuck, its lamps
+    # and poles closed and filled (from the sky round them, by the push-pull), its
+    # outer edge feathered over ~150 m so it ends in clear sky, not a seam
+    seen = cv2.morphologyEx((cnt > 0).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    seen0 = seen
+    seen = cv2.morphologyEx(seen, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(0.1 * CLOUD_H / G) | 1,) * 2))
+    outside = np.ones((gh + 2, gw + 2), np.uint8)
+    outside[1:-1, 1:-1] = 1 - seen
+    cv2.floodFill(outside, None, (0, 0), 2)
+    ext = (outside[1:-1, 1:-1] != 2).astype(np.uint8)
+    ccov = kit.smoothstep(0, 150.0 / G, cv2.distanceTransform(ext, cv2.DIST_L2, 5)).astype(np.float32)
+    # the holes themselves are clear sky (what the push-pull carried into
+    # them is the boards' warm fringe), feathered over ~30 m
+    hole = cv2.GaussianBlur(((ext > 0) & (seen0 == 0)).astype(np.float32), (0, 0), 30.0 / G)
+    ctex *= (1 - np.clip(hole * 1.5, 0, 1))[..., None]
+    del seen, seen0, hole, outside, ext, wl, nearw, thin, dk
+    # Read from the mirror, filtered by each panorama pixel's footprint on
+    # the plane: a pixel at elevation e spans dA = pi / EH of elevation and
+    # as much times cos e across, which on the plane is H dA / sin^2 e out
+    # from the mirror and t dA cos e across (t = H / sin e, the distance).
+    # A mip pyramid of the plane (premultiplied by its extent, Gaussian
+    # 5-tap), read trilinearly at the level of the narrow axis (or a
+    # quarter of the long one) with four taps along the long one: no
+    # aliasing low down where the plane goes edge-on, and overhead, where
+    # the equirect's rows close to a point, each row reads the plane's own
+    # small circle round the zenith, so a cloud there is one cloud, not
+    # concentric arcs.
+    pyr = [np.dstack([ctex * ccov[..., None], ccov])]
+    while len(pyr) < 9 and min(pyr[-1].shape[:2]) > 8:
+        pyr.append(cv2.pyrDown(pyr[-1]))
+    del ctex, ccov
+    rows = int(EH * (0.5 - np.radians(CLOUD_MIN_EL - 2) / np.pi))  # nothing to read lower down
+    Er = E[:rows]
+    ey = np.maximum(Er[..., 1], 1e-3)
+    el_r = np.arcsin(np.clip(ey, 0, 1))
+    hM = CLOUD_H - Mw[1]
+    t_r = hM / ey
+    Qx = (Mw[0] + Er[..., 0] * t_r - gx0) / G - 0.5
+    Qz = (Mw[2] + Er[..., 2] * t_r - gz0) / G - 0.5
+    dA = np.pi / EH
+    f_long = hM * dA / ey ** 2 / G  # texels, out from the mirror
+    f_across = t_r * dA * np.cos(el_r) / G
+    lv = np.log2(np.maximum(np.maximum(f_across, f_long / 4), 1.0))
+    hx, hz = Er[..., 0], Er[..., 2]
+    hn = np.maximum(np.hypot(hx, hz), 1e-6)
+    stp = f_long / 4  # tap spacing along the long axis, texels
+    sx_, sz_ = hx / hn * stp, hz / hn * stp
+    plane = np.zeros((rows, EW, 4), np.float32)
+    for k, lev in enumerate(pyr):
+        wk = np.clip(1 - np.abs(lv - k), 0, 1).astype(np.float32)
+        if k == len(pyr) - 1:
+            wk = np.where(lv >= k, 1.0, wk).astype(np.float32)
+        if not (wk > 0).any():
+            continue
+        acc = np.zeros((rows, EW, 4), np.float32)
+        for o in (-1.5, -0.5, 0.5, 1.5):
+            mx = ((Qx + o * sx_ + 0.5) / 2 ** k - 0.5).astype(np.float32)
+            mz = ((Qz + o * sz_ + 0.5) / 2 ** k - 0.5).astype(np.float32)
+            acc += cv2.remap(lev, mx, mz, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        plane += acc * (wk / 4)[..., None]
+    del pyr, acc
+    cl = np.zeros((EH, EW, 3), np.float32)
+    cw = np.zeros((EH, EW), np.float32)
+    cw[:rows] = plane[..., 3]
+    cl[:rows] = plane[..., :3] / np.maximum(plane[..., 3:], 1e-4)
+    del plane, Qx, Qz, mx, mz
+    # toward the horizon the plane goes edge-on and far: faded out by the
+    # grazing angle and by the haze between (a visibility of CLOUD_VIS)
     # (and none in the aureole, where the glass already reads white)
-    cw = cw * kit.smoothstep(22, 40, elev) * kit.smoothstep(8, 22, g_e)
+    t_all = hM / np.maximum(E[..., 1], 1e-3)
+    cw = cw * kit.smoothstep(CLOUD_MIN_EL, CLOUD_MIN_EL + 18, elev) * np.exp(-t_all / CLOUD_VIS) * kit.smoothstep(8, 22, g_e)
     skym = np.maximum(skym + cl * cw[..., None], skym * 0.25)
     print("clouds over %.1f%% of the sky above 40 deg" % (100 * (cw[elev > 40] > 0.5).mean()))
-    del cbase, ctex, ccov, cnt, Dp
+    del cbase, cnt, Dp, t_all
     # the swap, by the unmix above: the 360 keeps what stands in its sky
-    sold = sold_e * expo * wb
-    env_h = env_h + (sky_e * wire_e)[..., None] * (skym - sold)
+    env_h = env_h - sold_e * expo * wb + (sky_e * wire_e)[..., None] * skym
     env_h = np.maximum(env_h, 0)
 else:
     env_h = skym * hsky[..., None] + env_h * (1 - hsky[..., None])
