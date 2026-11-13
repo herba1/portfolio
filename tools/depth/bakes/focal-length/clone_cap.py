@@ -1,4 +1,4 @@
-# Clone two distractions out of the published outer plate (regrade_towers.py
+# Clone three distractions out of the published outer plate (regrade_towers.py
 # output), the last pass before the plate ships:
 #
 #  1. the crown of the distant tower straight "up" the plate (towards the
@@ -15,6 +15,11 @@
 #     x(y) is fitted through them, and only letter pixels inside a narrow
 #     band round that curve are inpainted, so the dark slot they ran along
 #     stays.
+#  3. a crane jib floating in clear sky just past the crown of the stone
+#     tower at the top left (it reads as a stray stick in the 12 mm frame).
+#     Pixels in its box a tenth darker than a cubic fitted to the clear sky
+#     round it, in blobs with nothing but sky round them (the crown enters
+#     the box at a corner), are inpainted from that sky.
 #
 # python3 -I clone_cap.py outer_in.webp outer_out.webp [debug.png]
 # Run it on regrade_towers.py's outer.webp, not on an already-cloned plate.
@@ -102,6 +107,44 @@ fixed = np.zeros(V.shape, bool)
 fixed |= alpha > 0.01
 dbg[m] = 255
 print('crown px', int(m.sum()))
+
+# ---- 3. the crane jib by the stone tower's crown
+CX0, CX1, CY0, CY1 = (int(round(v * sc)) for v in (1190, 1280, 1125, 1220))
+cbox = np.zeros(V.shape, bool)
+cbox[CY0:CY1, CX0:CX1] = True
+cring = np.zeros(V.shape, bool)
+cring[CY0 - 60:CY1 + 60, CX0 - 60:CX1 + 60] = True
+csky = cring & (im[..., 2] > im[..., 0] + 0.08) & (V > 0.42) & (S > 0.3)
+cys, cxs = np.nonzero(csky)
+Ac = basis(cxs.astype(np.float32), cys.astype(np.float32))
+ccoefs = [np.linalg.lstsq(Ac, lin[cys, cxs, ch], rcond=None)[0] for ch in range(3)]
+by, bx = np.nonzero(cbox)
+cmodel = np.stack([basis(bx.astype(np.float32), by.astype(np.float32)) @ cf for cf in ccoefs], 1)
+cdark = np.zeros(V.shape, np.uint8)
+cdark[by, bx] = (lin[by, bx] @ LUMA) < 0.9 * (cmodel @ LUMA)
+n, lab, st, _ = cv2.connectedComponentsWithStats(cdark, 8)
+jib = np.zeros(V.shape, bool)
+k9 = np.ones((9, 9), np.uint8)
+for i in range(1, n):
+    # a blob floating in clear sky: the ring round it is all sky
+    blob = lab == i
+    rim = (cv2.dilate(blob.astype(np.uint8), k9) > 0) & ~blob
+    if csky[rim].mean() > 0.9:
+        jib |= blob
+jib = cv2.dilate(jib.astype(np.uint8), k9)
+# the sky there is smooth: inpaint from the sky round it
+j0 = (slice(CY0 - 20, CY1 + 20), slice(CX0 - 20, CX1 + 20))
+J = out.copy()
+reg = np.ascontiguousarray((l2s(out[j0]) * 65535 + 0.5).astype(np.uint16))
+for ch in range(3):
+    reg[..., ch] = cv2.inpaint(np.ascontiguousarray(reg[..., ch]), jib[j0], 6, cv2.INPAINT_TELEA)
+J[j0] = s2l(reg.astype(np.float32) / 65535)
+jib = jib > 0
+ja = np.maximum(cv2.GaussianBlur(jib.astype(np.float32), (0, 0), 1.0), jib)[..., None]
+out = J * ja + out * (1 - ja); del J
+fixed |= ja[..., 0] > 0.01
+dbg[jib] = 255
+print('jib px', int(jib.sum()))
 
 # ---- 2. the ticker
 Y = im @ LUMA
