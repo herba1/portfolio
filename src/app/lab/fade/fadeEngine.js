@@ -54,19 +54,22 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    paint under it and stays a shadow on the chalked wall.
 //
 // Live, per pixel, with e = years x dose x susceptibility, where the dose is
-// the baked one on a cubic curve: paint holds below a threshold and fails
-// fast above it, so in thirty years the top floors in the whole sky give up
-// most of their colour (pink to chalk, orange to pale apricot, yellow to
-// cream) while the low storeys in their slot of it and the coral wall facing
-// north keep theirs:
+// the baked one on a power curve: paint holds below a threshold and fails
+// steadily above it, so the top floors in the whole sky hold for their first
+// eight years or so and give up about half of their thirty years' change
+// after year twelve, settling at their own residual tints (pink to a dusty
+// pink, orange to pale apricot), while the low storeys in their slot of it
+// and the coral wall facing north keep theirs; every coat also loses a thin
+// skin of yellow and magenta to the diffuse sky alone, with no induction, so
+// the coral wall gives up a tenth or so of its chroma and is not frozen:
 //  - ink: albedo -> optical density per channel; the neutral part is carbon
 //    black, the rest is cyan (absorbs red), magenta (green) and yellow (blue),
 //    each fading exponentially, yellow and magenta about 4x faster than cyan,
 //    so reds and yellows go first (dark shutter green is mostly neutral
 //    density, which barely moves); what the inks' differential rates do to a
 //    coat's hue is capped at a few degrees (in Oklab), and a residual tint of
-//    the paint always stays, so a coat loses chroma and gains value but
-//    keeps its family;
+//    the paint (about half its chroma) is a floor the loss approaches, so a
+//    coat loses chroma and gains value but keeps its family;
 //  - wood: lignin breaks down and brown wood goes silver grey (unused here:
 //    every surface in this photo is painted or stone);
 //  - chalk: the binder erodes and the white pigment powders out, lifting the
@@ -124,34 +127,60 @@ const OPEN_AT = 3.2;
 const K_INK = [0.03, 0.13, 0.16]; // cyan, magenta, yellow
 const K_BLACK = 0.004;
 const K_WOOD = 0.1;
-const K_CHALK = 0.1;
+const K_CHALK = 0.2;
 // Most of the most exposed surface powders to bare lime: the top floor goes to
 // pale plaster, a trace of its own hue still under the bloom (mat.webp's B
 // is 0.85 on render, so this is a bloom of about 0.9 on open paint).
 const CHALK_MAX = 1.05;
-const INDUCTION = 2.5;
-// Chalking needs the film itself to erode: only well-exposed paint gets there.
-const CHALK_INDUCTION = 6;
+// The induction is spent over a knee INK_KNEE wide, so an open top floor
+// holds for its first eight years or so, then fails steadily: about half of
+// its thirty years' change lands after year twelve, instead of nearly all of
+// it in the first decade.
+const INDUCTION = 8;
+const INK_KNEE = 2;
+// Chalking needs the film itself to erode: only well-exposed paint gets there,
+// and it lags the ink by a year or two.
+const CHALK_INDUCTION = 8.5;
+const CHALK_KNEE = 2;
 // Fading is not linear in dose: below a threshold the UV absorbers and the
 // binder hold, above it the film erodes and each year takes more. The dose
 // that feeds the clock is the baked one on a power curve about DOSE_PIVOT, so
 // the sky-open top floors run far ahead of the low storeys in their slot of
 // sky (the bake's dose differs by three to five between them; the paint's
-// clock, by thirty to a hundred), and the coral wall facing north, at a tenth
-// of an open south wall, hardly starts. The pivot puts the open top floors
-// (a baked dose of a quarter to a third) at thirty to seventy dose-years by
-// year thirty, so they reach eighty to ninety per cent of the way to lime.
-const DOSE_GAMMA = 3;
-const DOSE_PIVOT = 0.12;
+// clock, by fifteen to sixty), and the coral wall facing north, at a tenth
+// of an open south wall, never gets past the induction. The pivot puts the
+// open top floors (a baked dose of a quarter to a third) at fifteen to twenty
+// dose-years by year thirty, starting to fail around year eight, so they
+// reach about nine tenths of the clock's way by year thirty and about a fifth
+// of it by year twelve, which the eye reads as about half of the change (the
+// first loss of a deep colour shows hardest).
+const DOSE_GAMMA = 2.5;
+const DOSE_PIVOT = 0.185;
+// What any light does, beam or not: the paint's outer skin of yellow and
+// magenta fades under the diffuse sky alone, with no induction and no power
+// curve, linear in the baked dose and saturating at DIFFUSE_MAX of the inks'
+// density. The coral wall facing north, which the clock never reaches, sees
+// only its slot of sky and gives up a tenth or so of its chroma over thirty
+// years: it keeps its red, but it is not frozen. Everything else gets the
+// same skin fade under the clock's, its dose held to DIFFUSE_SKY, about what
+// the coral's slot of sky gives it: the beam is the clock's, and the sky's
+// own share of even an open wall's dose is not much more, so no wall's skin
+// fade runs ahead of the years.
+const DIFFUSE_MAX = 0.6;
+const K_DIFFUSE = 1.5;
+const DIFFUSE_SKY = 0.03;
 // Where the fade ends up: a lime render's white, measured off sun-bleached
 // Ligurian plaster as a neutral, slightly warm off-white (#EEE8DD), never
 // paper white and never cream. The pigment's loss climbs to it and the
 // chalk's bloom powders over it.
 const LIME = [0xee, 0xe8, 0xdd];
-// What the chalked coat keeps of its own paint: a small share of the
-// original chroma, at the original hue, so a pink wall bleaches to chalk with
-// a breath of pink and an orange one to a pale apricot, not all to one cream.
-const RESIDUAL = 0.15;
+// What the faded, chalked coat keeps of its own paint: about half of the
+// original chroma, at the original hue, so a sunlit pink wall settles near a
+// dusty pink (#E9CFC6) and an orange one near a pale apricot (#EBCB9E), not
+// all to one cream. The ink's loss approaches it as a floor (a share of the
+// chroma that is lost only in proportion), and the chalk's bloom mixes the
+// lime over it no further than this.
+const RESIDUAL = 0.5;
 // The differential fade (the inks' own rates, the lime's warmth) may turn a
 // coat's hue by at most this much (Oklab hue, degrees): it loses chroma and
 // gains value, and keeps its family.
@@ -540,6 +569,11 @@ uniform float uKChalk;
 uniform float uChalkMax;
 uniform float uInduction;
 uniform float uChalkInduction;
+uniform float uInkKnee;
+uniform float uChalkKnee;
+uniform float uDiffuseMax;
+uniform float uKDiffuse;
+uniform float uDiffuseSky;
 uniform float uDoseGamma;
 uniform float uDosePivot;
 uniform vec3 uLime;
@@ -575,7 +609,6 @@ vec3 toSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 const float LN10 = 2.302585;
-const float CHALK_KNEE = 3.0;
 // Oklab, to fade a colour along lightness and chroma while holding its hue
 vec3 oklab(vec3 c) {
   vec3 lms = mat3(0.4122214708, 0.2119034982, 0.0883024619, 0.5363325363, 0.6806995451, 0.2817188376, 0.0514459929, 0.1073969566, 0.6299787005) * max(c, 0.0);
@@ -707,6 +740,9 @@ void main() {
   vec4 J = texture(uDose, uv);
   vec2 tl = vec2(J.r + J.g / 255.0, J.b);
   float dose = tl.x * 2.0;
+  // the baked dose as it is, linear and held to the sky's share of it, for
+  // the diffuse skin fade
+  float doseLin = min(dose, uDiffuseSky);
   // the share of the dose a thin occluder took: its tan line
   float tanLine = tl.y;
   // the clock runs on the dose's power curve: the top floors far ahead
@@ -774,10 +810,12 @@ void main() {
     outColor = vec4(toSrgb(vec3(dose * m.a * local * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
     return;
   }
-  // effective dose after induction, with a soft knee (softplus)
+  // effective dose after induction, with a soft knee (softplus) uInkKnee wide
   float e0 = uYears * dose * m.a * local;
-  float e = uInduction * log(1.0 + exp(e0 / uInduction - 1.0)) - uInduction * log(1.0 + exp(-1.0));
+  float e = uInkKnee * (log(1.0 + exp((e0 - uInduction) / uInkKnee)) - log(1.0 + exp(-uInduction / uInkKnee)));
   e = max(e, 0.0);
+  // the skin fade under any light: linear in the baked dose, no induction
+  float fDiff = uDiffuseMax * (1.0 - exp(-uKDiffuse * uYears * doseLin * m.a));
 
   // albedo and optical density per channel
   vec3 a = clamp(lin / S, 0.004, 1.0);
@@ -791,7 +829,8 @@ void main() {
   // switches it, so the open wall grades with its dose and only the strip
   // under a ledge and a tan line (wear near -1) hold their colour firmly.
   float keep = mix(0.4, 1.0, smoothstep(-2.0, 1.6, wear));
-  vec3 lost = cmy * keep * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
+  vec3 fInk = 1.0 - (1.0 - keep * (1.0 - exp(-uKInk * e))) * (1.0 - fDiff * uKInk / uKInk.z);
+  vec3 lost = cmy * fInk + k * (1.0 - exp(-uKBlack * e));
   // what the pigment leaves behind is the lime render's own off-white, not
   // paper white: a fading colour climbs to it and stops (a surface that is
   // already lighter, like the white trim, keeps its own albedo)
@@ -804,10 +843,12 @@ void main() {
   float h0 = atan(o0.z, o0.y);
   float held = smoothstep(0.012, 0.035, C0);
   // and no coat gives up all of its colour: a residual tint of the paint
-  // stays at its own hue under whatever the sun takes
+  // stays at its own hue under whatever the sun takes. It is a floor the
+  // loss approaches, not one it hits: the sun takes its share of what lies
+  // above it, so a wall keeps fading through the back half of the years
   vec3 oi = oklab(aInk);
   float hi = capHue(oi.yz, h0);
-  float Ci = max(length(oi.yz), uResidual * C0);
+  float Ci = mix(min(length(oi.yz), C0), C0, uResidual);
   oi.yz = mix(oi.yz, Ci * vec2(cos(hi), sin(hi)), held);
   aInk = oklabToLin(oi);
 
@@ -820,7 +861,7 @@ void main() {
   // chalk: the binder erodes and the white pigment powders the surface
   // with a soft knee (softplus, a few dose-years wide): the bloom comes in
   // with the dose, never at a contour
-  float ec = max(CHALK_KNEE * (log(1.0 + exp((e0 - uChalkInduction) / CHALK_KNEE)) - log(1.0 + exp(-uChalkInduction / CHALK_KNEE))), 0.0);
+  float ec = max(uChalkKnee * (log(1.0 + exp((e0 - uChalkInduction) / uChalkKnee)) - log(1.0 + exp(-uChalkInduction / uChalkKnee))), 0.0);
   // to the lime white, heavier where the water runs. What is
   // dark in the photo is mostly not render at all (a window's void, the
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
@@ -1356,6 +1397,11 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uChalkMax, CHALK_MAX);
     gl.uniform1f(u.uInduction, INDUCTION);
     gl.uniform1f(u.uChalkInduction, CHALK_INDUCTION);
+    gl.uniform1f(u.uInkKnee, INK_KNEE);
+    gl.uniform1f(u.uChalkKnee, CHALK_KNEE);
+    gl.uniform1f(u.uDiffuseMax, DIFFUSE_MAX);
+    gl.uniform1f(u.uKDiffuse, K_DIFFUSE);
+    gl.uniform1f(u.uDiffuseSky, DIFFUSE_SKY);
     gl.uniform1f(u.uDoseGamma, DOSE_GAMMA);
     gl.uniform1f(u.uDosePivot, DOSE_PIVOT);
     gl.uniform3fv(u.uLime, lime);
