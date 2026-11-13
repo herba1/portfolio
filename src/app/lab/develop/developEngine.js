@@ -112,7 +112,12 @@ const COC = 15; // max circle of confusion, half-res px of the print
 const BAND = 0.62; // light in the front, linear
 
 // The print's finish (see finish() and grain() in COMPOSITE).
-const DIFFUSE = 0.1; // share of the high-key light's wide levels laid back
+const DIFFUSE = 0.3; // share of the high-key light's wide levels laid back
+// The cloud's shoulder (shoulder() in COMPOSITE): the sunlit tops lifted
+// towards paper white in scene light, up to +40% before the roll-off, nothing
+// below the cloud's shadow sides, and warmed with it, so they land a warm
+// neutral at ~245 rather than a cool, flat 235, short of 255.
+const TOP_LIFT = 0.4;
 const HAL_GAIN = 1.2; // red-layer exposure from that spill on dark steel
 const GRAIN = 0.8; // emulsion grain, stops at its strongest, in the mid-tones
 const GRAIN_PX = 1.5; // its clumps, in device px at DPR 2
@@ -120,7 +125,8 @@ const GRAIN_PX = 1.5; // its clumps, in device px at DPR 2
 const FILM = {
   ...FILM_PRESETS.summer,
   input: "linear",
-  bloom: 0.2,
+  bloom: 0.34,
+  bloomThreshold: 0.45, // only the cloud veils; the cobalt keeps its density
   halation: 0.55,
   halationThreshold: 0.95,
   vignette: 0.16,
@@ -251,7 +257,7 @@ float zenithDist(vec2 iuv) {
 
 // The print's finish. The developed print (the photograph, its sky graded) is
 // fixed, so its high-key light is taken once per size into a small pyramid,
-// 1/4, 1/8 and 1/16 of the print: only what is past about 0.6 luminance, keyed
+// 1/4, 1/8 and 1/16 of the print: only what is past about 0.45 luminance, keyed
 // in log light, so the cloud's cores and sunlit tops feed it and the blue and
 // the steel do not. HIKEY makes the 1/4 level (four bilinear taps one mip
 // down cover its 4x4 block of print pixels), SHRINK the two below it (and
@@ -267,7 +273,7 @@ vec3 printAt(vec2 iuv) {
 }
 vec3 highKey(vec3 c) {
   float l = max(dot(c, LUMA), 1e-4);
-  return c * smoothstep(log(0.45), log(0.8), log(l));
+  return c * smoothstep(log(0.3), log(0.7), log(l));
 }
 void main() {
   vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
@@ -306,6 +312,12 @@ uniform float uGrainSeed;
 uniform float uGrainPx;
 ${COMMON}
 const float DIFFUSE = ${f(DIFFUSE)};
+const float TOP_LIFT = ${f(TOP_LIFT)};
+// The diffusion's veil: sunlit cloud light, a touch warm (linear).
+const vec3 SPILL_TINT = vec3(1.05, 1.0, 0.9);
+// The tops' warmth, at full lift (linear; the summer stock's highlight tint
+// leans cool, this takes it past neutral to a sunlit warm white).
+const vec3 TOP_TINT = vec3(1.035, 1.0, 0.95);
 const float HAL_GAIN = ${f(HAL_GAIN)};
 const vec3 HAL_TINT = vec3(1.0, 0.35, 0.08);
 const float GRAIN = ${f(GRAIN)};
@@ -433,7 +445,10 @@ vec3 smoothAt(sampler2D t, vec2 uv) {
 // The film's finish on the developed print, from the pyramid of its high-key
 // light. Diffusion (a Pro-Mist): a share of the wide levels laid back over
 // the print, so the cloud's cores bleed softly into the cobalt and the
-// skyline glows. Halation: the same spill, from the narrow level, where it
+// skyline glows. It is laid on after the structure is composited, so where a
+// cable or crossarm crosses bright cumulus the cloud's light veils it,
+// faintly warm (SPILL_TINT), and eats into its edges. Halation: the same
+// spill, from the narrow level, where it
 // lands on something dark (steel and wire against cloud: the matte, a, and
 // not the bright hardware) exposes the red layer, a thin warm ring where the
 // pole and cables cross cumulus; plain blue next to cloud is lit by it too but is not
@@ -447,7 +462,7 @@ vec3 finish(vec3 c, vec2 iuv, float dev, float cap, float a) {
   vec3 h8 = smoothAt(uHk8, uv);
   vec3 h16 = smoothAt(uHk16, uv);
   float l0 = dot(c, LUMA);
-  vec3 add = DIFFUSE * (0.1 * h4 + 0.3 * h8 + 0.6 * h16);
+  vec3 add = DIFFUSE * SPILL_TINT * (0.1 * h4 + 0.25 * h8 + 0.65 * h16);
   float dark = a * (1.0 - smoothstep(0.06, 0.3, l0));
   add += HAL_TINT * (HAL_GAIN * dot(0.7 * h4 + 0.3 * h8, LUMA) * dark);
   add *= dev;
@@ -455,6 +470,23 @@ vec3 finish(vec3 c, vec2 iuv, float dev, float cap, float a) {
   float room = max(max(cap, l0) - l0, 0.0);
   float k = la > 1e-5 ? room * (1.0 - exp(-la / max(room, 1e-5))) / la : 1.0;
   return c + add * k;
+}
+
+// The cloud's shoulder, the print's last grade before the film: the sunlit
+// tops (past about 0.45 luminance, full by 0.95) lifted by up to TOP_LIFT and
+// warmed by TOP_TINT, so the cumulus glows a warm neutral instead of
+// stopping at a cool paper grey. Keyed on luminance alone: the cobalt, the
+// cloud's blue shadow sides and the steel sit well under the knee, and the
+// lift is a smooth gain, so the cloud's modelling holds. Past 1.1 the
+// lifted light rolls onto an asymptote at 1.22 (about 251 on the print), so a
+// glint on the hardware never reaches 255.
+vec3 shoulder(vec3 c) {
+  float l = max(dot(c, LUMA), 1e-4);
+  float w = smoothstep(0.45, 0.95, l);
+  float lt = l * (1.0 + TOP_LIFT * w);
+  float over = max(lt - 1.1, 0.0);
+  lt -= over - over / (1.0 + over / 0.12);
+  return c * (lt / l) * mix(vec3(1.0), TOP_TINT, w);
 }
 
 // Emulsion grain, in log light: strongest in the mid-tones (a stop either
@@ -523,7 +555,7 @@ void main() {
   col += AMBER * (HALO * line * glow * leak * (uBand / BAND));
 
   col = finish(col, iuv, mix(devB, devF, fg.a), cap, fg.a);
-  o = vec4(grain(col), 1.0);
+  o = vec4(grain(shoulder(col)), 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -973,8 +1005,10 @@ export async function createDevelop(host, { embedded = false } = {}) {
     for (const [src, dst, fb] of [
       [T.hk4, T.hk8, T.hk8Fb],
       [T.hk8, T.hk16, T.hk16Fb],
-      // the widest level blurred twice more at its own size, so the cloud's
-      // spill reaches well out into the blue
+      // the widest level blurred four times more at its own size, so the
+      // cloud's spill reaches well out over the blue and the steel
+      [T.hk16, T.hk16b, T.hk16bFb],
+      [T.hk16b, T.hk16, T.hk16Fb],
       [T.hk16, T.hk16b, T.hk16bFb],
       [T.hk16b, T.hk16, T.hk16Fb],
     ]) {
