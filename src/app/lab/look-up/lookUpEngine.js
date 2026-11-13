@@ -148,7 +148,7 @@ const FILM = {
 // and how far toward cream it goes.
 // ring is the thin halation (see SCENE): its radius in device px at a
 // 2560 wide frame, and its strength.
-const PRINT = { from: 0.62, to: 1.25, warm: 1, ringPx: 10, ring: 5 };
+const PRINT = { from: 0.62, to: 1.25, warm: 1, ringPx: 4, ring: 1.5 };
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const smooth = (a, b, x) => {

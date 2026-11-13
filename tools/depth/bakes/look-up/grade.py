@@ -165,7 +165,7 @@ def _grade3(eq, P, w, elev, Y, wsky, bn, prof):
     # --- non-sky: exposure + slight warm, buildings keep their glass
     rest = eq * P['expo'] * np.array(P['restTint'], np.float32)
     if P.get('bGrade', 1):
-        rest = _buildings(rest, wsky, w, P)
+        rest = _buildings(rest, wsky, w, P, elev)
     out = rest + (graded_sky - rest) * wsky[..., None]
     out = _shoulder(out, P)
     return out.astype(np.float32), wsky, alpha, prof
@@ -202,7 +202,7 @@ def _composite(eq, P, w, elev, wsky, sky2, prof):
     del sky2
     eq, wsky = _edges(eq, wsky, w, P)
     eq *= P['expo'] * np.array(P['restTint'], np.float32)
-    rest = _buildings(eq, wsky, w, P) if P.get('bGrade', 1) else eq
+    rest = _buildings(eq, wsky, w, P, elev) if P.get('bGrade', 1) else eq
     del eq
     sky -= rest; sky *= wsky[..., None]; sky += rest
     del rest
@@ -288,10 +288,7 @@ def _sky2(K, P, w, elev, prof):
     del Yc
     # the open blue: a smooth cobalt ramp by elevation, lit by the capture's
     # own broad sky brightness, not by the gaps' shapes
-    tt = np.clip(elev / 90, 0, 1)[..., None]
-    zen, mid, low, hor = [s2l(c) for c in P['skyHex']]
-    def lerp(a, b_, x): return a + (b_ - a) * x
-    skyc = np.where(tt > 0.5, lerp(mid, zen, smooth(0.5, 1.0, tt)), np.where(tt > 0.17, lerp(low, mid, (tt - 0.17) / 0.33), lerp(hor, low, tt / 0.17))).astype(np.float32)
+    skyc = _sky_ramp(elev, P)
     yref = np.interp(elev, pe, py).astype(np.float32)
     glow = np.clip(gap_Y / np.maximum(yref, 1e-4), 0.3, 4) ** P['s2Glow']
     del gap_Y
@@ -325,22 +322,31 @@ def _profile2(K, b, elev1, P):
 # pushed apart in log space around a pivot, and its colour swung from a
 # warm-neutral near-black (shaded faces, glass) to a pale warm stone (sunlit
 # faces). The per-pixel ratio to the face level rides on top, so the window grid survives.
-def _buildings(rest, wsky, w, P):
+def _buildings(rest, wsky, w, P, elev):
     # In row strips with a wide overlap (past every blur's reach), so an 8K
     # grade fits in memory; the result is the same as one pass.
+    # elev is the elevation in degrees, (h, 1) on the equirect or (h, w) on
+    # the rotated zenith cap.
     h = rest.shape[0]
     ov = int(w / 360 * P['bFace'] * 12) + 16
     step = max(2 * ov, h // 4)
     if h <= step + 2 * ov:
-        return _buildings1(rest, wsky, w, P)
+        return _buildings1(rest, wsky, w, P, elev)
     out = np.empty_like(rest)
     for r0 in range(0, h, step):
         r1 = min(h, r0 + step)
         a, b = max(0, r0 - ov), min(h, r1 + ov)
-        out[r0:r1] = _buildings1(rest[a:b], wsky[a:b], w, P)[r0 - a:r1 - a]
+        out[r0:r1] = _buildings1(rest[a:b], wsky[a:b], w, P, elev[a:b])[r0 - a:r1 - a]
     return out
 
-def _buildings1(rest, wsky, w, P):
+def _sky_ramp(elev, P):
+    # the open blue of the new sky (see _sky2) at an elevation, linear
+    tt = np.clip(np.asarray(elev, np.float32) / 90, 0, 1)[..., None]
+    zen, mid, low, hor = [s2l(c) for c in P['skyHex']]
+    def lerp(a, b_, x): return a + (b_ - a) * x
+    return np.where(tt > 0.5, lerp(mid, zen, smooth(0.5, 1.0, tt)), np.where(tt > 0.17, lerp(low, mid, (tt - 0.17) / 0.33), lerp(hor, low, tt / 0.17))).astype(np.float32)
+
+def _buildings1(rest, wsky, w, P, elev):
     m = np.clip(1 - wsky, 0, 1).astype(np.float32)
     Y = rest @ LUMA
     sig = w / 360 * P['bFace']
@@ -369,20 +375,47 @@ def _buildings1(rest, wsky, w, P):
     tn = navy / nY; ts = stone / float(stone @ LUMA)
     hl = smooth(P['bHlLo'], P['bHlHi'], u)[..., None]
     tint = tn + (ts - tn) * u[..., None]
-    # bWarmR/B are linear gains: about +0.04 R and -0.03 B in display values at stone level
+    # bWarmR/B are linear gains: about +0.05 R and -0.05 B in display values at stone level
     warm = np.array([1 + P['bWarmR'], 1, 1 - P['bWarmB']], np.float32)
     tint = tint * (1 + (warm - 1) * hl)
     tint = tint / (tint @ LUMA)[..., None]
-    # keep a little of the capture's own colour (glass reflecting sky), but
-    # never the saturated orange of the LED ticker
+    # The towers' own colour rides on the ramp, not under it: the capture's
+    # chroma, white-balanced against its overcast cast (bWB, the mean tower
+    # chroma, taken out bWBk of the way), multiplies the ramp's tint at bKeep
+    # strength in log space. So the sunlit stone stays warm, the shaded stone
+    # and the glass keep their own blue-green and steel instead of collapsing
+    # to one sepia plate; never the saturated orange of the LED ticker.
     own = rest / (Y[..., None] + 1e-5)
     r, g, b = rest[..., 0], rest[..., 1], rest[..., 2]
     led = smooth(1.25, 1.7, r / (g + 1e-5)) * smooth(1.6, 2.6, r / (b + 1e-5))
     led = cv2.GaussianBlur(led.astype(np.float32), (0, 0), max(1.0, w / 8192 * 3))
     led = np.clip(led * 2, 0, 1)
-    keep = (P['bKeep'] * (1 - led))[..., None]
-    col = tint + (own - tint) * keep
+    # (the sunlit faces are taken all the way out, bWBkLit: they are lit by
+    # the sun, not by the overcast the capture saw; the shaded faces keep
+    # some of its skylight blue)
+    lwb = np.log(np.array(P['bWB'], np.float32)); lwb -= float(np.log(np.exp(lwb) @ LUMA))
+    wbk = P['bWBk'] + (P['bWBkLit'] - P['bWBk']) * hl
+    lown = np.log(np.clip(own, 0.25, 4)) - lwb * wbk
+    # the chroma is read at the window-grid scale, so grain in the capture's
+    # deep shade does not come through as colour noise
+    lown = cv2.GaussianBlur(lown.astype(np.float32), (0, 0), max(0.7, w / 8192 * P['bChromaR']))
+    keep = ((P['bKeep'] + (P['bKeepLit'] - P['bKeep']) * hl[..., 0]) * (1 - led))[..., None]
+    col = tint * np.exp(lown * keep)
     col = col / np.maximum(col @ LUMA, 1e-5)[..., None]
+    # Skylight in the glass: a vertical facade mirrors the sky at the same
+    # elevation it is seen at, so the glass and the shaded faces take the new
+    # sky's colour there (pale cyan low, cobalt high), mixed into their chroma
+    # by bRefl, weighted by how dark the face is and how glassy (blue) the
+    # capture reads it, and lifting the darkest glass a little (bReflAdd,
+    # a fraction of the sky's own light).
+    sk = _sky_ramp(elev, P) * P['skyGain']
+    skY = np.maximum(sk @ LUMA, 1e-5)
+    skc = sk / skY[..., None]
+    glassy = smooth(0.15, 0.6, own[..., 2] - own[..., 0])
+    wr = (P['bRefl'] * (1 - u) ** P['bReflDark'] * (0.5 + 0.5 * glassy) * (1 - led)).astype(np.float32)
+    col = col + (skc - col) * wr[..., None]
+    col = col / np.maximum(col @ LUMA, 1e-5)[..., None]
+    Yn = Yn + skY * P['bReflAdd'] * wr
     # the ticker reads at its face level, not as a lit sign
     Yn = Yn + (np.minimum(Yn, lvl) - Yn) * led
     graded = Yn[..., None] * col
@@ -426,6 +459,10 @@ def _tower_curve(graded, mblur, w, P):
 # the HDRI) stands at 200, behind the engine's resting view (YAW0 = 20): the
 # clouds overhead are front-lit, white tops over skylit bases, as in ref 3.
 # bLit/bWarm*: the sunlit stone is the one warm note against the cobalt.
+# bKeep*/bWB*/bRefl*: the towers keep their own colour on top of that ramp
+# (blue-green glass, steel, warm stone) and the glass and shaded faces take
+# the new sky's colour, so the street and the sky read as one daylight
+# negative instead of a toned print under a colour sky (see _buildings1).
 # skyHex is a soft film cobalt, not polariser ink: lighter and less
 # saturated (the engine's film pass adds only a little blue depth on top), so
 # the frame lands near #1f5fae at the zenith and #3f8fcf toward the edges.
@@ -437,7 +474,8 @@ P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.52, 0.72, 1.0],
          restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3,
          bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#201f1e', bLit='#d6c3a2', bLitGain=1.12, bFloor=0.25,
-         bDetail=1.0, bHlLo=0.35, bHlHi=1.0, bWarmR=0.2, bWarmB=0.2, bKeep=0.12,
+         bDetail=1.0, bHlLo=0.35, bHlHi=1.0, bWarmR=0.25, bWarmB=0.3,
+         bKeep=0.8, bKeepLit=0.6, bWB=[0.77, 1.04, 1.27], bWBk=0.5, bWBkLit=1.2, bChromaR=1.5, bRefl=0.3, bReflDark=0.6, bReflAdd=0.06,
          bLocal=0.35, bLcR=0.35, bLcClip=0.35, bCon=1.18, bPivot=0.12, bConTop=0.5, bToe=0.007,
          # the second sky (see _sky2)
          sky2Yaw=-14.0, s2Clamp=40.0, s2Expo=0.8, s2Denoise=1.0, s2Lo=0.45, s2Hi=0.9,
