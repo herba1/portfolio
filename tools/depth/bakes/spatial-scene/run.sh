@@ -13,11 +13,12 @@
 # The LaMa plate and the outpainted canvas are cached in <workdir>
 # (plate.png, out.png); delete them to re-inpaint (about 10 minutes on 2 threads).
 #
-# The sky canvas extent in bake.py (CANVAS) covers the engine's widest view:
-# yaw +-6 deg about the pole, pitch -8..+16 deg about the anchor, the lens at
-# s = 1/2 (stereographic) at full pitch-up, the print showing 1/1.2 of the
-# photo. Sweeping those reaches x -0.46..0.46, y -0.59..1.00 photo heights on
-# the image plane. If the engine's ranges change, re-check that before baking.
+# The sky is two maps: the canvas (CANVAS in bake.py: the photo, and LaMa's
+# band round its sides and foot, on the photo's image plane) and dome.webp,
+# the whole sky to 112 deg from the zenith, which covers every view the engine
+# makes (yaw +-6 deg, the look up to a stereographic 116 deg pitched to ~73,
+# whose corners reach ~100 deg from the zenith). If the engine ever looks
+# lower than that, raise ZMAX in bake.py.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$HERE/../../../..
