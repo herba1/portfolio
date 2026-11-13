@@ -357,15 +357,47 @@ vec3 cloudTone(vec3 sl, vec2 iuv){
   float L = p.x + (0.05 * sun - 0.04 * shade * under) * uTone.x;
   return max(fromLab(vec3(L, ab)), 0.0);
 }
+// Where the sky is read beside the tower. The sky's own samples (the live
+// mean, the blocks, the clear-sky mean) are not trusted right up to the
+// matte: the viewfinder carries the fin's light a pixel or two past it (its
+// lower resolution, its shutter's flow), and the blocks' tower fill (bake)
+// reaches GROW block texels past it. Read there, that light is stretched
+// with the silk into a pale slab beside the fin with a dark fringe under it.
+// So the sky is read as if the matte were grown by SKY_GAP: a pixel nearer
+// the matte than that takes the sky from SKY_GAP out, along the matte's
+// normal (the sky's own light, clamped outward like a texture's edge), and
+// the fin's edge stays the matte's own, a pixel or two wide.
+const float SKY_GAP = 6.0;   // plate px (1080p): 3 block texels, inside the bake's fill
+const int GAP_STEPS = 8;
+vec2 skyPoint(vec2 iuv){
+  if (textureLod(uStill, iuv, 3.0).a <= 0.0) return iuv;
+  vec2 px = 1.0 / vec2(textureSize(uStill, 0));
+  vec2 h = px * 8.0;
+  vec2 g = vec2(textureLod(uStill, iuv + vec2(h.x, 0.0), 3.0).a - textureLod(uStill, iuv - vec2(h.x, 0.0), 3.0).a,
+                textureLod(uStill, iuv + vec2(0.0, h.y), 3.0).a - textureLod(uStill, iuv - vec2(0.0, h.y), 3.0).a);
+  if (dot(g, g) < 1e-6) return iuv;
+  vec2 n = -normalize(g); // away from the tower, in plate px
+  float d = SKY_GAP;
+  for (int k = 0; k < GAP_STEPS; k++) {
+    float t = SKY_GAP * float(k) / float(GAP_STEPS);
+    if (textureLod(uStill, iuv - n * t * px, 0.0).a > 0.02) { d = t; break; }
+  }
+  return iuv + n * (SKY_GAP - d) * px;
+}
 void main(){
   vec2 uv = gl_FragCoord.xy / uSize * uCover.xy + uCover.zw;
   vec2 iuv = vec2(uv.x, 1.0 - uv.y);
   vec3 f = texture(uFrame, iuv).rgb;
   if (uFrameLin < 0.5) f = lin(f);
-  vec3 e = texture(uExp, uv).rgb;
-  vec3 sl = mix(f, e, uWB);
+  // The sky's samples, from outside the grown matte.
+  vec2 siuv = skyPoint(iuv);
+  vec2 suv = vec2(siuv.x, 1.0 - siuv.y);
+  vec3 fs = texture(uFrame, siuv).rgb;
+  if (uFrameLin < 0.5) fs = lin(fs);
+  vec3 e = texture(uExp, suv).rgb;
+  vec3 sl = mix(fs, e, uWB);
   if (uKeep > 0.0) {
-    vec3 ml = mix(textureLod(uFrame, iuv, uLodM.x).rgb, textureLod(uExp, uv, uLodM.y).rgb, uWB);
+    vec3 ml = mix(textureLod(uFrame, siuv, uLodM.x).rgb, textureLod(uExp, suv, uLodM.y).rgb, uWB);
     // The finer mean: four taps half a cell apart, so the mip's cells
     // never print as a grid.
     vec3 md = vec3(0.0);
@@ -373,13 +405,13 @@ void main(){
     vec2 he = exp2(uLodD.y) * 0.5 / uDim.zw;
     for (int i = 0; i < 4; i++) {
       vec2 d = vec2(i == 0 || i == 3 ? -1.0 : 1.0, i < 2 ? -1.0 : 1.0);
-      vec3 fd = textureLod(uFrame, iuv + d * hf, uLodD.x).rgb;
-      vec3 ed = textureLod(uExp, uv + d * he, uLodD.y).rgb;
+      vec3 fd = textureLod(uFrame, siuv + d * hf, uLodD.x).rgb;
+      vec3 ed = textureLod(uExp, suv + d * he, uLodD.y).rgb;
       md += mix(fd, ed, uWB) * 0.25;
     }
-    sl = keepSky(sl, ml, md, iuv);
+    sl = keepSky(sl, ml, md, siuv);
   }
-  if (uTone.x > 0.0) sl = cloudTone(sl, iuv);
+  if (uTone.x > 0.0) sl = cloudTone(sl, siuv);
   vec3 sky = enc(sl);
   vec4 s = textureLod(uStill, iuv, uLod.x);
   vec3 dF = s.rgb - textureLod(uStill, iuv, uLod.y).rgb;

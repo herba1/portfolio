@@ -35,9 +35,10 @@ Steps
      at 960x540, lossless, in OKLab with L at 12 bits (see "The pyramid's
      encoding"), as many per atlas as fit in 4096 px. The tower is filled
      out of every block (push-pull from that block's own sky, inside the
-     matte grown by 6 px): a long exposure is a picture of the sky alone, and
-     the still plate supplies the tower, so no low-resolution tower light
-     bleeds into the smeared sky as a glow at its edge.
+     matte grown by 4 block texels, towerfill.py): a long exposure is a
+     picture of the sky alone, and the still plate supplies the tower, so no
+     low-resolution tower light bleeds into the smeared sky as a glow at its
+     edge. (towerfill.py alone re-applies the fill to shipped atlases.)
    - still.webp: 1920x1080, the linear mean of the whole loop (the tower
      carries its average light and its glass the average of its reflections,
      noise-free), with the stillness matte in alpha: the SAM 2.1 tower mask
@@ -66,6 +67,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 from grade import grade, lin2oklab, lin2srgb, srgb2lin  # noqa: E402
 from kit import guided, pushpull  # noqa: E402
+from towerfill import fill_tower, tower_keep  # noqa: E402
 
 # The crown: the open strut lattice above the tower's top floor slab (1080p
 # px; the line runs through the slab, which is solid). Only here does the
@@ -404,14 +406,11 @@ cv2.imwrite(os.path.join(args.work, "debug-crown.png"), cv2.resize(np.hstack([
     cv2.cvtColor((alpha[cz] * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR),
     cv2.cvtColor(((1 - cover[cz]) * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)]), None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST))
 
-# Tower out of the blocks: push-pull of each block's own sky.
-hole = cv2.resize(matte, (BW, BH), interpolation=cv2.INTER_AREA)
-hole = cv2.dilate((hole > 0.02).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
-keep = 1.0 - hole.astype(np.float32)
-filled = []
-for b in blocks:
-    fill = pushpull(b, keep)
-    filled.append(np.clip(b * keep[..., None] + fill * (1 - keep[..., None]), 0, 1).astype(np.float32))
+# Tower out of the blocks: push-pull of each block's own sky, inside the
+# matte grown by towerfill.GROW block texels (the shutter's flow drags the
+# fin's light a texel or two downwind; see towerfill.py).
+keep = tower_keep(matte, BW, BH)
+filled = [fill_tower(b, keep) for b in blocks]
 cv2.imwrite(os.path.join(args.work, "debug-block0.jpg"), cv2.cvtColor(to8(filled[0]), cv2.COLOR_RGB2BGR))
 
 
