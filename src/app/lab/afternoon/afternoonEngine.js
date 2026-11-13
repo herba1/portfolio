@@ -25,9 +25,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // mast arm. The sky is drawn by a small analytic model (a cyan-cobalt zenith
 // that holds its hue at every sun, lightening to a pale cobalt at the roofs, a
 // warm band laid on only in the sun's azimuth once it is low, a circumsolar
-// glow); the cloud keeps the photo's drawing and is graded white on its sunlit
-// side and skylight blue in its shade. The buildings are the photograph at
-// the photo's sun.
+// glow). The photo's one small wisp is retired; a photographed cumulus (Poly
+// Haven's Skidpan, its own luminance and alpha, cloud.webp) rises from behind
+// the right-hand roofs and the pole instead, relit here: a warm-white sunlit
+// flank that turns peach and swings lower as the sun drops, skylight-blue
+// shade holding its billows, a thin warm ring round its sunlit edge. The
+// buildings are the photograph at the photo's sun.
 //
 // Query: ?sun=0..1 holds the sun (0 = 12:30, 1 = 17:00, the last light; the
 // photo is 0.424, 14:25);
@@ -68,6 +71,17 @@ const SKY_HOR = [207, 0.44, 0.87, 0.85];
 const SKY_CURVE = 1.7;
 const SKY_WARMC = [1.0, 0.92, 0.8];
 const SKY_WARM_AMT = 1.0;
+// The cumulus: a photographed plate (cloud.webp, from tools/depth/bakes/
+// afternoon/cumulus.py: R its own luminance, A its coverage) laid behind the
+// street so it rises from behind the right-hand roofs and the pole. The
+// plate's foot (CLOUD_FOOT, card px) lands at CLOUD_AT (plate px), scaled by
+// CLOUD_SCALE and turned CLOUD_ROT degrees counter-clockwise, so its upright
+// leans in toward the zenith the way the building edges on that side do.
+const CLOUD_SIZE = [2140, 1880];
+const CLOUD_FOOT = [380, 1160];
+const CLOUD_AT = [1440, 1240];
+const CLOUD_SCALE = 1.25;
+const CLOUD_ROT = 22;
 const S_PHOTO = (T0 - T_START) / T_SPAN;
 const S_OPEN = 0.86;
 
@@ -265,6 +279,9 @@ uniform sampler2D uNrm;
 uniform sampler2D uDep;
 uniform sampler2D uMat;
 uniform sampler2D uVis;
+uniform sampler2D uCloud;
+uniform vec4 uCl0;       // the cumulus card: plate px of its foot, card px of its foot
+uniform vec4 uCl1;       // cos/scale, sin/scale, card size (px)
 uniform vec3 uL;
 uniform vec3 uSun;
 uniform vec3 uSky;
@@ -380,25 +397,64 @@ void main() {
   // Sky, drawn as it should print.
   vec3 vd = normalize(vec3((px.x - uCam.y) / uCam.x, (uCam.z - px.y) / uCam.x, 1.0));
   vec3 clear = skyTarget(vd, uL, uEl);
-  // The cloud keeps the photo's drawing (its own light, normalised to its
-  // white) and takes the colour of what lights it: the face toward the sun a
-  // white that warms only a little as the sun drops, the rest the pale blue
-  // of the sky that fills it. Both stay under paper white, so the sunlit edge
-  // rolls off instead of clipping, and nothing in it goes orange.
-  float cy = smoothstep(0.78, 0.96, l2s(vec3(dot(base, LUMA))).r);
-  vec2 tx = vec2(1.0 / uPlate.x, 1.0 / uPlate.y);
-  // toward the sun on the plate: a pixel with less cloud that way is a face it reaches
-  vec2 sdir = normalize(proj(vd * 10.0 + uL) - proj(vd * 10.0) + 1e-5);
-  float gSun = textureLod(uMat, t + sdir * 20.0 * tx, 2.0).g;
-  float gAway = textureLod(uMat, t - sdir * 20.0 * tx, 2.0).g;
-  float lit = clamp(0.45 + (gAway - gSun) * 1.2 + (cy - 0.5) * 0.5, 0.0, 1.0);
+  // The cumulus: a photographed plate, its own luminance and alpha, relit by
+  // the sun here. Its drawing (the tone of every billow, lit from its upper
+  // left in the photograph, as this sun stands) is kept; the sun model decides
+  // which faces take the sun. The lobes' relief comes from the plate's own
+  // coverage, blurred at two scales (its mips): a face turned toward the sun
+  // across the frame (and toward or away from us) is lit. The sunlit crown
+  // is a warm white that rolls off under paper white, never clipped; it warms
+  // to peach as the sun drops and its lit faces swing lower with it. The rest
+  // is the skylight blue of the dome that fills it, the plate's own billows
+  // held in it at a lower exposure.
   float low = 1.0 - smoothstep(3.0, 40.0, uEl);
-  vec3 cloudLit = mix(vec3(0.91, 0.92, 0.93), vec3(0.95, 0.9, 0.83), low);
-  vec3 cloudShade = hsv2rgb(vec3(212.0 / 360.0, mix(0.26, 0.34, low), mix(0.74, 0.66, low)));
-  vec3 cloud = mix(cloudShade, cloudLit, smoothstep(0.0, 1.0, lit));
-  // a soft matte (a little wider than the photo's), so the edge is the
-  // cloud thinning out, not a cut
-  float ca = smoothstep(0.03, 0.9, textureLod(uMat, t, 1.8).g);
+  // toward the sun on the plate
+  vec2 sdir = normalize(proj(vd * 10.0 + uL) - proj(vd * 10.0) + 1e-5);
+  vec2 dc = px - uCl0.xy;
+  vec2 cuv = (uCl0.zw + vec2(dc.x * uCl1.x - dc.y * uCl1.y, dc.x * uCl1.y + dc.y * uCl1.x)) / uCl1.zw;
+  vec4 cl = texture(uCloud, cuv);
+  vec2 ct = 1.0 / uCl1.zw;
+  vec2 ex = vec2(1.0, 0.0);
+  vec2 ey = vec2(0.0, 1.0);
+  vec2 g5 = vec2(textureLod(uCloud, cuv + ex * 28.0 * ct, 4.5).a - textureLod(uCloud, cuv - ex * 28.0 * ct, 4.5).a,
+                 textureLod(uCloud, cuv + ey * 28.0 * ct, 4.5).a - textureLod(uCloud, cuv - ey * 28.0 * ct, 4.5).a);
+  vec2 g3 = vec2(textureLod(uCloud, cuv + ex * 9.0 * ct, 3.0).a - textureLod(uCloud, cuv - ex * 9.0 * ct, 3.0).a,
+                 textureLod(uCloud, cuv + ey * 9.0 * ct, 3.0).a - textureLod(uCloud, cuv - ey * 9.0 * ct, 3.0).a);
+  // and inside the silhouette, the billows' own drawing: the plate's tone,
+  // blurred to the size of a lobe, read as relief (a lobe bulges toward us
+  // where it is brightest in the photograph)
+  vec2 gt = vec2(textureLod(uCloud, cuv + ex * 14.0 * ct, 3.5).r - textureLod(uCloud, cuv - ex * 14.0 * ct, 3.5).r,
+                 textureLod(uCloud, cuv + ey * 14.0 * ct, 3.5).r - textureLod(uCloud, cuv - ey * 14.0 * ct, 3.5).r);
+  vec2 gc = 0.6 * g5 + 0.8 * g3 + 1.6 * gt * cl.a;
+  // card to plate: the card's turn (the scale drops out of a direction)
+  float rc = uCl1.x / length(uCl1.xy);
+  float rs = uCl1.y / length(uCl1.xy);
+  vec2 gp = vec2(gc.x * rc + gc.y * rs, -gc.x * rs + gc.y * rc);
+  // a lobe's face turns outward, against its coverage's rise
+  vec3 cn = normalize(vec3(-gp * 2.2, 1.0));
+  float vl = dot(vd, uL);
+  vec3 cl3 = normalize(vec3(sdir * sqrt(max(1.0 - vl * vl, 0.0)), -vl));
+  float dif = dot(cn, cl3);
+  float tn = clamp((cl.r - 0.5) / 0.45, 0.0, 1.0);
+  // the cauliflower: the plate's fine tone against its lobe-sized blur, kept
+  // in both lights (stronger in the shade, where the sky alone models it)
+  float det = cl.r - textureLod(uCloud, cuv, 4.0).r;
+  // and the lobes themselves against the body (the shade holds them too)
+  float lobe = textureLod(uCloud, cuv, 3.5).r - textureLod(uCloud, cuv, 6.5).r;
+  // the underside, nearer the roofs, stands deeper in the cloud's own shade
+  float under = 1.0 - smoothstep(0.2, 0.62, dot(vd, UP));
+  float sunK = smoothstep(0.25, 0.85, 0.8 * tn + 0.45 * dif);
+  vec3 litC = mix(vec3(0.955, 0.94, 0.9), vec3(0.97, 0.82, 0.64), pow(low, 1.3)) * (0.79 + 0.19 * tn) * mix(1.0, 0.93, low) * (1.0 + 0.7 * det);
+  vec3 shadeC = hsv2rgb(vec3(207.0 / 360.0, mix(0.3, 0.36, low) + 0.06 * under, mix(0.84, 0.72, low)))
+    * (0.7 + 0.45 * tn + 0.1 * dif) * (1.0 + 1.5 * det + 1.6 * lobe) * (1.0 - 0.1 * under);
+  vec3 cloud = min(mix(shadeC, litC, sunK), vec3(0.955));
+  // A thin warm ring round its sunlit edge, outside it: the light the film's
+  // base throws back round a bright edge, on the clear sky only.
+  float ring = max(textureLod(uCloud, cuv, 1.8).a - cl.a, 0.0);
+  float edgeSun = smoothstep(-0.1, 0.7, dot(normalize(-gp + 1e-6), sdir));
+  vec3 ringC = mix(vec3(1.0, 0.86, 0.7), vec3(1.0, 0.72, 0.5), low);
+  clear = mix(clear, ringC, clamp(ring * edgeSun * 0.45, 0.0, 0.25));
+  float ca = cl.a;
   vec3 skyS = mix(clear, cloud, ca);
   // back through the scan grade below, so the sky lands where it was drawn;
   // the reveal's push lifts it with everything else
@@ -548,11 +604,14 @@ export async function createAfternoon(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [albImg, nrmImg, depImg, matImg] = await Promise.all(["albedo.webp", "normal.png", "depth.png", "matte.png"].map((f) => loadImage(BASE + f)));
+  const [albImg, nrmImg, depImg, matImg, cloudImg] = await Promise.all(
+    ["albedo.webp", "normal.png", "depth.png", "matte.png", "cloud.webp"].map((f) => loadImage(BASE + f)),
+  );
   const alb = imageTexture(gl, albImg, true);
   const nrm = imageTexture(gl, nrmImg, false);
   const mat = imageTexture(gl, matImg, true);
   const dep = depthTexture(gl, depImg);
+  const cloudTex = imageTexture(gl, cloudImg, true);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -730,6 +789,9 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     bindTex(2, dep, u.uDep);
     bindTex(3, mat, u.uMat);
     bindTex(4, T.vis.tex, u.uVis);
+    bindTex(5, cloudTex, u.uCloud);
+    gl.uniform4f(u.uCl0, CLOUD_AT[0], CLOUD_AT[1], CLOUD_FOOT[0], CLOUD_FOOT[1]);
+    gl.uniform4f(u.uCl1, Math.cos(rad(CLOUD_ROT)) / CLOUD_SCALE, Math.sin(rad(CLOUD_ROT)) / CLOUD_SCALE, CLOUD_SIZE[0], CLOUD_SIZE[1]);
     gl.uniform3fv(u.uL, sun.L);
     gl.uniform3fv(u.uSun, sun.sun);
     gl.uniform3fv(u.uSky, sun.fill);
@@ -884,7 +946,7 @@ export async function createAfternoon(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [alb, nrm, mat, dep].forEach((t) => gl.deleteTexture(t));
+      [alb, nrm, mat, dep, cloudTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
