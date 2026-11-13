@@ -3,6 +3,7 @@
 #     && python3 deepen.py <OE_WORK>/crop1536r.npy && python3 bake_wormseye.py <OE_WORK>/crop1536d.npy
 #     && python3 relight.py <copy of scene.webp> <copy of optics.png>   (cumulus relit, cloud key -> alpha)
 #     && python3 sunburst.py <copy of scene.webp> <copy of optics.png>  (the hidden sun lit: aureole, rim, optics, glow key)
+#     && python3 polarise.py <copy of scene.webp> <copy of optics.png>  (dense radial cobalt sky around the zenith)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image
