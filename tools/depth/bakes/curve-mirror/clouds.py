@@ -12,6 +12,13 @@
 
     Order: bake.py, develop.py (if run on its own), clouds.py, grade.py.
 
+The plate is not re-lit but re-composed (massing(), below): its own clouds,
+small scattered puffs and thin strips strung along the wires, go back to
+clear sky, and one towering cumulus is built in their place, rising from
+behind the roofs on the right between the crossing's pole and the barrier's,
+with a lower shoulder past the barrier, lit with the same TOP and BELLY by
+the same sun. relight(), the rest of this note, lights the panorama's sky.
+
 The plate's cumulus came through sky_grade.py with their own light kept, which
 was the light of a hazy spring sky: each puff a flat, slightly blue white
 (sRGB about 200-225 across a whole cloud, a luminance spread of about six
@@ -404,6 +411,229 @@ def relight(lin, sky, ray, right, up, sun, ppd, aspect=None, keep=None, white=No
     return out, {"Lw": Lw, "a": op, "h": h / max(float(h.max()), 1e-3), "lit": lit, "tr": tr, "rm": wc, "base": base}
 
 
+# --------------------------------------------------------------- the massing
+# The plate's own cumulus, even re-lit, were small scattered puffs (and, low
+# on the right, thin strips strung between the wires): confetti on the
+# cobalt, a backdrop with sprites on it. A summer sky over a low town is
+# built on one big body: a towering cumulus rising from behind the roofs,
+# its cauliflower towers stacked up toward the zenith. So the plate's clouds
+# all go back to clear sky, and one massing is built in their place, behind
+# the roofs on the right, between the crossing's pole and the barrier's,
+# with a lower shoulder past the barrier to the frame's edge; the upper left
+# stays open cobalt, so the gradient to the zenith carries the depth.
+#
+# Each tower is a stack of tiers (y of its middle, half width, lobe radius,
+# px at 28 px/deg on the plate), its axis sheared a little downwind as it
+# rises; each tier a row of lobes (spheres, nearer the viewer at the tower's
+# middle than at its flanks), and each lobe a cauliflower: smaller lobes
+# budded on its upper rim, and smaller ones again on theirs. The body is the
+# height field of the union (the nearest surface), its edge bumped with
+# smooth noise so no lobe is a circle. It takes the same light as the heaps
+# above: the sun's optical depth through the massing (the cap is its
+# sun-facing top and left, the belly the far, low side), each lobe's own
+# roundness off the height field's normal, the crevices between lobes in
+# their neighbours' shade, so the light runs from TOP at the sunlit tops to
+# BELLY under them; feathered at its edge (FEATHER), thinning to a veil at
+# its base where the aerial haze takes it, and composited only over the open
+# sky, unmixed (a wire across it stays a dark line, not a blue hairline).
+TOWERS = (
+    # the main tower: rising from behind the station house's roof, between
+    # the crossing's pole and the barrier's, its crowns toward the zenith
+    {"x": 1900.0, "lean": 0.06, "seed": 11, "tiers": (
+        (1270, 400, 200), (1110, 390, 185), (960, 380, 175), (820, 365, 165),
+        (690, 345, 155), (570, 315, 145), (460, 270, 132), (365, 205, 118), (290, 120, 100))},
+    # its shoulder: lower and further back, past the barrier to the edge
+    {"x": 2420.0, "lean": 0.10, "seed": 23, "tiers": (
+        (1240, 260, 150), (1100, 230, 135), (975, 190, 120), (870, 130, 105), (800, 60, 85))},
+)
+BUD = ((0.5, 4, 0.74), (0.45, 2, 0.78))  # cauliflower: (radius, buds, distance) of each level, of its parent
+DEPTH_Z = 0.55  # how much nearer a lobe at a tower's middle stands than one at its flank
+WOBBLE = (9.0, 1.4)  # the edge's noise: px of coarse and fine displacement at 28 px/deg
+M_OPQ = 5.0  # px of lobe height to opaque
+M_MFP = 170.0  # the sun's mean free path through the massing, px at 28 px/deg
+M_REACH = 700.0  # how far toward the sun the massing is measured, px at 28 px/deg
+M_AO = 26.0  # px of crevice (the height under its neighbourhood's) for full shade
+BASE_HAZE = (1150.0, 1450.0, 0.22)  # the base's aerial haze: from y, full by y, at most this much sky
+
+
+def _clear(lin, sky, s):
+    """Every cloud of the plate back to clear sky: how much of each pixel is
+    cloud (over its local clear sky), grown, filled from the clear sky
+    round it with the sky's own grain. Returns the cleared image and the
+    clear-sky base."""
+    base = sky_grade.clear_base(lin, sky)
+    L, Lb = kit.luma(lin), kit.luma(base)
+    neutral = kit.smoothstep(-0.03, 0.02, lin[..., 2] - lin[..., 0])
+    inside = np.clip(sky, 0, 1).astype(np.float32) * neutral
+    r = L / np.maximum(Lb, 1e-4)
+    a = kit.smoothstep(1.03, 1.12, r) * (inside > 0.3)
+    # a cloud is a body (more than a speck over its clear sky) and the soft
+    # fringe and wisps round it; the clear sky's own drift stays as it was
+    core = cv2.morphologyEx((a > 0.4).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    near = cv2.dilate(core, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(41 * s) | 1,) * 2))
+    m = cv2.dilate(((a > 0.05) & (near > 0)).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(9 * s) | 1,) * 2))
+    wc = np.clip(cv2.GaussianBlur(m.astype(np.float32), (0, 0), 2.0 * s) * 1.6, 0, 1)
+    clear = (wc < 0.01) & (sky > 0.95)
+    hp = L / np.maximum(cv2.GaussianBlur(L, (0, 0), 2.0), 1e-4) - 1
+    grain = np.roll(np.where(clear, hp, 0), round(90 * s), 0)
+    fill = cv2.GaussianBlur(kit.pushpull(lin, clear.astype(np.float32)), (0, 0), 3.0 * s)
+    fill = fill * (1 + np.clip(grain, -0.12, 0.12))[..., None]
+    out = lin * (1 - wc[..., None]) + fill * wc[..., None]
+    return out.astype(np.float32), base, wc
+
+
+def _lobes(tower, s):
+    """The tower's lobes, (x, y, r, z): its tiers' rows, each lobe budded."""
+    rng = np.random.default_rng(tower["seed"])
+    x0, lean = tower["x"] * s, tower["lean"]
+    y_base = tower["tiers"][0][0] * s
+    out = []
+    for i, (ty, hw, lr) in enumerate(tower["tiers"]):
+        ty, hw, lr = ty * s, hw * s, lr * s
+        xc = x0 + lean * (y_base - ty)
+        n = max(int(np.ceil(2 * hw / (1.15 * lr))), 1)
+        xs = np.linspace(xc - hw + lr * 0.6, xc + hw - lr * 0.6, n) if n > 1 else np.array([xc])
+        for x in xs:
+            x = x + rng.uniform(-0.18, 0.18) * lr
+            y = ty + rng.uniform(-0.22, 0.22) * lr
+            r = lr * rng.uniform(0.75, 1.25)
+            # nearer at the tower's middle: a column, not a wall
+            z = DEPTH_Z * np.sqrt(max(hw * hw - (x - xc) ** 2, 0.0)) + rng.uniform(-0.1, 0.1) * lr
+            out.append((x, y, r, z))
+    # cauliflower: buds on each lobe's upper rim (up and out, never down
+    # into the body), and buds on those
+    gen = out
+    for frac, nb, dist in BUD:
+        new = []
+        for (x, y, r, z) in gen:
+            for _ in range(nb):
+                ang = rng.uniform(-170, -10)  # image y down: the upper half
+                rr = r * frac * rng.uniform(0.75, 1.2)
+                d = r * dist * rng.uniform(0.85, 1.05)
+                bx, by = x + d * np.cos(np.radians(ang)), y + d * np.sin(np.radians(ang))
+                # standing on the parent's surface there
+                bz = z + np.sqrt(max(r * r - d * d, 0.0)) * 0.9
+                new.append((bx, by, rr, bz))
+        out += new
+        gen = new
+    return out
+
+
+def _heap_field(W, H, s, seed=5):
+    """The massing's height field (px, the nearest surface over the image
+    plane; -inf where there is none) and its lobe-scale part (each lobe's own
+    dome, for its roundness)."""
+    rng = np.random.default_rng(seed)
+    hf = np.full((H, W), -1e9, np.float32)
+    xs, ys = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+    # the edge's wobble: the whole field read through smooth noise, so no
+    # lobe is a circle and every rim has its own small puffs
+    disp = []
+    for k in range(2):
+        d = np.zeros((H, W), np.float32)
+        for sig, amp in ((14.0, WOBBLE[0]), (3.5, WOBBLE[1])):
+            n = cv2.GaussianBlur(rng.standard_normal((H, W)).astype(np.float32), (0, 0), sig * s)
+            d += amp * s * n / max(float(n.std()), 1e-6)
+        disp.append(d)
+    X, Y = xs + disp[0], ys + disp[1]
+    for t in TOWERS:
+        for (x, y, r, z) in _lobes(t, s):
+            x0, x1 = int(max(x - r - 24 * s, 0)), int(min(x + r + 24 * s, W))
+            y0, y1 = int(max(y - r - 24 * s, 0)), int(min(y + r + 24 * s, H))
+            if x0 >= x1 or y0 >= y1:
+                continue
+            dx, dy = X[y0:y1, x0:x1] - x, Y[y0:y1, x0:x1] - y
+            q = r * r - dx * dx - dy * dy
+            h = np.where(q > 0, z + np.sqrt(np.maximum(q, 0)), -1e9)
+            np.maximum(hf[y0:y1, x0:x1], h, out=hf[y0:y1, x0:x1])
+    return hf
+
+
+def massing(lin, sky, right, up, sun, ppd):
+    """The plate's clouds cleared and the towering cumulus built in their
+    place. lin: linear RGB; sky: the 0..1 open-sky matte; right, up: per-pixel
+    world directions of the image's +x and -y; sun: unit world direction to
+    the sun. Returns the image and a dict of the maps."""
+    s = ppd / 28.0
+    H, W = sky.shape
+    cleared, base, wc = _clear(lin, sky, s)
+    hf = _heap_field(W, H, s)
+    body = (hf > -1e8).astype(np.uint8)
+    # a bud that the wobble cut off from its parent is a speck, not a heap
+    nc, lc, stc, _ = cv2.connectedComponentsWithStats(body, connectivity=8)
+    big = np.zeros(nc, bool)
+    big[1:] = stc[1:, 4] >= 0.1 * float(stc[1:, 4].max())
+    body = big[lc].astype(np.float32)
+    hf = np.where(body > 0, hf, -1e9)
+    # the height over the image plane (0 at the massing's outer edge)
+    h = np.where(body > 0, np.maximum(hf, 0), 0).astype(np.float32)
+    # thickness at the edge: how far in from the silhouette, so the edge of a
+    # lobe that stands on another is not thin
+    dt = cv2.distanceTransform((body > 0).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
+    # the light: the sun across the image, and toward the viewer
+    lx = float(np.mean((right * sun).sum(-1)))
+    ly = float(np.mean((up * sun).sum(-1)))
+    lz = max(1 - lx * lx - ly * ly, 0.0) ** 0.5
+    l2 = max(np.hypot(lx, ly), 1e-3)
+    ux, uy = lx / l2, ly / l2
+    # each lobe's roundness, off the height field's normal (a touch smoothed:
+    # the seams between lobes stay creases, not steps)
+    hs = cv2.GaussianBlur(h, (0, 0), 2.5 * s)
+    gy, gx = np.gradient(hs)
+    n = np.stack([-gx, gy, np.full_like(gx, 1.0)], -1)
+    n /= np.linalg.norm(n, axis=-1, keepdims=True)
+    ndl = n[..., 0] * lx + n[..., 1] * ly + n[..., 2] * lz
+    lam = np.clip((ndl + WRAP) / (1 + WRAP), 0, 1)
+    # the sun through the massing: its cap is the sun-facing top and left
+    soft = cv2.GaussianBlur(body, (0, 0), 3.0 * s)
+    step = 3.0 * s
+    nst = int(M_REACH * s / step)
+    d_sun = _march(soft, ux, uy, step, nst)
+    d_far = _march(soft, -ux, -uy, step, nst)
+    frac = d_sun / np.maximum(d_sun + d_far, 1e-3)
+    frac = cv2.GaussianBlur(frac.astype(np.float32), (0, 0), 3.0 * s)
+    tr = np.exp(-d_sun / (M_MFP * s))
+    cap = 1 - kit.smoothstep(0.08, 0.75, frac)
+    # the crevices between lobes: in their neighbours' shade
+    nb = cv2.GaussianBlur(h, (0, 0), 14.0 * s) / np.maximum(cv2.GaussianBlur(body, (0, 0), 14.0 * s), 1e-3)
+    ao = 1 - kit.smoothstep(0.0, M_AO * s, nb - h) * 0.85
+    direct = (0.55 * cap + 0.45 * tr) * (0.25 + 0.75 * lam) * (0.55 + 0.45 * ao)
+    lit = np.clip(kit.smoothstep(0.04, 0.72, direct), 0, 1)
+    lit = cv2.GaussianBlur(lit.astype(np.float32), (0, 0), 0.8 * s)
+    C = BELLY + (TOP - BELLY) * lit[..., None]
+    # in the shade the lobes are lit by the sky above them, so the belly is
+    # not a flat blue: a lobe's upper face a little over BELLY, its under
+    # side and the folds under it a little below
+    sky_l = np.clip(0.5 + 0.5 * n[..., 1], 0, 1)
+    C = C * (1 + (1 - lit) * (0.11 * (sky_l - 0.5) * 2))[..., None]
+    # the deepest folds a little under the belly, the sky's blue kept
+    C = C * (0.86 + 0.14 * ao)[..., None]
+    # fine puffs in the light (the billows, as on the heaps above)
+    bill = _fbm((H, W), s, seed=17)
+    fine = bill - cv2.GaussianBlur(bill, (0, 0), 5.0 * s)
+    C = C * np.exp(0.02 * fine)[..., None]
+    # the base: the aerial haze between it and the lens takes it toward the sky
+    yy = np.arange(H, dtype=np.float32)[:, None] / s
+    hz = BASE_HAZE[2] * kit.smoothstep(BASE_HAZE[0], BASE_HAZE[1], yy)
+    C = C * (1 - hz[..., None]) + base * 1.35 * hz[..., None]
+    C = np.maximum(C, base * 1.04)
+    C = np.minimum(C, TOP[None, None] * 1.02)
+    # the edge: opaque a few px of lobe in, feathered into the cobalt
+    op = (1 - np.exp(-np.maximum(h, dt) / (M_OPQ * s))) * body
+    op = np.clip(cv2.GaussianBlur(op.astype(np.float32), (0, 0), FEATHER * s) * 1.04, 0, 1)
+    # the composite, unmixed against the open-sky matte: on the sky the new
+    # sky is the cleared sky under the cloud; a pixel part wire (or eave)
+    # takes the change by its share of sky, so the wire stays a dark line
+    new = cleared * (1 - op[..., None]) + C * op[..., None]
+    pure = (sky > 0.97).astype(np.float32)
+    delta = kit.pushpull(new - lin, pure)
+    m = np.clip(sky, 0, 1) ** 1.5
+    out = lin + delta * m[..., None]
+    out = np.where(pure[..., None] > 0, new, out)
+    out = np.clip(out, 0, None).astype(np.float32)
+    return out, {"a": op * np.clip(sky, 0, 1), "h": h / max(float(h.max()), 1e-3), "lit": lit, "tr": tr, "rm": wc, "base": base, "Lw": float(kit.luma(TOP[None, None])[0, 0])}
+
+
 def main():
     OUT = sys.argv[1] if len(sys.argv) > 1 else "public/lab/curve-mirror"
     SHEET = sys.argv[2] if len(sys.argv) > 2 else None
@@ -418,9 +648,9 @@ def main():
     H, W = photo.shape[:2]
     aux = cv2.imread(f"{OUT}/aux.png", cv2.IMREAD_COLOR)[..., ::-1].astype(np.float32) / 255
     sky = cv2.resize(aux[..., 2], (W, H), interpolation=cv2.INTER_LINEAR)
-    ray, right, up = _frame_plate(sc)
+    _, right, up = _frame_plate(sc)
     ppd = sc["f"] * np.pi / 180
-    lit_p, maps = relight(photo, sky, ray, right, up, sun, ppd, tidy=(W / 2, 0, W, H / 2))
+    lit_p, maps = massing(photo, sky, right, up, sun, ppd)
     cv2.imwrite(f"{OUT}/photo.webp", np.clip(np.round(develop.enc(lit_p) * 255), 0, 255).astype(np.uint8)[..., ::-1], [cv2.IMWRITE_WEBP_QUALITY, 88])
     print("plate: cloud %.2f%% of the frame, its white %.3f" % (100 * (maps["a"] > 0.5).mean(), maps["Lw"]))
 
