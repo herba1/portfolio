@@ -18,12 +18,14 @@ import { createStage, clamp } from "../_kit/stage";
 // the creases the depth map finds, and a cyan fill from the open sky.
 //
 // The plate's own sky was flat haze, so inside the sky matte it is replaced by
-// a photographed summer cumulus dome (Poly Haven, Kloofendal 48d Partly
-// Cloudy, CC0; tools/depth/bakes/passes-sky.py). Each pixel looks it up along
-// its true camera ray, the plate's pitch and lens, so the clouds converge on
-// the same vanishing point as the buildings. The dome turns and tilts with the
-// dragged sun so its own sun, and the sunlit sides of its clouds, stand where
-// the key light comes from.
+// a photographed summer cumulus dome (Poly Haven, Rural Asphalt Road, Alexander Scholten, CC0;
+// tools/depth/bakes/passes-sky.py): piled cumulus with hard sunlit tops and
+// blue-shadowed bases, standing low, with clear deep blue over them. Each
+// pixel looks it up along its true camera ray, the plate's pitch and lens, so
+// the clouds converge on the same vanishing point as the buildings. The dome
+// turns with the dragged sun so its tallest bank stands low on the sun's
+// side of the canyon, over the wall tops and behind the tower, and the open
+// canyon above stays cobalt. The sun itself is drawn where the light stands.
 //
 // Plate and dome are then developed as one exposure: a single film pass over
 // the matted frame spreads its highlights (a warm Pro-Mist diffusion), throws
@@ -43,7 +45,7 @@ uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y
 uniform vec3 uSunCol;     // key colour times intensity, linear
 uniform vec3 uUp;         // world up, camera space
 uniform float uDay;       // 0 at the horizon, 1 with the sun high
-uniform mat3 uDome;       // camera ray -> (toward the dome's sun, to its right, up), as columns
+uniform mat3 uDome;       // camera ray -> (toward the dome's cumulus bank, to its right, up), as columns
 out vec4 o;
 
 const vec2 TEX = vec2(2048.0, 1536.0);
@@ -53,13 +55,15 @@ const float ASPECT = 2048.0 / 1536.0;
 // (PITCH) that is where the zenith stands for this lens, so sky rays through
 // it converge with the walls.
 const float LENS = 1.034;
-// The sky dome: where its own sun stands across the equirect, and its open
-// blue sky's chroma (luma 1).
-const float SKY_U = 0.5951;
+// The sky dome: where its tallest cumulus bank stands across the equirect,
+// and its open blue sky's chroma (luma 1).
+const float SKY_U = 0.24;
 const vec3 SKY_BLUE = vec3(0.72, 1.0, 1.79);
 // The clouds' exposure against the graded blue: a sunlit top lands near
-// paper white, the way a polariser holds a cobalt sky under bright cumulus.
-const float CLOUD = 2.6;
+// paper white, the way a polariser holds a cobalt sky under bright cumulus,
+// and the body of the cloud stays under the shoulder, where its shading
+// still reads.
+const float CLOUD = 1.3;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
 
@@ -105,8 +109,10 @@ void main(){
   // walls stand, and paling it toward them drew a lit band along every edge
   // and filled the gap under the balcony with haze.
   float elev = asin(clamp(dot(V, uUp), -1.0, 1.0));
-  float pale = 1.0 - smoothstep(0.6, 1.25, elev);
-  vec3 blue = mix(vec3(0.014, 0.16, 0.66), vec3(0.3, 1.1, 2.0), pale * pale);
+  // Cobalt over most of the canyon; it pales only in the last stretch above
+  // the wall tops, and to a deeper cyan than haze.
+  float pale = 1.0 - smoothstep(0.35, 1.05, elev);
+  vec3 blue = mix(vec3(0.014, 0.16, 0.66), vec3(0.24, 0.9, 1.85), pale * pale);
   // The clouds' shoulder: a roll-off on their luminance ahead of the tone
   // curve, so the tops near the sun come down to a warm paper white instead
   // of clipping, and the sun's disc itself only just reaches it.
@@ -115,6 +121,10 @@ void main(){
   // dome's sky leans off SKY_BLUE the remainder turns violet, and the
   // clouds' exposure would show it as a fringe. So it is held near grey.
   cloud = mix(vec3(luma(cloud)), cloud, 0.3) * CLOUD;
+  // Cumulus is lit like a solid: the sunlit domes stand well clear of the
+  // body under them. The photograph's range is opened round its middle so
+  // the tops come forward and the bases fall back toward the blue.
+  cloud *= pow(max(luma(cloud), 1e-4) / 4.0, 0.45);
   // A cloud's shadow side is not grey: the sun does not reach it, the open
   // sky does, so it takes the sky's own blue (this ray's, cobalt high and
   // cyan low) at the same luminance, and sits a little deeper. Only the
@@ -124,6 +134,14 @@ void main(){
   cloud *= mix(skyTint * 0.5, warm, sunlit);
   cloud /= 1.0 + luma(cloud) / 12.0;
   vec3 skyL = (beta * blue + cloud) * mix(0.72, 1.0, uDay);
+  // The sun: the dome's own was taken out with its haze offline, so it is
+  // drawn here where the key light stands, a half-degree disc and a tight
+  // glow, warm, peaking under paper white. It sits in the sky layer, so the
+  // tower's matte cuts it and the lattice stands in silhouette against it.
+  float th = acos(clamp(dot(V, uSun), -1.0, 1.0));
+  vec3 sunHue = mix(vec3(1.0, 0.86, 0.6), uSunCol / max(uSunCol.r, 1e-3), 0.3);
+  sunHue /= luma(sunHue);
+  skyL += sunHue * (5.0 * smoothstep(0.0058, 0.0042, th) + 1.6 * exp(-th / 0.018) + 0.25 * exp(-th / 0.08)) * mix(0.6, 1.0, uDay);
 
   // Surfaces. Albedo in linear light; the plate's grade left the concrete
   // olive, so most of the chroma comes off the walls (not the tower's paint),
@@ -310,29 +328,36 @@ function sunFor(x, y) {
   return { dir, col, day, az, el };
 }
 
-// The sky dome's own sun stands this high (tools/depth/bakes/passes-sky.py).
-const DOME_SUN = (47.88 * Math.PI) / 180;
-// How far the dome may tilt to put its sun where the dragged one is. Beyond
-// this the frame's lower edge would look below the dome's horizon.
-const DOME_TILT = (26 * Math.PI) / 180;
+// The dome's cumulus bank follows the sun round, a share of its azimuth
+// (DOME_TURN) and never more than DOME_REACH off the camera's heading: so it
+// stands on the sun's side, between the sun and the tower, and at either
+// edge of the drag it waits at the wall tops instead of swinging out of
+// frame or across the canyon.
+const DOME_TURN = 0.35;
+const DOME_REACH = (35 * Math.PI) / 180;
+// And it is sunk this far, tilted down on its own side, so its tallest tops
+// (60 degrees up in the photograph) rise just over the wall tops and behind
+// the tower, and the open canyon above them stays deep blue. The tilt no
+// longer follows the sun's height: lifting the dome to meet a low sun swung
+// its clouds up across the whole canyon, an overcast sheet.
+const DOME_SINK = (14 * Math.PI) / 180;
 
-// The dome's orientation for a sun: turned about the zenith to the sun's
-// azimuth, then tilted in the sun's vertical plane so its own sun, and the
-// sunlit sides of its clouds, rise or fall to the sun's elevation. Returned as
-// the three columns of uDome: unit vectors, in camera space, toward the
-// dome's sun along the ground, to its right, and up.
-function domeFor(az, el) {
+// The dome's orientation for a sun: turned about the zenith to put its bank
+// on the sun's side, then tilted down toward the bank. Returned as the three
+// columns of uDome: unit vectors, in camera space, toward the bank along the
+// ground, to its right, and up.
+function domeFor(az) {
   const sp = Math.sin(PITCH);
   const cp = Math.cos(PITCH);
-  const sa = Math.sin(az);
-  const ca = Math.cos(az);
+  const turn = clamp(az * DOME_TURN, -DOME_REACH, DOME_REACH);
+  const sa = Math.sin(turn);
+  const ca = Math.cos(turn);
   // Heading (0, -sp, -cp) and right (1, 0, 0) span the ground; up is (0, cp, -sp).
   const toward = [sa, -sp * ca, -cp * ca];
   const right = [ca, sp * sa, cp * sa];
   const up = [0, cp, -sp];
-  const d = clamp(DOME_SUN - el, -DOME_TILT, DOME_TILT);
-  const c = Math.cos(d);
-  const s = Math.sin(d);
+  const c = Math.cos(DOME_SINK);
+  const s = Math.sin(DOME_SINK);
   const p = toward.map((t, i) => c * t - s * up[i]);
   const z = toward.map((t, i) => s * t + c * up[i]);
   return [...p, ...right, ...z];
@@ -543,7 +568,7 @@ export async function createPasses(host) {
     gl.uniform3f(u.up, 0, Math.cos(PITCH), -Math.sin(PITCH));
     gl.uniform1f(u.day, S.day);
     day = S.day;
-    gl.uniformMatrix3fv(u.dome, false, domeFor(S.az, S.el));
+    gl.uniformMatrix3fv(u.dome, false, domeFor(S.az));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     // What scatters, at half size, spread through its mips.
