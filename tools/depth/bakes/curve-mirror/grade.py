@@ -10,9 +10,10 @@ its pole's yellow bands), the barrier pole's orange-red, and the green sign
 at the lower right. Against the cobalt they compete with the vermilion
 mirror, which should be the one warm, complementary note. The engine grades
 them down in its plate pass (and wherever the glass shows the photograph's
-own pixels), in OKLCh: the yellow to ~62 % chroma, turned ~8 deg toward a
-weathered ochre and dropped a third of a stop, sun-faded enamel; the
-orange-red to ~62 %; the green to ~50 %.
+own pixels), in OKLCh: the yellow to ~45 % chroma, turned ~8 deg toward a
+weathered ochre and dropped half a stop, sun-faded enamel; the orange-red to
+~30 %, turned ~15 deg toward a dusty brick-brown and dropped half a stop; the
+green to ~50 %.
 
 Hue alone cannot find them: the house's sunlit boards (OKLCh hue 52-74), the
 fence, the camellia's leaves and the plaster (58-102) share the enamels'

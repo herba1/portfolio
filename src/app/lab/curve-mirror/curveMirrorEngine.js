@@ -365,11 +365,12 @@ vec3 grainDir(vec3 p, float id) {
 // One warm accent, and it is the mirror. The plate's own enamels (the
 // crossbuck's yellow, the barrier pole's orange-red, the green sign) stood at
 // full chroma against the cobalt and pulled the eye off the glass. They are
-// graded down here, in OKLCh, as sun-faded enamel: the yellow to 62 % chroma,
-// turned 8 deg toward ochre and a third of a stop down; the orange-red to
-// 62 %; the green to half. Where each enamel is comes from the bake
-// (grade.py: the object's footprint, its enamel-coloured pixels grown over
-// the edge and feathered); how much of a pixel is that enamel is told here,
+// graded down here, in OKLCh, as sun-faded enamel: the yellow to 45 % chroma,
+// turned 8 deg toward ochre and half a stop down; the orange-red to 30 %,
+// turned 15 deg toward a dusty brick-brown and half a stop down, so the
+// barrier's stripes no longer rhyme with the vermilion; the green to half.
+// Where each enamel is comes from the bake (grade.py: the object's
+// footprint, its enamel-coloured pixels grown over the edge and feathered); how much of a pixel is that enamel is told here,
 // by a hue window feathered 20 deg either side and a chroma floor, so the
 // house's sunlit boards, the fence and the black stripes are not touched,
 // and nothing steps at a mask's edge. The vermilion paint is the object's,
@@ -395,10 +396,10 @@ vec3 enamel(vec3 c, vec2 uv) {
   float wy = z.r * hueWin(h, 50.0, 108.0) * cw;
   float wo = z.g * hueWin(h, 30.0, 85.0) * cw;
   float wg = z.b * hueWin(h, 115.0, 150.0) * cw;
-  float sc = 1.0 - 0.22 * wy - 0.28 * wo - 0.5 * wg;
-  float a = radians(-8.0 * wy);
+  float sc = max(1.0 - 0.55 * wy - 0.7 * wo - 0.5 * wg, 0.0);
+  float a = radians(-8.0 * wy - 15.0 * wo);
   k.yz = mat2(cos(a), sin(a), -sin(a), cos(a)) * k.yz * sc;
-  return max(fromOk(k), 0.0) * exp2(-wy / 3.0);
+  return max(fromOk(k), 0.0) * exp2(-0.5 * (wy + wo));
 }
 
 // The photograph's own dirt. The sunlit plaster under the house's eave
