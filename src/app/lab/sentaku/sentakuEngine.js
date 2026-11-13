@@ -212,19 +212,55 @@ vec3 haloAt(float r) {
   int i = int(f);
   return mix(uHalo[i], uHalo[min(i + 1, NH)], f - float(i));
 }
-// The sky's smooth fit, carried past the frame. Above the top it deepens on
-// toward the zenith, eased to a hold a fifth of the frame up so it goes deep
-// navy, never black; past the sides and the foot it holds at the edge.
+// The sky's smooth fit, carried past the frame. Above the top its luminance
+// deepens on toward the zenith, eased to a hold a fifth of the frame up;
+// past the sides and the foot it holds at the edge.
 float ease(float x, float lo, float hi, float k) {
   if (x < lo) return lo - k * (1.0 - exp((x - lo) / k));
   if (x > hi) return hi + k * (1.0 - exp(-(x - hi) / k));
   return x;
 }
-vec3 skyFit(vec2 p) {
+vec2 skyN(vec2 p) {
   vec2 n = p / uSize;
   n.x = ease(n.x, 0.0, 1.0, 0.08);
   n.y = n.y < 0.0 ? ease(n.y, 0.0, 1.0, 0.2) : min(n.y, 1.0);
-  return exp(uSkyQ[0] + uSkyQ[1] * n.x + uSkyQ[2] * n.y + uSkyQ[3] * n.x * n.x + uSkyQ[4] * n.y * n.y + uSkyQ[5] * n.x * n.y);
+  return n;
+}
+vec3 skyLog(vec2 n) {
+  return uSkyQ[0] + uSkyQ[1] * n.x + uSkyQ[2] * n.y + uSkyQ[3] * n.x * n.x + uSkyQ[4] * n.y * n.y + uSkyQ[5] * n.x * n.y;
+}
+vec3 skyFit(vec2 p) { return exp(skyLog(skyN(p))); }
+// The zenith. Carried on channel by channel, the fit's green falls off
+// faster than its blue, so the sky the tilt adds went navy and purple. So
+// the top of the sky is split into value and chroma. Its value (blue, which
+// sets it in a sky this deep) deepens from ZEN_Y up at the fit's own rate at
+// first, easing to ZEN_A of it, so the zenith is a deep cyan-cobalt that
+// still deepens toward the top but never goes navy; going up, the columns
+// even out to the middle one's (held under where each started), so the
+// corners do not sink either. Its chroma (red and green against blue) blends
+// from the fit's toward a fixed zenith's, cobalt with a touch of cyan. It is a gain on the sky, photograph and fit alike, 1 below ZEN_Y and
+// continuous in value and slope there, so there is no seam at the old edge,
+// and the grain and the photograph's own variation carry through it.
+const float ZEN_Y = 0.32;
+const float ZEN_A = 0.4;
+const float ZEN_D = 0.3;
+const vec3 ZEN = vec3(-3.1, -0.994, 0.0); // log r/b, g/b, b/b: about sRGB 8, 62, 124
+float zenB(float x, float y) {
+  float l1 = skyLog(vec2(x, ZEN_Y)).b;
+  float d = skyLog(vec2(x, y)).b - l1;
+  return l1 + d * mix(ZEN_A, 1.0, exp(d / ZEN_D));
+}
+vec3 zenith(vec2 p) {
+  vec2 n = skyN(p);
+  if (n.y >= ZEN_Y) return vec3(1.0);
+  vec3 l = skyLog(n);
+  float s = smoothstep(0.25, -0.08, n.y);
+  // the darker columns at the sides are lifted toward the middle's, but
+  // held under where they started, deepening by a share of the middle's
+  // drop, so they too only ever deepen going up
+  float drop = zenB(0.5, n.y) - skyLog(vec2(0.5, ZEN_Y)).b;
+  float b = min(mix(zenB(n.x, n.y), zenB(0.5, n.y), s), skyLog(vec2(n.x, ZEN_Y)).b + 0.2 * drop);
+  return exp(b + mix(l - l.b, ZEN, s) - l);
 }
 // The plate, and past its edge the fit: matched to the plate's own sky at the
 // nearest edge (as a ratio, faded out over a few hundred px) so there is no
@@ -250,7 +286,7 @@ void main() {
   float r = distance(p, uSun);
   vec3 h = haloAt(r);
   // the sky with the photograph's grey veil lifted off
-  vec3 c = max(plateAt(p, r) - h, 0.0);
+  vec3 c = max(plateAt(p, r) - h, 0.0) * zenith(p);
   // the aureole put back: the same falloff, pale cyan, eased off close in so
   // the disc stands out of it; in clear view the lens veil whitens it
   c += h.g * mix(mix(0.45, 0.2, uOpen), 1.0, smoothstep(24.0, 360.0, r)) * mix(vec3(0.5, 1.0, 1.1), vec3(0.8, 0.95, 0.95), uOpen);
