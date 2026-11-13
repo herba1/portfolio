@@ -4,9 +4,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Joiner: after David Hockney's photo joiners. Lie on the quay, look up, and
 // take the sky one Polaroid at a time.
 //
-// The sky is one 360 capture (Poly Haven's Docklands 01, CC0), baked offline
-// into a zenith-centred disk of log radiance with a sky matte and a sky-only
-// plate. The table is a stereographic map of that sky: every point on it is a
+// The structures are one 360 capture (Poly Haven's Docklands 01, CC0), baked
+// offline into a zenith-centred disk of log radiance with a sky matte. Its sky
+// was a dull broken overcast, so the sky is a second capture: a sunny
+// cumulus pure sky (Poly Haven's Kloofendal 48d Partly Cloudy, CC0) baked into
+// the same disk, turned so its sun lands on the facade light and exposed to
+// the Docklands open blue at the zenith, as a drifting cloud deck over a
+// static blue with the sun in it (tools/depth/bakes/joiner/skyplate.py). The
+// table is a stereographic map of that sky: every point on it is a
 // direction, the zenith in the middle. A print aimed at a point is a real
 // rectilinear camera pointed along that direction, its focal length matched
 // to the map's local scale there, so neighbouring prints fit together. Each
@@ -20,9 +25,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //     cumulus disagree across the borders while walls and lamp posts do not.
 // Each frame is developed through the shared film kit (summer preset, a
 // polariser deepening the open blue, blacks barely lifted), then its sky is
-// re-graded from the plate's dull overcast to a June sky: sunlit cumulus on a
-// warm shoulder just under paper white, skylight-blue cloud shadow, and a
-// clear sky that deepens to cobalt towards the zenith (see SKY_GRADE).
+// graded to a June print: the cumulus on a warm shoulder just under paper
+// white with skylight-blue shade, and a clear sky that deepens to cobalt
+// towards the zenith (see SKY_GRADE).
 //
 // Drag to shoot prints where you point. Long-press to sweep the table.
 // Query: ?prints=N&seed=S lays down a pre-built joiner of N prints;
@@ -90,7 +95,9 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uScene;
 uniform sampler2D uMask;
-uniform sampler2D uSky;
+uniform sampler2D uSky;   // the cumulus sky, clouds taken out, sun kept (static)
+uniform sampler2D uCloud; // the cumulus deck, sun taken out (advected)
+uniform sampler2D uOver;  // the Docklands plate's own overcast, structures filled
 uniform vec3 uC;
 uniform vec3 uR;
 uniform vec3 uD;
@@ -103,6 +110,7 @@ uniform float uSrgb;
 const float THMAX = ${THMAX.toFixed(6)};
 const float LO = ${LO.toFixed(1)};
 const float HI = ${HI.toFixed(1)};
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const vec3 POL = vec3(${POLARIZER.map((v) => v.toFixed(3)).join(", ")});
 
 vec2 diskUv(vec3 d) {
@@ -138,7 +146,7 @@ void main() {
 
   vec3 col = base;
   float key = 0.0;
-  if (m > 0.002 && d.z > 0.01) {
+  if (d.z > 0.01) {
     // The same sky a moment earlier or later: move the cloud deck under the
     // wind, with a little shear so the shapes have evolved too.
     vec2 P = d.xy / d.z;
@@ -147,22 +155,70 @@ void main() {
     vec2 P2 = P - (uWind + shear) * k;
     vec3 d2 = normalize(vec3(P2, 1.0));
     vec2 uv2 = diskUv(d2);
-    vec3 moved = rad(texture(uScene, uv2).rgb);
-    vec3 fill = rad(texture(uSky, uv2).rgb);
-    // Where the drift lands on a structure, or near it, the sky stays where it
-    // was (the plate stands in only right against a structure), so a wall's
-    // edge is never dragged into the open sky and no smooth pale band of fill
-    // trails a facade. The margin is wider on the drifted side: the matte
-    // sits a few pixels inside the shadow side of a pole, and drifted, that
-    // sliver reads as a thin dark twin. A coarse mip of the matte softens the
-    // hand-over so it reads as cloud, not as a seam.
+    // The Docklands sky is replaced outright: the drifted cumulus deck, laid
+    // over the static blue (and the sun, which never drifts) by how much
+    // cloud it carries there. The deck has no structures in it, so the drift
+    // can never drag a wall or a lamp post with it; the Docklands disk only
+    // supplies the structures, under its eroded matte.
+    vec3 moved = rad(texture(uCloud, uv2).rgb);
+    vec3 still = rad(texture(uSky, uv).rgb);
+    float cover = 1.0 - smoothstep(0.42, 0.6, (moved.b - moved.r) / (moved.b + 1e-4));
+    vec3 sky = mix(still, moved, cover);
+    // The structures' rims still hold the old sky: the anti-aliased edge, and
+    // the band the eroded matte keeps back from a facade or a pole. Wherever
+    // the matte calls a pixel even partly sky, it is read for how much of the
+    // old sky it holds, against that sky right beside it (clean sky-matte
+    // pixels two to six plate pixels away; the filled overcast plate where
+    // there are none) and against the structure beside it: like the sky in
+    // light and colour, or its light between the wall's and the sky's (its
+    // share of sky). That share is swapped for the new sky, so the edges cut
+    // cleanly into the cumulus with no pale outline. A structure's own
+    // pixels (the matte at 0, a lamp post's inside included) are never read,
+    // however pale; the strips of old sky the matte used to call structure
+    // along a roofline are given back to it in the bake (grow.py).
     float w = skyWeight(uv, 2);
-    vec3 here = mix(fill, base, w);
-    float w2 = skyWeight(uv2, 4) * smoothstep(0.6, 1.0, textureLod(uMask, uv2, 3.0).r);
-    vec3 sky = mix(here, moved, w2);
-    col = mix(base, sky, w);
+    vec3 oc = rad(texture(uOver, uv).rgb);
+    vec2 mt = 1.0 / vec2(textureSize(uMask, 0));
+    vec3 lsum = vec3(0.0);
+    float lw = 0.0;
+    float ssum = 0.0;
+    float sw = 0.0;
+    for (int j = 0; j < 3; j++) {
+      float rr = 2.5 + 1.75 * float(j);
+      for (int i = 0; i < 8; i++) {
+        float an = float(i) * 0.785398 + float(j) * 0.39;
+        vec2 q = uv + vec2(cos(an), sin(an)) * mt * rr;
+        float mq = texture(uMask, q).r;
+        vec3 lq = log2(rad(texture(uScene, q).rgb) + 1e-4);
+        float wq = smoothstep(0.92, 1.0, mq);
+        lsum += wq * lq;
+        lw += wq;
+        float wsq = 1.0 - smoothstep(0.02, 0.1, mq);
+        ssum += wsq * dot(lq, LUMA);
+        sw += wsq;
+      }
+    }
+    vec3 lref = mix(log2(oc + 1e-4), lsum / max(lw, 1e-4), smoothstep(0.5, 3.0, lw));
+    vec3 dlog = log2(base + 1e-4) - lref;
+    float dl = dot(dlog, LUMA);
+    float like = smoothstep(-1.1, -0.3, dl) * (1.0 - smoothstep(0.6, 1.3, dl))
+      * (1.0 - smoothstep(0.12, 0.3, length(dlog - dl)));
+    float Ys = 1e4;
+    if (sw > 0.5) {
+      Ys = exp2(ssum / sw);
+      float Yk = exp2(dot(lref, LUMA));
+      float t = clamp((dot(base, LUMA) - Ys) / (Yk - Ys), 0.0, 1.0) * smoothstep(0.3, 0.8, abs(log2(Yk / Ys)));
+      like = max(like, t);
+    }
+    float a = max(w, like * smoothstep(0.02, 0.4, m));
+    // what is left of the pixel is the structure's share, never brighter than
+    // the structure beside it, so no part-swapped rim stays pale
+    vec3 res = min(max(base - a * exp2(lref), 0.0), (1.0 - a) * base);
+    res *= mix(1.0, min(1.0, (1.0 - a) * Ys * 1.3 / (dot(res, LUMA) + 1e-5)), smoothstep(0.0, 0.3, a));
+    col = a * sky + res;
+    m = a;
     float blue = smoothstep(0.4, 0.85, (col.b - col.r) / (col.b + 1e-4));
-    col *= mix(vec3(1.0), POL, blue * w);
+    col *= mix(vec3(1.0), POL, blue * a);
     key = m * smoothstep(0.01, 0.06, d.z);
   }
   col *= uGain;
@@ -171,23 +227,22 @@ void main() {
   outColor = vec4(col, key);
 }`;
 
-// The sky grade, the last step of each print's develop. The Docklands plate
-// was shot under a dull, broken overcast; a June print of it should be sunlit
-// cumulus on cobalt. That is a matter of cloud tonality, not exposure (more
-// exposure only pales the blue while the cloud stays grey), so the grade works
-// on the developed print, keyed on the sky matte (carried in the view's alpha)
-// and on how blue the scene light is there:
-//   - cloud: keeps the plate's own modelling. Its log luminance is read
+// The sky grade, the last step of each print's develop: a June print of the
+// cumulus deck, sunlit cloud on cobalt. That is a matter of cloud tonality,
+// not exposure (more exposure only pales the blue), so the grade works on the
+// developed print, keyed on the sky matte (carried in the view's alpha) and
+// on how blue the scene light is there:
+//   - cloud: keeps the deck's own modelling. Its log luminance is read
 //     against a local mean (two rings round the pixel, cloud only), the local
 //     contrast is opened up and the whole lot runs through a soft filmic
 //     shoulder that only reaches a warm near-white (#F4F1EA, never past it)
 //     on the sunlit tops;
-//   - sun: the plate's cloud is read as a height field (the slope of its log
+//   - sun: the cloud is read as a height field (the slope of its log
 //     radiance over four rings, a turret to a body across) and lit from one
-//     sun shared by every print. The side of a cloud that faces it is pushed
-//     into the warm shoulder, the far side falls up to two stops and goes to
-//     skylight blue (hue 208, sat 0.40), the colour of shade under an open
-//     sky, so flat grey masses get lit tops and blue shadow sides;
+//     sun shared by every print, the deck's own. A light touch now that the
+//     deck is lit by a real sun: the side of a cloud that faces it is eased
+//     into the warm shoulder, the far side down a little towards skylight
+//     blue (hue 208, sat 0.40), the colour of shade under an open sky;
 //   - cloud to sky: keyed on a feathered matte (the blue-against-white key
 //     blurred over about eight plate pixels), so cloud edges thin out into
 //     the blue instead of reading as cut-outs pasted on it;
@@ -196,9 +251,9 @@ void main() {
 //     vignette and grain as a ratio so every print still meters for itself.
 const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const SKY_GRADE = {
-  cloudGain: 0.6, // stops into the shoulder at the plate's mid cloud (x = 1 is the knee)
-  cloudToe: 3.4, // log contrast of the cloud's broad modelling: opens the plate's dull overcast
-  detail: 1.8, // log contrast of the fine detail against the local mean
+  cloudGain: -0.4, // stops into the shoulder at a mid cloud of the deck (x = 1 is the knee)
+  cloudToe: 2.1, // log contrast of the cloud's broad modelling (the deck's cumulus have their own)
+  detail: 1.7, // log contrast of the fine detail against the local mean
   depth: 2, // stops the shade side can fall below the knee, at most
   cloudSlope: 0.3, // film's slope in the clouds (log out per log exposure), to take the meter out
   cloudKeep: 1, // stops of the print's own exposure put back on the cloud, per stop
@@ -207,8 +262,11 @@ const SKY_GRADE = {
   keep: 0.5, // share of the print's own dye cast kept in the cloud
   skyKeep: 0.7, // power of the print's own exposure ratio kept in the clear sky
   grade: 1, // overall strength
-  sunGain: 0.9, // stops into the shoulder on the side of a cloud that faces the sun
-  sunShade: 2, // stops down on the far side, at most, in skylight blue
+  // the sun relight is a light touch: the deck is lit by its own sun (turned
+  // onto the facade light), so this only firms up the lit side a little; at
+  // full strength it painted mottled blue streaks inside the cloud masses
+  sunGain: 0.18, // stops into the shoulder on the side of a cloud that faces the sun
+  sunShade: 0.4, // stops down on the far side, at most, in skylight blue
   relief: 0.035, // facing per unit of slope (stops of plate radiance per print width)
   feather: 8, // cloud-to-sky matte blur radius, plate pixels
   sunAz: -52, // sun azimuth, degrees in the disk frame (table right = 0, up = -90)
@@ -269,17 +327,10 @@ void main() {
   vec4 dev = texture(uDev, vUv);
   vec4 raw = texture(uRaw, vUv);
 
-  // The sky matte, dilated by a few pixels (light pixels only), so its soft
-  // rim and any hairline left in it are graded with the sky around them
-  // instead of standing out as an ungraded fringe.
-  vec2 rt = 3.0 / vec2(textureSize(uRaw, 0));
-  float ring = 0.0;
-  for (int i = 0; i < 8; i++) {
-    float a = float(i) * 0.785398 + 0.39;
-    ring = max(ring, texture(uRaw, vUv + rt * vec2(cos(a), sin(a))).a);
-  }
-  float Y0 = dot(toLin(dev.rgb), LUMA);
-  float m = max(raw.a, ring * smoothstep(0.08, 0.3, Y0));
+  // The sky matte, as the view swapped it in: its rims were already cleaned
+  // of the old sky there, so it is used as it is (dilating it would grade a
+  // pale lamp post or ledge as sky).
+  float m = raw.a;
   m = smoothstep(0.0, 0.6, m) * uSky.y;
   if (m < 0.002) { outColor = dev; return; }
 
@@ -411,10 +462,11 @@ void main() {
   vec3 sky = tgt * pow(clamp(V / VREF, 0.55, 1.25), uSky.x);
 
   vec3 g = mix(cloud, sky, clear);
-  // Low over the roofs the plate is haze and push-pull fill round every
-  // structure, which a full grade would outline; ease it off towards the
-  // horizon, where a real sky pales anyway.
-  m *= mix(1.0, 0.4, smoothstep(0.9, 1.45, th));
+  // Low over the roofs the deck goes to haze and its cumulus are
+  // foreshortened to streaks; ease the grade off a little towards the
+  // horizon, where a real sky pales anyway (the deck has no fill round the
+  // structures to outline, so it keeps most of it).
+  m *= mix(1.0, 0.75, smoothstep(1.0, 1.45, th));
   vec3 outc = toSrgb(mix(lin, g, m));
   outc += (hash12(gl_FragCoord.xy + uSeed) + hash12(gl_FragCoord.yx + 5.3 + uSeed) - 1.0) / 255.0;
   outColor = vec4(clamp(outc, 0.0, 1.0), 1.0);
@@ -614,27 +666,34 @@ export async function createJoiner(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
 
-  const [sceneBm, maskBm, skyBm] = await Promise.all([
+  const [sceneBm, maskBm, skyBm, cloudBm, overBm] = await Promise.all([
     loadBitmap(`${ASSET}scene.webp`),
     loadBitmap(`${ASSET}mask.webp`),
     loadBitmap(`${ASSET}sky.webp`),
+    loadBitmap(`${ASSET}cloud.webp`),
+    loadBitmap(`${ASSET}overcast.webp`),
   ]);
 
-  // A small copy of the disk for the prints' electric eye.
+  // A small copy of the disk for the prints' electric eye: the Docklands
+  // structures with the cumulus deck under the sky matte, as the prints see it.
   const METER_N = 128;
   const meterLum = (() => {
-    const c = document.createElement("canvas");
-    c.width = c.height = METER_N;
-    const x = c.getContext("2d", { willReadFrequently: true });
-    x.drawImage(sceneBm, 0, 0, METER_N, METER_N);
-    const d = x.getImageData(0, 0, METER_N, METER_N).data;
+    const small = (bm) => {
+      const c = document.createElement("canvas");
+      c.width = c.height = METER_N;
+      const x = c.getContext("2d", { willReadFrequently: true });
+      x.drawImage(bm, 0, 0, METER_N, METER_N);
+      return x.getImageData(0, 0, METER_N, METER_N).data;
+    };
+    const ds = small(sceneBm);
+    const dm = small(maskBm);
+    const dc = small(cloudBm);
+    // log2 luminance, roughly (the channels are log-encoded)
+    const lum = (d, i) => LO + ((0.2 * d[i * 4] + 0.7 * d[i * 4 + 1] + 0.1 * d[i * 4 + 2]) / 255) * (HI - LO);
     const out = new Float32Array(METER_N * METER_N);
     for (let i = 0; i < out.length; i++) {
-      const r = d[i * 4] / 255;
-      const g = d[i * 4 + 1] / 255;
-      const b = d[i * 4 + 2] / 255;
-      // log2 luminance, roughly (the channels are log-encoded)
-      out[i] = LO + (0.2 * r + 0.7 * g + 0.1 * b) * (HI - LO);
+      const m = dm[i * 4] / 255;
+      out[i] = Math.log2((1 - m) * 2 ** lum(ds, i) + m * 2 ** lum(dc, i));
     }
     return out;
   })();
@@ -693,6 +752,8 @@ export async function createJoiner(host, { embedded = false } = {}) {
   const texScene = upload(sceneBm, true);
   const texMask = upload(maskBm, true);
   const texSky = upload(skyBm, true);
+  const texCloud = upload(cloudBm, true);
+  const texOver = upload(overBm, false);
 
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const view = compile(gl, VERT, VIEW);
@@ -855,9 +916,15 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, texMask);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, texSky);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, texCloud);
     gl.uniform1i(u.uScene, 0);
     gl.uniform1i(u.uMask, 1);
     gl.uniform1i(u.uSky, 2);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, texOver);
+    gl.uniform1i(u.uCloud, 3);
+    gl.uniform1i(u.uOver, 4);
     gl.uniform3fv(u.uC, c);
     gl.uniform3fv(u.uR, R);
     gl.uniform3fv(u.uD, D);
