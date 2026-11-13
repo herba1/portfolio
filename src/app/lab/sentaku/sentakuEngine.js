@@ -178,10 +178,12 @@ vec3 encode(vec3 c) {
 // proportion to how much of the disc the cloth leaves in view. Behind the
 // dress the sun is a soft patch of lit fabric, and its veil is the small one:
 // a pale cyan lobe about a third of the frame across and a tighter, whiter
-// one. Uncovered, it is the sun itself, and the veil is the lens's: warm-
-// neutral, most of the frame across with a long 1/(1+r^2) skirt, so the
-// whole upper middle lifts and greys out and the cloth beside the disc loses
-// its contrast and wraps in glare, as squinting into it does.
+// one. Uncovered, it is the sun itself, and the veil is the lens's: a warm
+// lobe about the disc, a little wider than the dress's shoulders, with only a
+// short, faint skirt. It never lifts the frame: a flat lift across the sky
+// greys the cobalt to milk and takes the cloth's contrast with it. The
+// exposure pulling down (ADAPT) is what the open sun does to the rest of the
+// frame, so the sky deepens while the disc blooms.
 const SUN_GLSL = `
 uniform vec2 uSun;    // image px
 uniform float uGlare; // the disc in view, the dress counting for a little
@@ -190,7 +192,7 @@ vec3 veil(vec2 p) {
   vec2 d = p - uSun;
   float r2 = dot(d, d);
   vec3 soft = vec3(0.13, 0.25, 0.29) * exp(-r2 / (240.0 * 240.0)) + vec3(0.06, 0.08, 0.075) * exp(-r2 / (64.0 * 64.0));
-  vec3 lens = vec3(0.30, 0.30, 0.27) * (exp(-r2 / (420.0 * 420.0)) + 0.5 / (1.0 + r2 / (260.0 * 260.0)));
+  vec3 lens = vec3(0.34, 0.27, 0.18) * (exp(-r2 / (180.0 * 180.0)) + 0.08 / (1.0 + r2 / (120.0 * 120.0)));
   return uGlare * mix(soft, lens, uOpen);
 }`;
 
@@ -288,8 +290,8 @@ void main() {
   // the sky with the photograph's grey veil lifted off
   vec3 c = max(plateAt(p, r) - h, 0.0) * zenith(p);
   // the aureole put back: the same falloff, pale cyan, eased off close in so
-  // the disc stands out of it; in clear view the lens veil whitens it
-  c += h.g * mix(mix(0.45, 0.2, uOpen), 1.0, smoothstep(24.0, 360.0, r)) * mix(vec3(0.5, 1.0, 1.1), vec3(0.8, 0.95, 0.95), uOpen);
+  // the disc stands out of it; in clear view it stays cyan, only a touch paler
+  c += h.g * mix(mix(0.45, 0.2, uOpen), 1.0, smoothstep(24.0, 360.0, r)) * mix(vec3(0.5, 1.0, 1.1), vec3(0.62, 0.97, 1.04), uOpen);
   // the disc: warm-neutral, rolling off through a hot shoulder. Seen through
   // the dress it is a hard dot about 15 px across; in clear view it is the
   // sun, blown out to about 40 px and still falling away, never a flat plate.
