@@ -402,11 +402,14 @@ void main() {
   // left in the photograph, as this sun stands) is kept; the sun model decides
   // which faces take the sun. The lobes' relief comes from the plate's own
   // coverage, blurred at two scales (its mips): a face turned toward the sun
-  // across the frame (and toward or away from us) is lit. The sunlit crown
-  // is a warm white that rolls off under paper white, never clipped; it warms
-  // to peach as the sun drops and its lit faces swing lower with it. The rest
-  // is the skylight blue of the dome that fills it, the plate's own billows
-  // held in it at a lower exposure.
+  // across the frame (and toward or away from us) is lit, and so is every
+  // billow the sun reaches through a few hundred pixels of the mass (a short
+  // march toward the sun through its coverage), about two fifths of it. The
+  // sunlit side is a warm white that rolls off on a shoulder short of paper
+  // white, never clipped; it warms to peach as the sun drops and its lit
+  // faces swing lower with it. The rest is the bright skylight blue of the
+  // dome that fills it, the plate's own billows held in it. A few percent of
+  // the sky's colour veils it all, so it stands in the same air.
   float low = 1.0 - smoothstep(3.0, 40.0, uEl);
   // toward the sun on the plate
   vec2 sdir = normalize(proj(vd * 10.0 + uL) - proj(vd * 10.0) + 1e-5);
@@ -437,17 +440,48 @@ void main() {
   float dif = dot(cn, cl3);
   float tn = clamp((cl.r - 0.5) / 0.45, 0.0, 1.0);
   // the cauliflower: the plate's fine tone against its lobe-sized blur, kept
-  // in both lights (stronger in the shade, where the sky alone models it)
-  float det = cl.r - textureLod(uCloud, cuv, 4.0).r;
+  // in both lights (stronger in the shade, where the sky alone models it);
+  // read a hair above the plate's own grain so the lit edge does not crunch
+  float det = textureLod(uCloud, cuv, 0.7).r - textureLod(uCloud, cuv, 4.0).r;
   // and the lobes themselves against the body (the shade holds them too)
   float lobe = textureLod(uCloud, cuv, 3.5).r - textureLod(uCloud, cuv, 6.5).r;
+  // How deep in the cloud this point stands, seen from the sun: its coverage
+  // summed along a short march toward the sun across the card, each step read
+  // at a coarser mip (a wider cone). The billows facing the sun take it through
+  // a few hundred pixels of the mass; behind them the light is spent.
+  vec2 sc = vec2(sdir.x * uCl1.x - sdir.y * uCl1.y, sdir.x * uCl1.y + sdir.y * uCl1.x) * ct;
+  float tau = 0.0;
+  for (int i = 0; i < 6; i++) {
+    float fi = float(i);
+    float d = 26.0 * (fi + 1.0) * (1.0 + 0.45 * fi);
+    float c = textureLod(uCloud, cuv + sc * d, 2.0 + 0.6 * fi).a;
+    tau += c * (1.0 + 0.4 * fi);
+  }
+  // sideways light marches through the mass; light from behind us lands on
+  // the face we see, light from behind the cloud reaches only its rim
+  float side = sqrt(max(1.0 - vl * vl, 0.0));
+  float reach = exp(-tau * mix(0.075, 0.3, max(vl, 0.0)) * side);
   // the underside, nearer the roofs, stands deeper in the cloud's own shade
   float under = 1.0 - smoothstep(0.2, 0.62, dot(vd, UP));
-  float sunK = smoothstep(0.25, 0.85, 0.8 * tn + 0.45 * dif);
-  vec3 litC = mix(vec3(0.955, 0.94, 0.9), vec3(0.97, 0.82, 0.64), pow(low, 1.3)) * (0.79 + 0.19 * tn) * mix(1.0, 0.93, low) * (1.0 + 0.7 * det);
-  vec3 shadeC = hsv2rgb(vec3(207.0 / 360.0, mix(0.3, 0.36, low) + 0.06 * under, mix(0.84, 0.72, low)))
-    * (0.7 + 0.45 * tn + 0.1 * dif) * (1.0 + 1.5 * det + 1.6 * lobe) * (1.0 - 0.1 * under);
-  vec3 cloud = min(mix(shadeC, litC, sunK), vec3(0.955));
+  float sunK = smoothstep(0.2, 0.62, reach + 0.9 * dif + 0.35 * (tn - 0.25) + 0.25 * lobe - 0.12 * under);
+  // The sunlit side: a warm white (a pale peach once low) that rolls off on a
+  // shoulder and is never clipped, the plate's billows held in it and each
+  // lobe rounding off as the light goes deeper into it. Set above paper white
+  // in print: the film's vignette and diffusion take back about a sixth.
+  float litF = (0.95 + 0.12 * tn + 0.25 * dif) * (0.86 + 0.2 * reach) * (1.0 + 0.8 * det + 1.5 * lobe);
+  // the folds between the sunlit billows are filled by the sky, not greyed
+  vec3 fold = mix(vec3(0.84, 0.93, 1.03), vec3(1.0), smoothstep(0.7, 1.06, litF));
+  vec3 litC = mix(vec3(1.0, 0.985, 0.95), vec3(1.0, 0.9, 0.79), pow(low, 1.3)) * litF * fold;
+  vec3 over = max(litC - 0.92, 0.0);
+  litC = min(litC, 0.92) + 0.2 * (1.0 - exp(-over / 0.2));
+  // The shade: the bright skylight blue of the open dome, not grey; the plate's
+  // own billows and the coverage relief model it.
+  vec3 shadeC = hsv2rgb(vec3(205.0 / 360.0, mix(0.13, 0.16, low) + 0.04 * under, mix(1.1, 1.06, low)))
+    * (0.9 + 0.12 * tn + 0.3 * dif) * clamp(1.0 + 1.1 * det + 2.6 * lobe, 0.72, 1.08) * (1.0 - 0.07 * under);
+  vec3 cloud = min(mix(shadeC, litC, sunK), vec3(1.07));
+  // The same air as the sky: a few percent of the sky's own colour veils the
+  // mass, a little more toward the roofs where there is more air in between.
+  cloud = mix(cloud, clear, 0.05 + 0.03 * under);
   // A thin warm ring round its sunlit edge, outside it: the light the film's
   // base throws back round a bright edge, on the clear sky only.
   float ring = max(textureLod(uCloud, cuv, 1.8).a - cl.a, 0.0);
