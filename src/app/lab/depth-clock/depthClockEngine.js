@@ -28,9 +28,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // drifts slowly on its own, so the cumulus passes behind the figures while the
 // crowns cross in front. The figures are lit by the sky around them, pale and
 // never white, and bleed a broad, faint veil of their own light into the air;
-// the air in that veil's footprint is first taken down a step (?shade=, a
-// multiply), so where the cloud's sunlit crown stands behind the 0 and the 4
-// the figures still separate from it without being brightened.
+// the air in that veil's footprint is first taken down a light, even step
+// (?shade=, a multiply), so the figures separate from the cloud body they
+// stand on while their counters show the same cloud light around them.
 // Before the film kit, the trees get a film grade that reads their matte
 // (GRADE): the phone's lime greens pulled toward olive-teal, the crushed
 // crowns lifted onto a cyan toe, the over-sharpened needles eased, the brighter
@@ -54,12 +54,14 @@ const ENC = 2;
 // numerals, so the trunks rise toward the time from every edge.
 const ANCHOR = [0.5, 0.46];
 // The numerals: centre of the figures and their em size, in image pixels.
-// They sit whole in the open well, low enough that the lower half of the 0
-// and the 4 stands on the cumulus's sunlit crown. Only the tips of the
-// crowns' outermost needles reach the 1s: measured against the matte and the
-// parallax, no figure loses more than about 4% of its ink at any full tilt,
-// and nothing crosses a stem. (Tune with ?nx=&ny=&ns=.)
-const NUM = { cx: 2120, cy: 900, size: 470 };
+// They stand low in the well, between the cloud and the crowns rather than
+// over them: the cumulus's warm crown rises clear above their tops, the
+// colon and the 0s stand on its body, and the 1 and the 4 reach into the
+// left and right crowns, so real branches and needles from the trees' matte
+// cut into both outer figures (their tops always clear: the time reads
+// whole at any tilt). Small enough that the crown stays the frame's light.
+// (Tune with ?nx=&ny=&ns=.)
+const NUM = { cx: 2005, cy: 1120, size: 375 };
 
 const SKY_D = 0.04; // the sky's disparity in the depth map
 const NUM_D = 0.2; // the numerals' plane: in front of the sky, behind every tree
@@ -220,8 +222,9 @@ void main() {
     // A value step under the figures: the air in their bleed footprint is
     // taken down softly (a multiply, so the cloud keeps its form) before
     // anything is added. The figures stay as they were, pale and never white;
-    // it is the cloud crown behind them that steps down, so the 0 and the 4
-    // separate from the brightest part of the cumulus.
+    // it is the cloud body behind them that steps down, evenly over the whole
+    // footprint (uShadeK is small), so the counters keep the same cloud light
+    // as the air round the figures.
     // The veil is measured against the air as it was, so it never fills the
     // step back in.
     // Bleed adds light, and less of it where the air is already as bright
@@ -328,12 +331,12 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const numQ = { cx: num(q.get("nx"), NUM.cx), cy: num(q.get("ny"), NUM.cy), size: num(q.get("ns"), NUM.size) };
   const numL = num(q.get("nl"), 0.85);
   const bleedK = num(q.get("bleed"), 0.4);
-  // The step under the figures: 0.8 of the air's light where the bleed
-  // reaches shadew. The film's shoulder compresses it on the cloud's crown to
-  // about a tenth on the print, which is what the 0 and the 4 need to stand
-  // off it; 0.85 left the brightest cloud level with the figures.
-  const shadeK = clamp(num(q.get("shade"), 0.8), 0, 1);
-  const shadeW = num(q.get("shadew"), 0.15);
+  // The step under the figures: a light one (0.9 of the air's light), and
+  // whole already where the faintest edge of the veil reaches (shadew), so
+  // the counters and the air round the figures sit on one even plate and
+  // the cloud reads continuous through the 0s instead of as a darker oval.
+  const shadeK = clamp(num(q.get("shade"), 0.9), 0, 1);
+  const shadeW = num(q.get("shadew"), 0.05);
   // The film grade the plates get before the film kit develops them (query
   // keys of the same names tune it).
   const grade = {
