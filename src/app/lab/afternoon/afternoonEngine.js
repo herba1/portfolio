@@ -22,9 +22,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // circumsolar lean and ground bounce), the sun's colour and strength from air
 // mass, cast shadows by marching each pixel's ray toward the sun through the
 // depth in screen space plus exact capsules for the pole, its lamp and the
-// mast arm. The sky is re-lit by a small analytic model (zenith deepening,
-// horizon band warming toward the sun, circumsolar glow), applied as a ratio
-// to the photo's own sky so the photo's sun gives back the photograph.
+// mast arm. The sky is drawn by a small analytic model (a cyan-cobalt zenith
+// that holds its hue at every sun, lightening to a pale cobalt at the roofs, a
+// warm band laid on only in the sun's azimuth once it is low, a circumsolar
+// glow); the cloud keeps the photo's drawing and is graded white on its sunlit
+// side and skylight blue in its shade. The buildings are the photograph at
+// the photo's sun.
 //
 // Query: ?sun=0..1 holds the sun (0 = 12:30, 1 = 17:00, the last light; the
 // photo is 0.424, 14:25);
@@ -56,6 +59,15 @@ const BOUNCE = 0.18;
 const GRADE_LO = [0.0, 0.07, 0.07];
 const GRADE_HI = [0.86, 0.88, 0.9];
 const PHOTO_EXPO = 1.6;
+// The drawn sky, in print sRGB before the film: overhead and at the roofline,
+// each hue (deg), saturation, value under a high sun, value at the last light.
+// Set so they come out of the film at about 210 deg / 0.8 / 0.5 overhead and
+// a pale cobalt at the roofs.
+const SKY_ZEN = [211, 0.8, 0.55, 0.5];
+const SKY_HOR = [207, 0.44, 0.87, 0.85];
+const SKY_CURVE = 1.7;
+const SKY_WARMC = [1.0, 0.92, 0.8];
+const SKY_WARM_AMT = 1.0;
 const S_PHOTO = (T0 - T_START) / T_SPAN;
 const S_OPEN = 0.86;
 
@@ -254,16 +266,17 @@ uniform sampler2D uDep;
 uniform sampler2D uMat;
 uniform sampler2D uVis;
 uniform vec3 uL;
-uniform vec3 uL0;        // the photo's sun
 uniform vec3 uSun;
 uniform vec3 uSky;
-uniform vec3 uTint;      // the sun's colour now over its colour in the photo
-uniform vec3 uSunC;      // the sun's colour now, unit luminance
 uniform float uEl;
-uniform float uEl0;
 uniform float uW0;       // hand-over to the photo's own shadows near its sun
 uniform float uExpo;
-uniform float uLate;     // 0 at the photo's sun .. 1 at the last light
+uniform float uStops;    // the reveal's push alone
+uniform vec4 uZen;       // sky overhead: hue (deg), saturation, value high sun, value last light
+uniform vec4 uHor;       // sky at the roofline, the same
+uniform float uSkyCurve; // how low the lightening sits
+uniform vec3 uWarmC;     // the warm white the band ramps to
+uniform float uWarmAmt;
 uniform vec3 uLo;
 uniform vec3 uHi;
 uniform float uDebug;
@@ -317,25 +330,37 @@ float poleVis(vec3 P, vec2 px) {
   return v;
 }
 
-// Clear-sky radiance, relative: deep blue overhead that goes deeper and darker
-// as the sun drops (more of the path is ozone-filtered, less is scattered),
-// a pale horizon band that warms to gold toward a low sun and goes to a dusty
-// rose-grey away from it, and the glow round the sun. Only its ratio between
-// now and the photo's sun is used, on the photo's own sky.
-vec3 skyModel(vec3 vd, vec3 L, float el) {
-  float h = max(dot(vd, UP), 0.0);
-  float low = 1.0 - smoothstep(3.0, 42.0, el);
-  vec3 zen = mix(vec3(0.27, 0.52, 1.0), vec3(0.09, 0.2, 0.74), low) * mix(1.0, 0.5, low * low);
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+
+// The clear sky, as it should print (sRGB, before the film). The scan's own
+// sky is a flat teal that no ratio can turn into a winter sky, so the sky is
+// drawn here outright and only the cloud keeps the photo's drawing.
+// Overhead it holds a deep cyan-cobalt at every sun (the hue does not drift,
+// only the value deepens a little as the sun drops); down toward the roofs it
+// lightens and opens to a pale cobalt, never to grey. The warm band is a
+// separate term, laid on only in the sun's azimuth and only low, and only
+// once the sun is low: it ramps the pale cobalt to a warm white, so the side
+// away from the sun stays blue. Then a soft glow round the sun.
+vec3 skyTarget(vec3 vd, vec3 L, float el) {
+  float h = clamp(dot(vd, UP), 0.0, 1.0);
+  float low = 1.0 - smoothstep(3.0, 40.0, el);
+  // 0 at the roofline (about 8 degrees up), 1 at the top of the frame (55)
+  float tz = clamp((h - 0.14) / 0.68, 0.0, 1.0);
+  float hz = pow(1.0 - tz, uSkyCurve);
+  vec3 zen = vec3(uZen.x / 360.0, uZen.y, mix(uZen.z, uZen.w, low));
+  vec3 hor = vec3(uHor.x / 360.0, uHor.y, mix(uHor.z, uHor.w, low));
+  vec3 c = hsv2rgb(mix(zen, hor, hz));
   vec3 vh = normalize(vd - dot(vd, UP) * UP + 1e-5);
   vec3 lh = normalize(L - dot(L, UP) * UP + 1e-5);
-  float toward = smoothstep(-0.3, 1.0, dot(vh, lh));
-  vec3 hzAway = mix(vec3(0.72, 0.84, 1.0), vec3(0.52, 0.62, 0.88), low);
-  vec3 hzSun = mix(vec3(0.82, 0.90, 1.0), vec3(1.6, 0.86, 0.36), low);
-  vec3 hz = mix(hzAway, hzSun, toward * toward) * mix(1.0, 0.8, low * low);
-  float band = pow(1.0 - h, mix(3.5, 5.0, low));
-  vec3 c = mix(zen, hz, band);
+  float az = smoothstep(0.2, 1.0, dot(vh, lh));
+  az *= az;
+  float band = pow(1.0 - tz, 5.0);
+  c += uWarmAmt * low * low * az * band * (uWarmC - c);
   float cg = dot(vd, L);
-  c += vec3(1.0, 0.8, 0.5) * (0.15 + 1.1 * low * low) * exp((cg - 1.0) / mix(0.12, 0.17, low));
+  c += vec3(0.10, 0.08, 0.05) * (0.25 + 0.75 * low) * exp((cg - 1.0) / 0.2);
   return c;
 }
 
@@ -352,37 +377,34 @@ void main() {
   float pv = Z < 3500.0 && dot(N, uL) > 0.0 ? mix(poleVis(P, px), 1.0, uW0) : 1.0;
   vec3 surf = base * ${PHOTO_EXPO.toFixed(3)} * shading(N, vis * pv);
 
-  // Sky: the photo's own sky times the model's change since the photo's sun.
+  // Sky, drawn as it should print.
   vec3 vd = normalize(vec3((px.x - uCam.y) / uCam.x, (uCam.z - px.y) / uCam.x, 1.0));
-  vec3 skyNow = skyModel(vd, uL, uEl);
-  vec3 skyPhoto = skyModel(vd, uL0, uEl0);
-  // Two readings of the change: the photo's sky times the model's ratio
-  // (exact at the photo's sun, but it can only scale the scan's teal, so a
-  // gold horizon would come out mint), and the model's own colour carried on
-  // the photo's luminance. The further the sun is from the photo's, the more
-  // the second one leads.
-  vec3 byRatio = base * skyNow / skyPhoto;
-  vec3 byModel = skyNow * (dot(base, LUMA) / max(dot(skyPhoto, LUMA), 1e-4));
-  vec3 clear = mix(byRatio, byModel, 0.75 * smoothstep(0.0, 0.8, uLate));
-  // The cloud (one small cumulus): the face toward the sun takes its colour,
-  // the rest goes to the blue of the sky that lights it, and both dim with
-  // the sky; nothing here pushes a cloud past the photo's own white.
-  float cy = dot(base, LUMA);
+  vec3 clear = skyTarget(vd, uL, uEl);
+  // The cloud keeps the photo's drawing (its own light, normalised to its
+  // white) and takes the colour of what lights it: the face toward the sun a
+  // white that warms only a little as the sun drops, the rest the pale blue
+  // of the sky that fills it. Both stay under paper white, so the sunlit edge
+  // rolls off instead of clipping, and nothing in it goes orange.
+  float cy = smoothstep(0.78, 0.96, l2s(vec3(dot(base, LUMA))).r);
   vec2 tx = vec2(1.0 / uPlate.x, 1.0 / uPlate.y);
   // toward the sun on the plate: a pixel with less cloud that way is a face it reaches
   vec2 sdir = normalize(proj(vd * 10.0 + uL) - proj(vd * 10.0) + 1e-5);
-  float gSun = textureLod(uMat, t + sdir * 24.0 * tx, 2.0).g;
-  float lit = clamp(0.35 + 0.5 * smoothstep(0.4, 0.8, cy) + (mt.g - gSun) * 2.0, 0.0, 1.0);
-  vec3 skyRel = skyNow / skyPhoto;
-  float dim = dot(skyRel, LUMA);
-  // (on the photo's own colour only near its sun: the scan's teal would turn
-  // a gold cloud lemon, so late it takes the sun's colour on its own light)
-  vec3 cloudLit = mix(base * uTint, dot(base, LUMA) * mix(vec3(1.0), uSunC, 0.75), smoothstep(0.0, 0.7, uLate)) * mix(1.0, 0.85, uLate);
-  vec3 cloudShade = base * mix(vec3(1.0), skyRel / max(dim, 1e-3), 0.6) * mix(1.0, dim, 0.7);
-  vec3 cloud = mix(cloudShade, cloudLit, lit);
-  vec3 sky = mix(clear, cloud, smoothstep(0.05, 0.5, mt.g));
+  float gSun = textureLod(uMat, t + sdir * 20.0 * tx, 2.0).g;
+  float gAway = textureLod(uMat, t - sdir * 20.0 * tx, 2.0).g;
+  float lit = clamp(0.45 + (gAway - gSun) * 1.2 + (cy - 0.5) * 0.5, 0.0, 1.0);
+  float low = 1.0 - smoothstep(3.0, 40.0, uEl);
+  vec3 cloudLit = mix(vec3(0.91, 0.92, 0.93), vec3(0.95, 0.9, 0.83), low);
+  vec3 cloudShade = hsv2rgb(vec3(212.0 / 360.0, mix(0.26, 0.34, low), mix(0.74, 0.66, low)));
+  vec3 cloud = mix(cloudShade, cloudLit, smoothstep(0.0, 1.0, lit));
+  // a soft matte (a little wider than the photo's), so the edge is the
+  // cloud thinning out, not a cut
+  float ca = smoothstep(0.03, 0.9, textureLod(uMat, t, 1.8).g);
+  vec3 skyS = mix(clear, cloud, ca);
+  // back through the scan grade below, so the sky lands where it was drawn;
+  // the reveal's push lifts it with everything else
+  vec3 sky = s2l((skyS - uLo) / (uHi - uLo)) * uStops;
 
-  vec3 col = mix(surf, sky, mt.r) * uExpo;
+  vec3 col = mix(surf * uExpo, sky, mt.r);
   if (uDebug > 0.5) col = vec3(vis * pv * max(dot(N, uL), 0.0)) * (1.0 - mt.r) * 0.6;
   // Back through the photo's own scan grade (lifted black; rolled white),
   // unclamped above white so the film's shoulder gets the highlights.
@@ -613,8 +635,6 @@ export async function createAfternoon(host, { embedded = false } = {}) {
   const photo = sunAt(T0);
   // Horizontal irradiance: what a light meter pointed at the sky would read.
   const lumH = (s) => dot3(s.sun, LUMA) * Math.max(dot3(s.L, UP), 0) + dot3(s.fill, LUMA);
-  const tintOf = (s) => s.sun.map((v) => v / Math.max(dot3(s.sun, LUMA), 1e-4));
-  const tint0 = tintOf(photo);
 
   // Sun: the drag sets a goal; what you see follows on a spring.
   let goal = held ? clamp(sunQ, 0, 1) : S_PHOTO;
@@ -719,13 +739,13 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     // who wants the late light to look late.
     const expo = Math.pow(lumH(photo) / lumH(sun), 0.35);
     gl.uniform1f(u.uExpo, expo * 2 ** expoStops);
-    gl.uniform3fv(u.uL0, photo.L);
+    gl.uniform1f(u.uStops, 2 ** expoStops);
     gl.uniform1f(u.uEl, sun.el);
-    gl.uniform1f(u.uEl0, photo.el);
-    const tint = tintOf(sun);
-    gl.uniform3fv(u.uTint, tint.map((v, i) => v / tint0[i]));
-    gl.uniform3fv(u.uSunC, tint);
-    gl.uniform1f(u.uLate, sun.late);
+    gl.uniform4fv(u.uZen, SKY_ZEN);
+    gl.uniform4fv(u.uHor, SKY_HOR);
+    gl.uniform1f(u.uSkyCurve, SKY_CURVE);
+    gl.uniform3fv(u.uWarmC, SKY_WARMC);
+    gl.uniform1f(u.uWarmAmt, SKY_WARM_AMT);
     gl.uniform4fv(u["uOcc[0]"], OCC_FLAT);
     gl.uniform3fv(u.uLo, GRADE_LO);
     gl.uniform3fv(u.uHi, GRADE_HI);
