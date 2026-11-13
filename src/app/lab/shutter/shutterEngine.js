@@ -50,8 +50,11 @@ import { takes } from "./shutterTakes";
 // as a print would be trimmed to the frame.
 //
 // Develop: _kit/film.js, summer preset (Pro-Mist bloom, colour bleed, curve,
-// 24 fps grain), then the print's top end (FINISH_FS): paper white, sunlit
-// cream, and a narrow warm halation ring in place of the film's wide one.
+// 24 fps grain), then the print's top end (FINISH_FS): for the tower paper
+// white, sunlit cream, and a narrow warm halation ring in place of the
+// film's wide one; for the sky a print that follows the exposure, its white
+// point set from the sky's own brightest silk (printSky), so the streaks
+// glow at every hold while the ND holds the sky's mean.
 
 const BASE = "/lab/shutter/";
 const TAU = 1; // frames: the opening frame's share of a still (?open); each frame already carries its own interval
@@ -123,6 +126,24 @@ const CREAM_C = 0.013;
 const RING_PX = 3; // at DPR 2
 const RING_C = 0.05;
 const RING_HUE = (48 * Math.PI) / 180;
+// The sky's print (printSky in FINISH_FS): its brightest silk, the 99.5th
+// percentile of the sky's luma, is printed to PRINT_TARGET (linear, ~235 in
+// sRGB, still under clipping) at every exposure length, lifted from a knee
+// at PRINT_KNEE of it. The anchor is measured on a small render of the print
+// read back asynchronously, so it follows the hold a frame or two behind,
+// eased over ANCHOR_TAU so grain never flickers it.
+const PRINT_TARGET = 0.82;
+const PRINT_KNEE = 0.45;
+const ANCHOR_PCT = 0.995;
+const ANCHOR_TAU = 0.12; // s
+const MEASURE_W = 240; // px across the anchor's sample of the print
+const FENCE_FRAMES = 6;
+const PRINT_GAP = 20; // px at DPR 2
+const ND_FLOOR = 0.85; // the most the cobalt below the knee gives back
+// The top of the shoulder (linear) and the most the white point is ever
+// raised; printSky (FINISH_FS) takes both from here.
+const PRINT_WHITE = 0.965;
+const PRINT_GAIN = 2.6;
 const develop = (T, N) => {
   const k = longness(T, N);
   return {
@@ -447,11 +468,84 @@ uniform vec2 uKnee;        // lightness where the shoulder starts, paper white
 uniform float uDetail;     // the glint's mullions put back
 uniform vec3 uCream;       // cream: hue (rad), chroma, strength
 uniform vec3 uRing;        // ring: radius (device px), chroma, hue (rad)
+uniform vec4 uPrint;       // the sky's print: highlight anchor, its target (linear luma), knee (share of the anchor), strength
+uniform float uPrintND;    // the gain below the knee that holds the sky's mean (the ND)
+uniform vec2 uTexel;       // one texel of the developed print, in uv
+uniform float uGap;        // device px: how far from the tower the print reads its sky
+uniform float uMeasure;    // 1: write the sky's smoothed luma and where it is sky, for the anchor
 out vec4 o;
 ${COMMON}
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 vec4 stillAt(vec2 iuv){ return textureLod(uStill, iuv, uLodS); }
 float lumaOf(vec3 s){ return dot(lin(s), LUMA); }
+// The sky's print. Normalised by its length, the long exposure keeps its
+// mean but loses its top: minutes of cumulus average into streaks that
+// never reach a cloud's white, so the silk prints as a pale blue-grey on
+// cobalt and stops glowing as the hold grows. A printer prints a long
+// negative to its own white point. The brightest silk of this print (the
+// sky's 99.5th percentile, measured on the print itself each time the
+// exposure changes) is the anchor, and the curve above the knee is lifted
+// so that the anchor lands on uPrint.y, a little under paper white: the
+// cobalt below the knee, most of the frame, keeps its tone, so the ND's
+// mean holds and only the streaks' crests come up (what the crests gain,
+// the cobalt below the knee gives back, uPrintND, a few % at most, so the
+// sky's mean luma stays what it was printed at before). Over the top the curve
+// rolls into PRINT_WHITE on a shoulder (never a clip), and the near-whites
+// turn from the film's cool grey to a warm neutral, a sunlit cumulus top.
+// The curve reads a smoothed luma (the sky's own light only, never the
+// tower's) and is applied as a gain, so it lifts the grain with its pixel
+// instead of stretching it into speckle.
+const float PRINT_WHITE = ${PRINT_WHITE.toFixed(4)}; // linear: what the top of the shoulder rolls into
+const float PRINT_GAIN = ${PRINT_GAIN.toFixed(4)};    // the most the white point is ever raised
+const vec2 WARM_D = vec2(0.58, 0.93); // display luma where the warm-neutral shoulder starts and is whole
+const vec2 WARM_AB = vec2(0.0009, 0.0089); // its colour: hue ~84 deg, a hair of chroma (OKLab)
+float matteAt(vec2 duv, float lod){
+  vec2 t = duv * uCover.xy + uCover.zw;
+  return textureLod(uStill, vec2(t.x, 1.0 - t.y), lod).a;
+}
+// Beside the tower the sky's light carries a faint veil of it (the
+// develop's diffusion, the integral's own edge). The curve is steepest
+// where the silk lifts, so read there it would print that veil up into a
+// pale drip down the fin. So within uGap of the tower the curve reads the
+// sky from uGap out, along the matte's normal, and the pixel takes that
+// sky's gain: the veil is carried at the gain, never stretched by the slope.
+vec2 gapPoint(vec2 duv){
+  float L = uLodS + 3.0;
+  float near = matteAt(duv, L);
+  if (near <= 0.0) return duv;
+  vec2 h = uTexel * 8.0;
+  vec2 g = vec2(matteAt(duv + vec2(h.x, 0.0), L) - matteAt(duv - vec2(h.x, 0.0), L),
+                matteAt(duv + vec2(0.0, h.y), L) - matteAt(duv - vec2(0.0, h.y), L));
+  if (dot(g, g) < 1e-6) return duv;
+  return duv - normalize(g) * uTexel * uGap * smoothstep(0.0, 0.25, near);
+}
+float skyLuma(vec2 duv){
+  float y = 0.0;
+  float w = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 t = duv + vec2(float(i), float(j)) * uTexel * 2.5;
+      vec2 tuv = t * uCover.xy + uCover.zw;
+      float k = 1.0 - textureLod(uStill, vec2(tuv.x, 1.0 - tuv.y), uLodS + 1.0).a;
+      y += dot(max(lin(texture(uDev, t).rgb), 0.0), LUMA) * k;
+      w += k;
+    }
+  }
+  return w > 1e-3 ? y / w : dot(max(lin(texture(uDev, duv).rgb), 0.0), LUMA);
+}
+vec3 printSky(vec3 c, float Yb){
+  float a = max(uPrint.x, 1e-3);
+  float t = uPrint.y;
+  float G = clamp(t / a, 1.0, PRINT_GAIN);
+  float Yp = Yb * mix(uPrintND, G, smoothstep(a * uPrint.z, a, Yb));
+  float over = max(Yp - t, 0.0);
+  Yp = min(Yp, t) + (PRINT_WHITE - t) * (1.0 - exp(-over / (PRINT_WHITE - t)));
+  vec3 q = toLab(c);
+  float L = q.x * pow(Yp / max(Yb, 1e-4), 1.0 / 3.0);
+  float sh = smoothstep(WARM_D.x, WARM_D.y, enc(vec3(Yp)).x);
+  vec2 ab = mix(q.yz, WARM_AB, sh);
+  return max(fromLab(vec3(L, ab)), 0.0);
+}
 void main(){
   vec2 fc = gl_FragCoord.xy;
   vec3 c = max(lin(texture(uDev, fc / uSize).rgb), 0.0);
@@ -460,6 +554,7 @@ void main(){
   vec2 iuv = vec2(uv.x, 1.0 - uv.y);
   vec4 s = stillAt(iuv);
   float m = s.a;
+  float Yb = skyLuma(gapPoint(fc / uSize));
   float C = length(p.yz);
   float neutral = 1.0 - smoothstep(0.03, 0.07, C);
 
@@ -521,7 +616,18 @@ void main(){
 
   ab = mix(ab, vec2(cos(uRing.z), sin(uRing.z)) * uRing.y, ring);
   L -= 0.025 * ring;
-  o = vec4(enc(max(fromLab(vec3(L, ab)), 0.0)), 1.0);
+  // The sky takes its own print; the tower keeps the one above.
+  vec3 tower = max(fromLab(vec3(L, ab)), 0.0);
+  if (uMeasure > 0.5) {
+    // The anchor's sample: the smoothed luma the print reads, and the luma
+    // the sky printed at before it (the mean the print holds), read only on
+    // open sky, well clear of the tower and its glint.
+    float clear = 1.0 - smoothstep(0.0, 0.02, textureLod(uStill, iuv, uLodS + 3.0).a);
+    o = vec4(enc(vec3(Yb, dot(tower, LUMA), 0.0)).rg, 0.0, clear);
+    return;
+  }
+  float ws = (1.0 - smoothstep(0.02, 0.5, m)) * uPrint.w;
+  o = vec4(enc(mix(tower, printSky(c, Yb), ws)), 1.0);
 }`;
 
 // Print onto the page: the developed frame, and the last one fading out
@@ -748,6 +854,9 @@ export async function createShutter(host, { embedded = false } = {}) {
   let comp = null;
   let raw = null; // the developed frame before its top end is printed
   let dev = [null, null]; // developed frames: current, previous
+  let meas = null; // the anchor's sample of the print
+  const pbo = gl.createBuffer();
+  let measBytes = null;
   const layout = (w, h, dpr) => {
     rect.w = Math.max(1, Math.round(w));
     rect.h = Math.max(1, Math.round(h));
@@ -767,6 +876,14 @@ export async function createShutter(host, { embedded = false } = {}) {
     dev.forEach((d) => freeTarget(gl, d));
     comp = target(gl, dw, dh, false);
     dev = [target(gl, dw, dh, false), target(gl, dw, dh, false)];
+    freeTarget(gl, meas);
+    meas = target(gl, MEASURE_W, Math.max(1, Math.round((MEASURE_W * dh) / dw)), false);
+    measBytes = new Uint8Array(meas.w * meas.h * 4);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, measBytes.byteLength, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    if (fence) gl.deleteSync(fence);
+    fence = null;
     if (!film) film = createFilm(gl, { width: dw, height: dh });
     else film.resize(dw, dh);
   };
@@ -776,7 +893,16 @@ export async function createShutter(host, { embedded = false } = {}) {
   let fade = 1; // 0..1 cross-fade from the previous print
   let press = { s: 1, v: 0, target: 1 };
   let dirty = true;
+  let reprint = false; // only the sky's print changed: finish and blit again
   let expDirty = true;
+  // The sky's highlight anchor (linear luma): the one in use, and the last
+  // measured. A measurement in flight is a fence on its read-back.
+  let anchor = null;
+  let anchorTarget = null;
+  let fence = null;
+  let fenceAge = 0;
+  let measureWanted = false;
+  let lastLook = null;
   let seed = 3;
   let grainT = 0;
   let reveal = still || reduced ? null : { t: 0, dur: 2.0, from: 2.5 };
@@ -807,7 +933,6 @@ export async function createShutter(host, { embedded = false } = {}) {
 
   const draw = () => {
     if (!comp || !film) return;
-    const dpr = stage.dpr;
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
@@ -886,10 +1011,27 @@ export async function createShutter(host, { embedded = false } = {}) {
 
     // 3. Develop.
     const look = develop(T, N);
+    lastLook = look;
     film.render(comp.tex, { ...look, exposure: exposureEV + look.exposure, grainSeed: seed }, raw.fbo);
 
-    // 4. The top end: paper white, cream, the narrow halation ring.
+    // A held still is measured on the spot (one stall, once); a moving
+    // print is printed on the anchor it has and measured behind it.
+    if (still) {
+      measure(true);
+      anchor = anchorTarget;
+    }
+    printAndBlit();
+    if (!still) measure();
+  };
+
+  // 4. The top end: the sky's print; for the tower paper white, cream, the
+  // narrow halation ring. With `into`, the anchor's sample instead.
+  const finishPass = (into) => {
+    const dpr = stage.dpr;
+    const look = lastLook;
+    const lodD = Math.max(0, Math.log2((SW * cover[0]) / comp.w));
     gl.bindVertexArray(vao);
+    gl.disable(gl.BLEND);
     const fu = P.finish.u;
     gl.useProgram(P.finish.p);
     gl.activeTexture(gl.TEXTURE0);
@@ -898,7 +1040,14 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, stillTex);
     gl.uniform1i(fu.uDev, 0);
     gl.uniform1i(fu.uStill, 1);
-    gl.uniform2f(fu.uSize, raw.w, raw.h);
+    gl.uniform2f(fu.uSize, into ? into.w : raw.w, into ? into.h : raw.h);
+    gl.uniform2f(fu.uTexel, 1 / raw.w, 1 / raw.h);
+    gl.uniform1f(fu.uGap, PRINT_GAP * (dpr / 2));
+    gl.uniform1f(fu.uMeasure, into ? 1 : 0);
+    // Faded in with the opening reveal: an overexposed field has no top to print.
+    const strength = anchor == null ? 0 : reveal ? 1 - exposureEV / reveal.from : 1;
+    gl.uniform4f(fu.uPrint, anchor ?? 1, PRINT_TARGET, PRINT_KNEE, Math.max(0, Math.min(1, strength)));
+    gl.uniform1f(fu.uPrintND, anchor == null ? 1 : holdND(anchor));
     gl.uniform4fv(fu.uCover, cover);
     gl.uniform1f(fu.uLodS, lodD);
     gl.uniform2f(fu.uLift, 2 ** (LIFT - look.exposure), STREAK_LIFT);
@@ -906,9 +1055,108 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform2f(fu.uKnee, KNEE, PAPER);
     gl.uniform3f(fu.uCream, CREAM_HUE, CREAM_C, 1);
     gl.uniform3f(fu.uRing, RING_PX * (dpr / 2), RING_C, RING_HUE);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, dev[0].fbo);
-    gl.viewport(0, 0, dev[0].w, dev[0].h);
+    const to = into || dev[0];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, to.fbo);
+    gl.viewport(0, 0, to.w, to.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+
+  // The anchor's sample: the sky's smoothed luma at MEASURE_W across, read
+  // back without a stall (a pixel-pack buffer behind a fence, polled each
+  // frame). One in flight at a time; a newer print waits for it.
+  const measure = (now = false) => {
+    if (!meas) return;
+    if (now) {
+      finishPass(meas);
+      gl.readPixels(0, 0, meas.w, meas.h, gl.RGBA, gl.UNSIGNED_BYTE, measBytes);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      readAnchor();
+      return;
+    }
+    if (fence) {
+      measureWanted = true;
+      return;
+    }
+    measureWanted = false;
+    finishPass(meas);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.readPixels(0, 0, meas.w, meas.h, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+  };
+  const toLinear = new Float32Array(256).map((_, i) => {
+    const c = i / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const pollMeasure = () => {
+    if (!fence) return false;
+    const st = gl.clientWaitSync(fence, 0, 0);
+    // A GPU running many frames behind (a software renderer) would never
+    // let the anchor arrive: past FENCE_FRAMES the read just waits for it.
+    if ((st === gl.TIMEOUT_EXPIRED || st === gl.WAIT_FAILED) && ++fenceAge < FENCE_FRAMES) return false;
+    fenceAge = 0;
+    gl.deleteSync(fence);
+    fence = null;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, measBytes);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    readAnchor();
+    if (measureWanted) measure();
+    return true;
+  };
+  // The gain below the knee that keeps the sky's mean where the ND put it,
+  // for a given anchor: the curve (printSky) is linear in it, so it is
+  // solved exactly over the sample's histogram.
+  const skyHist = new Uint32Array(256);
+  let skyMean = 0; // the sky's mean luma (linear) as printed before
+  const holdND = (a) => {
+    const G = Math.min(PRINT_GAIN, Math.max(1, PRINT_TARGET / a));
+    const k = a * PRINT_KNEE;
+    let n0 = 0;
+    let lo = 0;
+    let hi = 0;
+    for (let v = 0; v < 256; v++) {
+      const n = skyHist[v];
+      if (!n) continue;
+      const y = toLinear[v];
+      const x = Math.min(1, Math.max(0, (y - k) / Math.max(1e-6, a - k)));
+      const ss = x * x * (3 - 2 * x);
+      let top = y * G * ss;
+      if (top > PRINT_TARGET) top = PRINT_TARGET + (PRINT_WHITE - PRINT_TARGET) * (1 - Math.exp(-(top - PRINT_TARGET) / (PRINT_WHITE - PRINT_TARGET)));
+      n0 += n;
+      lo += n * y * (1 - ss);
+      hi += n * top;
+    }
+    if (lo <= 0) return 1;
+    return Math.min(1, Math.max(ND_FLOOR, (skyMean * n0 - hi) / lo));
+  };
+  // The 99.5th percentile of the open sky's luma in the sample.
+  const readAnchor = () => {
+    const hist = new Uint32Array(256);
+    let n = 0;
+    let sum = 0;
+    for (let i = 0; i < measBytes.length; i += 4) {
+      if (measBytes[i + 3] < 250) continue;
+      hist[measBytes[i]]++;
+      sum += toLinear[measBytes[i + 1]];
+      n++;
+    }
+    if (n >= 200) {
+      skyHist.set(hist);
+      skyMean = sum / n;
+      let left = Math.max(1, Math.round(n * (1 - ANCHOR_PCT)));
+      let v = 255;
+      while (v > 0 && left > hist[v]) left -= hist[v--];
+      anchorTarget = Math.max(0.02, toLinear[v]);
+    }
+  };
+
+  const printAndBlit = () => {
+    if (!comp || !film || !lastLook) return;
+    finishPass(null);
+    const dpr = stage.dpr;
 
     // 5. Print onto the paper.
     gl.bindVertexArray(vao);
@@ -1084,6 +1332,14 @@ export async function createShutter(host, { embedded = false } = {}) {
 
   stage.onFrame((dt) => {
     if (!still) pumpVideo();
+    // The sky's anchor: a held still snaps to its measurement, a moving
+    // print eases toward it.
+    pollMeasure();
+    if (anchorTarget != null && anchor !== anchorTarget) {
+      const next = anchor == null || still ? anchorTarget : anchor + (anchorTarget - anchor) * (1 - Math.exp(-dt / ANCHOR_TAU));
+      anchor = Math.abs(next - anchorTarget) < anchorTarget * 0.002 ? anchorTarget : next;
+      reprint = true;
+    }
     if (shot.open) {
       // Wall-clock time, not frame time: a slow frame must not shorten the
       // exposure the finger asked for.
@@ -1139,7 +1395,11 @@ export async function createShutter(host, { embedded = false } = {}) {
     }
     if (dirty && (liveReady || shot.any)) {
       dirty = false;
+      reprint = false;
       draw();
+    } else if (reprint) {
+      reprint = false;
+      printAndBlit();
     }
   });
   void embedded;
@@ -1157,6 +1417,9 @@ export async function createShutter(host, { embedded = false } = {}) {
       freeTarget(gl, comp);
       freeTarget(gl, raw);
       dev.forEach((d) => freeTarget(gl, d));
+      freeTarget(gl, meas);
+      if (fence) gl.deleteSync(fence);
+      gl.deleteBuffer(pbo);
       freeTarget(gl, exp);
       acc.forEach((t) => freeTarget(gl, t));
       [stillTex, skyTex, liveTex, pressTex, ...atlasTex].forEach((t) => gl.deleteTexture(t));
