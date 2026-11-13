@@ -143,6 +143,7 @@ uniform sampler2D uPhoto;  // sRGB
 uniform sampler2D uEnv;    // sRGB equirect, centred on the mirror
 uniform sampler2D uEnvD;   // log distance code
 uniform sampler2D uAux;    // r: log z code, g: sunlit, b: sky
+uniform sampler2D uGrade;  // the plate's enamels: r yellow, g orange-red, b green (grade.py)
 uniform vec4 uView;        // photo px: x0, y0 (top), w, h
 uniform vec2 uPhotoSize;
 uniform float uF;
@@ -358,6 +359,45 @@ vec3 grainDir(vec3 p, float id) {
     return cross(uN, rad / max(length(rad), 1e-4));
   }
   return vec3(0.0);
+}
+
+// One warm accent, and it is the mirror. The plate's own enamels (the
+// crossbuck's yellow, the barrier pole's orange-red, the green sign) stood at
+// full chroma against the cobalt and pulled the eye off the glass. They are
+// graded down here, in OKLCh, as sun-faded enamel: the yellow to 62 % chroma,
+// turned 8 deg toward ochre and a third of a stop down; the orange-red to
+// 62 %; the green to half. Where each enamel is comes from the bake
+// (grade.py: the object's footprint, its enamel-coloured pixels grown over
+// the edge and feathered); how much of a pixel is that enamel is told here,
+// by a hue window feathered 20 deg either side and a chroma floor, so the
+// house's sunlit boards, the fence and the black stripes are not touched,
+// and nothing steps at a mask's edge. The vermilion paint is the object's,
+// never the plate's, and keeps its full colour.
+vec3 toOk(vec3 c) {
+  vec3 l = mat3(0.4122214708, 0.2119034982, 0.0883024619, 0.5363325363, 0.6806995451, 0.2817188376, 0.0514459929, 0.1073969566, 0.6299787005) * c;
+  l = pow(max(l, 0.0), vec3(1.0 / 3.0));
+  return mat3(0.2104542553, 1.9779984951, 0.0259040371, 0.7936177850, -2.4285922050, 0.7827717662, -0.0040720468, 0.4505937099, -0.8086757660) * l;
+}
+vec3 fromOk(vec3 k) {
+  vec3 l = mat3(1.0, 1.0, 1.0, 0.3963377774, -0.1055613458, -0.0894841775, 0.2158037573, -0.0638541728, -1.2914855480) * k;
+  l = l * l * l;
+  return mat3(4.0767416621, -1.2684380046, -0.0041960863, -3.3077115913, 2.6097574011, -0.7034186147, 0.2309699292, -0.3413193965, 1.7076147010) * l;
+}
+float hueWin(float h, float lo, float hi) { return smoothstep(lo - 20.0, lo, h) * smoothstep(hi + 20.0, hi, h); }
+vec3 enamel(vec3 c, vec2 uv) {
+  vec3 z = texture(uGrade, uv).rgb;
+  if (z.r + z.g + z.b < 0.004) return c;
+  vec3 k = toOk(c);
+  float ch = length(k.yz);
+  float h = degrees(atan(k.z, k.y));
+  float cw = smoothstep(0.015, 0.045, ch);
+  float wy = z.r * hueWin(h, 50.0, 108.0) * cw;
+  float wo = z.g * hueWin(h, 30.0, 85.0) * cw;
+  float wg = z.b * hueWin(h, 115.0, 150.0) * cw;
+  float sc = 1.0 - 0.22 * wy - 0.28 * wo - 0.5 * wg;
+  float a = radians(-8.0 * wy);
+  k.yz = mat2(cos(a), sin(a), -sin(a), cos(a)) * k.yz * sc;
+  return max(fromOk(k), 0.0) * exp2(-wy / 3.0);
 }
 
 // The photograph's own dirt. The sunlit plaster under the house's eave
@@ -673,6 +713,8 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   vec2 ppx = uC + uF * vec2(cam.x, -cam.y) / max(-cam.z, 1e-4);
   float pin = min(min(ppx.x, uPhotoSize.x - ppx.x), min(ppx.y, uPhotoSize.y - ppx.y));
   float fromPhoto = cam.z < 0.0 ? smoothstep(0.0, 160.0, pin) : 0.0;
+  // the plate's enamels graded as the plate's are, where the glass shows them
+  if (fromPhoto > 0.0) c = mix(c, enamel(c, ppx / uPhotoSize), fromPhoto);
   vec3 nb = env(dir, 5.0);
   float nbC = (nb.b - nb.r) / max(nb.b, 1e-3);
   float above = smoothstep(0.28, 0.15, nbC) * smoothstep(0.62, 0.4, dot(nb, LUMA));
@@ -986,7 +1028,7 @@ void main() {
 #else
 
   // the photograph
-  vec3 col = texture(uPhoto, p / uPhotoSize).rgb;
+  vec3 col = enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize);
   vec4 aux = texture(uAux, p / uPhotoSize);
   // the assembly's shadow on it, through the point map
   if (aux.r < 0.995) {
@@ -1454,12 +1496,13 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [scene, photoImg, envImg, envdImg, auxImg] = await Promise.all([
+  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg] = await Promise.all([
     fetch(BASE + "scene.json").then((r) => r.json()),
     loadImage(BASE + "photo.webp"),
     loadImage(BASE + "env.webp"),
     loadImage(BASE + "envd.png"),
     loadImage(BASE + "aux.png"),
+    loadImage(BASE + "grade.png"),
   ]);
   const photo = imageTexture(gl, photoImg, { srgb: true, mips: true });
   const envT = imageTexture(gl, envImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
@@ -1467,6 +1510,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
   const envD = imageTexture(gl, envdImg, { wrapS: gl.REPEAT });
   const aux = imageTexture(gl, auxImg);
+  const gradeT = imageTexture(gl, gradeImg);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -1869,6 +1913,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       bindTex(2, envD, u.uEnvD);
       bindTex(3, aux, u.uAux);
       if (P === sceneP) bindTex(4, geoT.tex, u.uGeo);
+      if (P === sceneP) bindTex(5, gradeT, u.uGrade);
       gl.uniform2f(u.uRes, L.rw, L.rh);
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
       gl.viewport(0, 0, L.rw, L.rh);
@@ -2100,7 +2145,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       film.destroy();
       filmP.destroy();
       for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT, diffT, diffPT, redT, ringT, ...mq, ...ms]) freeTarget(gl, t);
-      for (const t of [photo, envT, envD, aux]) gl.deleteTexture(t);
+      for (const t of [photo, envT, envD, aux, gradeT]) gl.deleteTexture(t);
       for (const pr of [sceneP, geoP, opticsP, blit, mistKeyP, mistDownP, mistBlurP, mistRedP, mistP, mistRingP]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
