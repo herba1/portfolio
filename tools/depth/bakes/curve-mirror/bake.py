@@ -45,6 +45,11 @@ photo's vertical vanishing point):
     the sky in the glass meets the sky round the mirror. photo.webp is the
     graded plate; aux.png is measured on the plate as shot.
 
+Then the 360's surfaces are developed to the plate (develop.py: a Lab colour
+transfer to the photo's sunlit walls per luminance band, the road's highlights
+rolled off warm, its greens taken to the photo's foliage), so the engine
+grades the whole panorama as it grades the photograph's own pixels.
+
 Also: a distance panorama (for parallax across the 0.8 m face), SH9 irradiance
 of the panorama (for lighting the paint), and aux.png for the photo: log depth
 (for the mirror's shadow on the house) and how sunlit each pixel is.
@@ -60,6 +65,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import kit  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import develop  # noqa: E402
 import sky_grade  # noqa: E402
 
 WORK, OUT = sys.argv[1], sys.argv[2]
@@ -528,6 +534,15 @@ dcode = np.where(surf_all, dcode, 1.0)
 aux = np.dstack([dcode, np.clip(lit, 0, 1), sky])
 aux = cv2.resize(aux, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
 T.mark("aux")
+
+# the 360's surfaces developed to the plate (develop.py): colour-transferred
+# to its sunlit walls by luminance band, the road's highlights rolled off
+# warm, the greens taken to its foliage, the windows' pastel out, the tone
+# mapped crispness let down; not the photograph's own pixels, not the sky
+# (after the SH9, which lights the paint from the panorama as it was)
+w_street = np.clip((1 - alpha) * (1 - np.clip(hsky, 0, 1)), 0, 1).astype(np.float32)
+env = develop.develop(env, w_street, E, lin, sky, lit)
+T.mark("develop")
 
 # ---------------------------------------------------------------- write
 enc = lambda c: np.where(c <= 0.0031308, c * 12.92, 1.055 * np.power(np.clip(c, 0.0031308, None), 1 / 2.4) - 0.055)

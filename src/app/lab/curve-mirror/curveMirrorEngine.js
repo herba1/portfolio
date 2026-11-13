@@ -32,12 +32,16 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //  - the object takes the plate's grain at the photo's pixel pitch, so the
 //    film develops it and the photograph alike;
 //  - the street the glass shows is under the same sun: the 360's surfaces
-//    (shot under cloud) take the sun's exposure, up to the photo's own
-//    sunlit walls; what the glass shows is then graded to the plate (opened
-//    0.7-0.8 stop, black point held, a shoulder at the plate's sunlit white),
-//    since an acrylic mirror returns ~85 % of it, and its sky is taken to the
-//    cobalt round the mirror by reflected elevation, never a stop under or
-//    greyer than the street it stands in;
+//    (shot under cloud) are developed in the bake to the photo's own sunlit
+//    walls (a Lab colour transfer by luminance band, the road's highlights
+//    rolled off warm, the greens taken to the plate's foliage, its tone-mapped
+//    crispness let down), and read a third of a mip softer than their pixel
+//    footprint, the plate's scan MTF; what the glass shows is then graded to
+//    the plate (lifted for the aluminium's loss, black point held, a shoulder
+//    at the plate's sunlit white), since an acrylic mirror returns ~85 % of
+//    it, and goes through the same Pro-Mist and halation as the plate; its
+//    sky is taken to the cobalt round the mirror by reflected elevation,
+//    never a stop under or greyer than the street it stands in;
 //  - the face is a second-surface acrylic dome standing proud of the frame
 //    on its own wall: a Schlick sheen of cool sky that climbs toward the rim,
 //    the zenith's broad gloss over the upper bulge, the hood's underside
@@ -588,23 +592,23 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
     float t = envDist(dir);
     dir = normalize(o + r * t);
   }
-  // footprint of this pixel in the panorama (ray differentials); a little
-  // sharper than the box footprint, so a wire stays one dark hairline
+  // footprint of this pixel in the panorama (ray differentials), opened a
+  // third of a mip past the box footprint: the plate is a scan of film, its
+  // finest edge spread over a couple of pixels, and a reflection drawn any
+  // sharper than the photograph round it reads as an inset, not as glass in
+  // this street. (A wire is still one dark line, as the plate's own are.)
   float dust = dustAt(q.xy);
   float smudge = smudgeAt(q.xy);
-  vec3 c = envGrad(dir, exp2(-0.7 + 2.5 * smudge));
-  // The 360 behind the lens was shot under cloud: its walls and road sit at
-  // 0.02-0.13 linear where the photo's own sunlit walls read 0.52 (median of
-  // the sunlit matte). The street the mirror sees is under the photo's noon
-  // sun, so the 360's surfaces take the sun's exposure: 5x at the road's
-  // grey, opened in contrast (a sunlit street has the spread an overcast one
-  // lacks), warmed to the sun's colour, and rolled off on a shoulder so a
-  // white wall lands at sunlit plaster, not clip. Not its sky (already the
-  // photo's fitted sky, blue and bright in its neighbourhood, so the wires
-  // across it stay dark), and not the photograph's own re-projected pixels,
-  // which carry their own sun. The 360's distances only hold below the
-  // horizon (above it everything is "far"), so above it the surfaces are told
-  // from the sky by their neighbourhood: grey and dim, not blue and bright.
+  vec3 c = envGrad(dir, exp2(0.35 + 2.5 * smudge));
+  // The 360 behind the lens is developed in the bake (develop.py): under the
+  // photo's sun, colour-transferred band by band to the plate's sunlit walls
+  // and paving, its road's highlights rolled off warm, its greens taken to
+  // the plate's foliage, its tone-mapped crispness let down. So the whole
+  // panorama, the photograph's own pixels and the 360 alike, is graded here
+  // the one way. Where it is the photograph is still told (fromPhoto), and,
+  // above the horizon, where the 360 is surface rather than sky (above): the
+  // 360's distances only hold below it, so there the two are told by their
+  // neighbourhood, warm or grey, not blue and bright.
   float dE = envDist(dir);
   vec3 cam = transpose(uR) * (uM + dir * dE);
   vec2 ppx = uC + uF * vec2(cam.x, -cam.y) / max(-cam.z, 1e-4);
@@ -612,18 +616,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float fromPhoto = cam.z < 0.0 ? smoothstep(0.0, 160.0, pin) : 0.0;
   vec3 nb = env(dir, 5.0);
   float nbC = (nb.b - nb.r) / max(nb.b, 1e-3);
-  float above = smoothstep(0.28, 0.15, nbC) * smoothstep(0.45, 0.3, dot(nb, LUMA));
-  float street = (1.0 - fromPhoto) * max(1.0 - smoothstep(120.0, 600.0, dE), above);
-  float cl0 = max(dot(c, LUMA), 1e-4);
-  float Lg = 5.0 * cl0 * pow(cl0 / 0.12, 0.25);
-  vec3 cs = c * vec3(1.09, 1.0, 0.87) * (0.8 * (1.0 - exp(-Lg / 0.8)) / cl0);
-  // the overcast sky lit the 360's road from the whole dome and its walls
-  // from half of it; under the sun the two take about the same, so its road
-  // was twice as bright as its walls for what the sun makes of them
-  // (the 360's distances are a ground plane below its horizon, so the road
-  // is told by how steeply the ray looks down: its houses end about 12 deg)
-  cs *= mix(1.0, 0.45, smoothstep(0.25, 0.55, -dir.y));
-  c = mix(c, cs, street);
+  float above = smoothstep(0.28, 0.15, nbC) * smoothstep(0.62, 0.4, dot(nb, LUMA));
 
   // The sky. The panorama's sky (and the photograph's, re-projected) is the
   // plate's graded clear sky by elevation, which near the horizon is the
@@ -645,19 +638,15 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   c = mix(c, max(sk, 0.0), wSky);
 
   // The plate's grade. The glass returns ~85 % of this, so what it shows
-  // has to stand at the plate's own exposure, not a stop under it: the
-  // street is opened up 0.7 stop (the photograph's own pixels, which carry
-  // their sun already, only enough to make up the aluminium's loss), with
-  // the black point held, then rolled on a shoulder toward the plate's
-  // sunlit white (the photo's sunlit plaster reaches 0.70 linear at its
-  // 98th percentile), so a white wall in the glass lands where the wall
-  // beside it does and nothing clips; its chroma is brought to the plate's.
-  float lift = mix(mix(exp2(0.8), exp2(0.2), fromPhoto), 1.12, wSky);
+  // has to stand at the plate's own exposure, not a stop under it: lifted
+  // only to make up the aluminium's loss (the panorama carries the sun
+  // already, the 360 from its development), the black point held, then
+  // rolled on a shoulder toward the plate's sunlit white (the photo's sunlit
+  // plaster reaches 0.70 linear at its 98th percentile), so a white wall in
+  // the glass lands where the wall beside it does and nothing clips.
+  float lift = mix(exp2(0.2), 1.12, wSky);
   float cl = max(dot(c, LUMA), 1e-5);
-  // the overcast 360 lacks a sunlit street's spread: opened in contrast
-  // about its mid grey before the lift, its shadows let down to the plate's
-  float con = mix(pow(cl / 0.18, 0.3), 1.0, max(fromPhoto, wSky));
-  float lb = cl * con * lift;
+  float lb = cl * lift;
   // the shoulder is judged on luminance or, for a vivid sign or a flower,
   // its strongest channel, so a red does not clip on its own
   float mxc = max(max(c.r, c.g), c.b) / cl;
@@ -665,11 +654,10 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   const float KN = 0.44, WC = 0.9;
   float yt = yb < KN ? yb : KN + (WC - KN) * (1.0 - exp(-(yb - KN) / (WC - KN)));
   c *= (lb / cl) * (yt / max(yb, 1e-6));
-  // vibrance, not saturation: the grey siding and the road take colour, a
-  // tree that already has it is not driven to neon
-  float chr = (max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b)) / max(max(max(c.r, c.g), c.b), 1e-4);
-  float vib = mix(mix(1.9, 1.0, smoothstep(0.1, 0.5, chr)), 1.06, max(fromPhoto, wSky));
-  c = max(mix(vec3(dot(c, LUMA)), c, vib), 0.0);
+  // the plate's own slight vibrance, nothing more: the street was given its
+  // colour in the bake, and a vibrance here lifted a grey curtain behind a
+  // window to a pastel green and pink
+  c = max(mix(vec3(dot(c, LUMA)), c, 1.06), 0.0);
 
   // The mirror sees its own head. A reflected ray that runs up under the
   // visor (or, from the very rim, back across the frame's face) meets paint,
