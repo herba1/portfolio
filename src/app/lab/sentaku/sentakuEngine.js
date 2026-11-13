@@ -28,10 +28,15 @@ import { createCloth, drift, PHANTOM, PX, ROPE } from "./cloth";
 // as the dress covers it again.
 //
 // The view: the lens looks much further up than the photographer did, from
-// further down and further in. The camera pitches toward the zenith, and as
-// it does the eye drops (along the garments' hang, the world's gravity) and
-// moves in toward the line, until it is under the line in front of the
-// dress, at about the height of its hem. The sky is at infinity, the same
+// much nearer the dress. The eye has one constraint: at rest the sun must
+// sit behind the dress's mid-body, as it does in the photograph. The sun is
+// at infinity, so every eye that keeps it there lies on one line, the
+// sun-dress axis: through a point on the skirt, along the sun's ray back
+// toward the lens. As the camera pitches toward the zenith the eye slides up
+// that axis, in under the line and close in front of the skirt, so the hem
+// passes just below it and looms, and the sun glows through the sheer cloth
+// in the hero view; pitching the rotation alone slid the sun out under the
+// hem. The sky is at infinity, the same
 // from any eye, so it stays on the rotation's exact map. The cloth and the
 // line are drawn by full perspective from the eye: each vertex is placed in
 // 3D, on the photograph's own ray to it (so from the photograph's eye it is
@@ -39,7 +44,7 @@ import { createCloth, drift, PHANTOM, PX, ROPE } from "./cloth";
 // cloth's displacement. From below, gravity points at the lens: the pegs
 // and the line recede and converge, the garments' sides converge on the
 // zenith above the frame, and the hems come toward the lens and loom. It all
-// goes out through a stereographic lens about 100 degrees across: conformal,
+// goes out through a stereographic lens about 115 degrees across: conformal,
 // so nothing stretches toward the edges as through a rectilinear lens that
 // wide. The sky the photograph never held (above its top edge, and the wedges
 // either side) is its smooth fit carried on by angle. Everything is lit in
@@ -52,8 +57,9 @@ import { createCloth, drift, PHANTOM, PX, ROPE } from "./cloth";
 // Query: ?gust=0..1 holds a steady gust (with ?dir=-1|1 and ?t=seconds of it,
 // default 2.4), simulated deterministically and frozen, for stills.
 // ?still=1 is the photograph with no wind. ?tilt=degrees sets the pitch (0 is
-// the photograph's own view, and its own eye); ?drop, ?fwd and ?yaw move the
-// eye and turn the line's plane. Numeric FILM keys override the grade.
+// the photograph's own view, and its own eye); ?fwd slides the eye along the
+// sun-dress axis, ?sunu and ?sunv move the skirt point the sun sits behind
+// (photograph px), ?yaw turns the line's plane. Numeric FILM keys override the grade.
 
 const ASSET = "/lab/sentaku/";
 const PAPER = [0xf2, 0xf0, 0xeb];
@@ -134,22 +140,23 @@ const TIE = [748, 1296, 852, 1492];
 // uncropped frame (the crop keeps the top 3080 of 4000 rows).
 const LENS_F = 1550;
 const LENS_C = [700, 1050];
-const TILT = 40; // degrees the camera pitches up past the photographer's view
-const WIDEN = 1.8; // and the lens widens by this much as it does
-const LENS_OY = 700; // the optical centre's row in the tilted frame: the line across the upper third, the hem low
+const TILT = 56; // degrees the camera pitches up past the photographer's view
+const WIDEN = 2.45; // and the lens widens by this much as it does
+const LENS_OY = 330; // the optical centre's row in the tilted frame: high, so the near hem fits under it
 const TILT_W = 5.2; // the tilt's spring: rad/s, about 1.2 s to settle
 const TILT_Z = 0.82;
 const TILT_AT = 0.35; // s after load before it starts
 // The eye. A rotation alone only moves the line down the frame: nothing nears
-// the lens. So as it tilts the eye also moves, down (along the garments' hang,
-// the world's gravity) by EYE_DROP of the dress's hang and toward the line by
-// EYE_FWD of its distance, under the line and in front of it. The cloth is
-// drawn by full perspective from there; the sky, at infinity, is the same
-// from any eye, and stays on the rotation's exact map. It goes no further
-// than this because the sun is low behind the dress: from here its ray still
-// meets the skirt just above the hem, so at rest the sun stays behind it.
-const EYE_DROP = 0.45;
-const EYE_FWD = 0.66;
+// the lens. So as it tilts the eye also moves, and it has one constraint: at
+// rest the sun stays behind the dress's mid-body, as in the photograph. The
+// sun is at infinity, so that fixes the eye to a line, the axis from SUN_ON
+// (the point of the skirt it sits behind, photograph px) back along the
+// sun's ray. Along it the eye goes in to EYE_FWD of the line's distance:
+// under the line, a hand's span in front of the skirt and just above its hem,
+// so the hem passes close below the lens and looms. (Dropping the eye below
+// the axis, as it once did, pushed the sun out under the hem into open sky.)
+const SUN_ON = [690, 990];
+const EYE_FWD = 0.72;
 const YAW = 20; // degrees the line's plane turns from square to the photograph's lens, its right end away
 // the photograph's plane: the garments hang this far along its axis, where a
 // metre reads as PX px through its lens
@@ -1031,11 +1038,21 @@ export async function createSentaku(host, { embedded = false } = {}) {
   let tiltV = 0;
   const skyQ = new Float32Array(18);
   for (let k = 0; k < 6; k++) for (let c = 0; c < 3; c++) skyQ[k * 3 + c] = meta.sky.quad[c][k];
-  // The dress's hang, from the line to its hem, in metres: the eye drops by a
-  // share of it.
-  const dressG = meta.garments.find((g) => g.name === "dress") ?? meta.garments[0];
-  const HANG = (dressG.bbox[3] - ropeY((dressG.bbox[0] + dressG.bbox[2]) / 2)) / PX;
-  const eyeTo = [0, num("drop", EYE_DROP) * HANG, num("fwd", EYE_FWD) * Z0];
+  // The eye, on the sun-dress axis: SUN_ON placed in 3D as the cloth is
+  // (on its own ray, on the line's turned plane), then back along the sun's
+  // ray to EYE_FWD of the line's distance. From there the sun's ray meets
+  // the skirt at SUN_ON, so at rest the sun glows through it.
+  const yawK = Math.tan((num("yaw", YAW) * Math.PI) / 180);
+  const planeAt = (u) => Z0 / Math.max(0.25, 1 - ((u - LENS_C[0]) / LENS_F) * yawK); // the plane's depth on u's ray
+  const eyeTo = (() => {
+    const u = num("sunu", SUN_ON[0]);
+    const v = num("sunv", SUN_ON[1]);
+    const t = planeAt(u);
+    const on = [((u - LENS_C[0]) / LENS_F) * t, ((v - LENS_C[1]) / LENS_F) * t, t];
+    const sd = [(meta.sun[0] - LENS_C[0]) / LENS_F, (meta.sun[1] - LENS_C[1]) / LENS_F, 1];
+    const back = Math.max(0, t - clamp(num("fwd", EYE_FWD), 0, 0.85) * Z0);
+    return on.map((c, i) => c - back * sd[i]);
+  })();
   // the framing (lens, centre and eye) goes with the angle, so ?tilt=0 is the
   // photograph, seen from where it was taken
   const viewNow = () => {
@@ -1077,11 +1094,10 @@ export async function createSentaku(host, { embedded = false } = {}) {
   // one end. Each pixel stays on its own ray, at the depth where that ray
   // meets the turned plane, and the cloth's motion there is scaled with it,
   // so the photograph's eye still sees exactly the photograph.
-  const yawK = Math.tan((num("yaw", YAW) * Math.PI) / 180);
   const place = (u0, v0, dx, dy, dz, view, o, so) => {
     const { eye } = view;
     const rx = (u0 - LENS_C[0]) / LENS_F;
-    const t = Z0 / Math.max(0.25, 1 - rx * yawK); // the plane's depth on this ray
+    const t = planeAt(u0);
     const m = t / Z0;
     drift(dx, dy, dz, dv3);
     const X = rx * t + m * dv3[0];
