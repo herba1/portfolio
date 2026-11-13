@@ -27,6 +27,10 @@
 #     grazing angle it really has.
 # Cells of 16 and 8 px that split also keep a splat of their own, so the
 # renderer can stop one or two levels early (adaptive count).
+# Every tower's outline is a crisp matte, refined against the photograph and
+# redrawn as straight polylines (see "crisp mattes"), and is laid again as a
+# ribbon of thin Gaussians along it (see "edge splats"), so a silhouette stays
+# straight and clean against the sky when the camera swings.
 # A back layer of large splats carries the dome behind the towers and past
 # the frame, so moving the camera never opens a hole; every dome splat samples
 # plate.webp, a sky plate with the towers painted out (see "the sky plate"). The frame is outpainted by ~12% on
@@ -237,7 +241,7 @@ def snap_depth(dep, img8):
     return dep
 
 
-dep = snap_depth(dep, img8)
+# (the snap runs below, with the hard layers and the shards: see DEP_CACHE)
 
 
 # ---- hard layers: one plane (or a corner of two) per structure
@@ -318,6 +322,9 @@ def fit_layer(x, y, d, two=True):
     return best
 
 
+LAYER_PLANES = {}  # layer -> (mode, planes): kept for the crisp mattes below
+
+
 def hard_layers(dep, labels):
     H_, W_ = dep.shape
     tow = dep >= SKY_T
@@ -362,6 +369,7 @@ def hard_layers(dep, labels):
         v = vals[0] if mode == "one" else (np.minimum(*vals) if mode == "min" else np.maximum(*vals))
         before = 1.4826 * np.median(np.abs(dep[mine] - v))
         out[mine] = np.maximum(v, SKY_T + 0.01)
+        LAYER_PLANES[int(k)] = (mode, [np.asarray(p, np.float64) for p in P])
         print(f"layer {k}: {int(mine.sum())} px, {mode} plane fit, core residual {err:.4f}, whole-layer change {before:.4f}")
     return out.astype(np.float32)
 
@@ -473,35 +481,523 @@ def hang_shards(dep, labels):
 
 
 LAYERS = os.environ.get("LAYERS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "layers.png"))
+# DEP_CACHE=file.npz keeps the snapped, layered depth (the snap, the hard
+# layers and the shards) between bakes of the same photograph, for iterating on
+# what follows; it is checked against the depth, photo and layers it came from.
+DEP_CACHE = os.environ.get("DEP_CACHE", "")
+labels = None
 if os.path.exists(LAYERS):
     labels = np.array(Image.open(LAYERS))
     if labels.shape != dep.shape:
         labels = cv2.resize(labels, (W, H), interpolation=cv2.INTER_NEAREST)
-    dep = hard_layers(dep, labels)
-    lzs_ = logz(dep)
-    k5_ = np.ones((5, 5), np.uint8)
-    ln_, lf_ = cv2.erode(lzs_, k5_), cv2.dilate(lzs_, k5_)
-    # (sky pixels go on the dome whatever their depth here, so only the
-    # towers' own pixels count)
-    mid_ = ((lf_ - ln_) > DISC_T) & (lzs_ - ln_ > DISC_T * 0.5) & (lf_ - lzs_ > DISC_T * 0.5) & (dep >= SKY_T)
-    print("hard layers: tower px left between layers", int(mid_.sum()))
-    del lzs_, ln_, lf_, mid_
-    dep = hang_shards(dep, labels)
-    del labels
+dep_key = np.array([dep.sum(dtype=np.float64), img8[::7, ::7].sum(dtype=np.float64),
+                    -1.0 if labels is None else labels.sum(dtype=np.float64)])
+cached = None
+if DEP_CACHE and os.path.exists(DEP_CACHE):
+    z_ = np.load(DEP_CACHE)
+    if "planes" in z_ and z_["dep"].shape == dep.shape and np.allclose(z_["key"], dep_key):
+        cached = z_["dep"].astype(np.float32)
+        for row in z_["planes"]:
+            mode = ("one", "min", "max")[int(row[1])]
+            LAYER_PLANES[int(row[0])] = (mode, [row[2:5], row[5:8]][:1 if mode == "one" else 2])
+        print("snapped, layered depth from", DEP_CACHE)
+if cached is not None:
+    dep = cached
+else:
+    dep = snap_depth(dep, img8)
+    if labels is not None:
+        dep = hard_layers(dep, labels)
+        lzs_ = logz(dep)
+        k5_ = np.ones((5, 5), np.uint8)
+        ln_, lf_ = cv2.erode(lzs_, k5_), cv2.dilate(lzs_, k5_)
+        # (sky pixels go on the dome whatever their depth here, so only the
+        # towers' own pixels count)
+        mid_ = ((lf_ - ln_) > DISC_T) & (lzs_ - ln_ > DISC_T * 0.5) & (lf_ - lzs_ > DISC_T * 0.5) & (dep >= SKY_T)
+        print("hard layers: tower px left between layers", int(mid_.sum()))
+        del lzs_, ln_, lf_, mid_
+        dep = hang_shards(dep, labels)
+    if DEP_CACHE:
+        planes = np.array([[k, ("one", "min", "max").index(m)] + list(P[0]) + list(P[-1]) for k, (m, P) in LAYER_PLANES.items()])
+        np.savez(DEP_CACHE, dep=dep, key=dep_key, planes=planes)
+del cached
+
+# ---- crisp mattes: one clean outline per tower
+# Every edge above was settled pixel by pixel (the snap's colour vote, SAM's
+# masks, the shards), so each tower's outline still wanders a pixel or two
+# either way along a facade that is dead straight: once the camera swings,
+# the round splats laid along it part unevenly from the sky and the outline
+# reads as torn paper, and the scraps the votes left in the sky drift loose as
+# dark crumbs. These are curtain-wall towers: their outlines are straight
+# lines. So each tower gets a matte of its own, and its outline is redrawn:
+#   1. every piece of structure belongs to a tower. Unlabelled structure this
+#      big (SURF_MIN) that carries straight on from a layer beside it joins
+#      that layer; otherwise it becomes a surface of its own, one plane
+#      fitted to its core like a hard layer. A smaller piece joins the layer
+#      beside it, or, with none within reach, goes to the sky;
+#   2. each tower's mask (its depth-step edge) is refined against the
+#      photograph by a colour guided filter (He et al., Guided Image
+#      Filtering), so its edge lies on the photograph's own edge, and every
+#      pixel within a few px of an edge goes to whichever tower, or the sky,
+#      the filter says covers most of it;
+#   3. teeth and notches a few px across are cut off the edge (an opening
+#      and a closing, keeping long thin runs: rails, spires); pieces of a
+#      tower under MIN_PIECE px are crumbs and go; holes of sky under
+#      MIN_HOLE px are flecks and close; what is left is traced and
+#      simplified (Douglas-Peucker, SIMPLIFY px) to straight polylines, which
+#      are drawn back far tower first, so a nearer tower's outline is the
+#      line two towers meet on. A pixel that was structure and that no
+#      outline now holds, clear of the sky, goes to the tower nearest it.
+# A pixel that changes tower takes its new tower's depth (its local plane,
+# or its nearest pixel), and the body of every hard layer ends on the layer's
+# own plane. The outlines are kept: the splats along them are laid again
+# below (see "edge splats").
+MATTE_R, MATTE_EPS = 3, 2e-3  # guided filter: radius px, regulariser (colour 0..1)
+MATTE_BAND = 3  # px either side of an edge the matte may move it
+SIMPLIFY = 1.6  # px: the most a tower's outline departs from its matte
+MIN_PIECE = 200  # px
+MIN_HOLE = 64  # px
+SURF_MIN = 3000  # px
+JOIN_DE = 12.0  # CIELAB: across the border of a piece that carries on from a layer
+JOIN_GAP = 21  # px: a rail this wide across a facade does not cut it in two
+K5E = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+
+def box_(a, r):
+    return cv2.boxFilter(a, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REFLECT)
+
+
+def guided(I, p, r, eps):
+    # colour guided filter: p, with its edges moved onto I's
+    mI = box_(I, r)
+    mp = box_(p, r)
+    cov = box_(I * p[..., None], r) - mI * mp[..., None]
+    S = np.empty(I.shape[:2] + (3, 3), np.float32)
+    for i in range(3):
+        for j in range(i, 3):
+            S[..., i, j] = S[..., j, i] = box_(I[..., i] * I[..., j], r) - mI[..., i] * mI[..., j]
+    S += np.float32(eps) * np.eye(3, dtype=np.float32)
+    a = np.linalg.solve(S, cov[..., None])[..., 0]
+    b = mp - (a * mI).sum(-1)
+    return (box_(a, r) * I).sum(-1) + box_(b, r)
+
+
+def bbox_of(m, pad, shape):
+    ys, xs = np.nonzero(m)
+    return (max(int(ys.min()) - pad, 0), min(int(ys.max()) + pad + 1, shape[0]),
+            max(int(xs.min()) - pad, 0), min(int(xs.max()) + pad + 1, shape[1]))
+
+
+def outline(m, eps):
+    # straight outline of a mask: outer contours and holes, simplified
+    m = m.astype(np.uint8)
+    outer, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    n_, cc_, st_, _ = cv2.connectedComponentsWithStats(1 - m, connectivity=4)
+    h_, w_ = m.shape
+    x, y, w, h = st_[:, 0], st_[:, 1], st_[:, 2], st_[:, 3]
+    inner = (x > 0) & (y > 0) & (x + w < w_) & (y + h < h_)
+    inner[0] = False
+    holes = []
+    for i in np.nonzero(inner)[0]:
+        sub = (cc_[y[i]:y[i] + h[i], x[i]:x[i] + w[i]] == i).astype(np.uint8)
+        cs, _ = cv2.findContours(sub, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE, offset=(int(x[i]), int(y[i])))
+        holes += list(cs)
+    simp = lambda cs: [p for p in (cv2.approxPolyDP(c, eps, True) for c in cs) if len(p) >= 3]
+    return simp(outer), simp(holes)
+
+
+# Structure SAM missed and the snap's colour vote gave to the sky, by hand:
+# the last bays of the white tower (layer 13) down to its tip, white grid on
+# white cloud, which otherwise hang on the dome and slide off the tower as
+# pale scraps. Polygons in the photograph's pixels; only sky in them is taken.
+LAYER_PATCHES = {
+    13: [[(1446, 1150), (1452, 1222), (1442, 1231), (1452, 1350), (1439, 1363), (1409, 1331), (1421, 1318), (1410, 1150)]],
+}
+
+
+HUNG = set()  # layers whose body hangs on another surface, not on its own plane
+
+
+def carries_on(m, y0, x0, lab, labc, lzs, skip=(), de=None):
+    # The layer a piece carries straight on from, if any: the same facade cut
+    # off from it by the snap or by SAM. Colour within JOIN_DE across the
+    # border (CIELAB, means over 6 px either side), depth within 10% along
+    # 40% of it at least, and 500 px of border. m: the piece, a crop at y0, x0.
+    k13 = np.ones((13, 13), np.uint8)
+    P_ = 24
+    H_, W_ = lab.shape
+    py0, px0 = max(y0 - P_, 0), max(x0 - P_, 0)
+    py1, px1 = min(y0 + m.shape[0] + P_, H_), min(x0 + m.shape[1] + P_, W_)
+    mm = np.zeros((py1 - py0, px1 - px0), np.uint8)
+    mm[y0 - py0:y0 - py0 + m.shape[0], x0 - px0:x0 - px0 + m.shape[1]] = m
+    inb = (mm > 0) & ~(cv2.erode(mm, k13) > 0)
+    outb = (cv2.dilate(mm, k13) > 0) & (mm == 0)
+    _, nl_ = cv2.distanceTransformWithLabels(1 - mm, cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    lzc = lzs[py0:py1, px0:px1]
+    lzin = lzc[mm > 0][np.maximum(nl_, 1) - 1]
+    rl, C = lab[py0:py1, px0:px1], labc[py0:py1, px0:px1]
+    best_k, best_e = None, JOIN_DE if de is None else de
+    for k in np.unique(rl[outb]):
+        sk = outb & (rl == k)
+        if k <= 0 or int(k) in skip or sk.sum() < 500:
+            continue
+        agree = (np.abs(lzc[sk] - lzin[sk]) < 0.1).mean()
+        near_ = (cv2.dilate(sk.astype(np.uint8), k13) > 0) & inb
+        e = float(np.linalg.norm(C[near_].mean(0) - C[sk].mean(0)))
+        if agree >= 0.4 and e < best_e:
+            best_k, best_e = int(k), e
+    return best_k, best_e
+
+
+def crisp_matte(dep, labels, img8):
+    H_, W_ = dep.shape
+    dep = dep.copy()
+    lab = np.where(dep >= SKY_T, labels.astype(np.int32), -1)
+    fresh = np.zeros((H_, W_), bool)  # taken from the sky: no depth of their own yet
+    for k, polys_ in LAYER_PATCHES.items():
+        pm = np.zeros((H_, W_), np.uint8)
+        cv2.fillPoly(pm, [np.array(p_, np.int32) for p_ in polys_], 1)
+        take = (pm > 0) & (lab < 0)
+        lab[take] = k  # its depth: the layer's plane, with the matte's moved pixels below
+        fresh |= take
+        print(f"matte: patch for layer {k}: {int(take.sum())} px of sky taken")
+    # 1. unlabelled structure
+    labc = cv2.cvtColor(img8.astype(np.float32) / 255.0, cv2.COLOR_RGB2Lab)
+    lzs = logz(dep)
+    # 0. A layer the shards' pass hung whole on the surface in front of it
+    # that is the same facade as a planar layer beside it (SAM split one face
+    # between two masks) is that layer, on its plane.
+    for k in sorted(LAYER_PLANES):
+        mk = lab == k
+        if not mk.any():
+            continue
+        y0, y1, x0, x1 = bbox_of(mk, 0, (H_, W_))
+        my, mx = np.nonzero(mk[y0:y1, x0:x1])
+        X, Y = (mx + x0 - W_ / 2) / 1000.0, (my + y0 - H_ / 2) / 1000.0
+        mode, P = LAYER_PLANES[k]
+        vals = [p[0] * X + p[1] * Y + p[2] for p in P]
+        v = vals[0] if mode == "one" else (np.minimum(*vals) if mode == "min" else np.maximum(*vals))
+        if (np.abs(lzs[my + y0, mx + x0] - logz(np.maximum(v, SKY_T + 0.01).astype(np.float32))) > DISC_T).mean() <= 0.2:
+            continue
+        j, e = carries_on(mk[y0:y1, x0:x1].astype(np.uint8), y0, x0, lab, labc, lzs, skip={k})
+        if j is None or j not in LAYER_PLANES:
+            continue
+        lab[my + y0, mx + x0] = j
+        fresh[my + y0, mx + x0] = True
+        print(f"matte: layer {k}, hung on the surface in front, is the same facade as layer {j} (colour dE {e:.1f}): joins it")
+    k9 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    # A big piece that carries straight on from a layer beside it is that
+    # layer: what of it touches the layer joins it, on the layer's plane,
+    # taken apart at its thin joins first (a 9 px opening: a rail or a sunlit
+    # beam that runs off the facade is not the facade).
+    un = (lab == 0).astype(np.uint8)
+    n_, cc, st_, _ = cv2.connectedComponentsWithStats(un, connectivity=8)
+    for i in np.nonzero(st_[:, cv2.CC_STAT_AREA] >= SURF_MIN)[0]:
+        if i == 0:
+            continue
+        x, y, w, h, a = st_[i]
+        m = (cc[y:y + h, x:x + w] == i).astype(np.uint8)
+        best_k, best_e = carries_on(m, y, x, lab, labc, lzs)
+        if best_k is None:
+            continue
+        P_ = 8
+        y0, y1, x0, x1 = max(y - P_, 0), min(y + h + P_, H_), max(x - P_, 0), min(x + w + P_, W_)
+        mc = np.zeros((y1 - y0, x1 - x0), np.uint8)
+        mc[y - y0:y - y0 + h, x - x0:x - x0 + w] = m
+        core = cv2.morphologyEx(mc, cv2.MORPH_OPEN, k9)
+        n7, cc7, _, _ = cv2.connectedComponentsWithStats(core, connectivity=8)
+        # (what touches the layer, or a part of the piece that joined it)
+        touch = np.zeros(n7, bool)
+        tl = lab[y0:y1, x0:x1] == best_k
+        for _ in range(8):
+            tgt = cv2.dilate((tl | touch[cc7]).astype(np.uint8), np.ones((JOIN_GAP, JOIN_GAP), np.uint8)) > 0
+            t2 = np.zeros(n7, bool)
+            t2[np.unique(cc7[tgt & (core > 0)])] = True
+            t2[0] = False
+            if (t2 == touch).all():
+                break
+            touch = t2
+        my, mx = np.nonzero(touch[cc7])
+        lab[my + y0, mx + x0] = best_k
+        fresh[my + y0, mx + x0] = True
+        print(f"matte: unlabelled piece of {int(a)} px at {x + w // 2},{y + h // 2} carries on from layer {best_k}"
+              f" (colour dE {best_e:.1f}): {len(my)} px of it join it")
+        # The other big parts of a piece that is a facade are facade too,
+        # cut off by rails or a nearer tower: each joins the layer it carries
+        # on from, on a looser colour match (the light falls differently on
+        # the next face of the same building), or stays as it is (below).
+        cnt = np.bincount(cc7.ravel(), minlength=n7)
+        for j in np.nonzero(~touch & (cnt >= SURF_MIN // 2))[0]:
+            if j == 0:
+                continue
+            sub = cc7 == j
+            k2, e2 = carries_on(sub.astype(np.uint8), y0, x0, lab, labc, lzs, de=JOIN_DE * 1.6)
+            if k2 is None:
+                continue
+            sy2, sx2 = np.nonzero(sub)
+            lab[sy2 + y0, sx2 + x0] = k2
+            fresh[sy2 + y0, sx2 + x0] = True
+            print(f"matte:   and {len(sy2)} px of it at {int(sx2.mean()) + x0},{int(sy2.mean()) + y0} carry on from layer {k2} (colour dE {e2:.1f})")
+    del cc
+    # The rest, if big, is a surface of its own, one plane fitted to its core.
+    core = cv2.morphologyEx((lab == 0).astype(np.uint8), cv2.MORPH_OPEN, k9)
+    n_, cc, st_, _ = cv2.connectedComponentsWithStats(core, connectivity=8)
+    del core
+    nid = 100
+    for i in np.nonzero(st_[:, cv2.CC_STAT_AREA] >= SURF_MIN)[0]:
+        if i == 0:
+            continue
+        x, y, w, h, a = st_[i]
+        m = cc[y:y + h, x:x + w] == i
+        dist = cv2.distanceTransform(m.astype(np.uint8), cv2.DIST_L2, 5)
+        iy, ix = np.nonzero(m & (dist > min(RB, 0.5 * float(dist.max()))))
+        if len(iy) < 200:
+            continue
+        sel = np.arange(0, len(iy), max(1, len(iy) // 40000))
+        X = (ix[sel] + x - W_ / 2) / 1000.0
+        Y = (iy[sel] + y - H_ / 2) / 1000.0
+        p = plane_irls(X, Y, dep[iy[sel] + y, ix[sel] + x].astype(np.float64), np.ones(len(sel)))
+        my, mx = np.nonzero(m)
+        v = p[0] * (mx + x - W_ / 2) / 1000.0 + p[1] * (my + y - H_ / 2) / 1000.0 + p[2]
+        dep[my + y, mx + x] = np.maximum(v, SKY_T + 0.01)
+        lab[my + y, mx + x] = nid
+        LAYER_PLANES[nid] = ("one", [np.asarray(p, np.float64)])
+        print(f"matte: unlabelled surface {nid}: {int(a)} px at {int(mx.mean()) + x},{int(my.mean()) + y}, one plane")
+        nid += 1
+    un = un > 0
+    # a smaller piece joins whole, or not at all: a spire or a rail standing
+    # off a tower (its base within 24 px of it) goes with the tower it stands
+    # on, every pixel at the depth of the tower beside it, or, past the
+    # tower's edge, at the depth of the point it stands on
+    small = lab == 0
+    del cc
+    labelled = lab > 0
+    dl, nl = cv2.distanceTransformWithLabels((~labelled).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    nl = np.maximum(nl, 1) - 1
+    near_lab = lab[labelled][nl]
+    near_dep = dep[labelled][nl]
+    near_fresh = fresh[labelled][nl]
+    del nl
+    n_, cc, _, _ = cv2.connectedComponentsWithStats(small.astype(np.uint8), connectivity=8)
+    iy, ix = np.nonzero(small)
+    ci = cc[iy, ix]
+    o = np.lexsort((dl[iy, ix], ci))
+    first = np.ones(len(o), bool)
+    first[1:] = ci[o][1:] != ci[o][:-1]
+    anc = np.zeros(n_, np.int64)
+    anc[ci[o][first]] = o[first]
+    a_ = anc[ci]
+    join = dl[iy[a_], ix[a_]] < 24
+    alab = near_lab[iy[a_], ix[a_]]
+    own = near_lab[iy, ix] == alab
+    lab[iy[join], ix[join]] = alab[join]
+    dep[iy[join], ix[join]] = np.where(own, near_dep[iy, ix], near_dep[iy[a_], ix[a_]])[join]
+    # (beside a piece that joined a layer above, the depth comes with it, below)
+    fresh[iy[join], ix[join]] = near_fresh[iy[a_], ix[a_]][join]
+    adopt = np.zeros_like(small)
+    adopt[iy[join], ix[join]] = True
+    del iy, ix, ci, o, first, anc, a_, join, alab, own
+    gone = small & ~adopt
+    lab[gone] = -1
+    dep[gone] = SKY_T * 0.6
+    print("matte: unlabelled px joined to the layer beside them", int(adopt.sum()), ", to the sky", int(gone.sum()))
+    del cc, dl, near_lab, near_dep, near_fresh, un, small, adopt, gone, labelled, lzs
+    ids = [int(k) for k in np.unique(lab) if k >= 0]
+    assert 0 not in ids
+    # far first: median disparity
+    med = {k: float(np.median(dep[lab == k][::7])) for k in ids}
+    ids.sort(key=lambda k: med[k])
+    rank = {k: i for i, k in enumerate(ids)}
+
+    # 2. refine every edge against the photograph
+    I = img8.astype(np.float32) / 255.0
+    best = np.zeros((H_, W_), np.float32)
+    tot = np.zeros((H_, W_), np.float32)
+    blab = np.full((H_, W_), -1, np.int32)
+    pad_ = 4 * MATTE_R + 4
+    for k in ids:
+        y0, y1, x0, x1 = bbox_of(lab == k, pad_, (H_, W_))
+        p = (lab[y0:y1, x0:x1] == k).astype(np.float32)
+        q = np.clip(guided(I[y0:y1, x0:x1], p, MATTE_R, MATTE_EPS), 0, 1)
+        tot[y0:y1, x0:x1] += q
+        b_ = best[y0:y1, x0:x1]
+        up = q > b_
+        b_[up] = q[up]
+        blab[y0:y1, x0:x1][up] = k
+    new = np.where(1 - tot > best, -1, blab)
+    del best, tot, blab, I
+    l8 = np.zeros((H_, W_), np.uint16)
+    l8[:] = np.where(lab >= 0, lab + 1, 0)
+    kb = np.ones((3, 3), np.uint8)
+    edge = (cv2.dilate(l8, kb) != cv2.erode(l8, kb))
+    band = cv2.dilate(edge.astype(np.uint8), np.ones((2 * MATTE_BAND + 1,) * 2, np.uint8)) > 0
+    new = np.where(band, new, lab)
+    print("matte: px the guided filter moved", int((new != lab).sum()))
+    del l8, edge, band
+
+    # 3. crumbs, flecks, straight outlines, drawn back far first
+    out = np.full((H_, W_), -1, np.int32)
+    polys = {}
+    crumbs = flecks = 0
+    for k in ids:
+        if not (new == k).any():
+            continue
+        y0, y1, x0, x1 = bbox_of(new == k, 4, (H_, W_))
+        m = (new[y0:y1, x0:x1] == k).astype(np.uint8)
+        # teeth and notches a few px across along an edge go (an opening and
+        # a closing, 5 px); thin runs that stand clear of the body (a rail, a
+        # spire, a cross-bar: long and narrow, not a tooth) stay as they are
+        op = cv2.morphologyEx(m, cv2.MORPH_OPEN, K5E)
+        thin = m & (1 - op)
+        n6, cc6, st6, _ = cv2.connectedComponentsWithStats(thin, connectivity=8)
+        ext = np.maximum(st6[:, 2], st6[:, 3])
+        run = (ext >= 10) & (ext * ext >= 3 * st6[:, cv2.CC_STAT_AREA])
+        run[0] = False
+        m = np.maximum(cv2.morphologyEx(op, cv2.MORPH_CLOSE, K5E), run[cc6].astype(np.uint8))
+        n2, cc2, st2, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+        ok = st2[:, cv2.CC_STAT_AREA] >= MIN_PIECE
+        ok[0] = False
+        crumbs += int((~ok[1:]).sum())
+        m = ok[cc2].astype(np.uint8)
+        n3, cc3, st3, _ = cv2.connectedComponentsWithStats(1 - m, connectivity=4)
+        hx, hy, hw, hh = st3[:, 0], st3[:, 1], st3[:, 2], st3[:, 3]
+        fl = (st3[:, cv2.CC_STAT_AREA] < MIN_HOLE) & (hx > 0) & (hy > 0) & (hx + hw < m.shape[1]) & (hy + hh < m.shape[0])
+        fl[0] = False
+        flecks += int(fl.sum())
+        m = np.maximum(m, fl[cc3].astype(np.uint8))
+        if not m.any():
+            continue
+        po, ph = outline(m, SIMPLIFY)
+        f = np.zeros_like(m)
+        cv2.fillPoly(f, po, 1)
+        if ph:
+            cv2.fillPoly(f, ph, 0)
+        out[y0:y1, x0:x1][f > 0] = k
+        polys[k] = [(p.reshape(-1, 2) + [x0, y0]).astype(np.float64) for p in po + ph]
+    # structure no outline holds, clear of the sky, goes to the nearest tower
+    skyN = new < 0
+    dsk = cv2.distanceTransform((~skyN).astype(np.uint8), cv2.DIST_L2, 5)
+    gap = (new >= 0) & (out < 0) & (dsk >= 2.0)
+    _, nl = cv2.distanceTransformWithLabels((out < 0).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    out = np.where(gap, out[out >= 0][np.maximum(nl, 1) - 1], out)
+    del nl, dsk, skyN
+    # a crumb of a tower cut off from it by the redraw
+    n4, cc4, st4, _ = cv2.connectedComponentsWithStats((out >= 0).astype(np.uint8), connectivity=8)
+    cr = st4[:, cv2.CC_STAT_AREA] < MIN_PIECE
+    cr[0] = False
+    out[cr[cc4]] = -1
+    crumbs += int(cr.sum())
+    del cc4
+    print(f"matte: {len(polys)} towers outlined, {sum(len(p) for p in polys.values())} polylines,"
+          f" {crumbs} crumbs dropped, {flecks} flecks closed, {int(gap.sum())} px between outlines filled;"
+          f" px changed in all {int((out != lab).sum())}")
+    # depth: a pixel that changed tower takes its new tower's nearest pixel's depth
+    moved = (out >= 0) & ((out != lab) | fresh)
+    for k in np.unique(out[moved]):
+        mk = moved & (out == k)
+        y0, y1, x0, x1 = bbox_of(mk, 160, (H_, W_))
+        src = (lab[y0:y1, x0:x1] == k) & ~fresh[y0:y1, x0:x1]
+        if not src.any():
+            y0, y1, x0, x1 = 0, H_, 0, W_
+            src = (lab == k) & ~fresh
+        if not src.any():
+            out[mk] = -1
+            continue
+        _, nl = cv2.distanceTransformWithLabels((~src).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+        dv = dep[y0:y1, x0:x1][src][np.maximum(nl, 1) - 1]
+        sub = mk[y0:y1, x0:x1]
+        # where the tower is a plane round them, on that plane
+        sy, sx = np.nonzero(src)
+        if len(sy) >= 200:
+            sel = np.arange(0, len(sy), max(1, len(sy) // 20000))
+            X, Y = (sx[sel] + x0) / 1000.0, (sy[sel] + y0) / 1000.0
+            dsrc = dep[y0:y1, x0:x1][src][sel].astype(np.float64)
+            p = plane_irls(X, Y, dsrc, np.ones(len(sel)))
+            res = 1.4826 * np.median(np.abs(dsrc - (p[0] * X + p[1] * Y + p[2])))
+            if res < 0.004:
+                my, mx = np.nonzero(sub)
+                pv = p[0] * (mx + x0) / 1000.0 + p[1] * (my + y0) / 1000.0 + p[2]
+                dv = dv.copy()
+                dv[my, mx] = np.maximum(pv, SKY_T + 0.01)
+        dep[y0:y1, x0:x1][sub] = dv[sub]
+    # The body of every hard layer (its largest piece) lies on the layer's own
+    # plane, every pixel of it: specks of it the shards' pass hung elsewhere,
+    # now joined to it again, and the pixels it took from the sky, included.
+    for k, (mode, P) in LAYER_PLANES.items():
+        mk = out == k
+        if not mk.any():
+            continue
+        y0, y1, x0, x1 = bbox_of(mk, 0, (H_, W_))
+        n5, cc5, st5, _ = cv2.connectedComponentsWithStats(mk[y0:y1, x0:x1].astype(np.uint8), connectivity=8)
+        body = cc5 == 1 + int(np.argmax(st5[1:, cv2.CC_STAT_AREA]))
+        my, mx = np.nonzero(body)
+        X, Y = (mx + x0 - W_ / 2) / 1000.0, (my + y0 - H_ / 2) / 1000.0
+        vals = [p[0] * X + p[1] * Y + p[2] for p in P]
+        v = vals[0] if mode == "one" else (np.minimum(*vals) if mode == "min" else np.maximum(*vals))
+        v = np.maximum(v, SKY_T + 0.01).astype(np.float32)
+        far_ = np.abs(logz(dep[my + y0, mx + x0]) - logz(v)) > DISC_T
+        if far_.mean() > 0.2:
+            # The whole body was hung on the surface in front (a shard): it
+            # stays there, unless it is the same facade as a planar layer
+            # beside it (SAM split one face between two masks), when it
+            # joins that layer, on its plane.
+            j, e = carries_on(body.astype(np.uint8), y0, x0, out, labc, logz(dep), skip=HUNG | {k})
+            if j is not None and j in LAYER_PLANES and j < k:
+                mj, Pj = LAYER_PLANES[j]
+                vj = [p[0] * X + p[1] * Y + p[2] for p in Pj]
+                vj = vj[0] if mj == "one" else (np.minimum(*vj) if mj == "min" else np.maximum(*vj))
+                out[my + y0, mx + x0] = j
+                dep[my + y0, mx + x0] = np.maximum(vj, SKY_T + 0.01)
+                polys.setdefault(j, []).extend(polys.pop(k, []))
+                print(f"matte: layer {k}, hung on the surface in front, is the same facade as layer {j} (colour dE {e:.1f}): joins it")
+                continue
+            HUNG.add(k)
+            continue
+        dep[my + y0, mx + x0] = v
+        print(f"matte: layer {k} body back on its plane, {int(far_.sum())} px moved past a step")
+    dep = np.where(out < 0, np.minimum(dep, np.float32(SKY_T * 0.6)), dep).astype(np.float32)
+    return dep, out, polys, rank
+
+
+LAB = None
+if labels is not None:
+    dep, LAB, POLYS, RANK = crisp_matte(dep, labels, img8)
+del labels
 img8 = grade(img8, (dep < SKY_T).astype(np.uint8))
 lin = s2l(img8.astype(np.float32) / 255.0).astype(np.float32)
+# The matte's outline is the tower's edge, so the photograph's last two pixels
+# inside it, where the iPhone mixed the sky into the tower and sharpened the
+# mix into a pale or dark rim, are the sky's light, not the tower's: each
+# takes the colour of the nearest pixel clear of the rim instead (the tower's
+# own colour, the matte's foreground), so no tower carries a halo of sky away
+# with it when it moves. Structure too thin to have an inside keeps its own.
+if LAB is not None:
+    tw_ = LAB >= 0
+    dsk_ = cv2.distanceTransform(tw_.astype(np.uint8), cv2.DIST_L2, 5)
+    clear_ = tw_ & (dsk_ > 2.2)
+    _, nl_ = cv2.distanceTransformWithLabels((~clear_).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    rim_ = tw_ & ~clear_
+    src_ = np.nonzero(clear_.ravel())[0][np.maximum(nl_[rim_], 1) - 1]
+    ry_, rx_ = np.nonzero(rim_)
+    dd_ = np.hypot(ry_ - src_ // W, rx_ - src_ % W)
+    ok_ = (dd_ < 4.0) & (LAB.ravel()[src_] == LAB[ry_, rx_])
+    lin[ry_[ok_], rx_[ok_]] = lin.reshape(-1, 3)[src_[ok_]]
+    img8[ry_[ok_], rx_[ok_]] = img8.reshape(-1, 3)[src_[ok_]]
+    print("matte: rim px given their tower's own colour", int(ok_.sum()))
+    del tw_, dsk_, clear_, nl_, rim_, src_, ry_, rx_, dd_, ok_
 
 # ---- sky mask
 sky = (dep < SKY_T).astype(np.uint8)
 k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-# Sky slivers under 5 px inside a tower go; thin structure in the sky (the
-# crown's outer rails, 4-6 px wide, standing clear of it now that the snap has
-# taken the ring away) stays, so no closing here.
-sky = cv2.morphologyEx(sky, cv2.MORPH_OPEN, k5)
-n, lab, stats, _ = cv2.connectedComponentsWithStats(1 - sky, 8)
-for i in range(1, n):  # specks of "tower" inside the sky
-    if stats[i, cv2.CC_STAT_AREA] < 400:
-        sky[lab == i] = 1
+if LAB is None:
+    # Sky slivers under 5 px inside a tower go; thin structure in the sky (the
+    # crown's outer rails, 4-6 px wide, standing clear of it now that the snap
+    # has taken the ring away) stays, so no closing here. (With layers, the
+    # crisp mattes have done this, outline by outline.)
+    sky = cv2.morphologyEx(sky, cv2.MORPH_OPEN, k5)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(1 - sky, 8)
+    for i in range(1, n):  # specks of "tower" inside the sky
+        if stats[i, cv2.CC_STAT_AREA] < 400:
+            sky[lab == i] = 1
 print("sky fraction", sky.mean())
 
 # ---- depth discontinuities
@@ -612,7 +1108,19 @@ for j in range(nb):
 dkey = (np.exp(-key) - BETA) / ALPHA
 dsm = (accn + 0.02 * dkey) / (accd + 0.02)
 del dkey
+dep_plane = dep
 dep = np.where(tower, np.maximum(dsm, SKY_T + 0.01), dep).astype(np.float32)
+if LAB is not None:
+    # Every tower is a plane (or a corner of two) already. The smoothing is
+    # for the model's ripple, and at an edge, where its support is all on one
+    # side, it bends the plane a little toward the inside: the outline would
+    # part from itself as the camera moves. So each tower keeps its plane,
+    # unless the smoothing hung it on another surface (a rail on the crown).
+    keep_ = tower & (np.abs(logz(dep) - logz(dep_plane)) < DISC_T)
+    print("matte: tower px kept on their own plane", int(keep_.sum()), "of", int(tower.sum()))
+    dep = np.where(keep_, dep_plane, dep).astype(np.float32)
+    del keep_
+del dep_plane
 del accn, accd, dsm, hs, hk, nu, du, w_in
 
 # Disparity gradient per pixel (for cells that straddle a step, whose plane
@@ -643,6 +1151,8 @@ del kx, ky
 # them to the tower (below); the sky's own splat colours leave them out too,
 # taking the clean sky beside them instead, so no dark or pale outline of a
 # tower is left on the sky once the tower moves.
+# (With layers the matte puts the edge on the photograph's own edge; towD is
+# still the region the sky's colours and the plate keep clear of.)
 towD = cv2.dilate(tower.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
 clean = ((sky > 0) & ~towD).astype(np.float32)
 cden = cv2.GaussianBlur(clean, (0, 0), 6)
@@ -745,6 +1255,11 @@ PLATE_RB = 500.0  # canvas px: the blue beside the towers settles to one deep bl
 # beside every edge. The depth map marks it, so the dome takes the plate there
 # and leaves no bright outline of a tower on the sky once the tower moves.
 halo = (cv2.dilate(towD.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0) & ~towD
+# With layers the depth map holds each tower to its matte, and the ring runs
+# from the matte's edge: the dome takes the plate right up to the outline.
+TOWQ = tower if LAB is not None else towD
+if LAB is not None:
+    halo = halo | (towD & ~tower)
 
 
 def sky_plate():
@@ -758,11 +1273,15 @@ def sky_plate():
     imq = cv2.resize(img8, (Wq, Hq), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
     cache = os.environ.get("PLATE_CACHE", "")
     fq = None
-    if cache and os.path.exists(cache):
+    hole_f = cache + ".hole.npy"
+    if cache and os.path.exists(cache) and os.path.exists(hole_f):
         z = np.load(cache)
         # (LaMa feathers its paste ~6 px into the known sky, so compare clear of that)
         far_ = cv2.erode((~hq).astype(np.uint8), np.ones((17, 17), np.uint8)) > 0
-        if z.shape == imq.shape and np.abs(z[far_] - imq[far_]).max() < 0.02:
+        # and it must have been made for this hole: a fill for a smaller one
+        # still shows whatever the new hole takes away (a spire, a tower's tip)
+        hz = np.load(hole_f)
+        if z.shape == imq.shape and hz.shape == hq.shape and not (hq & ~hz).any() and np.abs(z[far_] - imq[far_]).max() < 0.02:
             fq = z.astype(np.float32)
             print("sky plate: fill from", cache)
     if fq is None:
@@ -771,6 +1290,7 @@ def sky_plate():
         print(f"sky plate: {lama.calls} LaMa calls, {lama.secs:.0f} s")
         if cache:
             np.save(cache, fq.astype(np.float16))
+            np.save(hole_f, hq)
     Wp_, Hp_ = W // PLATE_DIV, H // PLATE_DIV
     hp = cv2.resize(hole.astype(np.float32), (Wp_, Hp_), interpolation=cv2.INTER_AREA) > 0.01
     ip = s2l(cv2.resize(img8, (Wp_, Hp_), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0).astype(np.float32)
@@ -1032,6 +1552,29 @@ def splats(X0, Y0, S, is_leaf):
         col[o] = col_[ok_]
         a[o], b[o] = a_[ok_], b_[ok_]
         c[o] = dm_[ok_] - a_[ok_] * cu_[ok_] - b_[ok_] * cv_[ok_]
+    u, v, Z, nrm = place(cu, cv, a, b, c, tower)
+    # shape from the structure tensor
+    jxx, jxy, jyy = q["gxx"] / area, q["gxy"] / area, q["gyy"] / area
+    tr = jxx + jyy
+    disc = np.sqrt(np.maximum((jxx - jyy) ** 2 + 4 * jxy ** 2, 0))
+    l1, l2 = (tr + disc) / 2, (tr - disc) / 2
+    coh = (l1 - l2) / (l1 + l2 + 1e-9)
+    strength = np.sqrt(np.maximum(l1, 0)) * S / A
+    ang_g = 0.5 * np.arctan2(2 * jxy, jxx - jyy)
+    ang_e = ang_g + np.pi / 2  # along the edge
+    an = 1 + 2.0 * coh * np.clip(strength / 0.12, 0, 1)
+    an = np.minimum(an, 3.0)
+    k = 0.62
+    s1 = np.maximum(k * S * np.sqrt(an), 0.9)
+    s2 = np.maximum(k * S / np.sqrt(an), 0.9)
+    level = np.array([LEVEL_OF[int(s)] for s in S])
+    return dict(u=u, v=v, Z=Z, n=nrm, s1=s1, s2=s2, ang=ang_e % np.pi, col=col,
+                tex=np.ones_like(u, bool), leaf=np.full(u.shape, is_leaf), level=level, tower=tower)
+
+
+def place(cu, cv, a, b, c, tower):
+    # centre (analysis units) and inverse-depth plane d = a U + b V + c ->
+    # full-res position, depth and normal; the sky goes on the dome
     u = (cu * 1000 + Wa / 2) * A
     v = (cv * 1000 + Ha / 2) * A
     dcen = np.maximum(a * cu + b * cv + c, SKY_T + 0.01)
@@ -1055,23 +1598,7 @@ def splats(X0, Y0, S, is_leaf):
     Zs = R_DOME / np.linalg.norm(r, axis=-1)
     Z = np.where(tower, Zt, Zs)
     nrm = np.where(tower[:, None], nrm, -rn)
-    # shape from the structure tensor
-    jxx, jxy, jyy = q["gxx"] / area, q["gxy"] / area, q["gyy"] / area
-    tr = jxx + jyy
-    disc = np.sqrt(np.maximum((jxx - jyy) ** 2 + 4 * jxy ** 2, 0))
-    l1, l2 = (tr + disc) / 2, (tr - disc) / 2
-    coh = (l1 - l2) / (l1 + l2 + 1e-9)
-    strength = np.sqrt(np.maximum(l1, 0)) * S / A
-    ang_g = 0.5 * np.arctan2(2 * jxy, jxx - jyy)
-    ang_e = ang_g + np.pi / 2  # along the edge
-    an = 1 + 2.0 * coh * np.clip(strength / 0.12, 0, 1)
-    an = np.minimum(an, 3.0)
-    k = 0.62
-    s1 = np.maximum(k * S * np.sqrt(an), 0.9)
-    s2 = np.maximum(k * S / np.sqrt(an), 0.9)
-    level = np.array([LEVEL_OF[int(s)] for s in S])
-    return dict(u=u, v=v, Z=Z, n=nrm, s1=s1, s2=s2, ang=ang_e % np.pi, col=col,
-                tex=np.ones_like(u, bool), leaf=np.full(u.shape, is_leaf), level=level, tower=tower)
+    return u, v, Z, nrm
 
 
 L = splats(LX, LY, LS, True)
@@ -1123,6 +1650,200 @@ for D, name in ((L, "leaves"), (I, "stand-ins")):
     for k_ in D:
         D[k_] = D[k_][~cut]
 
+# ---- edge splats: the outlines laid again, thin and straight
+# Along a silhouette the quadtree's cells are 4 px and their splats round, or
+# laid along whatever edge the cell's own texture shows: a row of overlapping
+# blobs whose rim scallops in and out of the matte. With the camera still the
+# depth test cuts them on the photograph's edge; once it swings, each blob
+# cuts the outline at its own place and the edge frays. So every visible
+# stretch of every tower's outline (against the sky, or in front of a farther
+# tower) is laid again as a ribbon of thin Gaussians: the long axis along the
+# outline's own straight segment (EDGE_ST), across it at most half a texel
+# (EDGE_SN; the texture is 0.76 of the canvas), in two rows just inside the
+# edge. They sit on their tower's plane at the pixel just inside, and carry
+# the colour of the tower clear of the rim (the rim itself was given that
+# colour above), so nothing of the sky goes with them.
+EDGE_STEP = 2.5  # px between splats along an outline
+EDGE_ST = 2.0  # px: sigma along the outline
+EDGE_SN = 0.6  # px: sigma across it
+EDGE_ROWS = (0.0, 1.2)  # px in from the outline (the edge pixels' centres)
+
+
+def edge_splats():
+    if LAB is None or not POLYS:
+        return None
+    pts, tng, kk = [], [], []
+    for k, plist in POLYS.items():
+        for P in plist:
+            P = P + 0.5  # pixel index -> pixel centre
+            d = np.roll(P, -1, 0) - P
+            lg = np.hypot(d[:, 0], d[:, 1])
+            ok = lg > 0.5
+            P, d, lg = P[ok], d[ok], lg[ok]
+            if len(P) == 0:
+                continue
+            ns = np.maximum(np.ceil(lg / EDGE_STEP), 1).astype(np.int64)
+            seg = np.repeat(np.arange(len(P)), ns)
+            j = np.arange(len(seg)) - np.repeat(np.cumsum(ns) - ns, ns)
+            f = (j + 0.5) / ns[seg]
+            pts.append(P[seg] + d[seg] * f[:, None])
+            tng.append(d[seg] / lg[seg, None])
+            kk.append(np.full(len(seg), k))
+    pts, tng, kk = np.concatenate(pts), np.concatenate(tng), np.concatenate(kk)
+
+    def lab_at(p):
+        x = np.clip(np.floor(p[:, 0]).astype(np.int64), 0, W0 - 1)
+        y = np.clip(np.floor(p[:, 1]).astype(np.int64), 0, H0 - 1)
+        return LAB[y, x]
+
+    nn = np.stack([-tng[:, 1], tng[:, 0]], -1)
+    a_in = lab_at(pts + nn) == kk
+    b_in = lab_at(pts - nn) == kk
+    side = np.where(a_in & ~b_in, 1.0, np.where(b_in & ~a_in, -1.0, 0.0))
+    n_in = nn * side[:, None]
+    rk = np.full(max(RANK) + 2, -1, np.int64)
+    for k, r in RANK.items():
+        rk[k] = r
+    o = lab_at(pts - 1.5 * n_in)
+    vis = (side != 0) & (lab_at(pts) == kk) & ((o < 0) | (rk[np.maximum(o, 0)] < rk[kk]))
+    pts, tng, n_in = pts[vis], tng[vis], n_in[vis]
+    print("edge splats: outline samples", len(vis), "visible", int(vis.sum()))
+    out_ = []
+    for r in EDGE_ROWS:
+        c_ = pts + r * n_in
+        u = c_[:, 0] + PX
+        v = c_[:, 1] + PY
+        ip = c_ + 0.8 * n_in  # the pixel just inside: its plane
+        ix = np.clip(np.floor(ip[:, 0]).astype(np.int64) + PX, 0, W - 1)
+        iy = np.clip(np.floor(ip[:, 1]).astype(np.int64) + PY, 0, H - 1)
+        cp = c_ + 2.5 * n_in  # clear of the rim: its colour
+        jx = np.clip(np.floor(cp[:, 0]).astype(np.int64) + PX, 0, W - 1)
+        jy = np.clip(np.floor(cp[:, 1]).astype(np.int64) + PY, 0, H - 1)
+        ok = tower[iy, ix]
+        out_.append((u[ok], v[ok], iy[ok], ix[ok], jy[ok], jx[ok], tng[ok]))
+    u, v, iy, ix, jy, jx, t = (np.concatenate([o_[i] for o_ in out_]) for i in range(7))
+    cu = (u / A - Wa / 2) / 1000.0
+    cv = (v / A - Ha / 2) / 1000.0
+    ia, ja = np.minimum(iy // A, Ha - 1), np.minimum(ix // A, Wa - 1)
+    a = gxA[ia, ja].astype(np.float64) * 1000.0
+    b = gyA[ia, ja].astype(np.float64) * 1000.0
+    c = dep[iy, ix].astype(np.float64) - a * cu - b * cv
+    tw = np.ones(len(u), bool)
+    u, v, Z, nrm = place(cu, cv, a, b, c, tw)
+    n = len(u)
+    return dict(u=u, v=v, Z=Z, n=nrm, s1=np.full(n, EDGE_ST), s2=np.full(n, EDGE_SN),
+                ang=np.arctan2(t[:, 1], t[:, 0]) % np.pi, col=lin[jy, jx].astype(np.float64),
+                tex=np.ones(n, bool), leaf=np.ones(n, bool), level=np.full(n, 5), tower=tw)
+
+
+E = edge_splats()
+
+
+# ---- underlays: a tower carries on behind the thin things in front of it
+# A rail or a mullion of a nearer tower crossing a farther facade (the crown's
+# rails over the white facade beside it) hides a slit of that facade, and the
+# photograph never saw what is in it. Once the camera swings and the rail
+# slides off, the slit opened onto the sky through the facade, and its edges
+# read as tears. So every slit up to ~12 px wide that a tower's own outline
+# closes over (a 13 px closing of its matte) is laid with small round splats
+# on the tower's own plane, coloured from the tower round it. From the
+# original camera they sit behind the rail and are never seen; the depth test
+# shows them their own colour, never the rail's.
+UNDER_GAP = 13  # px: the closing
+UNDER_STEP = 3  # px between splats
+
+
+def underlays():
+    if LAB is None:
+        return None
+    rk = RANK
+    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (UNDER_GAP, UNDER_GAP))
+    us, vs, ds, cs, gs = [], [], [], [], []
+    for k in rk:
+        mk = LAB == k
+        if not mk.any():
+            continue
+        if k in LAYER_PLANES and k not in HUNG:
+            mode, P = LAYER_PLANES[k]
+        else:
+            # a layer hung on another surface: the plane it hangs on, fitted
+            iy, ix = np.nonzero(mk)
+            sel = np.arange(0, len(iy), max(1, len(iy) // 40000))
+            X, Y = (ix[sel] - W0 / 2) / 1000.0, (iy[sel] - H0 / 2) / 1000.0
+            mode, P = "one", [plane_irls(X, Y, dep[iy[sel] + PY, ix[sel] + PX].astype(np.float64), np.ones(len(sel)))]
+            del iy, ix, sel, X, Y
+        y0, y1, x0, x1 = bbox_of(mk, UNDER_GAP, (H0, W0))
+        gy, gx = np.mgrid[y0:y1, x0:x1]
+        X, Y = (gx - W0 / 2) / 1000.0, (gy - H0 / 2) / 1000.0
+        vals = [p[0] * X + p[1] * Y + p[2] for p in P]
+        if mode == "one":
+            vp, j_ = vals[0], np.zeros(X.shape, np.int64)
+        else:
+            j_ = (np.argmin if mode == "min" else np.argmax)(np.stack(vals), 0)
+            vp = np.choose(j_, vals)
+        del gy, gx, X, Y, vals
+        # against the depth the splats were laid on: on this plane, or nearer
+        dl_ = logz(dep[y0 + PY:y1 + PY, x0 + PX:x1 + PX]) - logz(np.maximum(vp, SKY_T + 0.01).astype(np.float32))
+        tw_c = tower[y0 + PY:y1 + PY, x0 + PX:x1 + PX]
+        onp = tw_c & (np.abs(dl_) < DISC_T)
+        m = (mk[y0:y1, x0:x1] & onp).astype(np.uint8)
+        nearer = tw_c & (dl_ < -DISC_T)
+        slit = (cv2.morphologyEx(m, cv2.MORPH_CLOSE, ker) > 0) & nearer
+        sy, sx = np.mgrid[0:y1 - y0:UNDER_STEP, 0:x1 - x0:UNDER_STEP]
+        sel = slit[sy, sx]
+        if not sel.any():
+            continue
+        py, px = sy[sel] + y0, sx[sel] + x0
+        v = vp[py - y0, px - x0]
+        g_ = np.array([[p[0], p[1]] for p in P])[j_[py - y0, px - x0]]
+        # colour: the tower's own, round the slit (normalised blur over its pixels)
+        w_ = cv2.GaussianBlur(m.astype(np.float32), (0, 0), 5)
+        cl = cv2.GaussianBlur(lin[y0 + PY:y1 + PY, x0 + PX:x1 + PX] * m[..., None], (0, 0), 5) / np.maximum(w_, 1e-4)[..., None]
+        good = w_[py - y0, px - x0] > 0.02
+        us.append(px[good] + 0.5)
+        vs.append(py[good] + 0.5)
+        ds.append(np.maximum(v[good], SKY_T + 0.01))
+        gs.append(g_[good])
+        cs.append(cl[py - y0, px - x0][good])
+    if not us:
+        return None
+    u = np.concatenate(us) + PX
+    v = np.concatenate(vs) + PY
+    d = np.concatenate(ds)
+    col = np.concatenate(cs).astype(np.float64)
+    # the tower's plane (its slope per photo px / 1000, in analysis units)
+    g = np.concatenate(gs)
+    cu = (u / A - Wa / 2) / 1000.0
+    cv = (v / A - Ha / 2) / 1000.0
+    a = g[:, 0] * A
+    b = g[:, 1] * A
+    c = d - a * cu - b * cv
+    tw = np.ones(len(u), bool)
+    u, v, Z, nrm = place(cu, cv, a, b, c, tw)
+    n = len(u)
+    print("underlays", n)
+    return dict(u=u, v=v, Z=Z, n=nrm, s1=np.full(n, 0.75 * UNDER_STEP), s2=np.full(n, 0.75 * UNDER_STEP),
+                ang=np.zeros(n), col=col, tex=np.ones(n, bool), leaf=np.ones(n, bool), level=np.full(n, 4), tower=tw)
+
+
+U_ = underlays()
+if U_ is not None:
+    E = U_ if E is None else {k_: np.concatenate([E[k_], U_[k_]]) for k_ in E}
+if E is not None:
+    # and no tower splat lies outside its tower's matte (dilated 2 px): a
+    # splat the quadtree laid on a scrap the matte dropped would hang in the
+    # sky as a crumb
+    towM = cv2.dilate(tower.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    for D, name in ((L, "leaves"), (I, "stand-ins")):
+        ix = np.clip(np.floor(D["u"]).astype(np.int64), 0, W - 1)
+        iy = np.clip(np.floor(D["v"]).astype(np.int64), 0, H - 1)
+        cut = D["tower"] & ~towM[iy, ix]
+        print("matte: culled", int(cut.sum()), name, "outside their tower")
+        for k_ in D:
+            D[k_] = D[k_][~cut]
+    print("edge splats", len(E["u"]))
+    del towM
+
 # ---- back layer: sky behind the towers and past the frame
 M = int(round(0.14 * max(W0, H0)))  # past the outpainted canvas
 G = 28
@@ -1145,7 +1866,7 @@ B = dict(u=bx, v=by, Z=R_DOME * 1.02 / np.linalg.norm(br, axis=-1), n=-brn,
          tex=np.ones(bx.shape, bool), leaf=np.ones(bx.shape, bool), level=np.zeros(bx.shape, int), tower=np.zeros(bx.shape, bool))
 print("back layer", len(bx))
 
-ALL = {k: np.concatenate([B[k], L[k], I[k]]) for k in L}
+ALL = {k: np.concatenate([B[k], L[k], I[k]] + ([E[k]] if E is not None else [])) for k in L}
 N = len(ALL["u"])
 print("total splats", N)
 
@@ -1202,7 +1923,7 @@ dtow = np.where(tower, dep, dep[tower][np.maximum(nt, 1) - 1])
 del nt
 zt = 1 / (ALPHA * np.clip(dtow, SKY_T + 0.01, 1) + BETA)
 qd = np.clip(np.round(np.log(np.clip(zt, DEPTH_LO, DEPTH_HI) / DEPTH_LO) / np.log(DEPTH_HI / DEPTH_LO) * 254), 0, 253)
-qd = np.where(towD, qd, np.where(halo, 254, 255)).astype(np.uint8)
+qd = np.where(TOWQ, qd, np.where(halo, 254, 255)).astype(np.uint8)
 del dtow, zt
 qd = cv2.resize(qd, (TW, th), interpolation=cv2.INTER_NEAREST)
 Image.fromarray(qd, "L").save(f"{out}/depth.png", optimize=True)

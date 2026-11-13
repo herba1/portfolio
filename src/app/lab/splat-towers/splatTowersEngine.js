@@ -29,11 +29,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // a hole or a flat patch. The bake outpaints
 // the texture and the splats ~12% past the frame, so the lookup runs right to
 // the edge of the view at any pose of the orbit. The edges go soft the way a
-// lens does: one round blur over the finished frame, growing with the square
-// of the distance from the centre (BLUR_FS).
+// lens does: one round blur over the finished frame, nothing over the middle
+// and rising from halfway out to the corners (BLUR_FS).
 //
 // Query: ?yaw=&pitch= (degrees of orbit) hold a still; ?reveal=0..1 holds the
-// opening.
+// opening; ?blur= scales the lens (0: none).
 
 const ASSET = "/lab/splat-towers/";
 const DATA_W = 2048; // texels per row of the splat texture (2 per splat)
@@ -307,9 +307,12 @@ void main() {
 }`;
 
 // The lens: one isotropic Gaussian over the finished frame whose sigma grows
-// with the square of the distance from the centre (field curvature, and the
-// diffusion a fast lens shows wide open), so the edges go soft the same way
-// in every direction and the middle is untouched. Gaussians are the one
+// with the distance from the centre (field curvature, and the diffusion a
+// fast lens shows wide open), so the edges go soft the same way in every
+// direction. It starts late: nothing inside half the way to the corners
+// (r < LENS_R0 of the half-diagonal), then rising as the 1.5 power past it,
+// so the middle of the frame and most of every tower face stay sharp and only
+// the corners go soft. Gaussians are the one
 // isotropic kernel that separates, so it runs as two passes, horizontal then
 // vertical, each with the sigma of its own pixel; sigma changes slowly enough
 // across the frame that the two compose to a round blur, with no seam.
@@ -323,12 +326,14 @@ uniform sampler2D uIn;
 uniform vec2 uRes;
 uniform vec2 uDir;      // (1, 0) or (0, 1)
 uniform float uK;       // sigma in the corners, device px
+uniform float uR0;      // where the softening starts, as a share of the half-diagonal
 out vec4 outColor;
 void main() {
   vec2 fc = gl_FragCoord.xy;
   vec2 d = fc - 0.5 * uRes;
   vec2 hd = 0.5 * uRes;
-  float sigma = uK * dot(d, d) / dot(hd, hd);
+  float r = length(d) / length(hd);
+  float sigma = uK * pow(max(r - uR0, 0.0) / (1.0 - uR0), 1.5);
   ivec2 ij = ivec2(fc);
   vec4 acc = texelFetch(uIn, ij, 0);
   if (sigma < 0.3) {
@@ -352,8 +357,9 @@ void main() {
 }`;
 // sigma in the corners as a share of the frame's height, at rest, and how much
 // more a full swing of the camera opens it
-const BLUR_CORNER = 0.004;
-const BLUR_SWING = 0.0028;
+const BLUR_CORNER = 0.0032;
+const BLUR_SWING = 0.0016;
+const LENS_R0 = 0.5;
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -547,6 +553,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   const qYaw = num("yaw");
   const qPitch = num("pitch");
   const qReveal = num("reveal");
+  const qBlur = num("blur"); // scales the lens (0 holds a still with no edge softening)
   const held = qYaw != null || qPitch != null || qReveal != null;
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
@@ -824,6 +831,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.uniform1i(blurProg.u.uIn, 0);
     gl.uniform2f(blurProg.u.uRes, w, h);
     gl.uniform1f(blurProg.u.uK, corner);
+    gl.uniform1f(blurProg.u.uR0, LENS_R0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.bindFramebuffer(gl.FRAMEBUFFER, blurA.fbo);
     gl.uniform2f(blurProg.u.uDir, 1, 0);
@@ -946,7 +954,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     // the camera swings.
     const swing = Math.min(1, Math.hypot(yd, pd) / SOFT_DEG);
     const reveal = qReveal != null ? qReveal : held || reduced ? 1 : expoOut(clamp((age - 0.25) / 2.6, 0, 1));
-    const lens = stage.canvas.height * (BLUR_CORNER * (1 + 0.12 * breathe * Math.sin((t * 2 * Math.PI) / 9.1)) + BLUR_SWING * swing * swing);
+    const lens = (qBlur ?? 1) * stage.canvas.height * (BLUR_CORNER * (1 + 0.12 * breathe * Math.sin((t * 2 * Math.PI) / 9.1)) + BLUR_SWING * swing * swing);
     const soft = [0.3 + reveal * 1.25, 0];
 
     // Keep the order fresh as the camera moves.
