@@ -20,6 +20,12 @@ export const TAUT = 0.035;
 const GAMMA = 0.55; // broadband damping, 1/s: the fundamental rings ~3.5 s
 const VOIGT = 0.0045; // high modes die first (rate ~ VOIGT (n pi)^2 / 2)
 export const STRUCT = { omega: 2 * Math.PI * 4.2, zeta: 0.3, gain: 0.8 };
+// Bending stiffness, as the length over which a cable under tension rounds a
+// load, l = sqrt(EI / T), in cable diameters. A stranded steel cable of
+// diameter d at line tension comes out near 5 d (a 20 mm feeder: EI ~ 150
+// N m^2, T ~ 15 kN, l ~ 0.1 m). The string's physics stays a string; the
+// drawn shape takes the stiffness (see shapeDrawn).
+export const STIFF = 5;
 
 // ---------------------------------------------------------------- the view
 
@@ -160,6 +166,8 @@ export function makeString(def, index) {
   };
   const shade = new Float32Array(25 * 3);
   def.shade.forEach((c, i) => shade.set(c, i * 3));
+  // The cable's diameter at its support, image px: the stiffness length.
+  const dia = def.w.slice(0, 4).reduce((a, b) => a + b, 0) / Math.min(4, def.w.length);
   return {
     def,
     index,
@@ -188,6 +196,13 @@ export function makeString(def, index) {
     knot,
     shade,
     jExit,
+    // Stiffness length in nodes (see STIFF, shapeDrawn).
+    stiff: (STIFF * dia) / ds,
+    rev: 0, // bumped whenever y changes; the drawn shape follows it
+    drawnRev: -1,
+    yd: new Float64Array(N + 1), // drawn displacement at the nodes, image px
+    m2: new Float64Array(N + 1), // its cubic spline's second differences
+    tri: new Float64Array(N + 1), // scratch for the two solves
     y: new Float64Array(N + 1), // displacement along the rest normal, image px
     v: new Float64Array(N + 1),
     f: new Float64Array(N + 1), // external force this step
@@ -236,6 +251,55 @@ export function offsetAt(w, j, x, y) {
   return (x - rx) * nxx + (y - ry) * nyy;
 }
 
+// The drawn shape at the nodes, from the string's. Two steps, both solved
+// along the free run (the pin j0 to the far support), with the ends held:
+//  1. Stiffness. A cable with bending stiffness EI under tension T carries a
+//     load as T y'' - EI y'''' = -q; the string's own shape y_s has T y_s'' =
+//     -q, so the cable's is y_s filtered by (1 - l^2 D^2)^-1, l^2 = EI / T: an
+//     exponential kernel of length l. Straight legs pass through unchanged;
+//     the crown under a fingertip and the corners of a running pulse round
+//     over l, as a steel cable's do, instead of over one node.
+//  2. A natural cubic spline through those nodes (C2: the curvature is
+//     continuous, so no node shows as a facet or a soft kink).
+// Cheap: two tridiagonal solves of ~96 per wire, once per change of y.
+export function shapeDrawn(w) {
+  if (w.drawnRev === w.rev) return;
+  w.drawnRev = w.rev;
+  const { N, y, yd, m2, tri, j0 } = w;
+  for (let j = 0; j <= j0; j++) yd[j] = y[j];
+  yd[N] = y[N];
+  // -L2 z_j-1 + (1 + 2 L2) z_j - L2 z_j+1 = y_j, z_j0 and z_N held (Thomas;
+  // tri holds L2 / den, m2 the forward-swept right side).
+  const L2 = w.stiff * w.stiff;
+  const b = 1 + 2 * L2;
+  let cp = 0;
+  let dp = yd[j0];
+  for (let j = j0 + 1; j < N; j++) {
+    const den = b - L2 * cp;
+    const rhs = y[j] + L2 * dp + (j === N - 1 ? L2 * yd[N] : 0);
+    cp = L2 / den;
+    dp = rhs / den;
+    tri[j] = cp;
+    m2[j] = dp;
+  }
+  // z_j = d'_j + c'_j z_j+1
+  for (let j = N - 1; j > j0; j--) yd[j] = m2[j] + (j === N - 1 ? 0 : tri[j] * yd[j + 1]);
+  // Natural spline over j0..N, unit spacing: m_j-1 + 4 m_j + m_j+1 =
+  // 6 (z_j+1 - 2 z_j + z_j-1), m_j0 = m_N = 0.
+  m2.fill(0);
+  cp = 0;
+  dp = 0;
+  for (let j = j0 + 1; j < N; j++) {
+    const den = 4 - cp;
+    const rhs = 6 * (yd[j + 1] - 2 * yd[j] + yd[j - 1]) - dp;
+    cp = 1 / den;
+    dp = rhs / den;
+    tri[j] = cp;
+    m2[j] = dp;
+  }
+  for (let j = N - 2; j > j0; j--) m2[j] -= tri[j] * m2[j + 1];
+}
+
 export function sampleY(w, j) {
   // Catmull-Rom through the nodes: smooth enough to draw at 4 px a segment.
   const i = clamp(Math.floor(j), 0, w.N - 1);
@@ -255,18 +319,31 @@ const erf = (x) => {
   return x < 0 ? -e : e;
 };
 
-// The displacement as drawn: the string, with the turn at its pin rounded the
-// way a stiff cable leaves its clamp. The first free segment's slope a turns
-// on over a Gaussian-smoothed ramp of width w.bend instead of a corner:
-// y + a (R(x) - max(x, 0)), R the ramp max(x, 0) blurred by that Gaussian.
-// The correction vanishes a few widths from the pin, so the legs stay
-// straight and the crown is untouched.
+// The displacement as drawn: the stiff cable's shape through its spline (see
+// shapeDrawn), with the turn at its pin rounded the way a stiff cable leaves
+// its clamp. The spline runs from the pin, so there it is a clean hinge onto
+// the first free segment; that slope a turns on over a Gaussian-smoothed ramp
+// of width w.bend instead of a corner: y + a (R(x) - max(x, 0)), R the ramp
+// max(x, 0) blurred by that Gaussian. The correction vanishes a few widths
+// from the pin, so the legs stay straight and the crown is untouched.
 export function drawnY(w, j) {
-  const y = sampleY(w, j);
-  if (!w.j0) return y;
-  const x = ((j - w.j0) * w.ds) / w.bend;
+  shapeDrawn(w);
+  const { N, j0, yd, m2 } = w;
+  const jj = clamp(j, 0, N);
+  let y;
+  if (jj <= j0) {
+    const i = Math.min(N - 1, Math.floor(jj));
+    y = yd[i] + (yd[i + 1] - yd[i]) * (jj - i);
+  } else {
+    const i = Math.min(N - 1, Math.floor(jj));
+    const t = jj - i;
+    const u = 1 - t;
+    y = u * yd[i] + t * yd[i + 1] + ((u * u * u - u) * m2[i] + (t * t * t - t) * m2[i + 1]) / 6;
+  }
+  if (!j0) return y;
+  const x = ((j - j0) * w.ds) / w.bend;
   if (x < -4 || x > 4) return y;
-  const a = (w.y[w.j0 + 1] - w.y[w.j0]) / w.ds;
+  const a = (yd[j0 + 1] - yd[j0]) / w.ds;
   const R = x * 0.5 * (1 + erf(x / Math.SQRT2)) + Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
   return y + a * w.bend * (R - Math.max(x, 0));
 }
@@ -290,6 +367,7 @@ export function pullShape(w, jc, A) {
   const sc = Math.abs(peak) > 1e-9 ? A / peak : 0;
   for (let j = 0; j <= N; j++) y[j] *= sc;
   w.v.fill(0);
+  w.rev++;
 }
 
 // All the wires, and the two structures they hang from (the mast with its
@@ -350,6 +428,7 @@ export function createWorld(defs) {
         v[j] += h * (c2 * lap + visc * lapv - GAMMA * v[j] + fw * gust + hand);
       }
       for (let j = j0 + 1; j < N; j++) y[j] += h * v[j];
+      w.rev++;
     }
   };
   return { wires, groups, step, time: () => simT };

@@ -1,7 +1,7 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createPluckSound } from "./pluck";
-import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape, sampleY } from "./strings";
+import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape } from "./strings";
 
 // Catenary: the overhead wires of a Japanese railway mast, photographed from
 // underneath against summer cumulus, are real strings.
@@ -27,10 +27,14 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape, sam
 // the neighbours. A slow, zero-mean breeze keeps them alive at rest. A hand
 // is a fingertip pad, not a point: a pull is two straight legs and a small
 // rounded crown, the shape of a taut wire pushed aside, never a V. The
-// wires are drawn analytically (erf of a blurred box, the measured shade) in
-// linear light at device resolution, along the fitted catenary evaluated
-// exactly plus a cubic through the nodes' displacement, then the frame is
-// haloed through the shared film kit (summer) and printed (PRINT_CURVE).
+// wires are drawn analytically in linear light at device resolution: an erf
+// of a box softened as the plate's steel is softened, shaded as a lit
+// cylinder (dark underside, skylit upper flank, the sky at grazing, the
+// metal's tint from the photographed section), along the fitted catenary
+// evaluated exactly plus the displacement carried through the cable's
+// bending stiffness and a C2 cubic spline through the nodes (shapeDrawn in
+// strings.js). Then the frame is haloed through the shared film kit (summer)
+// and printed (PRINT_CURVE).
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1.5>, 1.5 the fullest give of a
@@ -532,14 +536,19 @@ layout(location = 0) in vec2 aPos;
 layout(location = 1) in float aAcross;
 layout(location = 2) in vec4 aProf;   // half width, blur, opacity, hand-off
 layout(location = 3) in vec2 aRest;   // image px of the resting wire here
+layout(location = 4) in float aUp;    // screen-up share of the + across side
 uniform vec2 uRes;
 out float vD;
 out vec4 vProf;
 out vec2 vRest;
+out float vUp;
 void main() {
   vD = aAcross;
   vProf = aProf;
   vRest = aRest;
+  // Which edge faces the sky: +1 the + side, -1 the - side; a wire that
+  // runs near vertical has no up edge and shades evenly.
+  vUp = clamp(aUp * 4.0, -1.0, 1.0);
   gl_Position = vec4(aPos.x / uRes.x * 2.0 - 1.0, 1.0 - aPos.y / uRes.y * 2.0, 0.0, 1.0);
 }`;
 
@@ -548,8 +557,13 @@ precision highp float;
 in float vD;
 in vec4 vProf;
 in vec2 vRest;
+in float vUp;
 out vec4 outColor;
-uniform vec3 uShade[25];
+uniform float uCore;      // the cable's measured core luminance (linear)
+uniform vec3 uMetal;      // its own tint, from the photographed section
+uniform vec2 uSkyLit;     // skylight on the upper flank (x core at the rim / 8), its sky chroma kept
+uniform float uRing;      // the photograph's edge overshoot (its sharpening)
+uniform sampler2D uPlate;
 uniform sampler2D uAtlas;
 uniform vec2 uAtlasSize;
 uniform vec4 uRiderBox;   // image px; zero size when none
@@ -571,10 +585,23 @@ float erf_(float x) {
 }
 void main() {
   float hw = vProf.x;
-  // Optical blur plus the pixel's own footprint.
+  // The edge: a box of the cable's width through the same softening the
+  // plate's steel has at this depth (the lens blur measured on the wire,
+  // regressed on depth, and the plate's own resampling; vProf.y carries both)
+  // plus the pixel's own footprint. No line is drawn at the edge: the cable
+  // ends where its coverage does.
   float sig = sqrt(vProf.y * vProf.y + 0.085);
   float k = 0.70710678 / sig;
   float a = vProf.z * 0.5 * (erf_((vD + hw) * k) - erf_((vD - hw) * k));
+  // The photograph's edges carry its in-camera sharpening: a faint light
+  // ring on the sky side of every edge (the plate's own feeder at its clamp:
+  // sky 149, 157 at the edge, then the cable). An unsharp mask against a
+  // blur 2.5 times wider, kept to the outside only, so it never darkens the
+  // cable's own edge into an outline. (Below zero coverage only lands in a
+  // float target; an 8-bit one clamps it away.)
+  float kw = k / 2.5;
+  float aw = vProf.z * 0.5 * (erf_((vD + hw) * kw) - erf_((vD - hw) * kw));
+  a += uRing * min(a - aw, 0.0);
   // Near its insulator the photograph keeps its own wire; the live one takes
   // over along a ramp so the sum stays exactly the photograph.
   float r = vProf.w;
@@ -586,18 +613,35 @@ void main() {
       a *= 1.0 - texture(uAtlas, (uRiderAt + q) / uAtlasSize).a;
     }
   }
-  float u = clamp((vD / max(hw, 0.25) + 1.25) / 2.5 * 25.0 - 0.5, 0.0, 24.0);
-  int i0 = int(floor(u));
-  int i1 = min(i0 + 1, 24);
-  vec3 col = mix(uShade[i0], uShade[i1], fract(u));
-  // The same graphite as the steel. A live wire is steel too, but it was
-  // painted out of the plate, so the key's steel mask (key.r) never reaches
-  // it: hold it at the steel's residue directly. The cloud's veil then barely
-  // touches the wire body (it stays a dark silhouette across lit cumulus);
-  // its halation comes from the HALO pass over the finished scene, exactly
-  // as the plate's steel takes it, wherever the wire has moved to.
-  col = mix(col, graphite(col), uStruct.x);
+  // A lit cylinder, seen from below, shaded the way the photograph's own
+  // feeder is where the plate keeps it (at its clamp): x runs across it, +1
+  // the edge that faces the sky. The face toward the camera is the cable's
+  // underside, lit only by what comes up off the ground: its dark core and
+  // lower flank, the measured core luminance taken through the same grade as
+  // the mast's steel (graphite: lifted out of the black), in the metal's own
+  // warm grey (sampled from that same photographed section). Over the upper
+  // third the surface turns to the open sky and takes skylight, rising
+  // quadratically to the rim, in the sky's colour: in the photograph the
+  // cable runs 0.0024 at the core, 0.013 three px in from its upper edge,
+  // 0.007 at five, cyan. Applied after the grade, at the strength that
+  // survives the print's shadow toe: in the print the photographed section
+  // reads ~15 levels lighter over its upper quarter. At grazing it reflects
+  // the sky itself (Fresnel; below).
+  float x = clamp(vD / max(hw, 0.25), -1.0, 1.0) * vUp;
+  float nz = sqrt(max(1.0 - x * x, 0.0));
+  float rim = max((x - 0.3) / 0.7, 0.0);
+  float lit = uSkyLit.x * 8.0 * rim * rim;
   vec2 kuv = vRest / uImg;
+  vec3 sky = textureLod(uPlate, kuv, 4.0).rgb;
+  vec3 skyN = sky / max(dot(sky, LUMA), 1e-4);
+  float yG = (uCore * uStruct.y + uStruct.z) * (1.0 + lit);
+  vec3 tint = mix(uMetal, mix(uMetal, skyN, uSkyLit.y), lit / (1.0 + lit));
+  vec3 col = yG * tint / dot(tint, LUMA);
+  // At grazing, either edge, the reflected ray runs on nearly as the view
+  // ray did, past the cable into the sky behind it: both edges take the sky
+  // (the lower a little less, its flank turned to the ground), so neither
+  // stops on a dark line.
+  col += sky * (0.02 + 0.3 * pow(1.0 - nz, 3.0)) * smoothstep(0.2, 1.0, abs(x)) * (x > 0.0 ? 1.0 : 0.75);
   col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * mist(uKey, kuv) * uGlow.y * uMist.y);
   outColor = vec4(col, a);
 }`;
@@ -832,6 +876,75 @@ function upload(gl, bm, { mips = true, linear = false } = {}) {
   return tex;
 }
 
+// The metal's own colour: the feeder where the photograph keeps it, at its
+// clamp (the stretch before the hand-off, where the plate still holds the
+// real cable). The darker 60% of its core, in linear light, as a tint
+// (luminance 1), taken a third of the way from neutral: a weathered
+// steel-cored cable reads warm grey, not brown. Falls back to the steel's.
+const METAL_SHARE = 0.5;
+// The live wires' edges against the plate's. The photograph's own feeder,
+// where the plate keeps it at its clamp, has an edge of sigma 1.4 image px
+// (an erf fitted across it on the plate), where the bake measured the wire's
+// optical blur as 0.53: the rest is the plate's own softening (the resample
+// to its width, the photograph's processing). Added in quadrature to every
+// wire's measured blur, so a live edge softens exactly as the steel beside it
+// does. The same edge rises to 157 on a sky of 149 before it falls: the
+// camera's sharpening ring, EDGE_RING of an unsharp mask (see WIRE_F).
+const PLATE_MTF = 1.3; // image px
+const EDGE_RING = 0.5;
+// Skylight on the upper flank: the rim of the cable runs 1 + 8 SKY_LIT times
+// its core (graded linear light; WIRE_F), and keeps SKY_CHROMA of the sky's
+// chroma.
+const SKY_LIT = 0.45;
+const SKY_CHROMA = 0.6;
+function metalTint(bm, meta) {
+  const fall = STRUCT_TINT.map((v) => v / (0.2126 * STRUCT_TINT[0] + 0.7152 * STRUCT_TINT[1] + 0.0722 * STRUCT_TINT[2]));
+  try {
+    const def = meta.wires.find((d) => d.handoff && d.handoff[1] > d.handoff[0]);
+    if (!def || !def.cat || typeof OffscreenCanvas === "undefined") return fall;
+    const C = def.cat;
+    const sc = bm.width / meta.image[0];
+    const ch = Math.cosh(C.m / C.c);
+    const pts = [];
+    for (let s = 30; s <= def.handoff[0] - 20; s += 2) {
+      const p = C.a0 + C.a1 * s + C.g * (Math.cosh((s - C.m) / C.c) - ch);
+      for (let o = -0.3; o <= 0.301; o += 0.1) {
+        const d = p + o * def.w[0];
+        pts.push([(C.P0[0] + s * C.t[0] + d * C.n[0]) * sc, (C.P0[1] + s * C.t[1] + d * C.n[1]) * sc]);
+      }
+    }
+    if (!pts.length) return fall;
+    const x0 = Math.floor(Math.min(...pts.map((q) => q[0])));
+    const y0 = Math.floor(Math.min(...pts.map((q) => q[1])));
+    const cw = Math.ceil(Math.max(...pts.map((q) => q[0]))) - x0 + 1;
+    const chh = Math.ceil(Math.max(...pts.map((q) => q[1]))) - y0 + 1;
+    const cv = new OffscreenCanvas(cw, chh);
+    const cx = cv.getContext("2d", { willReadFrequently: true });
+    cx.drawImage(bm, x0, y0, cw, chh, 0, 0, cw, chh);
+    const px = cx.getImageData(0, 0, cw, chh).data;
+    const lin = (v) => {
+      const c = v / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const samples = pts
+      .map(([x, y]) => {
+        const i = (Math.floor(y - y0) * cw + Math.floor(x - x0)) * 4;
+        const c = [lin(px[i]), lin(px[i + 1]), lin(px[i + 2])];
+        return [c, 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]];
+      })
+      .sort((p, q) => p[1] - q[1])
+      .slice(0, Math.max(1, Math.round(pts.length * 0.6)));
+    const m = [0, 1, 2].map((k) => samples.reduce((acc, sm) => acc + sm[0][k], 0));
+    const L = 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2];
+    if (!(L > 0)) return fall;
+    const t = m.map((v) => clamp(1 + (v / L - 1) * METAL_SHARE, 0.6, 1.4));
+    const n = 0.2126 * t[0] + 0.7152 * t[1] + 0.0722 * t[2];
+    return t.map((v) => v / n);
+  } catch {
+    return fall;
+  }
+}
+
 export async function createCatenary(host, { embedded = false } = {}) {
   const q = new URLSearchParams(window.location.search);
   const num = (k, d) => {
@@ -910,6 +1023,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
   ]);
   const [IW, IH] = meta.image;
   const view = pitchView(IW, IH, clamp(num("pitch", PITCH), -10, 30));
+  const metal = metalTint(plateBm, meta);
+  const plateMtf = PLATE_MTF;
   const plateTex = upload(gl, plateBm);
   const atlasTex = upload(gl, atlasBm);
   const keyTex = upload(gl, keyBm, { mips: false, linear: true });
@@ -919,12 +1034,19 @@ export async function createCatenary(host, { embedded = false } = {}) {
 
   const world = createWorld(meta.wires);
   const { wires, groups } = world;
+  // Each cable's core luminance, as measured across it (linear): the middle
+  // of its shade profile, where it is its own dark body and no rim.
+  for (const w of wires) {
+    let y = 0;
+    for (let i = 8; i <= 16; i++) y += 0.2126 * w.shade[i * 3] + 0.7152 * w.shade[i * 3 + 1] + 0.0722 * w.shade[i * 3 + 2];
+    w.core = y / 9;
+  }
 
   const sound = createPluckSound();
 
   // ---- GL
   const plateP = compile(gl, VERT_FULL, PLATE);
-  const wireP = compile(gl, WIRE_V, WIRE_F, ["aPos", "aAcross", "aProf", "aRest"]);
+  const wireP = compile(gl, WIRE_V, WIRE_F, ["aPos", "aAcross", "aProf", "aRest", "aUp"]);
   const riderP = compile(gl, RIDER_V, RIDER_F, ["aPos", "aUv"]);
   const haloSrcP = compile(gl, VERT_FULL, HALO_SRC);
   const haloHP = compile(gl, VERT_FULL, HALO_H);
@@ -947,7 +1069,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
   // Render samples per node segment: ~2.5 device px apart on the feeder, so
   // the strip follows the curve, not a polyline.
   const SUB = 8;
-  const STRIDE = 9;
+  const STRIDE = 10;
   const maxVerts = (NODES * SUB + 2) * 2;
   const wireBuf = gl.createBuffer();
   const wireData = new Float32Array(maxVerts * STRIDE);
@@ -964,6 +1086,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
   gl.vertexAttribPointer(2, 4, gl.FLOAT, false, STRIDE * F, 3 * F);
   gl.enableVertexAttribArray(3);
   gl.vertexAttribPointer(3, 2, gl.FLOAT, false, STRIDE * F, 7 * F);
+  gl.enableVertexAttribArray(4);
+  gl.vertexAttribPointer(4, 1, gl.FLOAT, false, STRIDE * F, 9 * F);
 
   const riderBuf = gl.createBuffer();
   const riderData = new Float32Array(6 * 5);
@@ -1257,7 +1381,11 @@ export async function createCatenary(host, { embedded = false } = {}) {
         const across = (Math.abs(ja * jd - jb * jc) / tl) * k;
         // Fitted widths read ~0.6 px wide of the photograph at display size.
         const hw = ((w.knot(w.def.w, s) - WIDTH_TRIM) / 2) * across;
-        const sig = w.knot(w.def.sig, s) * across;
+        // The softening the plate's steel has here: the lens blur measured
+        // on the wire (image px, regressed on depth) and the plate's own
+        // resampling (PLATE_MTF), added in quadrature.
+        const sig0 = w.knot(w.def.sig, s);
+        const sig = Math.sqrt(sig0 * sig0 + plateMtf * plateMtf) * across;
         const o = w.knot(w.def.o, s);
         const r = ho[1] > ho[0] ? clamp((s - ho[0]) / (ho[1] - ho[0]), 0, 1) : 1;
         const ext = hw + 3 * sig + 2;
@@ -1277,12 +1405,19 @@ export async function createCatenary(host, { embedded = false } = {}) {
           wireData[b + 6] = r;
           wireData[b + 7] = qx - nxx * yy;
           wireData[b + 8] = qy - nyy * yy;
+          wireData[b + 9] = -uy;
           n++;
         }
       }
       gl.useProgram(wireP.p);
       gl.uniform2f(wireP.u.uRes, W, H);
-      gl.uniform3fv(wireP.u.uShade, w.shade);
+      gl.uniform1f(wireP.u.uCore, w.core);
+      gl.uniform3fv(wireP.u.uMetal, metal);
+      gl.uniform2f(wireP.u.uSkyLit, SKY_LIT, SKY_CHROMA);
+      gl.uniform1f(wireP.u.uRing, EDGE_RING);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, plateTex);
+      gl.uniform1i(wireP.u.uPlate, 2);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, atlasTex);
       gl.uniform1i(wireP.u.uAtlas, 0);
@@ -1310,9 +1445,9 @@ export async function createCatenary(host, { embedded = false } = {}) {
       // the photograph's plane (the corners then go through the homography).
       for (const r of w.def.riders) {
         const jc = r.sc / w.ds;
-        const yy = sampleY(w, jc);
+        const yy = drawnY(w, jc);
         const h = 0.5 * Math.max(r.s1 - r.s0, w.ds) / w.ds;
-        const slope = (sampleY(w, jc + h) - sampleY(w, jc - h)) / (2 * h * w.ds);
+        const slope = (drawnY(w, jc + h) - drawnY(w, jc - h)) / (2 * h * w.ds);
         const [cx0, cy0, rnx, rny] = w.rest(r.sc);
         const ox = cx0 - 0.5;
         const oy = cy0 - 0.5;
