@@ -27,8 +27,9 @@
 # so the clouds climb the paper's shoulder above the sky instead of level with it.
 #
 # Pipeline (re-grades the shipped bake in place, like deepen.py --shipped; pass
-# copies of the un-relit files, never the outputs). It runs last: deepen.py and
-# bake_wormseye.py write RGB only and would drop the key.
+# copies of the un-relit files, never the outputs). It runs after deepen.py and
+# bake_wormseye.py, which write RGB only and would drop the key; only
+# sunburst.py follows it, and keeps the key (adding the sun's glow to it).
 #             python3 relight.py <scene.webp> <optics.png> [preview.png]
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np

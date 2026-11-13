@@ -61,15 +61,26 @@ export const FILM = {
   // negative by skyHold of every stop of overexposure (about -0.9 EV at +1.67),
   // keyed on the bake's cloud mask (scene.webp's alpha, relight.py), so a
   // cloud's blue-lit underside is not mistaken for sky and a crown's edge is
-  // held with the sky behind it, never left as a pale outline. The dark
-  // needles take skyHoldNeedle of it. The scan's extra blue depth eases off on the held sky
+  // held with the sky behind it, never left as a pale outline. The same key
+  // spares the hidden sun's glow (sunburst.py), falling off over ~9 deg, so it
+  // is the glow that carries the overexposure: it climbs the shoulder, spreads
+  // and swallows the crown's edge while the sky around it stays held.
+  // The scan's extra blue depth eases off on the held sky
   // (to skyHoldDepth by skyHoldFull), or it would pour the held light straight
   // back into the blue channel and pin it at the cap again. So the sky's
   // brightest channel stays near 200-215, still deepening towards the zenith,
   // while the clouds keep climbing the shoulder above it. 0 EV is untouched.
   skyHold: 0.55,
   skyHoldDepth: 1.1,
-  skyHoldNeedle: 0.35, // share of the hold the dark needles take, so the shadows still open up
+  // The dark needles take skyHoldNeedle of it, so the shadows still open up. The
+  // hand-over from needle to sky is spread over skyHoldY (log2 scene luminance,
+  // ~5.7 stops): squeezed into the 1.7 stops between 0.03 and 0.1 it held a
+  // needle's lit side back almost as far as its shadow sat above it, so at +3
+  // the canopy's midtones collapsed onto one level and posterized into flat
+  // grey-green and lilac blobs. Spread out, each stop of needle still prints
+  // at least 0.7 stop apart at +3.
+  skyHoldNeedle: 0.3,
+  skyHoldY: [-9.0, -3.3],
   skyHoldFull: 1.67,
 
   hiWarm: 0.025,
@@ -104,7 +115,7 @@ uniform vec3 uGamma; uniform vec3 uShoulder; uniform float uToe; uniform float u
 uniform vec3 uGref;         // negative density of the printer-light grey
 uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax;
 uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm;
-uniform vec2 uSkyQ; uniform float uHold; uniform float uHoldNeedle; uniform float uHoldDepth; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
+uniform vec2 uSkyQ; uniform float uHold; uniform float uHoldNeedle; uniform vec2 uHoldY; uniform float uHoldDepth; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
 uniform float uGrain; uniform float uSeed; uniform float uGrainPx;
 out vec4 o;
@@ -143,7 +154,7 @@ void main(){
   // The printer holds all but the cloud back (after the optics, so the hold does not
   // read as a dark gap for the halation to fill).
   float open = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0); // 1 - the bake's cloud share
-  open *= mix(uHoldNeedle, 1.0, smoothstep(0.03, 0.1, Ys));
+  open *= mix(uHoldNeedle, 1.0, smoothstep(uHoldY.x, uHoldY.y, log2(max(Ys, 1e-6))));
   L *= exp2(-uHold * open);
 
   // Negative: each layer on its own H&D curve.
@@ -457,6 +468,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSkyCap, F.skyCap);
     gl.uniform1f(u.uHold, F.skyHold * Math.max(e, 0));
     gl.uniform1f(u.uHoldNeedle, F.skyHoldNeedle);
+    gl.uniform2fv(u.uHoldY, F.skyHoldY);
     gl.uniform1f(u.uHoldDepth, F.blueDepth + (F.skyHoldDepth - F.blueDepth) * clamp(e / F.skyHoldFull, 0, 1));
     gl.uniform1f(u.uBloom, F.bloom);
     gl.uniform1f(u.uHal, F.halation);
