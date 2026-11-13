@@ -3,8 +3,9 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 
 // Curve mirror (カーブミラー): a roadside convex traffic mirror on an orange
 // pole, standing in a real photograph of a Kyoto level crossing. Drag to turn
-// it on its bracket and the reflection sweeps the street behind you, the
-// house, the crossing and the sky; at one angle it catches the sun.
+// it on its bracket (as far as a real one turns, against sprung stops) and
+// the reflection sweeps the street behind you, the house, the crossing and
+// the sky; at one angle it catches the sun.
 //
 // The photograph is measured: MoGe-2 gives every pixel a metric position, the
 // poles' vanishing point gives the true vertical (the lens is tilted up 22.6
@@ -28,7 +29,10 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //    their paint is the road mirror's vermilion enamel, chipped to dark steel,
 //    streaked by rain and dirtied where the AO says it is sheltered, its fine
 //    tooth taken from the photo's own plaster, with a roughness map that
-//    breaks up the sun's anisotropic streak down the pole and along the rim;
+//    breaks up the sun's anisotropic streak down the pole; the head's paint
+//    is chalked matte (rough dielectric, its sheen the prefiltered panorama,
+//    no sun lobe), and all of it rolls off on the plate's shoulder, so a
+//    sunlit face stays orange and never bleaches;
 //  - the object takes the plate's grain at the photo's pixel pitch, so the
 //    film develops it and the photograph alike;
 //  - the street the glass shows is under the same sun: the 360's surfaces
@@ -76,8 +80,8 @@ const RC = 1.6; // radius of curvature
 // pitches about that knuckle and turns (yaw) with the arm round the pole, so
 // the pole stands ARM behind the shell's back and stops below the hinge: the
 // lower rim, swinging back as the head tips down, clears it (the frame's back
-// edge by 7 cm at the stop, still 2 cm at the rubber band's far limit), and
-// nothing ever passes through the glass.
+// edge by about 5 cm at the lower limit), and nothing ever passes through the
+// glass.
 const HINGE = 0.18; // hinge axis behind the face apex (just behind the shell's back)
 const ARM = 0.3; // pole axis behind the hinge, horizontally
 const POLE_DROP = 0.05; // pole top below the hinge
@@ -96,11 +100,26 @@ const HOOD = 0.11;
 const HOOD_ARC = 80;
 // rest aim (relative to facing the lens) and limits, degrees
 const REST = [20, -15];
-const YAW_LIM = [-78, 78];
-const PITCH_LIM = [-32, 40];
-// how far a drag can push past each stop (degrees, asymptotic): the lower stop
-// is the shell's own, firm, so the rim never comes within a centimetre of the pole
-const OVER = { yaw: 18, up: 18, down: 8 };
+// What the bracket can do. The arm's clamp band turns on the pole, but the
+// yoke's stops (and the street the mirror is bolted to watch) hold the face
+// within 65 degrees of the lens either way, so its back, the bare pressed
+// steel, is never turned to it; the knuckle tips it 35 degrees down toward
+// the road and 15 up, where the visor's rear lip meets the yoke. Hard
+// limits, never passed.
+const YAW_LIM = [-65, 65];
+const PITCH_LIM = [-35, 15];
+// The end-stops are rubber-bushed springs, not walls: a soft spring takes up
+// from SOFT, a stiffer one from FIRM, each pushing the head back toward the
+// open range; under the hand the head lags the drag more and more as the
+// stop nears and creeps up to the limit asymptotically, and let go it eases
+// back off the bushing to where the soft spring balances. Degrees, and the
+// springs' stiffness as a multiple of the follow spring's.
+const STOP = {
+  yaw: { soft: [-45, 45], firm: [-55, 55] },
+  pitch: { soft: [-26, 6], firm: [-31, 10] },
+  kSoft: 0.35,
+  kFirm: 2.2,
+};
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -356,6 +375,22 @@ float photoDirt(vec2 m) {
   return clamp(1.0 - l / max(l4, 1e-3), -1.0, 1.0);
 }
 
+// The plate's shoulder, for paint in sun. The film's curve would take a
+// vermilion's red channel alone over white (1.3 in full sun against a white
+// point of 1.2) and bleach the lit side toward pink-white; so it is judged,
+// as the glass's sun is, on the brightest channel through the film's
+// highlight tint, and past the knee (what develops to 0.8) the whole colour
+// is scaled down on an exponential toward a ceiling well under white (half
+// way to what develops to 0.97). Its channels keep their ratio: the lit side
+// rolls off as a warm orange, never past about 240.
+vec3 paintShoulder(vec3 c) {
+  float m = max(max(c.r * uHiTint.r, c.g * uHiTint.g), c.b * uHiTint.b);
+  float kn = uSunTone.x, top = mix(uSunTone.x, uSunTone.y, 0.5);
+  if (m <= kn) return c;
+  float m2 = kn + (top - kn) * (1.0 - exp(-(m - kn) / (top - kn)));
+  return c * (m2 / m);
+}
+
 vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 q = toLocal(p);
   float occ = ao(p, n);
@@ -452,6 +487,30 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 sunC = vec3(1.0, 0.96, 0.88);
   vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
 
+  // The head (frame, visor and shell) is twenty years of roadside sun on
+  // baked enamel: the binder chalked, the gloss gone, a rough dielectric.
+  // Roughness 0.55..0.65 (a little higher on bare steel), F0 0.04, and its
+  // specular is the panorama prefiltered to that lobe's width, a mip read and
+  // weighted by the split-sum's analytic fit (Karis), not a sun lobe: the sky
+  // and street lay a faint sheen across it, and the sunlit side is simply
+  // paint in sun, so a head turned to the light reads as matte steel, never a
+  // flashlight spot. The pole and bracket below keep their rain-polished
+  // streak.
+  if (id == 1.0 || id == 2.0) {
+    float rH = clamp(0.6 + 0.08 * (n1 - 0.5) + 0.1 * max(dirt, 0.0) + 0.12 * chip, 0.55, 0.72);
+    float ndvH = max(dot(n, v), 1e-3);
+    const vec4 C0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+    const vec4 C1 = vec4(1.0, 0.0425, 1.04, -0.04);
+    vec4 rr = rH * C0 + C1;
+    float a004 = min(rr.x * rr.x, exp2(-9.28 * ndvH)) * rr.x + rr.y;
+    vec2 AB = vec2(-1.04, 1.04) * a004 + rr.zw;
+    // the lobe's width in the 4096 px panorama: about 60 degrees across at
+    // this roughness, a mip of 8 to 9
+    vec3 rH3 = reflect(-v, n);
+    vec3 specH = env(rH3, 5.2 + 5.5 * rH) * (0.04 * AB.x + AB.y) * occ * (1.0 - gasket);
+    return paintShoulder(diff + specH);
+  }
+
   // The roughness map: the enamel keeps its gloss only where it is intact.
   // Chalk, grime, the plaster-tooth dirt and every chip take it away, so the
   // sun's streak breaks up along the pole instead of running like chrome.
@@ -498,7 +557,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   float Fs = F0 + (1.0 - F0) * pow(1.0 - vdh, 5.0);
   float Gl = 2.0 * ndl / (ndl + sqrt(a * a + (1.0 - a * a) * ndl * ndl));
   spec += sunC * sunE * sh * D * Fs * Gv * Gl / (4.0 * ndv) * (0.15 + 0.85 * gloss) * (1.0 - gasket) * 2.0;
-  return diff + spec;
+  return paintShoulder(diff + spec);
 }
 
 // ---------------------------------------------------------------- the glass
@@ -1533,11 +1592,13 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (aimQ === "sun") {
     held = true;
     aimInit = sunAim;
+    console.log("curve-mirror sunAim", sunAim.map((x) => x.toFixed(1)).join(","));
   } else if (aimQ) {
     const v = aimQ.split(",").map(Number);
     if (v.length === 2 && v.every(Number.isFinite)) {
       held = true;
-      aimInit = v;
+      // held within what the bracket can do
+      aimInit = [clamp(v[0], YAW_LIM[0], YAW_LIM[1]), clamp(v[1], PITCH_LIM[0], PITCH_LIM[1])];
     }
   }
   const still = held || q.get("still") === "1";
@@ -1656,8 +1717,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
 
   // ---------------------------------------------------------------- state
   // The aim (yaw, pitch in degrees) follows a goal on a spring, like a head
-  // on a bracket with some play: 1:1 under the hand, the hand's speed carried
-  // on release, rubber-banded past the bracket's stops.
+  // on a bracket with some play: 1:1 under the hand in the open range, the
+  // hand's speed carried on release, sprung at the bracket's stops.
   const aim = [...aimInit];
   const vel = [0, 0];
   const goal = [...aimInit];
@@ -1669,12 +1730,47 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const inPrint = (p) => p.x >= L.x && p.x <= L.x + L.w && p.y >= L.y && p.y <= L.y + L.h;
   // degrees per css px: half the print's width turns it ~100 degrees
   const gain = () => 100 / Math.max(240, L.w * 0.5);
-  const rubber = (v, lo, hi, spanLo, spanHi) => {
-    const k = 0.35;
-    if (v < lo) return lo - spanLo * (1 - Math.exp(((v - lo) * k) / spanLo));
-    if (v > hi) return hi + spanHi * (1 - Math.exp((-(v - hi) * k) / spanHi));
-    return v;
+  // The hand's drag sets a goal that may run past the stops (by up to 40
+  // degrees, so a fling has somewhere to go); the head follows it on its
+  // spring, and the stops' springs push back on the head: none in the open
+  // range, the soft one past SOFT, the firm one on top past FIRM, so it lags
+  // the hand more and more and reaches the hard limit only under a long
+  // pull, and there it is held.
+  const LIM = [YAW_LIM, PITCH_LIM];
+  const FIRM = [STOP.yaw.firm, STOP.pitch.firm];
+  const SOFT = [STOP.yaw.soft, STOP.pitch.soft];
+  const reach = (v, i) => clamp(v, LIM[i][0] - 40, LIM[i][1] + 40);
+  // the stops' push on the head, as a multiple of the follow spring's w^2
+  const stopForce = (x, i) => {
+    const [slo, shi] = SOFT[i];
+    const [flo, fhi] = FIRM[i];
+    let f = 0;
+    if (x > shi) f -= STOP.kSoft * (x - shi);
+    if (x < slo) f -= STOP.kSoft * (x - slo);
+    if (x > fhi) f -= STOP.kFirm * (x - fhi);
+    if (x < flo) f -= STOP.kFirm * (x - flo);
+    return f;
   };
+  // where the head balances against the stops for a goal g
+  const balance = (g, i) => {
+    const [slo, shi] = SOFT[i];
+    const [flo, fhi] = FIRM[i];
+    const ks = STOP.kSoft;
+    const kf = STOP.kFirm;
+    let x = g;
+    if (g > shi) {
+      x = (g + ks * shi) / (1 + ks);
+      if (x > fhi) x = (g + ks * shi + kf * fhi) / (1 + ks + kf);
+    } else if (g < slo) {
+      x = (g + ks * slo) / (1 + ks);
+      if (x < flo) x = (g + ks * slo + kf * flo) / (1 + ks + kf);
+    }
+    return clamp(x, LIM[i][0], LIM[i][1]);
+  };
+  // let go: the clamp band's friction holds the head where the hand left it
+  // in the open range and on the soft spring, but the firm bushing pushes it
+  // back off to where it takes up
+  const letGo = (g, i) => clamp(balance(g, i), FIRM[i][0], FIRM[i][1]);
   stage.on("down", (p) => {
     if (held || !inPrint(p)) return;
     dragging = true;
@@ -1689,26 +1785,26 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     }
     const g = gain();
     // push the face: right turns it right, up tilts it up
-    goal[0] = rubber(drag0.yaw - (p.x - drag0.x) * g, YAW_LIM[0], YAW_LIM[1], OVER.yaw, OVER.yaw);
-    goal[1] = rubber(drag0.pitch - (p.y - drag0.y) * g, PITCH_LIM[0], PITCH_LIM[1], OVER.down, OVER.up);
+    goal[0] = reach(drag0.yaw - (p.x - drag0.x) * g, 0);
+    goal[1] = reach(drag0.pitch - (p.y - drag0.y) * g, 1);
   });
   stage.on("up", (p) => {
     if (!dragging) return;
     dragging = false;
     stage.canvas.style.cursor = inPrint(p) ? "grab" : "";
     const g = gain();
-    goal[0] = clamp(goal[0] - p.vx * g * 0.2, YAW_LIM[0], YAW_LIM[1]);
-    goal[1] = clamp(goal[1] - p.vy * g * 0.2, PITCH_LIM[0], PITCH_LIM[1]);
+    goal[0] = letGo(goal[0] - p.vx * g * 0.2, 0);
+    goal[1] = letGo(goal[1] - p.vy * g * 0.2, 1);
   });
 
   host.tabIndex = embedded ? -1 : 0;
   const onKey = (e) => {
     if (held) return;
     const step = e.shiftKey ? 10 : 2;
-    if (e.key === "ArrowLeft") goal[0] = clamp(goal[0] + step, YAW_LIM[0], YAW_LIM[1]);
-    else if (e.key === "ArrowRight") goal[0] = clamp(goal[0] - step, YAW_LIM[0], YAW_LIM[1]);
-    else if (e.key === "ArrowUp") goal[1] = clamp(goal[1] + step, PITCH_LIM[0], PITCH_LIM[1]);
-    else if (e.key === "ArrowDown") goal[1] = clamp(goal[1] - step, PITCH_LIM[0], PITCH_LIM[1]);
+    if (e.key === "ArrowLeft") goal[0] = letGo(goal[0] + step, 0);
+    else if (e.key === "ArrowRight") goal[0] = letGo(goal[0] - step, 0);
+    else if (e.key === "ArrowUp") goal[1] = letGo(goal[1] + step, 1);
+    else if (e.key === "ArrowDown") goal[1] = letGo(goal[1] - step, 1);
     else return;
     e.preventDefault();
     touched = true;
@@ -1948,13 +2044,21 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
 
     if (!held) {
       // spring: ζ 0.82; stiffer while held (the hand), softer after (the bracket)
+      // under the hand the stops push back on the head (let go, the goal
+      // has already been brought back inside them)
       const w = 2 * Math.PI * (dragging ? 2.4 : 1.1);
       const z = 0.82;
       const h = Math.min(dt, 1 / 30);
       for (let i = 0; i < 2; i++) {
-        const acc = w * w * (goal[i] - aim[i]) - 2 * z * w * vel[i];
+        const push = dragging ? w * w * stopForce(aim[i], i) : 0;
+        const acc = w * w * (goal[i] - aim[i]) + push - 2 * z * w * vel[i];
         vel[i] += acc * h;
         aim[i] += vel[i] * h;
+        const [lo, hi] = LIM[i];
+        if (aim[i] > hi || aim[i] < lo) {
+          aim[i] = clamp(aim[i], lo, hi);
+          vel[i] = 0;
+        }
         if (Math.abs(goal[i] - aim[i]) < 1e-3 && Math.abs(vel[i]) < 1e-3) {
           aim[i] = goal[i];
           vel[i] = 0;
