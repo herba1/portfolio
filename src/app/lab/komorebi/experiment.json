@@ -27,7 +27,7 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
       "author": "Greg Zaal (original), Jarod Guest (sky edits)",
       "licence": "CC0",
-      "note": "The cumulus. 8K linear puresky HDRI, reprojected to the same stereographic upward view and turned so its sun lands exactly on the drawn sun (tilted 24 degrees down, rolled 15 degrees about the sun axis), so every cloud is lit from where the sun is drawn. Clouds unmixed from their clear sky by blue excess, relit to the scene's sun and skylight, highlights rolled off below the film's clip, composited behind the needle mattes; in the shader the shade takes the skylight, the sunlit tops roll off to cream and local contrast is lifted by the sun."
+      "note": "The cumulus. 8K linear puresky HDRI, reprojected to the same stereographic upward view and turned so its sun lands exactly on the drawn sun (tilted 24 degrees down, rolled 15 degrees about the sun axis), so every cloud is lit from where the sun is drawn. Clouds unmixed from their clear sky by blue excess, relit to the scene's sun and skylight, highlights rolled off below the film's clip, composited behind the needle mattes; in the shader they are relit as sunlit volumes: a warm-neutral key on the sun-facing sides rolling off below the clip, shade and undersides in the colour of the sky round them, a silver lining on thin edges facing the sun and a forward-scatter glow beside it."
     }
   ]
 }
