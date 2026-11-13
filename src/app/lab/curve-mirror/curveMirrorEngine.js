@@ -1613,10 +1613,11 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   // a sunlit cumulus top (clouds.py's TOP), the same way: the scene
   // colour that develops to a warm neutral just under white, R over G over B.
   // The curve alone undershoots it: the film's Pro-Mist takes a share of a
-  // small highlight's light away and the vignette a little more, so it is
-  // set 15 % over, and a touch warmer, measured on the render (?aim=20,-15:
-  // the tops land at about 246, 243, 240, nothing at 250)
-  const CLOUD_W = [0.955, 0.94, 0.915].map((v, i) => (1.15 * [1, 0.98, 0.94][i] * sceneFor(v)) / LOOK.highlightTint[i]);
+  // highlight's light away and the vignette a little more, so it is set
+  // over (by less now the tops are a heap's broad sunlit cap, not its rim),
+  // and a touch warmer, measured on the render (?aim=45,-30: the tops land
+  // at about #F4EEE2, the bellies about a stop under, toward #A9BCD3)
+  const CLOUD_W = [0.957, 0.933, 0.886].map((v, i) => (1.07 * [1, 0.985, 0.95][i] * sceneFor(v)) / LOOK.highlightTint[i]);
   // without a float target the scene is stored as the film's sRGB input
   const sunTone = () => (linear ? TONE : TONE.map((v) => linearToSrgb(Math.min(v, 1))));
 
