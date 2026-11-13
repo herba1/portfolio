@@ -27,16 +27,19 @@ import { createCloth, project, PHANTOM, PX, ROPE } from "./cloth";
 // sink toward rim-lit silhouettes against it, and the exposure breathes back
 // as the dress covers it again.
 //
-// The view: the lens looks further up than the photographer did. The camera
-// pitches toward the zenith about the photograph's own optical centre, a pure
-// rotation, which reprojects every depth exactly (a homography of the frame),
-// so the cut-out cloth keeps its geometry wherever it hangs. With a wider
-// lens, the line drops and the garments hang toward the viewer, their sides
-// converging on the zenith; the sky the photograph never held (above its top
-// edge, and the wedges either side) is its smooth fit carried on. Everything
-// is lit in the photograph's own pixels and only drawn through the
-// homography, so the sun, its halo, the disc's coverage and the cloth's light
-// stay registered. On load the camera tilts up on a spring.
+// The view: the lens looks much further up than the photographer did. The
+// camera pitches toward the zenith about the photograph's own optical centre,
+// a pure rotation, which reprojects every depth exactly, so the cut-out cloth
+// keeps its geometry wherever it hangs. It looks out through a stereographic
+// lens about 100 degrees across: conformal, so nothing stretches toward the
+// edges as it would through a rectilinear lens that wide. The line bows, the
+// garments hang toward the viewer, their sides converging on the zenith, and
+// the sky the photograph never held (above its top edge, and the wedges
+// either side) is its smooth fit carried on by angle. Everything is lit in
+// the photograph's own pixels and only drawn through the lens, so the sun, its
+// halo, the disc's coverage and the cloth's light stay registered. On load
+// the camera tilts up on a spring, the lens easing from the photograph's own
+// to the stereographic as it goes.
 //
 // Query: ?gust=0..1 holds a steady gust (with ?dir=-1|1 and ?t=seconds of it,
 // default 2.4), simulated deterministically and frozen, for stills.
@@ -122,44 +125,78 @@ const TIE = [748, 1296, 852, 1492];
 // uncropped frame (the crop keeps the top 3080 of 4000 rows).
 const LENS_F = 1550;
 const LENS_C = [700, 1050];
-const TILT = 26; // degrees the camera pitches up past the photographer's view
-const WIDEN = 1.2; // and the lens widens by this much as it does
-const LENS_OY = 420; // the optical centre's row in the tilted frame
+const TILT = 40; // degrees the camera pitches up past the photographer's view
+const WIDEN = 1.8; // and the lens widens by this much as it does
+const LENS_OY = 623; // the optical centre's row in the tilted frame
 const TILT_W = 5.2; // the tilt's spring: rad/s, about 1.2 s to settle
 const TILT_Z = 0.82;
 const TILT_AT = 0.35; // s after load before it starts
 
-const mul3 = (a, b) => {
-  const o = new Array(9);
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
-  return o;
-};
-const inv3 = (m) => {
-  const [a, b, c, d, e, f, g, h, i] = m;
-  const A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
-  const det = a * A + b * B + c * C;
-  return [A, c * h - b * i, b * f - c * e, B, a * i - c * g, c * d - a * f, C, b * g - a * h, a * e - b * d].map((v) => v / det);
-};
-const apply3 = (m, u, v) => {
-  const w = m[6] * u + m[7] * v + m[8];
-  return [(m[0] * u + m[1] * v + m[2]) / w, (m[3] * u + m[4] * v + m[5]) / w];
-};
-// The photograph's pixels to the tilted frame's (row-major): back through the
-// lens to a ray, turned by the pitch about the lens's x axis (image y points
-// down, so up is -y), and out through the wider lens about its new centre.
-const viewOf = (deg, widen, oy) => {
+// The photograph's pixels to the tilted frame's: back through the lens to a
+// ray, turned by the pitch about the lens's x axis (image y points down, so up
+// is -y), and out through a stereographic lens about the new centre: a ray
+// theta off the axis lands 2 fo tan(theta / 2) out, not fo tan(theta). It is
+// conformal, so the wide view keeps every garment's shape where a rectilinear
+// lens would stretch it toward the edges, and straight lines bow. The lens is
+// the azimuthal family seen from kappa behind the sphere's centre,
+// r = fo (1 + kappa) sin(theta) / (kappa + cos(theta)): kappa 0 is the
+// photograph's own rectilinear lens, 1 the stereographic, so the tilt eases
+// from the one to the other and ?tilt=0 is still the photograph.
+const viewOf = (deg, widen, oy, kappa) => {
   const t = (deg * Math.PI) / 180;
   const c = Math.cos(t);
   const s = Math.sin(t);
   const f = LENS_F;
   const fo = f / widen;
   const [cx, cy] = LENS_C;
-  const Kin = [1 / f, 0, -cx / f, 0, 1 / f, -cy / f, 0, 0, 1];
+  const K = clamp(kappa, 0, 1);
   const R = [1, 0, 0, 0, c, s, 0, -s, c];
-  const Kout = [fo, 0, cx, 0, fo, oy, 0, 0, 1];
-  const H = mul3(Kout, mul3(R, Kin));
-  return { H, Hi: inv3(H) };
+  const fwd = (u, v) => {
+    const y = (v - cy) / f;
+    const dx = (u - cx) / f;
+    const dy = c * y + s;
+    const dz = c - s * y;
+    const k = (fo * (1 + K)) / (K * Math.hypot(dx, dy, dz) + dz);
+    return [cx + dx * k, oy + dy * k];
+  };
+  return { R, lens: [f, cx, cy, fo], out: [oy, K], fwd };
 };
+// The same lens in GLSL: forward for the cloth's vertices, inverse for the
+// full-frame plate. uR turns the photograph's rays into the frame's.
+const LENS_GLSL = `
+uniform mat3 uR;
+uniform vec4 uLens; // the photograph's focal length and centre, the frame's focal length
+uniform vec2 uOut;  // the frame's optical centre row, and kappa
+vec2 toFrame(vec2 p) {
+  vec3 d = uR * vec3((p - uLens.yz) / uLens.x, 1.0);
+  float K = uOut.y;
+  return vec2(uLens.y, uOut.x) + d.xy * (uLens.w * (1.0 + K) / (K * length(d) + d.z));
+}
+// The frame's px back to the photograph's: the ray from kappa behind the
+// sphere through the pixel meets it at t, and is turned back into the
+// photograph's lens. Inside the photograph that is its own pixel. Past its
+// edges a tangent plane runs off to infinity as the ray nears 90 degrees from
+// its axis, and the wide lens sees well past that: so out there the pixel is
+// carried on from the edge by the ray's angle instead (its angle in the
+// x-z and y-z planes past the edge's), matched in value and slope at the
+// edge and easing to a slow, steady run, so the sky the photograph never
+// held stays a smooth gradient however far the lens looks.
+float runOn(float e) { return 0.82 * 0.22 * (1.0 - exp(-e / 0.22)) + 0.18 * e; }
+float carry(float a, float c, float n) {
+  float f = uLens.x;
+  float lo = atan(-c / f), hi = atan((n - c) / f);
+  if (a < lo) return c + f * tan(lo) - f / (cos(lo) * cos(lo)) * runOn(lo - a);
+  if (a > hi) return c + f * tan(hi) + f / (cos(hi) * cos(hi)) * runOn(a - hi);
+  return c + f * tan(a);
+}
+vec2 toPhoto(vec2 q) {
+  float K = uOut.y;
+  vec3 w = vec3((q - vec2(uLens.y, uOut.x)) / uLens.w, 1.0 + K);
+  float ww = dot(w, w);
+  float t = (K * (1.0 + K) + sqrt(K * K * (1.0 + K) * (1.0 + K) - ww * (K * K - 1.0))) / ww;
+  vec3 d = transpose(uR) * (vec3(0.0, 0.0, -K) + t * w);
+  return vec2(carry(atan(d.x, d.z), uLens.y, uSize.x), carry(atan(d.y, d.z), uLens.z, uSize.y));
+}`;
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -203,7 +240,7 @@ out vec4 o;
 uniform sampler2D uPlate;
 uniform sampler2D uBlur;
 uniform vec2 uSize;
-uniform mat3 uHi;     // the tilted frame's px back to the photograph's
+${LENS_GLSL}
 uniform vec3 uSkyQ[6]; // the sky's quadratic, log linear rgb, per basis term
 uniform vec3 uHalo[${HALO.length / 3}];
 ${SUN_GLSL}
@@ -225,7 +262,7 @@ float ease(float x, float lo, float hi, float k) {
 vec2 skyN(vec2 p) {
   vec2 n = p / uSize;
   n.x = ease(n.x, 0.0, 1.0, 0.08);
-  n.y = n.y < 0.0 ? ease(n.y, 0.0, 1.0, 0.2) : min(n.y, 1.0);
+  n.y = n.y < 0.0 ? ease(n.y, 0.0, 1.0, 0.35) : min(n.y, 1.0);
   return n;
 }
 vec3 skyLog(vec2 n) {
@@ -256,7 +293,7 @@ vec3 zenith(vec2 p) {
   vec2 n = skyN(p);
   if (n.y >= ZEN_Y) return vec3(1.0);
   vec3 l = skyLog(n);
-  float s = smoothstep(0.25, -0.08, n.y);
+  float s = smoothstep(ZEN_Y, -0.3, n.y); // slow enough that the lift never outruns the deepening
   // the darker columns at the sides are lifted toward the middle's, but
   // held under where they started, deepening by a share of the middle's
   // drop, so they too only ever deepen going up
@@ -264,27 +301,45 @@ vec3 zenith(vec2 p) {
   float b = min(mix(zenB(n.x, n.y), zenB(0.5, n.y), s), skyLog(vec2(n.x, ZEN_Y)).b + 0.2 * drop);
   return exp(b + mix(l - l.b, ZEN, s) - l);
 }
-// The plate, and past its edge the fit: matched to the plate's own sky at the
-// nearest edge (as a ratio, faded out over a few hundred px) so there is no
-// seam, with the plate's grain mirrored back out from inside the edge.
+// The plate, and past its edge the fit, carried on as the fit times the
+// plate's mean departure from it along the top (as a ratio, so there is no
+// seam), and the plate's grain mirrored back out.
+vec3 edgeRatio(vec2 pc) {
+  vec3 at = texture(uBlur, pc / uSize).rgb;
+  vec3 fit = skyFit(pc) + haloAt(distance(pc, uSun));
+  return log(max(at, 1e-4) / max(fit, 1e-4));
+}
+float fallOff(vec2 p) { return exp(-min(min(p.x, uSize.x - p.x), p.y) / 200.0); }
 vec3 plateAt(vec2 p, float r) {
   vec2 lo = vec2(0.5);
   vec2 hi = uSize - 0.5;
-  if (p.x >= lo.x && p.y >= lo.y && p.x <= hi.x && p.y <= hi.y) return texture(uPlate, p / uSize).rgb;
+  // one ratio for the whole far sky, the mean along the photograph's top
+  vec3 mean = vec3(0.0);
+  for (int k = 0; k <= 8; k++) mean += edgeRatio(vec2(lo.x + (hi.x - lo.x) * float(k) / 8.0, lo.y));
+  mean /= 9.0;
+  if (p.x >= lo.x && p.y >= lo.y && p.x <= hi.x && p.y <= hi.y) {
+    // The photograph's own lens darkens its top corners and sides. Its edges
+    // used to be the frame's; the wide lens shows them mid-sky, where that
+    // fall-off would read as a dark shelf. So near its top and sides the
+    // plate's departure from the fit eases to the far sky's, over 200 px.
+    return texture(uPlate, p / uSize).rgb * exp((mean - edgeRatio(p)) * fallOff(p));
+  }
   vec2 pc = clamp(p, lo, hi);
-  vec3 at = texture(uBlur, pc / uSize).rgb;
-  vec3 fit = skyFit(pc) + haloAt(distance(pc, uSun));
-  float w = exp(-distance(p, pc) / 240.0);
-  vec3 sky = skyFit(p) * pow(max(at, 1e-4) / max(fit, 1e-4), vec3(w)) + haloAt(r);
-  vec2 pm = clamp(uSize - abs(uSize - abs(p)), lo, hi);
+  // matched to the plate as eased at the foot; the top and sides already
+  // meet the mean
+  float w = p.y > hi.y ? exp(-distance(p, pc) / 220.0) : 0.0;
+  vec3 foot = mix(edgeRatio(pc), mean, fallOff(pc));
+  vec3 sky = skyFit(p) * exp(mix(mean, foot, w)) + haloAt(r);
+  // mirrored back and forth, so far out it is still grain, not a smear of
+  // one edge row; kept off the disc and its ring wherever it lands
+  vec2 pm = clamp(uSize - abs(mod(p, 2.0 * uSize) - uSize), lo, hi);
   vec3 bm = texture(uBlur, pm / uSize).rgb;
-  vec3 grain = texture(uPlate, pm / uSize).rgb - bm;
+  vec3 grain = (texture(uPlate, pm / uSize).rgb - bm) * smoothstep(120.0, 260.0, distance(pm, uSun));
   return max(sky + grain * sky / max(bm, 1e-3), 0.0);
 }
 void main() {
   vec2 q = vec2(vUv.x, 1.0 - vUv.y) * uSize;
-  vec3 hp = uHi * vec3(q, 1.0);
-  vec2 p = hp.xy / hp.z;
+  vec2 p = toPhoto(q);
   float r = distance(p, uSun);
   vec3 h = haloAt(r);
   // the sky with the photograph's grey veil lifted off
@@ -347,7 +402,7 @@ in vec2 aRest;
 in vec3 aShade;
 in vec3 aStrain;
 uniform vec2 uSize;
-uniform mat3 uH; // the photograph's px to the tilted frame's
+${LENS_GLSL}
 out vec2 vRest;
 out vec2 vPos;
 out vec3 vShade;
@@ -357,10 +412,10 @@ void main() {
   vPos = aPos;
   vShade = aShade;
   vStrain = aStrain;
-  // drawn through the homography with its own w, so everything the fragments
-  // read (the photograph, its sky, the sun) is interpolated projectively
-  vec3 h = uH * vec3(aPos, 1.0);
-  gl_Position = vec4(h.x / uSize.x * 2.0 - h.z, h.z - h.y / uSize.y * 2.0, 0.0, h.z);
+  // each vertex through the stereographic lens; a cell is small enough
+  // (30 px of the photograph) that the map is near affine across it
+  vec2 h = toFrame(aPos);
+  gl_Position = vec4(h.x / uSize.x * 2.0 - 1.0, 1.0 - h.y / uSize.y * 2.0, 0.0, 1.0);
 }`;
 
 const CLOTH_F = `#version 300 es
@@ -646,8 +701,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
   const rawView = q.get("raw") != null; // the scene before the film, for checking
   const held = holdGust != null || still;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  const tiltTo = clamp(num("tilt", TILT), -10, 40);
-  const widenTo = clamp(num("widen", WIDEN), 0.6, 2);
+  const tiltTo = clamp(num("tilt", TILT), -10, 60);
+  const widenTo = clamp(num("widen", WIDEN), 0.6, 3);
   const oyTo = num("oy", LENS_OY);
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
@@ -736,8 +791,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
   // light, how far it has moved, and the view cosine against the rest's
   const ROPE_STEP = 12;
   // the line runs on well past the photograph's ends, for the tilted lens
-  const ropeU0 = -720;
-  const ropeN = Math.ceil((IW + 1440) / ROPE_STEP) + 1;
+  const ropeU0 = -2400;
+  const ropeN = Math.ceil((IW + 4800) / ROPE_STEP) + 1;
   const NV = N + ropeN * 2;
   const vdata = new Float32Array(NV * VS);
   for (let k = 0; k < N; k++) {
@@ -950,7 +1005,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
   // the framing (lens and centre) goes with the angle, so ?tilt=0 is the photograph
   const viewNow = () => {
     const k = (tiltP * tiltTo) / TILT;
-    return viewOf(tiltTo * tiltP, 1 + (widenTo - 1) * k, LENS_C[1] + (oyTo - LENS_C[1]) * k);
+    return viewOf(tiltTo * tiltP, 1 + (widenTo - 1) * k, LENS_C[1] + (oyTo - LENS_C[1]) * k, k);
   };
   const stepTilt = (dt, age) => {
     const n = Math.max(1, Math.ceil(dt * 120));
@@ -1022,7 +1077,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, blurTex);
     gl.uniform1i(plateP.u.uBlur, 1);
     gl.activeTexture(gl.TEXTURE0);
-    gl.uniformMatrix3fv(plateP.u.uHi, true, view.Hi);
+    gl.uniformMatrix3fv(plateP.u.uR, true, view.R);
+    gl.uniform4fv(plateP.u.uLens, view.lens);
+    gl.uniform2fv(plateP.u.uOut, view.out);
     gl.uniform3fv(plateP.u["uSkyQ[0]"], skyQ);
     gl.uniform2f(plateP.u.uSize, IW, IH);
     gl.uniform2f(plateP.u.uSun, sunPx[0], sunPx[1]);
@@ -1036,7 +1093,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(clothP.p);
     gl.uniform2f(clothP.u.uSize, IW, IH);
-    gl.uniformMatrix3fv(clothP.u.uH, true, view.H);
+    gl.uniformMatrix3fv(clothP.u.uR, true, view.R);
+    gl.uniform4fv(clothP.u.uLens, view.lens);
+    gl.uniform2fv(clothP.u.uOut, view.out);
     gl.uniform3f(clothP.u.uRopeX, 12, IW + PHANTOM * meta.cell - 20, 1250);
     gl.uniform2f(clothP.u.uSun, sunPx[0], sunPx[1]);
     gl.uniform1f(clothP.u.uGlare, glare);
@@ -1122,10 +1181,10 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, scene.tex);
     gl.uniform1i(blitP.u.uScene, 1);
     gl.activeTexture(gl.TEXTURE0);
-    // the disc where the homography puts it, and how much it magnifies there
-    const [sx, sy] = apply3(view.H, sunPx[0], sunPx[1]);
-    const [ax, ay] = apply3(view.H, sunPx[0] + 1, sunPx[1]);
-    const [bx, by] = apply3(view.H, sunPx[0], sunPx[1] + 1);
+    // the disc where the lens puts it, and how much it magnifies there
+    const [sx, sy] = view.fwd(sunPx[0], sunPx[1]);
+    const [ax, ay] = view.fwd(sunPx[0] + 1, sunPx[1]);
+    const [bx, by] = view.fwd(sunPx[0], sunPx[1] + 1);
     const mag = Math.sqrt(Math.abs((ax - sx) * (by - sy) - (ay - sy) * (bx - sx)));
     gl.uniform2f(blitP.u.uSunUv, sx / IW, 1 - sy / IH);
     gl.uniform2f(blitP.u.uRes, rect.w, rect.h);
