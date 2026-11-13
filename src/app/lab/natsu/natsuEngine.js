@@ -14,8 +14,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the sky and can grow into blue that was never photographed.
 //
 // What runs here:
-//  - Parallax: pointer (or device tilt) moves the camera a few centimetres;
-//    each layer shifts by its disparity, the signal most, the sky not at all.
+//  - One gesture, camera pitch. The pointer's height (or the device's tilt)
+//    tips the camera up from level toward 35 degrees; a hold tips it all the
+//    way. Each layer is reprojected through a wide pinhole at that pitch, so
+//    the signal keystones about a vanishing point above the frame (mast,
+//    ladder and gantry converge upward, the wires fan out), the far layers
+//    turning through proportionally less of it by their depth, and the sky
+//    deepens to cobalt toward the zenith. Side to side, the vanishing point
+//    follows the pointer a little. The frame is full bleed.
 //  - The cloud evolves from its own texture. A slow growth field lifts and
 //    spreads the tower; dozens of lobes on its outline swell one after
 //    another, each once (nothing loops back); inside, two bands of detail
@@ -23,24 +29,40 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    re-seeded with a variance-preserving cross-fade, masked to the active
 //    upper tower so the outline never doubles.
 //  - The wires hang on three lightly damped springs driven by a little wind.
-//  - Hold: the sun swings from low front-left (as photographed) round behind
-//    the tower. The lit faces turn with it, the body falls to skylight blue,
-//    and the thin edges facing the sun light up; the film's halation and
-//    diffusion pick that light up.
+//  - Looking up is looking into the sun: past SUN_FROM of the pitch it swings
+//    from low front-left (as photographed) round behind the tower. The lit
+//    faces turn with it, the body falls to skylight blue, and the thin edges
+//    facing the sun light up; the film's halation and diffusion pick that
+//    light up.
 //  - The crossing lamps alternate now and then, as a train comes.
 //
 // Query: ?t=0..1 growth (0 = the photograph, 1 = five minutes on),
-// ?light=0..1 sun (0 = as shot, 1 = behind the tower), ?tilt=x[,y] in -1..1,
-// ?lamp=0|1|2, ?still=1 skips the reveal.
+// ?light=0..1 sun (0 = as shot, 1 = behind the tower; else it follows the
+// pitch), ?tilt=x[,y] in -1..1 (y: -1 looks highest, 0 is the resting look),
+// ?pitch=0..35 degrees (overrides tilt's y), ?lamp=0|1|2, ?still=1 skips the
+// reveal.
 
 const BASE = "/lab/natsu/";
 const PW = 2592;
 const PH = 1728;
 const DUR = 300; // seconds for the full growth
-// Parallax: px of plate shift per unit of disparity at full deflection.
-const PAR = 36;
-const DREF = 0.1;
+// Camera pitch: the gesture's one quantity. Level is the photograph; the
+// pointer runs the look from PITCH_LO to PITCH_HI, a hold goes all the way.
+const PITCH_MAX = (35 * Math.PI) / 180;
+const PITCH_LO = 0.08;
+const PITCH_HI = 0.92;
+const PITCH_REST = 0.5;
+// The light comes round behind the tower as the look climbs past this.
+const SUN_FROM = 0.62;
+// Virtual lens: focal length in units of the half height (about 85 deg
+// vertical), and how much of the frame's width the top row keeps (1: all
+// of it, 0: the bottom row does).
+const FOCAL = 1.1;
+const KEEP = 0.6;
+// Plate px kept clear of the photograph's edge.
+const EDGE = 30;
 const DISP_N = 0.8;
+const DISP_W = 0.4;
 const DISP_CLOUD = 0.02;
 // Crossing lamp slits (plate px): x, y0, y1.
 const LAMPS = [
@@ -119,8 +141,8 @@ uniform sampler2D uCloud;   // normal xy, cloudness
 uniform sampler2D uFields;  // activity, sway weight, not-sky
 uniform sampler2D uLayers;  // near alpha, wire alpha, wire disparity
 uniform sampler2D uFg;      // silhouette colour (sRGB texture)
-uniform vec4 uView;         // plate uv: x0, y0 (top left), w, h
-uniform vec2 uPar;          // px shift per unit disparity
+uniform vec4 uProj;         // aspect, plate px per screen unit, plate y of the centre row, plate x of the centre column
+uniform vec4 uCam;          // pitch (rad), focal length (screen units), vanishing column (screen units), keep-width
 uniform float uGrow;        // 0..1
 uniform float uTime;        // boil clock, s
 uniform float uBoil;        // 0 with reduced motion
@@ -139,6 +161,23 @@ const vec3 L0 = normalize(vec3(-0.8, -0.12, 0.55));
 const vec3 SUN = vec3(1.0, 0.84, 0.66);
 const vec3 AMB = vec3(0.42, 0.52, 0.72);
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// deep cobalt straight up (linear light, before the film)
+const vec3 ZENITH = vec3(0.0006, 0.053, 0.29);
+
+// The camera pitched up by uCam.x, seen through a pinhole of focal uCam.y,
+// lens shifted so the frame stays on the photograph. A layer at disparity
+// disp feels a fraction of the pitch (the camera's pivot is behind the lens,
+// so near things swing through more of it): vertical lines converge on a
+// vanishing point above the frame, lines across fan out from it.
+float pitchShare(float disp) { return 0.4 + 0.6 * clamp(disp / ${DISP_N}, 0.0, 1.0); }
+vec2 project(vec2 s, float disp) {
+  float t = uCam.x * pitchShare(disp);
+  float a = sin(t) * cos(t) / uCam.y;
+  float d = 1.0 - s.y * a;
+  float k = 1.0 - uCam.w * a;
+  vec2 v = vec2((s.x - uCam.z) * k / d + uCam.z, s.y * k / d);
+  return vec2(uProj.w + uProj.y * v.x, uProj.z - uProj.y * v.y);
+}
 
 vec3 sky(vec2 uv) {
   vec3 t1 = vec3(1.0, uv.x, uv.y);
@@ -188,18 +227,23 @@ float capsule(vec2 p, vec2 a, vec2 b) {
 }
 
 void main() {
-  vec2 uvO = vec2(vUv.x, 1.0 - vUv.y);
-  vec2 p = uView.xy + uvO * uView.zw;      // plate uv, v down
-  vec2 px = p * PLATE;
+  // screen, in units of the half height, y up
+  vec2 s = vec2((vUv.x - 0.5) * 2.0 * uProj.x, (vUv.y - 0.5) * 2.0);
 
   // --- sky (at infinity) ---
-  vec2 pS = px - uPar * (0.0 - ${DREF});
-  vec3 col = sky(pS / PLATE);
+  vec2 pS = project(s, 0.0);
+  vec3 sky0 = sky(pS / PLATE);
+  // the photograph's blue deepens toward the zenith as the camera looks up
+  float elev = uCam.x + atan(s.y / uCam.y);
+  float zen = smoothstep(0.05, 1.3, elev);
+  vec3 skyN = mix(sky0, ZENITH, zen * zen * (3.0 - 2.0 * zen) * 0.92);
+  vec3 col = skyN;
 
   // --- cloud ---
-  vec2 pc = px - uPar * (${DISP_CLOUD} - ${DREF});
+  vec2 pc = project(s, ${DISP_CLOUD});
   vec2 p1 = pc - growth(pc);
   float occ = 0.0;
+  float thin = 0.0;
   // pure sky far from any cloud: nothing to evolve
   if (textureLod(uFields, p1 / PLATE, 3.0).b > 0.0) {
   vec2 d = vec2(0.0);
@@ -254,10 +298,19 @@ void main() {
   // with the sun behind, the face we see is lit by the sky alone
   ratio *= mix(vec3(1.0), vec3(0.6, 0.67, 0.8), uBehind);
   vec3 skyQ = sky(qb);
+  // The cloud as it now stands: its light over the sky. The evolving detail
+  // and the soft base reach a little past the baked cloudness, so the relight
+  // follows this alpha as well, or the halo outside the mask keeps the old
+  // light and stands off the darkened body as a second, ghostly rim.
+  float exc = dot(cl - skyQ, LUMA);
+  float aC = smoothstep(0.0, 0.1, exc);
   // relight the cloud's light, not the sky seen through its fringe
-  vec3 R = mix(vec3(1.0), ratio, m);
+  vec3 R = mix(vec3(1.0), ratio, max(m, aC));
   float solid = smoothstep(0.62, 0.95, textureLod(uCloud, qb, 4.0).b) * smoothstep(0.45, 0.9, mRaw);
-  vec3 lit = mix(skyQ + (cl - skyQ) * R, cl * R, solid);
+  // (only the cloud's light: where the plate dips a shade under the fitted
+  // sky there is no cloud to relight, and scaling it would lift a pale rim)
+  vec3 dC = cl - skyQ;
+  vec3 lit = mix(skyQ + max(dC, 0.0) * R + min(dC, 0.0), cl * R, solid);
 
   // Silver lining: thin edges facing the sun transmit it when it is behind.
   float thick = textureLod(uCloud, qb, 4.0).b;
@@ -270,31 +323,43 @@ void main() {
   float edge = smoothstep(0.0, 0.6, 1.0 - thick) * smoothstep(0.0, 0.02, length(g));
   float tex = clamp(dot(cl, LUMA) / max(dot(base, LUMA), 1e-3), 0.55, 1.5);
   float bright = smoothstep(0.2, 0.55, dot(base, LUMA));
-  lit += SUN * (uBehind * 1.3 * edge * facing * m * bright * tex);
+  // seated on the cloud's own alpha, eased in from its very edge, so the
+  // lining lies on the silhouette and never floats in the halo outside it
+  float seat = smoothstep(0.03, 0.22, exc);
+  lit += SUN * (uBehind * 1.3 * edge * facing * seat * bright * tex);
 
-  occ = m * max(clamp(dot(cl - skyQ, LUMA) / 0.12, 0.0, 1.0), solid);
-  col = max(col + lit - skyQ, 0.0);
+  occ = m * max(clamp(exc / 0.12, 0.0, 1.0), solid);
+  // The thin fringe round the silhouette (the cloud as it is seen now, not
+  // the baked mask) scatters the sun's light forward rather than hiding it.
+  // Blocking the aureole there left the fringe darker than the glowing sky
+  // beside it: a teal ghost of a second outline off the cloud.
+  thin = smoothstep(0.0, 0.04, exc) * (1.0 - smoothstep(0.08, 0.4, exc));
+  // the cloud's own light stays as photographed; only the sky through it deepens
+  col = max(skyN + lit - skyQ - (skyN - sky0) * occ, 0.0);
   }
   // aureole round the hidden sun, only where there is sky
-  float ds = length(px - uSunPx) / PLATE.x;
-  col += vec3(1.0, 0.93, 0.82) * uAure * (0.10 * exp(-ds * ds / 0.012) + 0.05 * exp(-ds / 0.25)) * (1.0 - occ);
+  float ds = length(pS - uSunPx) / PLATE.x;
+  float hide = clamp(occ - thin, 0.0, 1.0);
+  col += vec3(1.0, 0.93, 0.82) * uAure * (0.10 * exp(-ds * ds / 0.012) + 0.05 * exp(-ds / 0.25)) * (1.0 - hide + thin * 0.8);
 
   // --- wires, masts, gantry: per-pixel disparity, springs ---
-  vec2 pW = px / PLATE;
-  float dW = texture(uLayers, pW).b;
+  // one share of the pitch for the whole catenary: its masts and wires are
+  // one rigid frame, and a per-pixel share would kink the wires where the
+  // depth map steps
+  vec2 pW = project(s, ${DISP_W}) / PLATE;
   float swW = texture(uFields, pW).g;
   float sx = pW.x * 6.2832;
   float sy = pW.y * 6.2832;
   float sway = uSway.x * sin(sx * 1.3 + sy * 5.1 + 0.7)
              + uSway.y * sin(sx * 2.1 - sy * 7.3 + 2.1)
              + uSway.z * sin(sx * 0.7 + sy * 11.0 + 4.0);
-  vec2 qw = (px - uPar * (dW - ${DREF}) - vec2(0.18, 1.0) * sway * swW) / PLATE;
+  vec2 qw = (project(s, ${DISP_W}) - vec2(0.18, 1.0) * sway * swW) / PLATE;
   float aW = texture(uLayers, qw).g;
   vec3 fW = texture(uFg, qw).rgb;
   col = mix(col, fW, aW);
 
   // --- the signal ---
-  vec2 pn = px - uPar * (${DISP_N} - ${DREF});
+  vec2 pn = project(s, ${DISP_N});
   vec2 qn = pn / PLATE;
   float aN = texture(uLayers, qn).r;
   vec3 fN = texture(uFg, qn).rgb;
@@ -374,8 +439,10 @@ function imageTexture(gl, img, { srgb = false, mips = true } = {}) {
   if (mips) gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  // mirrored: under the pitch the top corners may look a little past the
+  // photograph's sides, where its sky, truss and cloud go on in reflection
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.MIRRORED_REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.MIRRORED_REPEAT);
   return t;
 }
 
@@ -437,7 +504,8 @@ export async function createNatsu(host, { embedded = false } = {}) {
   const tiltRaw = q.get("tilt");
   const tiltQ = tiltRaw ? tiltRaw.split(",").map(Number).filter(Number.isFinite) : null;
   const lampQ = num("lamp");
-  const frozen = tQ != null || lightQ != null || (tiltQ && tiltQ.length > 0);
+  const pitchQ = num("pitch");
+  const frozen = tQ != null || lightQ != null || pitchQ != null || (tiltQ && tiltQ.length > 0);
   const still = frozen || q.get("still") === "1";
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -470,9 +538,10 @@ export async function createNatsu(host, { embedded = false } = {}) {
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
 
-  // Layout, in css px of the box: a 3:2 print on the paper (4:5 crop on a
-  // narrow screen, kept on the signal and the tower).
-  const L = { x: 0, y: 0, w: 1, h: 1, view: [0.04, 0.04, 0.92, 0.92] };
+  // Layout: full bleed. The plate is fitted so the top row of the frame (the
+  // widest under the pitch) stays on the photograph; on a narrow screen the
+  // frame is kept on the signal and the tower.
+  const L = { x: 0, y: 0, w: 1, h: 1, aspect: 1.6, S: 791, cx: PW / 2 };
   let sceneT = null;
   let filmT = null;
   let dirty = true;
@@ -480,41 +549,12 @@ export async function createNatsu(host, { embedded = false } = {}) {
   let lastBox = null;
   const layout = (W, H, dpr) => {
     lastBox = [W, H, dpr];
-    let aspect = 1.5;
-    if (embedded) {
-      Object.assign(L, { x: 0, y: 0, w: W, h: H });
-      aspect = W / H;
-    } else if (W / H < 0.9) {
-      aspect = 0.8;
-      const side = Math.max(16, Math.round(W * 0.06));
-      let w = W - side * 2;
-      let h = w / aspect;
-      if (h > H * 0.74) {
-        h = H * 0.74;
-        w = h * aspect;
-      }
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - 12 });
-    } else {
-      const side = Math.max(24, W * 0.07);
-      const w = Math.min(W - side * 2, H * 0.78 * 1.5);
-      const h = w / 1.5;
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - 12 });
-    }
-    // View inside the plate (uv), with a margin for the parallax.
-    const plateAspect = PW / PH;
-    let vw = 0.92;
-    let vh = (vw * plateAspect) / aspect;
-    if (vh > 0.92) {
-      vh = 0.92;
-      vw = (vh * aspect) / plateAspect;
-    }
-    const cx = aspect < 1.2 ? 0.38 : 0.5;
-    const x0 = clamp(cx - vw / 2, 0.04, 0.96 - vw);
-    L.view = [x0, 0.5 - vh / 2, vw, vh];
-    L.x = Math.round(L.x * dpr) / dpr;
-    L.y = Math.round(L.y * dpr) / dpr;
-    L.w = Math.round(L.w * dpr) / dpr;
-    L.h = Math.round(L.h * dpr) / dpr;
+    Object.assign(L, { x: 0, y: 0, w: W, h: H });
+    const aspect = W / H;
+    L.aspect = aspect;
+    L.cx = aspect < 1.2 ? PW * 0.38 : PW / 2;
+    const half = Math.min(L.cx, PW - L.cx) - EDGE;
+    L.S = Math.min(half / aspect, (PH - 2 * EDGE) / 2);
     L.pw = Math.max(2, Math.round(L.w * dpr));
     L.ph = Math.max(2, Math.round(L.h * dpr));
     L.rw = Math.max(2, Math.round(L.pw * scale));
@@ -533,7 +573,6 @@ export async function createNatsu(host, { embedded = false } = {}) {
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
 
   // --- input ---
-  const inPrint = (p) => p.x >= L.x && p.x <= L.x + L.w && p.y >= L.y && p.y <= L.y + L.h;
   let holding = false;
   let keyHold = false;
   let tilt = null; // device orientation, -1..1
@@ -562,7 +601,6 @@ export async function createNatsu(host, { embedded = false } = {}) {
     } else if (D) window.addEventListener("deviceorientation", onOrient);
   };
   stage.on("down", (p, e) => {
-    if (!inPrint(p)) return;
     holding = true;
     if (e?.pointerType === "touch") askOrient();
   });
@@ -584,8 +622,13 @@ export async function createNatsu(host, { embedded = false } = {}) {
 
   // --- state ---
   let time = tQ != null ? clamp(tQ, 0, 1) * DUR : 0;
-  let light = lightQ != null ? clamp(lightQ, 0, 1) : 0;
-  let lightV = 0;
+  // look: the camera's pitch as a share of PITCH_MAX; hold: 0..1 on a spring
+  const lookOf = (cy) => PITCH_REST - ((PITCH_HI - PITCH_LO) / 2) * cy;
+  let look = pitchQ != null ? clamp(pitchQ / 35, 0, 1) : lookOf(cam.y);
+  const lightOf = (lk) => smooth(SUN_FROM, 1, lk);
+  let light = lightQ != null ? clamp(lightQ, 0, 1) : lightOf(look);
+  let hold = 0;
+  let holdV = 0;
   // wire springs: x, v per mode
   const springs = [
     { w: 2 * Math.PI * 0.43, x: 0, v: 0, amp: 1.0 },
@@ -630,8 +673,13 @@ export async function createNatsu(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, tex[k]);
       gl.uniform1i(u[uni[i]], i);
     });
-    gl.uniform4f(u.uView, ...L.view);
-    gl.uniform2f(u.uPar, cam.x * PAR, cam.y * PAR * 0.6);
+    // the camera: pitch, and the lens shift that keeps the near layer's top
+    // row on the photograph's top edge
+    const th = look * PITCH_MAX;
+    const an = (Math.sin(th) * Math.cos(th)) / FOCAL;
+    const Cy = EDGE + (L.S * (1 - KEEP * an)) / (1 - an);
+    gl.uniform4f(u.uProj, L.aspect, L.S, Cy, L.cx);
+    gl.uniform4f(u.uCam, th, FOCAL, 0.15 + 0.3 * cam.x, KEEP);
     const g = 1 - Math.pow(1 - clamp(time / DUR, 0, 1), 1.6);
     gl.uniform1f(u.uGrow, g);
     fillBulges(g);
@@ -756,14 +804,17 @@ export async function createNatsu(host, { embedded = false } = {}) {
       cam.x += (tx - cam.x) * k;
       cam.y += (ty - cam.y) * k;
 
-      // the sun: a critically-ish damped spring toward held / let go
+      // the hold: a critically-ish damped spring toward held / let go; it
+      // tips the look all the way up, and the sun comes round with the look
       const goal = holding || keyHold ? 1 : 0;
       const w = 2.6;
       const z = 0.92;
-      const acc = w * w * (goal - light) - 2 * z * w * lightV;
-      lightV += acc * dt;
-      light += lightV * dt;
-      light = clamp(light, -0.02, 1.02);
+      const acc = w * w * (goal - hold) - 2 * z * w * holdV;
+      holdV += acc * dt;
+      hold += holdV * dt;
+      hold = clamp(hold, -0.02, 1.02);
+      look = lookOf(cam.y) + (1 - lookOf(cam.y)) * hold;
+      light = clamp(lightOf(look), 0, 1);
 
       // wind on the wires: two incommensurate gust sines, and a nudge when the
       // pointer sweeps fast across the print
@@ -795,7 +846,7 @@ export async function createNatsu(host, { embedded = false } = {}) {
         grainSeed = (grainSeed + 1) % 997;
       }
     }
-    const moving = !frozen && (!reduce || Math.abs(lightV) > 1e-4 || age < 0.5);
+    const moving = !frozen && (!reduce || Math.abs(holdV) > 1e-4 || age < 0.5);
     if (!dirty && !moving) return;
     dirty = false;
     draw(expo, fade, lamps);
