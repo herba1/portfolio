@@ -27,13 +27,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // polariser deepening the open blue, blacks barely lifted), then its sky is
 // graded to a June print: the cumulus on a warm shoulder just under paper
 // white with skylight-blue shade, and a clear sky that deepens to cobalt
-// towards the zenith (see SKY_GRADE).
+// towards the zenith (see SKY_GRADE). Last comes the finish (see FINISH):
+// a thin red-orange halation ring where bright sky meets a structure, a
+// little scan softness and the print's own grain, so the film survives the
+// grade.
 //
 // Drag to shoot prints where you point. Long-press to sweep the table.
 // Query: ?prints=N&seed=S lays down a pre-built joiner of N prints;
 // ?t=seconds freezes the newest print that long into its fall; ?sweep=seconds
 // holds a long-press sweep; ?ev= and any film parameter override the film;
-// ?grade=0..1 and the other SKY_GRADE keys override the sky grade.
+// ?grade=0..1 and the other SKY_GRADE keys override the sky grade, and the
+// FINISH keys (?grainAmp=, ?halation=, ?mtf= ...) the finish.
 
 const ASSET = "/lab/joiner/";
 const THMAX = (120 * Math.PI) / 180; // disk rim, from the zenith
@@ -503,6 +507,126 @@ void main() {
   outColor = vec4(clamp(outc, 0.0, 1.0), 1.0);
 }`;
 
+// The finish, the last pass of each print: what makes it an instant print
+// rather than a digital crop. The sky grade above is a smooth curve on a
+// grain-free luminance, so whatever grain the film laid down is gone from the
+// sky by the time it is graded; the emulsion's character goes back on here,
+// after it, in three steps:
+//   - halation: light from a bright cloud or open sky that crosses into a
+//     dark structure on the matte scatters back off the film base and blooms
+//     as a thin red-orange ring just inside the structure's edge; on the
+//     bright side the same edge loses its cold paper white to a warm one, so
+//     the rim round a roofline reads as the film's ring, not a matte fringe;
+//   - scan MTF: a slight, isotropic softening (the same kernel for every
+//     channel, so no RGB split), the way edges bleed in an SX-70 print;
+//   - grain: the print's own seed, clumped over a couple of texels, a
+//     density grain that rides on each channel's own value (hue kept, no
+//     chroma speckle) and is strongest in the midtones: about four code
+//     values in open sky, less in the deepest cobalt and on the cloud tops.
+const FINISH = {
+  halation: 0.55, // ring strength on the dark side (share of the bright edge's light)
+  halationEdge: 0.5, // warming of the bright side of the same edge
+  halationRadius: 0.009, // ring radius, share of the print width (about 3.5 texels)
+  mtf: 0.55, // share of the scan blur mixed in
+  mtfRadius: 0.0022, // scan blur radius, share of the print width
+  grainAmp: 9, // code values of grain at the midtone peak
+};
+const HALO = [1, 0.3, 0.07]; // halation colour, linear: red-orange off the base
+
+const FIN = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uImg;  // the graded print (sRGB)
+uniform sampler2D uRaw;  // the camera's view; alpha = sky matte
+uniform vec3 uHal;       // dark-side strength, bright-side warming, radius (uv)
+uniform vec2 uMtf;       // strength, radius (uv)
+uniform float uGrain;    // code values at the midtone peak
+uniform float uSeed;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const vec3 HALO = ${vec3(HALO)};
+
+vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+// zero-mean, unit-variance noise on the lattice
+float gnoise(vec2 p) {
+  return (hash12(p) + hash12(p + 17.31) + hash12(p + 41.7) - 1.5) * 2.0;
+}
+// clumped: value noise over a lattice a couple of texels across
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(gnoise(i), gnoise(i + vec2(1.0, 0.0)), f.x), mix(gnoise(i + vec2(0.0, 1.0)), gnoise(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void main() {
+  vec3 c0 = toLin(texture(uImg, vUv).rgb);
+  float m0 = texture(uRaw, vUv).a;
+
+  // Scan MTF: a little binomial blur, mixed in.
+  vec3 bl = 4.0 * c0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.785398;
+    vec2 o = vec2(cos(a), sin(a)) * uMtf.y;
+    bl += (i % 2 == 0 ? 2.0 : 1.0) * toLin(texture(uImg, vUv + (i % 2 == 0 ? o : o * 1.4142)).rgb);
+  }
+  bl /= 16.0;
+  vec3 lin = mix(c0, bl, uMtf.x);
+
+  // Halation: the light of the bright sky beside a structure's edge
+  // (gathered over two tight rings), how much of the rings is sky, and how
+  // much is structure.
+  float Y0 = dot(c0, LUMA);
+  float sGlow = 0.0;
+  float sSky = 0.0;
+  float sw = 0.0;
+  for (int j = 1; j <= 3; j++) {
+    float r = uHal.z * (j == 1 ? 0.45 : (j == 2 ? 0.9 : 1.5));
+    float w = j == 1 ? 1.0 : (j == 2 ? 0.6 : 0.35);
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * 0.785398 + float(j) * 0.39;
+      vec2 q = vUv + vec2(cos(a), sin(a)) * r;
+      float mq = texture(uRaw, q).a;
+      sGlow += w * mq * dot(toLin(texture(uImg, q).rgb), LUMA);
+      sSky += w * mq;
+      sw += w;
+    }
+  }
+  sSky /= sw;
+  // the brightness of the sky across the edge, and how near the edge is
+  float glow = smoothstep(0.08, 0.6, sGlow / max(sSky * sw, 1e-4));
+  float edgeIn = (1.0 - m0) * smoothstep(0.02, 0.4, sSky) * glow;
+  float edgeOut = m0 * smoothstep(0.04, 0.4, 1.0 - sSky) * smoothstep(0.25, 0.7, Y0);
+  // structure side: the ring. On a dark wall it is light added, red-orange;
+  // on a pale rim (the plate's own edge, which would read as a white matte
+  // fringe) the same ring is a filter that takes the white over to it.
+  float darkW = 1.0 - smoothstep(0.04, 0.35, Y0);
+  lin += uHal.x * edgeIn * darkW * glow * 0.8 * HALO;
+  lin *= mix(vec3(1.0), vec3(1.0, 0.7, 0.5), clamp(uHal.x * edgeIn * (1.0 - darkW) * 1.6, 0.0, 1.0));
+  // sky side: the white along the same edge warms a little
+  lin *= mix(vec3(1.0), vec3(1.0, 0.85, 0.72), clamp(uHal.y * edgeOut, 0.0, 1.0));
+
+  vec3 c = pow(clamp(lin, 0.0, 1.0), vec3(1.0 / 2.2));
+
+  // Grain: mostly shared across the channels (density), a little each its own
+  // (dye clouds), riding on each channel's value so the hue holds.
+  vec2 fc = gl_FragCoord.xy + uSeed * vec2(1.618, 2.414);
+  float gs = 0.9 * vnoise(fc / 1.9) + 0.3 * gnoise(fc);
+  vec3 gc = vec3(gnoise(fc + 3.1), gnoise(fc + 7.7), gnoise(fc + 11.3));
+  vec3 n = 0.92 * gs + 0.3 * gc;
+  float L = dot(c, LUMA);
+  float wL = 0.22 + 0.78 * exp(-pow((L - 0.45) / 0.2, 2.0));
+  float mx = max(c.r, max(c.g, c.b));
+  vec3 fch = mix(vec3(0.25), vec3(1.0), c / max(mx, 1e-3));
+  c += n * fch * wL * uGrain / 255.0;
+  outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
 // A print on the table: paper, image, and its shadow, drawn in one quad.
 const PRINT_VS = `#version 300 es
 in vec2 aPos;
@@ -685,6 +809,11 @@ export async function createJoiner(host, { embedded = false } = {}) {
     const v = q.get(key);
     if (v != null && v !== "" && Number.isFinite(+v)) grade0[key] = +v;
   }
+  const fin0 = { ...FINISH };
+  for (const key of Object.keys(FINISH)) {
+    const v = q.get(key);
+    if (v != null && v !== "" && Number.isFinite(+v)) fin0[key] = +v;
+  }
   const sunDir = (() => {
     const az = (grade0.sunAz * Math.PI) / 180;
     const el = (grade0.sunEl * Math.PI) / 180;
@@ -790,6 +919,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
   const view = compile(gl, VERT, VIEW);
   const printP = compile(gl, PRINT_VS, PRINT_FS);
   const gradeP = compile(gl, VERT, GRADE);
+  const finP = compile(gl, VERT, FIN);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
@@ -813,6 +943,8 @@ export async function createJoiner(host, { embedded = false } = {}) {
   let rawLinear = true;
   let devTex = null; // the film's output, before the sky grade
   let devFbo = null;
+  let gradeTex = null; // the graded print, before the finish
+  let gradeFbo = null;
 
   const allocRaw = () => {
     if (rawTex) gl.deleteTexture(rawTex);
@@ -842,6 +974,17 @@ export async function createJoiner(host, { embedded = false } = {}) {
     devFbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, devFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, devTex, 0);
+    if (gradeTex) gl.deleteTexture(gradeTex);
+    if (gradeFbo) gl.deleteFramebuffer(gradeFbo);
+    gradeTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, gradeTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, cell, cell, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gradeFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, gradeFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, gradeTex, 0);
     gl.bindTexture(gl.TEXTURE_2D, rawTex);
     for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -988,8 +1131,8 @@ export async function createJoiner(host, { embedded = false } = {}) {
       devFbo,
     );
 
-    // the sky grade, into the print
-    gl.bindFramebuffer(gl.FRAMEBUFFER, p.fbo);
+    // the sky grade
+    gl.bindFramebuffer(gl.FRAMEBUFFER, gradeFbo);
     gl.viewport(0, 0, cell, cell);
     gl.disable(gl.BLEND);
     gl.useProgram(gradeP.p);
@@ -1017,6 +1160,22 @@ export async function createJoiner(host, { embedded = false } = {}) {
     // feather radius, plate pixels to print uv (the print spans 2 uHalf / F radians)
     gl.uniform1f(g.uFeather, (grade0.feather * PLATE_RAD * F) / (img / f));
     gl.uniform1f(g.uSeed, p.grain);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // the finish (halation, scan softness, grain), into the print
+    gl.bindFramebuffer(gl.FRAMEBUFFER, p.fbo);
+    gl.useProgram(finP.p);
+    const fu = finP.u;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, gradeTex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, rawTex);
+    gl.uniform1i(fu.uImg, 0);
+    gl.uniform1i(fu.uRaw, 1);
+    gl.uniform3f(fu.uHal, fin0.halation, fin0.halationEdge, fin0.halationRadius);
+    gl.uniform2f(fu.uMtf, fin0.mtf, fin0.mtfRadius);
+    gl.uniform1f(fu.uGrain, fin0.grainAmp);
+    gl.uniform1f(fu.uSeed, p.grain);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindVertexArray(null);
     gl.activeTexture(gl.TEXTURE0);
@@ -1359,7 +1518,10 @@ export async function createJoiner(host, { embedded = false } = {}) {
       if (rawFbo) gl.deleteFramebuffer(rawFbo);
       if (devTex) gl.deleteTexture(devTex);
       if (devFbo) gl.deleteFramebuffer(devFbo);
+      if (gradeTex) gl.deleteTexture(gradeTex);
+      if (gradeFbo) gl.deleteFramebuffer(gradeFbo);
       gl.deleteProgram(view.p);
+      gl.deleteProgram(finP.p);
       gl.deleteProgram(gradeP.p);
       gl.deleteProgram(printP.p);
       gl.deleteBuffer(quad);
