@@ -1,0 +1,11 @@
+{
+  "title": "Interruptions",
+  "description": "A plotter drawing on warm paper after Vera Molnar: a square of fifty by fifty short ink lines of one length, each turned a little from the vertical, so the sheet reads as an ordered weave, with irregular holes where lines were never drawn. Pass the pointer over the sheet and the lines it touches are erased, leaving faint ghosts of themselves; the pen comes back for them like a plotter, one line at a time, travelling to the nearest next, until the hole closes along a path. Drag across it and the variance rises under the hand all the way, so the weave turns into a tangle of lines at any angle, pushed off the grid, then each line springs back to its place in the drawing.",
+  "tags": ["Canvas", "Generative", "Drawing"],
+  "status": "draft",
+  "createdAt": "2026-11-06T14:00:00.000Z",
+  "intent": "From Vera Molnar, Interruptions (1968-69), https://www.sothebys.com/en/articles/vera-molnar-the-grande-dame-of-generative-art : one rule and a small variance make a whole drawing. The pointer is the interruption.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.4], "to": [0.6, 0.6] },
+  "sources": ["https://www.sothebys.com/en/articles/vera-molnar-the-grande-dame-of-generative-art"]
+}

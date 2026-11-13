@@ -1,0 +1,35 @@
+{
+ "source": "Pexels 5124202, 84LENS (@84lens)",
+ "start": 24,
+ "frames": 232,
+ "fade": 24,
+ "block": 8,
+ "blocks": 29,
+ "fps": 24.0,
+ "crop": [
+  0,
+  0,
+  1920,
+  1080
+ ],
+ "video": [
+  1280,
+  720
+ ],
+ "blockSize": [
+  960,
+  540
+ ],
+ "atlas": [
+  4,
+  7
+ ],
+ "atlases": [
+  "blocks-0.webp",
+  "blocks-1.webp"
+ ],
+ "encoding": "oklab-l12",
+ "ab": 0.15,
+ "stabilised": true,
+ "maxShift": 2.888
+}

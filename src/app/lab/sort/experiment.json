@@ -1,0 +1,76 @@
+{
+  "title": "Sort",
+  "description": "A summer photograph of a level crossing with one wave of it pixel-sorted: the verge's grass begins to sort in short runs and, as it rises, the runs lengthen into strips until out of it the grass climbs as a staircase of straight sorted strips, each a hard-edged rectangle at its own row, stepping right as it rises until the stack leans over into a crest and a lip hangs down from its end; every strip is one luminance ramp from dark green to its brightest pixels, dark low under the lean and turning white-gold at the crest, with a few glints breaking off the lit ends, while every pole and sign stands whole in front of it. Brush anywhere and the picture sorts under your hand, live on the GPU; the longer and harder you brush, the longer the runs grow and the higher the stack climbs. Press and hold and the sort runs backwards, every pixel sliding home.",
+  "tags": [
+    "generative",
+    "WebGL",
+    "Photo",
+    "Pixel sort"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:00:00.000Z",
+  "intent": "After Kim Asendorf's ASDF Pixel Sort (2010, https://github.com/kimasendorf/ASDFPixelSort) and herb's generative reference 2 (a street photo smeared into horizontal strips that climb in a staircase like grass). The print's 2400x1600 is cut into bands 4-7 px tall; each is sorted once along its centre row and that row is written down the whole band, so every run is a solid rectangle. Spans may only start on grass and run on, within a reach and an ASDF luminance interval that both grow with the brush, ending once they have run 30% of their reach through anything but vegetation, or at a silhouette in the depth map (Depth Anything V2) or a depth step, so they never cross a pole; sorted by luminance with every green pixel ahead of every other, so each run is one clean ramp from dark green to bright yellow-green and only then its few other pixels, by odd-even transposition in WebGL2 fragment passes; outside a span the same network orders pixels by home index, so erasing the mask sorts every pixel back home. The wave is geometry and is never bent: the verge is the root, a graded zone about 190 px tall that the stack grows out of: at its foot, just above the rails, the photo stays whole but for short runs sorted in place along its grass, cut into windows of the band's own vegetation so they never cross a trunk, a post or a cabinet; moving up, the windows lengthen and more of each band sorts, and lifted strips start out of each row's own grass, at first short and few, then longer and bridging the gaps, until the rows join the stack, so the lower and left edges are ragged and follow the real grass and the tree and fence stay photo (the zone's grass bands are sorted again, whole, on rows of their own for the stack to read); above it the stack is cut into its own rows, mostly hairlines with an occasional chunky block (2 to 24 device px), and each row is a straight, opaque strip from the stack's inner edge, both its ends stepped right as the square of its height, so the upper third leans well out past the face, each carrying one long sorted run of a single verge band stretched to the row's whole length, with no sky between rows. No outline is drawn: a row is given only a reach, and it ends where its last whole run ends, so the outer edge is ragged row by row and is the sort's own. The stack is one woven sheet that leans over as it climbs; the crest's rows run on out over the top, and below them the lip hangs free and curls back in over a hollow of open sky that opens downward; the road and the rails stay clear, and a soft holdout matte keeps the poles, crossbucks, lamps and signs in front: baked at the print's full 2400x1600 from the depth map, pale cabinets, housings, stumps and scraps dropped so the rows run on behind them, refined against the photo's own edges with a colour guided filter and mixed over the strips per device pixel, never thresholded. The stack climbs with the mask over the verge: half the amount lifts it half way, tapering, with no crest. Each row is lit by the sort order: every row reads a long stretch of its run, at least three quarters of the ramp, so the whole gradient shows inside it, dark green at the stack's inner edge, bright yellow-green and on towards near-white at its outer end (the grass first, then only the bright half of what the run carried past it, so the ramp never drops back to dark); its facing (low under the lean, high at the crest and the lip's shoulder) tips that stretch and shades the row's head, and each row slides it darker or brighter by its own offset so neighbours differ. Across the upper third each row's tail lands at its end as a block gone over whole to white, the tall rows there blowing out into a broken column of glowing blocks, the spine, and tall rows (16-24 device px) all down the face blow out at their ends too, each block ramping from the row's yellow-green into white; the run's grey, beige or blue pixels are graded onto the green ramp by luminance so the sheet stays one green, and glint tiles break off strip ends at every height, most at the crest.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.25,
+      0.3
+    ],
+    "to": [
+      0.4,
+      0.22
+    ]
+  },
+  "probe": [
+    {
+      "idle": 1500
+    },
+    {
+      "drag": [
+        [
+          0.2,
+          0.3
+        ],
+        [
+          0.42,
+          0.26
+        ]
+      ],
+      "ms": 2400
+    },
+    {
+      "idle": 1200
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.6
+        ],
+        [
+          0.5,
+          0.6
+        ]
+      ],
+      "ms": 2200
+    },
+    {
+      "idle": 1500
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/railroad-crossing-with-barriers-and-warning-signs-b3Ow_DxiW7M",
+      "file": "https://images.unsplash.com/photo-1776586264901-f41bb46ebb3f?w=6000&fit=max&q=90&fm=jpg",
+      "author": "XS Xue (@xxs11)",
+      "licence": "Unsplash License",
+      "note": "6000x4000 original, shown at 2400x1600; depth from Depth Anything V2 Small via tools/depth/depth_hr.py, 1200x800."
+    },
+    "https://github.com/kimasendorf/ASDFPixelSort",
+    "https://en.wikipedia.org/wiki/Odd%E2%80%93even_sort"
+  ]
+}

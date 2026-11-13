@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+  <body style="margin: 0; background: #888">
+    <!-- Served by poles_render.mjs. Renders Poly Haven `modular_electricity_poles`
+         preset 01 (CC0), scaled to an 11.5 m pole and lit by the field plate's
+         HDRI, from the train's camera at each key position along the track. -->
+    <script type="importmap">
+      { "imports": { "three": "/three.module.js", "three/addons/": "/jsm/" } }
+    </script>
+    <script type="module">
+      import * as THREE from "three";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+
+      const cfg = await (await fetch("/jobs.json")).json();
+      const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1);
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+      const scene = new THREE.Scene();
+      const hdr = await new RGBELoader().loadAsync("/env.hdr");
+      hdr.mapping = THREE.EquirectangularReflectionMapping;
+      scene.environment = new THREE.PMREMGenerator(renderer).fromEquirectangular(hdr).texture;
+
+      const gltf = await new GLTFLoader().loadAsync("/model/modular_electricity_poles_2k.gltf");
+      const pre = cfg.preset;
+      const kids = gltf.scene.children.filter((c) => c.name.startsWith(pre) && !cfg.exclude.includes(c.name.slice(pre.length)));
+      const ox = kids.find((c) => c.name === pre + "pole").position.x;
+      const inner = new THREE.Group();
+      for (const c of kids) {
+        const k = c.clone();
+        k.position.x -= ox;
+        inner.add(k);
+      }
+      // Model x (the crossarm) runs in depth, perpendicular to the line.
+      inner.rotation.y = cfg.rot;
+      const outer = new THREE.Group();
+      outer.add(inner);
+      outer.scale.setScalar(cfg.scale);
+      scene.add(outer);
+      outer.updateMatrixWorld(true);
+
+      window.__out = [];
+      for (const j of cfg.jobs) {
+        const { W, H } = j;
+        renderer.setSize(W, H);
+        // The camera stands j.px * D along the track from the pole and looks
+        // square out at it, level; the frustum covers the cell in image-plane
+        // units (tan), so the sprite is exact for a pole at j.px. Three's
+        // screen right is world -x: world x is minus the engine's track axis.
+        const n = 0.25;
+        const cam = new THREE.PerspectiveCamera(30, W / H, n, 400);
+        cam.position.set(j.px * cfg.D, cfg.camH, -cfg.D);
+        cam.lookAt(j.px * cfg.D, cfg.camH, 0);
+        cam.updateMatrixWorld(true);
+        cam.projectionMatrix.makePerspective((j.px + j.l) * n, (j.px + j.r) * n, j.t * n, j.b * n, n, 400);
+        cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+        const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType, samples: 8 });
+        const rt2 = new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType });
+        renderer.setRenderTarget(rt);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear();
+        renderer.render(scene, cam);
+        renderer.setRenderTarget(rt2);
+        const gl = renderer.getContext();
+        const props = renderer.properties;
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, props.get(rt).__webglMultisampledFramebuffer || props.get(rt).__webglFramebuffer);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, props.get(rt2).__webglFramebuffer);
+        gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, props.get(rt2).__webglFramebuffer);
+        const buf = new Float32Array(W * H * 4);
+        gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, buf);
+        rt.dispose();
+        rt2.dispose();
+        await fetch("/out/" + j.name, { method: "POST", body: buf });
+      }
+      window.__done = true;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "title": "Eclipse",
+  "description": "A pale plaster wall in the dappled shade of a tree, and a small sun. Slide the moon across it and every soft spot of light on the wall becomes the same crescent at once, because each gap between the leaves was always a pinhole image of the sun. At totality the wall goes blue and the spots become faint rings.",
+  "tags": ["WebGL", "Light", "Optics"],
+  "status": "draft",
+  "createdAt": "2026-11-06T04:30:00.000Z",
+  "intent": "Factory run 2, the only idea of 134 to pass both critics. Reveal that dapples are images of the sun.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.62, 0.5] },
+  "probe": [
+    { "idle": 1500 },
+    { "drag": [[0.25, 0.5], [0.5, 0.52]], "ms": 2400 },
+    { "idle": 700 },
+    { "drag": [[0.5, 0.52], [0.53, 0.52]], "ms": 900 },
+    { "idle": 1500 },
+    { "drag": [[0.53, 0.52], [0.8, 0.5]], "ms": 1800 },
+    { "idle": 1600 }
+  ],
+  "sources": ["https://en.wikipedia.org/wiki/Pinhole_camera#Solar_eclipses", "https://en.wikipedia.org/wiki/Solar_eclipse"]
+}

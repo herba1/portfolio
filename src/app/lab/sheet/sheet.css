@@ -1,0 +1,325 @@
+.sh-root {
+  --sh-ground: #f2f0eb;
+  --sh-ink: #16140f;
+  --sh-ink-2: #6f6b63;
+  --sh-rule-color: rgb(22 20 15 / 0.1);
+  /* Body sits at 460 on the ladder and the quiet label rung at 430; the
+     scale has no named rung for either. */
+  --font-weight-body: 460;
+  --font-weight-quiet: 430;
+  /* The credits' grid: labels set flush right against an axis, values flush
+     left from it, the way a sleeve sets its credits. The sheet's head hangs
+     on the same axis. */
+  /* Wide enough for the longest name in the personnel, "George Harrison". */
+  --sh-label: 104px;
+  --sh-gutter: 16px;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--sh-ground);
+  color: var(--sh-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sh-root:not([data-ready]) .sh-stage {
+  visibility: hidden;
+}
+
+.sh-stage {
+  position: relative;
+}
+
+/* Just the screen: a rounded rectangle of glass, black underneath, so that
+   when the page steps back there is somewhere for it to step back into. */
+.sh-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 390px;
+  height: 844px;
+  transform: scale(var(--sh-k, 1));
+  transform-origin: 0 0;
+  border-radius: 55px;
+  overflow: hidden;
+  isolation: isolate;
+  background: #000;
+  box-shadow:
+    0 0 0 0.5px rgb(30 24 14 / 0.16),
+    0 2px 4px rgb(30 24 14 / 0.04),
+    0 24px 64px -16px rgb(30 24 14 / 0.22);
+}
+
+/* ---- the page behind --------------------------------------------------- */
+
+.sh-page {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 55px;
+  background: #fff;
+  transform-origin: 50% 0;
+}
+
+.sh-dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sh-album {
+  padding: 64px 0 0;
+}
+
+.sh-cover {
+  display: block;
+  width: 264px;
+  height: 264px;
+  margin: 0 auto;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.08),
+    0 12px 32px -12px rgb(30 24 14 / 0.36);
+  pointer-events: none;
+}
+
+/* The record, on the credits' own grid and side margins: the sheet rises
+   over the front of the sleeve its credits are the back of. */
+.sh-credits.sh-record {
+  margin-top: 24px;
+  padding: 0 20px;
+}
+
+/* ---- the clock ----------------------------------------------------------
+   The only thing left of the status bar, set twice on top of itself: the
+   dark copy is clipped to the page, the white one to the black band above
+   the page's edge, both cut along that edge as it moves. Whatever part of
+   the glyphs the edge has passed is white on black, the rest is ink on the
+   page, so the time never sits half on the wrong ground. */
+
+.sh-clock {
+  position: absolute;
+  top: 16px;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 20px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.sh-clock > span {
+  position: absolute;
+  inset: 0;
+  color: var(--sh-ink);
+}
+
+.sh-clock > [data-ink="light"] {
+  color: #fff;
+  clip-path: inset(0 0 100% 0);
+}
+
+/* ---- the sheet --------------------------------------------------------- */
+
+.sh-sheet {
+  position: absolute;
+  top: 64px;
+  left: 0;
+  z-index: 3;
+  width: 390px;
+  height: 900px; /* full height plus room to rubber-band above full */
+  border-radius: 14px 14px 0 0;
+  background: #fff;
+  box-shadow:
+    0 -0.5px 0 rgb(22 20 15 / 0.08),
+    0 -8px 32px rgb(22 20 15 / 0.08);
+  touch-action: none;
+  cursor: grab;
+  outline: none;
+}
+
+.sh-root[data-dragging] .sh-sheet {
+  cursor: grabbing;
+}
+
+.sh-grabber {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 36px;
+  height: 5px;
+  margin-left: -18px;
+  border-radius: 3px;
+  background: #d6d3cd;
+}
+
+/* Side two's first row: the grabber's 16pt band, then one line of the pitch,
+   on the page's own axis and side margins. At half the sheet's edge sits 8pt
+   under side one's total, so this row lands exactly one empty line under it,
+   where the page's next group would. */
+.sh-credits.sh-head {
+  --sh-rule: 0;
+  position: relative;
+  height: 40px;
+  padding: 16px 20px 0;
+}
+
+.sh-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--sh-rule-color);
+  opacity: var(--sh-rule);
+}
+
+.sh-body {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  height: 740px; /* 844 - 64 - 40: the viewport at full, ending at the screen's foot */
+  overflow: hidden;
+  /* The last line fades into the screen's rounded foot instead of being cut
+     by it, wherever the sheet stands: --sh-foot is how much of the body is
+     on screen. */
+  --sh-foot: 100%;
+  mask-image: linear-gradient(to bottom, #000 calc(var(--sh-foot) - 24px), transparent var(--sh-foot));
+}
+
+/* No top padding: the first line under the head is side two's second
+   title, on the next line of the pitch. */
+.sh-scroll {
+  padding: 0 20px 64px;
+}
+
+/* ---- the credits, set like the back of a sleeve ------------------------ */
+
+.sh-credits {
+  display: grid;
+  grid-template-columns: var(--sh-label) minmax(0, 1fr);
+  column-gap: var(--sh-gutter);
+  align-items: baseline;
+  margin: 0;
+}
+
+/* One 24px line pitch through the whole block; a new group is one empty
+   line, nothing else. */
+.sh-credits > [data-group] {
+  margin-top: 24px;
+}
+
+/* Labels take the 24px pitch too, so a label on a line of its own (a group's
+   name) still advances the block by exactly one line. */
+.sh-k {
+  text-align: right;
+  line-height: 24px;
+  white-space: nowrap;
+  color: var(--sh-ink);
+  font-weight: var(--font-weight-quiet);
+}
+
+/* The personnel spans both columns and re-uses them through a subgrid, so the
+   names hang on the same axis as every other label. */
+.sh-personnel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  margin: 0;
+}
+
+.sh-personnel > .sh-credits {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.sh-v {
+  margin: 0;
+  min-width: 0;
+  font-weight: var(--font-weight-body);
+  text-wrap: pretty;
+}
+
+/* A value with no label of its own: side two carrying on, a song's title
+   over its credits. */
+.sh-cont {
+  grid-column: 2;
+}
+
+/* The record's name: the same size and line as every value, a step up the
+   weight ladder. */
+.sh-v[data-strong] {
+  font-weight: var(--font-weight-strong);
+}
+
+/* Titles hang: a turnover line steps in, so every title starts flush on the
+   axis and nothing else does. */
+.sh-side li > span:first-child {
+  margin: 0;
+  padding-left: 16px;
+  text-indent: -16px;
+}
+
+/* Sleeve notes: no space between paragraphs, an indent instead, so the
+   column keeps one unbroken 24px rhythm. */
+.sh-note {
+  margin: 0;
+}
+
+.sh-note + .sh-note {
+  text-indent: 16px;
+}
+
+.sh-side {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A title that turns over carries its running time down to its last line,
+   the way a contents page sets a broken entry, so the turnover reads as one
+   title running on to its time and not as a row out of line. */
+.sh-side li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: last baseline;
+}
+
+.sh-dur {
+  justify-self: end;
+  text-align: right;
+}
+
+/* The side's running time, totted up under the durations like a ledger. */
+.sh-side .sh-total {
+  margin-top: 8px;
+  font-weight: var(--font-weight-strong);
+}
+
+.sh-total .sh-dur {
+  position: relative;
+  grid-column: 2;
+}
+
+.sh-total .sh-dur::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -8px;
+  right: 0;
+  height: 0.5px;
+  background: var(--sh-ink);
+}

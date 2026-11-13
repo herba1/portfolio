@@ -1,0 +1,197 @@
+.playcount {
+  --pc-ground: #f2f0eb;
+  --pc-ink: #1b1a17;
+  --pc-caret: #1b1a17;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--pc-ground);
+  color: var(--pc-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.playcount[data-embedded] {
+  min-height: 100%;
+}
+
+.playcount-stage {
+  position: absolute;
+  inset: 0;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 600ms var(--ease-out-quart);
+}
+
+.playcount[data-embedded] .playcount-stage {
+  touch-action: pan-x;
+}
+
+.playcount[data-ready] .playcount-stage {
+  opacity: 1;
+}
+
+.playcount[data-dragging] .playcount-stage {
+  cursor: grabbing;
+}
+
+/* The number. A zero-size anchor at the optical centre; every glyph is
+   absolutely placed from it by the engine. */
+.playcount-number {
+  --pc-size: 120px;
+  /* roll window edges from the centre line; the engine measures the face and
+     overwrites these */
+  --pc-win-top: 0.46em;
+  --pc-win-bottom: 0.45em;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  font-size: var(--pc-size);
+  line-height: 1;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  /* tracking law, folded into each glyph's advance by the engine */
+  letter-spacing: calc((var(--pc-size) - 12px) * -0.043);
+  /* sit the figure a touch above centre, where the eye puts the middle */
+  transform: translateY(-0.06em);
+}
+
+.playcount-probe {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  letter-spacing: 0;
+}
+
+.playcount-col,
+.playcount-comma {
+  position: absolute;
+  left: 0;
+  top: -1.2em;
+  height: 2.4em;
+  will-change: transform;
+}
+
+/* A hard window a little taller than the figures: a turning figure slides
+   out under a crisp edge, like a counter wheel. The edges sit a clear 0.1em
+   off the cap line and the baseline, so a mid-roll cut reads as an aperture,
+   never as a crop along the type. Open at the sides so tight tracking never
+   shaves a glyph. Figures ride a layer above the commas: a comma crossing
+   one passes behind it. */
+.playcount-col {
+  z-index: 1;
+  width: var(--pc-adv);
+  clip-path: polygon(
+    -40% calc(50% - var(--pc-win-top)),
+    140% calc(50% - var(--pc-win-top)),
+    140% calc(50% + var(--pc-win-bottom)),
+    -40% calc(50% + var(--pc-win-bottom))
+  );
+}
+
+/* The comma's window: the gap between the figures' advances, which the
+   engine keeps current (--pc-gap-l, --pc-gap-r). Its left edge is hard: the
+   gap a new comma opens out of and a leaving one slides back into. Vertically
+   it only has to hold the tail, since a comma never leaves the baseline. */
+.playcount-comma {
+  z-index: 0;
+  clip-path: polygon(
+    var(--pc-gap-l, 0px) calc(50% - var(--pc-win-top)),
+    var(--pc-gap-r, 160%) calc(50% - var(--pc-win-top)),
+    var(--pc-gap-r, 160%) calc(50% + var(--pc-win-bottom) + 0.2em),
+    var(--pc-gap-l, 0px) calc(50% + var(--pc-win-bottom) + 0.2em)
+  );
+}
+
+.playcount-strip,
+.playcount-glyph,
+.playcount-comma-mark {
+  position: absolute;
+  inset: 0;
+}
+
+.playcount-glyph,
+.playcount-comma {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0;
+}
+
+.playcount-glyph,
+.playcount-strip,
+.playcount-comma-mark {
+  will-change: transform;
+}
+
+.playcount-comma-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.playcount-comma {
+  width: var(--pc-comma);
+}
+
+.playcount-caret {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  top: -0.36em;
+  width: max(2px, 0.024em);
+  height: 0.72em;
+  border-radius: 1px;
+  background: var(--pc-caret);
+  opacity: 0;
+  transition: opacity 160ms var(--ease-out-quart);
+}
+
+.playcount[data-focus] .playcount-caret {
+  opacity: 1;
+  animation: playcount-blink 1.1s var(--ease-out-quart) 600ms infinite;
+}
+
+.playcount[data-focus][data-moving] .playcount-caret {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes playcount-blink {
+  0%, 55% { opacity: 1; }
+  70%, 92% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.playcount-input {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  caret-color: transparent;
+  font-size: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playcount[data-focus] .playcount-caret {
+    animation: none;
+  }
+}

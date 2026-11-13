@@ -1,0 +1,11 @@
+{
+  "title": "Snap-On",
+  "description": "One word, LINTEL, in a heavy sans drawn from straight stems and slabs. Tap a stem near its foot or its head and a square slab serif slides in from the side and seats with a dry click; tap the end of an arm and it takes a beak. Drag along the baseline and an underline runs out under the letters, catching at each letter's edge and tying them into one piece; drag above the caps for an overbar. Double-tap any fitting to knock it off. Every fitting is filled with the letters as one shape, so a seated serif is part of the letter, not a sticker on it.",
+  "tags": ["Type", "Interaction", "Sound"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:00:00.000Z",
+  "intent": "Matthew Carter's Walker (1995, Walker Art Center), a sans shipped with modular snap-on serifs, underlines and overbars that designers attach letter by letter (https://walkerart.org/magazine/flat-files-6-experimental-posters). Make the attaching itself the piece: a machined fitting that slides in and seats, and bars that link letters.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.62], "to": [0.66, 0.62] },
+  "sources": ["https://walkerart.org/magazine/flat-files-6-experimental-posters", "https://en.wikipedia.org/wiki/Walker_(typeface)"]
+}

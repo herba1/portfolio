@@ -1,0 +1,67 @@
+import { albumById } from "@/app/lab/_music/catalog";
+
+const abbey = albumById("abbey-road");
+
+// The record as the page behind sets it: the same label/value axis as the
+// credits in the sheet, and side one, so the sheet's side two continues it.
+export const ALBUM = {
+  cover: abbey.cover,
+  rows: [
+    ["Title", abbey.title],
+    ["Artist", abbey.artist],
+    ["Year", "1969"],
+  ],
+  sideLabel: "Side one",
+  side: [
+    ["Come Together", "4:20"],
+    ["Something", "3:03"],
+    ["Maxwell's Silver Hammer", "3:27"],
+    ["Oh! Darling", "3:26"],
+    ["Octopus's Garden", "2:51"],
+    ["I Want You (She's\u00a0So\u00a0Heavy)", "7:47"],
+  ],
+};
+
+export const TRACK = {
+  title: "Here Comes the Sun",
+  length: "3:05",
+  credits: [
+    ["Written by", "George Harrison"],
+    ["Produced by", "George Martin"],
+    ["Engineered by", "Geoff Emerick, Phil McDonald"],
+    ["Recorded", "EMI Studios, London, 7\u00a0July\u00a0to\u00a019\u00a0August\u00a01969"],
+    ["Key", "A major"],
+  ],
+  // Personnel as a sleeve lists it: the name against the axis, the parts
+  // after it, broken by hand so each line is one family of instruments and
+  // every entry takes one or two lines of the 24px pitch.
+  performers: [
+    ["George Harrison", ["lead vocals, acoustic guitar,", "harmonium, Moog, handclaps"]],
+    ["Paul McCartney", ["bass, harmonies, handclaps"]],
+    ["Ringo Starr", ["drums, handclaps"]],
+    ["George Martin", ["orchestral arrangement"]],
+    ["Orchestra", ["violas, cellos, double bass,", "piccolos, flutes, clarinets"]],
+  ],
+  about: [
+    "Harrison wrote it in April 1969 in Eric Clapton's garden in Surrey, on a morning he had skipped another Apple business meeting, with a borrowed acoustic guitar and the first warm day of the year.",
+    "Lennon was recovering from a car crash in Scotland and does not play on it. The other three laid down the backing track, and Harrison spent the summer adding to it: harmonium, handclaps, a small orchestra, and last of all the Moog, which carries the bridge's uneven bars up into the final chorus.",
+  ],
+  sideLabel: "Side two",
+  label: [
+    ["Released", "26 September 1969"],
+    ["Label", "Apple PCS 7088"],
+  ],
+  side: [
+    ["Here Comes the Sun", "3:05"],
+    ["Because", "2:45"],
+    ["You Never Give Me Your Money", "4:02"],
+    ["Sun King", "2:26"],
+    ["Mean Mr. Mustard", "1:06"],
+    ["Polythene Pam", "1:12"],
+    ["She Came In Through the Bathroom Window", "1:57"],
+    ["Golden Slumbers", "1:31"],
+    ["Carry That Weight", "1:36"],
+    ["The End", "2:05"],
+    ["Her Majesty", "0:23"],
+  ],
+};

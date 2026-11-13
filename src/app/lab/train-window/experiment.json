@@ -1,0 +1,21 @@
+{
+  "title": "Train Window",
+  "description": "Looking up and out of a local train on a summer afternoon, from a low seat: a worm's-eye view with no horizon and no ground, only the sky, deepening to cobalt toward the zenith at the top of the print. The poles of the line right beside the track pass one at a time, each a dark silhouette rising out of the bottom of the print and converging on the zenith, its crossarms and insulators foreshortened hard against the big cumulus behind it, while the wires run as straight lines toward their vanishing point out along the track. Drag sideways to set the train's speed and direction: the pole, its crossarms and insulators seen from right beneath, smears into a soft bar around its dark core, the wires slide along themselves, and the cumulus barely move. Every layer is blurred by the same 1/125 s shutter at its own screen speed. Let go and the train coasts down to a crawl.",
+  "tags": ["WebGL", "Parallax", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:30:00.000Z",
+  "intent": "Genre spec idea 8, Train Window (Natsu, moving): Shinkai's 5 Centimeters per Second and Japanese local-line summer imagery. The gesture is the train's speed; motion parallax and shutter blur follow from each layer's distance (blur = screen velocity x shutter). Reference: https://en.wikipedia.org/wiki/Parallax#Motion_parallax",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.6], "to": [0.4, 0.6] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.6, 0.6], [0.36, 0.6]], "ms": 2600 },
+    { "idle": 3200 }
+  ],
+  "sources": [
+    "Field, hedge, barn and far tree line: HDRI 'Rural Asphalt Road', Poly Haven, by Alexander Scholten, CC0. https://polyhaven.com/a/rural_asphalt_road (16k .hdr). Reprojected square out of the road: the field onto a ground plane (rectilinear, each row at its distance), the hedge and far tree line as cylindrical strips cut with Depth Anything V2 (tools/depth/depth_hr.py) and a colour key. Shipped as log2 radiance -8..+1.5 in 8 bits with TPDF dither.",
+    "Sky: the field plate's own, HDRI 'Rural Asphalt Road', Poly Haven, by Alexander Scholten, CC0. https://polyhaven.com/a/rural_asphalt_road (8k .hdr). Turned and tipped up 10 degrees so its one big heaped cumulus stands behind the pole head and the upper wires, the cloud matted from its sky by blueness, the low stratocumulus bank and the tree line dropped for a clear pale cyan haze deepening to cobalt overhead, shadowed faces graded toward skylight blue and sunlit tops toward a warm neutral (tools/depth/bakes/train-window/sky.py).",
+    "Poles: 3D model 'Modular Electricity Poles', Poly Haven, by James Ray Cock, CC0. https://polyhaven.com/a/modular_electricity_poles (2k glTF), preset 01 without its guy wire, scaled to an 11.5 m pole with its crossarms running in depth, lit by the field plate's HDRI and rendered from the train's real viewpoint (1.7 m up, 3.4 m off) at 37 view angles along the track for the head and 13 for the trunk (tools/depth/bakes/train-window/poles_render.mjs, poles.py), so the arms' undersides, insulators and transformer foreshorten as the pole crosses the window. Conductors and drop wires are 3D catenaries projected exactly.",
+    "https://en.wikipedia.org/wiki/Parallax#Motion_parallax"
+  ]
+}

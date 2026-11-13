@@ -1,0 +1,383 @@
+# Fog, the sky: the docklands cumulus laid over the radial cobalt.
+#
+# The capture's clouds are unmixed from its own blue once, and that one unmix
+# is used twice: the cover a (how much of the gap's blueness each pixel has
+# lost) is both what the cloud's light is solved with and what it is laid back
+# with, premultiplied. So nothing of the capture's sky is left in an edge pixel
+# (no pale ring of the old blue round each cloud), and a margin thins into the
+# new cobalt exactly as it thinned into the old.
+#
+# The cloud's light is then lit again rather than ranked by luminance (which
+# made the body one mid grey with flat white islands): across a thickness
+# proxy (the cover blurred at the scale of a cumulus' lobes) the light runs
+# from skylight-blue shade #93B1CB on the thin margins to cream #FFF1E2 on the
+# thick bodies, leaned by the sun's side (each cloud's own shadow toward the
+# sun, just past the top edge of the frame, a broad relief and gradient
+# toward it) and by the capture's own light at the scale of its lobes, with
+# a terminator softened over a lobe's width. No face is lit from the
+# silhouette inward: that put a hard cream crescent along each upper rim, a
+# sticker on an airbrushed blob. The ladder gives the hue; its luminance stops
+# under the shoulder, and the capture's own folds (its band-pass light, at
+# full strength over the whole interior, easing in only over the outermost
+# few pixels) ride on it both ways, so the body has the capture's texture
+# throughout and the lobes keep its crispness.
+# Mid-thickness dips inside a thick body are floored, so no cobalt shows
+# through a cloud as a hole, and no cloud pixel prints darker than the cobalt
+# under it, so the margins carry no dark flecks.
+import numpy as np, cv2
+
+LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
+# The sun, as the capture has it (docklands_01: azimuth ~37.5 deg, elevation
+# ~28.8 deg), through the plate's rays (render.py: yaw 8 + 192, pitch -62, a
+# 118 deg stereographic frame). The engine's SUN is the same.
+SUN = dict(lon=37.5, lat=28.8, yaw=200.0, pitch=-62.0, hfov=118.0)
+# The light's ladder, display sRGB: shade and thin margins (0) to the sunlit
+# tops (1). Bright all the way: a cumulus' shade is the sky's blue light on
+# white, not a grey. The warm end only on the body of a cloud: a lobe's lit
+# rim round a hole or a thin edge stays a neutral white (cream over the
+# cobalt showing through it prints a peach fleck).
+# How far the cover is floored inside a thick body, and the strength of the
+# capture's band-pass folds over the relit cloud.
+HOLE_FLOOR = 0.9
+DETAIL_K = 1.6
+DETAIL_MID = 1.4
+# How the light runs across the thickness proxy: the cover-at-lobe-scale
+# where the shade begins to warm and where it is full cream, how much the
+# sun's side of the sky leans it, and the terminator's softness (2400 px).
+THICK_LO, THICK_HI = 0.35, 1.0
+SUN_SIDE = 0.6
+OWN_K = 0.45
+L_GAMMA = 1.6
+TERM_SIG = 18
+# The luminance (linear) the shade and the sunniest body are laid at under
+# their folds: the shade a light skylight blue, so a margin keeps a crisp
+# edge on the cobalt instead of greying into it.
+BASE_LO, BASE_TOP = 0.55, 0.7
+# The few pixels inside the silhouette over which the darkening folds ease
+# in (2400 px); the brightening ones come in over three.
+DETAIL_EDGE = 16
+# The bake's luminance shoulder (bake.py), which the folds are laid on through.
+SH_K0, SH_TOP = 0.64, 0.965
+# Dark blots inside the big left cumulus, healed after the composite (heal):
+# a hard-edged hexagon ~70 px across at the 3840 plate, where the cobalt came
+# through the body (x, y, radius, donor offset x, y).
+BLOTS = [(966, 1008, 46, -150, -40)]
+LIGHT_RIM = [(0.78, '#F1F1EF'), (1.0, '#F8F7F4')]
+LIGHT = [(0.0, '#93B1CB'), (0.3, '#A9C1D6'), (0.55, '#D2DDE4'), (0.78, '#F2EFEA'), (1.0, '#FFF1E2')]
+
+
+def s2l(h):
+    c = np.array([int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)], np.float32)
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def smooth(a, b, x):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def nblur(x, w, sig):
+    """normalised blur of x over the pixels weighted w"""
+    if x.ndim == 3:
+        return cv2.GaussianBlur(x * w[..., None], (0, 0), sig) / (cv2.GaussianBlur(w, (0, 0), sig)[..., None] + 1e-5)
+    return cv2.GaussianBlur(x * w, (0, 0), sig) / (cv2.GaussianBlur(w, (0, 0), sig) + 1e-5)
+
+
+def sun_pixel(W, H):
+    """The sun's position in plate pixels (off the frame) and its direction in
+    the camera frame (x right, y down, z forward)."""
+    r = np.pi / 180
+    lo, la, t, p = SUN['lon'] * r, SUN['lat'] * r, SUN['yaw'] * r, SUN['pitch'] * r
+    d = [np.cos(la) * np.sin(lo), -np.sin(la), np.cos(la) * np.cos(lo)]
+    v = [np.cos(t) * d[0] - np.sin(t) * d[2], d[1], np.sin(t) * d[0] + np.cos(t) * d[2]]
+    s = np.array([v[0], np.cos(p) * v[1] - np.sin(p) * v[2], np.sin(p) * v[1] + np.cos(p) * v[2]])
+    f = (W / 2) / (2 * np.tan(SUN['hfov'] * r / 4))
+    th = np.arccos(np.clip(s[2], -1, 1))
+    rr = 2 * f * np.tan(th / 2)
+    n = np.hypot(s[0], s[1])
+    return ((W - 1) / 2 + rr * s[0] / n, (H - 1) / 2 + rr * s[1] / n), s
+
+
+def sun_dir2d(W, H):
+    """Per pixel, the unit direction in the image toward the sun's position."""
+    (sx, sy), _ = sun_pixel(W, H)
+    x, y = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+    dx, dy = sx - x, sy - y
+    n = np.hypot(dx, dy) + 1e-6
+    return (dx / n).astype(np.float32), (dy / n).astype(np.float32), x, y
+
+
+def self_shadow(a, W, H, q=4, reach=0.06, steps=24):
+    """Optical depth of cover between each pixel and the sun, marched toward
+    the sun's position over `reach` of the frame width (nearer cover weighing
+    more), at 1/q resolution."""
+    w, h = W // q, H // q
+    small = cv2.resize(a, (w, h), interpolation=cv2.INTER_AREA)
+    small = cv2.GaussianBlur(small, (0, 0), 2.5)
+    dx, dy, x, y = sun_dir2d(w, h)
+    dl = reach * w / steps
+    od = np.zeros((h, w), np.float32)
+    wsum = 0.0
+    for i in range(1, steps + 1):
+        wi = np.exp(-i / (0.5 * steps))
+        mx, my = x + dx * dl * i, y + dy * dl * i
+        od += wi * cv2.remap(small, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        wsum += wi
+    od /= wsum
+    return cv2.resize(cv2.GaussianBlur(od, (0, 0), 3.0), (W, H), interpolation=cv2.INTER_CUBIC)
+
+
+def relief(h, W, H, S, k, elev_deg=32.0):
+    """Lambert on the cover read as a height field, lit from the sun's side of
+    the frame: each lobe gets a face toward the sun and one away from it."""
+    hx = cv2.Sobel(h, cv2.CV_32F, 1, 0, ksize=3) / 8
+    hy = cv2.Sobel(h, cv2.CV_32F, 0, 1, ksize=3) / 8
+    dx, dy, _, _ = sun_dir2d(W, H)
+    e = np.radians(elev_deg)
+    nx, ny = -hx * k * S, -hy * k * S
+    return (nx * dx * np.cos(e) + ny * dy * np.cos(e) + np.sin(e)) / np.sqrt(nx * nx + ny * ny + 1)
+
+
+def composite(sky, elev, matte, stats=False):
+    """sky: the docklands render, linear. Returns the sky composite (linear),
+    the cover and a dict of the intermediate fields."""
+    H, W = elev.shape
+    S = W / 2400  # blur radii were tuned on the 2400 plate
+    Y = sky @ LUMA
+    sb = cv2.GaussianBlur(sky, (0, 0), 1.2 * S)
+    blue = (sb[..., 2] - sb[..., 0]) / (sb[..., 2] + 1e-4)
+
+    # The capture's own clear sky, filled in under the clouds: its blueness, its
+    # colour and its light, smooth fields measured on the open gaps only.
+    open_ = smooth(0.6, 0.68, blue) ** 2
+    bgap = np.maximum(nblur(blue, open_, 40 * S), 0.5)
+    Ygap = nblur(Y, open_, 40 * S)
+    # Cover: how much of the gap's blueness is gone, on a wide ramp, so a
+    # margin thins over as many pixels as it did in the photograph.
+    bn = blue / bgap
+    alpha = 1 - smooth(0.22, 0.97, bn)
+    alpha = cv2.GaussianBlur(alpha, (0, 0), 0.9 * S)
+    # The cloud's own light, unmixed from the blue behind it by that cover:
+    # (capture - (1 - a) * gap) / a.
+    Yadd = np.maximum(Y - Ygap * (1 - alpha), 0)
+    Ycl = np.maximum(Yadd / np.maximum(alpha, 0.35), 0.2)
+    # Where the cover is thin that estimate is noise over a small number, so
+    # the margin takes the light of the cloud just inside it.
+    inner = nblur(Ycl, alpha ** 4, 4 * S)
+    Ycl = np.maximum(inner + (Ycl - inner) * smooth(0.35, 0.85, alpha), 0.2)
+    # The cover as unmixed dips at mid-thickness inside the big bodies (a
+    # thinner fold of the capture reads as half sky), and laid over the new
+    # cobalt those dips print as blotchy holes, a torn decal. Inside a thick
+    # body the cover is floored to most of its cloud-scale blur; the margins,
+    # the gaps between clouds and the thin clouds keep their own.
+    a0 = alpha
+    thick0 = 0.3 * cv2.GaussianBlur(a0, (0, 0), 8 * S) + 0.35 * cv2.GaussianBlur(a0, (0, 0), 20 * S) \
+        + 0.35 * cv2.GaussianBlur(a0, (0, 0), 48 * S)
+    # (Enclosed only: past a cloud's outer silhouette the cloud-scale blur is
+    # under a half, and a floor there would lift the margin into a halo.)
+    body = cv2.GaussianBlur(a0, (0, 0), 28 * S)
+    alpha = np.maximum(a0, HOLE_FLOOR * body * smooth(0.45, 0.55, thick0) * smooth(0.58, 0.72, body))
+    del thick0, body
+
+    # ------------------------------------------------ the clear sky
+    # A radial gradient in the open sky between the towers, pale cyan where it
+    # meets them, deepening to cobalt at the middle of the opening, and paler
+    # still low down the street.
+    q8 = 8
+    ms = cv2.resize(matte, (W // q8, H // q8), interpolation=cv2.INTER_AREA)
+    dist = cv2.distanceTransform((ms > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
+    dist = cv2.GaussianBlur(dist, (0, 0), 18)
+    dist = cv2.resize(dist, (W, H), interpolation=cv2.INTER_CUBIC)
+    u = np.clip(dist / np.percentile(dist[matte > 0.5], 99.5), 0, 1)
+    te = np.clip((elev - 25) / 60, 0, 1)
+    t = np.clip(0.75 * u ** 0.8 + 0.4 * te - 0.1, 0, 1)[..., None]
+    t = t * t * (3 - 2 * t)
+    deep, rim, low = s2l('#00447f'), s2l('#1383b0'), s2l('#5a9fc6')
+    gap = rim + (deep - rim) * t
+    gap = gap + (low - gap) * smooth(45, 12, elev)[..., None]
+    # keep the gaps' own gentle variation
+    Yg = cv2.GaussianBlur(Y, (0, 0), 8 * S)  # wide enough to drop the capture's row noise
+    Yl = cv2.GaussianBlur(Y, (0, 0), 60 * S)
+    gap = gap * np.clip(Yg / (Yl + 1e-4), 0.7, 1.3)[..., None] ** 0.35
+
+    # ------------------------------------------------ the cumulus, lit
+    # Thickness: the cover at the scale of a cumulus' lobes and of the whole
+    # cloud. A margin, a wisp, a lone fleck is thin; the heart of a bank thick.
+    t1 = cv2.GaussianBlur(alpha, (0, 0), 8 * S)
+    t2 = cv2.GaussianBlur(alpha, (0, 0), 20 * S)
+    t3 = cv2.GaussianBlur(alpha, (0, 0), 48 * S)
+    thick = 0.3 * t1 + 0.35 * t2 + 0.35 * t3
+    # The light runs across that thickness: the thin margins, wisps and flecks
+    # in skylight-blue shade (light passes through them and little scatters
+    # back toward us), the thick bodies in the sun's cream, with the sun's side
+    # of the sky leaning it warmer. The terminator between the two is wide, a
+    # lobe's width and more, so a cumulus reads as a lit volume, not a cut-out
+    # with a cream stroke along its upper rim: no face is lit from the
+    # silhouette inward (a height field lit at the scale of the margin put the
+    # brightest light exactly on the outer edge, a hard crescent).
+    # The sun's side at the scale of the whole cloud: the broad thickness read
+    # as a height field and lit from the sun, and each cloud's own shadow (the
+    # cover marched toward the sun, so the far side and the base look through
+    # the whole cloud).
+    form = relief(0.45 * t2 + 0.55 * t3, W, H, S, 30)
+    od = self_shadow(alpha, W, H)
+    lit = np.exp(-1.6 * od)
+    # And the broad gradient toward the sun: the clouds nearer it in the sky
+    # (the top of the frame) carry more of its light.
+    (sx, sy), _ = sun_pixel(W, H)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    toward = 1 - np.clip(np.hypot(xx - sx, yy - sy) / np.hypot(W, H), 0, 1)
+    toward = smooth(np.percentile(toward, 2), np.percentile(toward, 98), toward)
+    del yy, xx
+    # The capture's folds, at full strength: its band-pass luminance (the
+    # docklands light, lightly denoised, less its blur at ~12 px of the 2560
+    # frame), so the lobes are as crisp as the capture's own and the sky holds
+    # up next to the glass. Taken on the cloud's light as unmixed from the
+    # capture's blue, with the blur normalised over the cloud alone, so a fold
+    # where the blue showed through, or the blue beside a margin, does not
+    # print as a dark hole or rim. Under it the forms at the scale of the
+    # lobes, and a little of the broad modelling.
+    lY = np.log(cv2.GaussianBlur(Ycl, (0, 0), 0.75 * S))
+    wc = alpha ** 4 + 1e-3
+    lo1 = nblur(lY, wc, 11 * S)
+    lo2 = nblur(lY, wc, 40 * S)
+    lm = np.median(lY[(alpha > 0.9) & (matte > 0.5)])
+    lB = nblur(lY, wc, 90 * S)
+    dl = DETAIL_K * (lY - lo1) + DETAIL_MID * (lo1 - lo2) + 0.18 * (lB - lm)
+    sunward = 0.4 * lit + 0.35 * smooth(0.2, 0.9, form) + 0.25 * toward
+    # And the capture's own light at the scale of its lobes and of the whole
+    # cloud (unmixed, normalised over the cloud): a fold the capture has in
+    # shade stays toward the blue, a bulge it has lit toward the cream, so
+    # the terminator follows the capture's lobes, not the silhouette.
+    own = np.clip(0.5 + 1.4 * ((lo2 - lm) + 0.6 * (lB - lm)), 0, 1)
+    sunward = (1 - OWN_K) * sunward + OWN_K * own
+    L = smooth(THICK_LO, THICK_HI, thick) * (1 - SUN_SIDE + SUN_SIDE * sunward)
+    # The terminator, softened over a lobe's width.
+    L = cv2.GaussianBlur(L, (0, 0), TERM_SIG * S)
+    # Most of a body sits in the middle of the ladder, where the capture's
+    # folds have room both ways; the cream is its sunniest lobes.
+    L = smooth(0.06, 0.9, L) ** L_GAMMA
+
+    # Over the whole interior at full strength, right up to the margin: only
+    # the outermost few pixels, where the unmixed light is an estimate over a
+    # small number, ease in, and there the cover is thin enough that the
+    # cobalt carries the edge. (A fold that darkens goes toward the
+    # skylight-blue shade below, never grey.)
+    din = cv2.distanceTransform((a0 > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
+    din = cv2.GaussianBlur(din, (0, 0), 1 * S)
+    # A fold that darkens is trusted where the cover is: on a thin fold, where
+    # the capture's blue showed through, the unmixed light is a guess and its
+    # dip would print as a blue blotch; and the capture's thin edges run grey
+    # for a few pixels, which at full strength right on the silhouette draws
+    # an outline round the cloud.
+    dl = np.where(dl < 0, dl * smooth(0.45, 0.9, a0) * smooth(1 * S, DETAIL_EDGE * S, din), dl * smooth(0, 3 * S, din))
+    del din, lo1, lo2, lB, wc, own
+
+    # The ladder, in linear light, by L: hue and luminance together.
+    def ladder(lst):
+        st = [(x, s2l(h)) for x, h in lst]
+        return np.stack([np.interp(L, [x for x, _ in st], [c[k] for _, c in st]) for k in range(3)], -1).astype(np.float32)
+    body = smooth(0.6, 0.88, t1)[..., None]
+    base = ladder(LIGHT[:-2] + LIGHT_RIM) * (1 - body) + ladder(LIGHT) * body
+    # The ladder gives the hue; the luminance under the folds stops short of
+    # the shoulder, so the capture's folds have room above it as well as
+    # below and the sunlit body keeps its texture (laid out at the ladder's
+    # own luminance, the cream bodies sat on the shoulder and printed as one
+    # smooth airbrushed field).
+    Ylad = base @ LUMA
+    base = base * ((BASE_LO + (BASE_TOP - BASE_LO) * L) / (Ylad + 1e-5))[..., None]
+    # Laid on after the relight, at full strength as printed: the bake's shoulder (bake.py, from 0.64) and
+    # the film's flatten the sunlit tops, so there the folds are laid on
+    # steeper by how much the shoulder takes out of their log contrast.
+    Yb = base @ LUMA
+    gain = np.where(Yb < SH_K0, 1.0, np.exp(-(Yb - SH_K0) / (SH_TOP - SH_K0)) * Yb
+                    / (SH_K0 + (SH_TOP - SH_K0) * (1 - np.exp(-(Yb - SH_K0) / (SH_TOP - SH_K0)))))
+    detail = np.exp(np.clip(dl / np.clip(gain, 0.4, 1.0), -0.65, 0.75))
+    # Where a fold darkens a sunlit top it is in the cloud's own shade, so it
+    # goes toward skylight blue, never a darker cream (which prints brown).
+    shade = s2l('#A9C1D6')
+    shade = shade / (shade @ LUMA)
+    dark = smooth(0.0, 0.5, -np.log(np.minimum(detail, 1)))[..., None]
+    cloud = (base * (1 - dark) + Yb[..., None] * shade * dark) * detail[..., None]
+    # And no pixel of a cloud is darker than the cobalt under it: a margin
+    # thins into the blue, it never prints a dark fleck or rim on the way.
+    Yc = cloud @ LUMA
+    cloud = cloud * np.maximum(1.0, (gap @ LUMA) * 1.02 / (Yc + 1e-5))[..., None]
+    # A filled hole takes the light of the cloud round it, so it closes as
+    # more of the body rather than as a flat shaded patch.
+    filled = np.clip(a0 / np.maximum(alpha, 1e-3), 0, 1)[..., None]
+    cloud = cloud * filled + nblur(cloud, a0 ** 4, 10 * S) * (1 - filled)
+    a3 = alpha[..., None]
+    skyg = gap * (1 - a3) + cloud * a3
+    if stats:
+        cm = (alpha > 0.9) & (matte > 0.5)
+        print('L cloud pct', np.percentile(L[cm], [5, 25, 50, 75, 95]).round(3), 'thick', np.percentile(thick[cm], [5, 25, 50, 75, 95]).round(3), 'sunward', np.percentile(sunward[cm], [5, 25, 50, 75, 95]).round(3))
+        print('detail pct', np.percentile(detail[cm], [1, 5, 50, 95, 99]).round(3))
+    return skyg, alpha, dict(L=L, thick=thick, lit=lit, form=form, toward=toward, detail=detail, gap=gap, Ycl=Ycl)
+
+
+def retouch(skyg, specks, W, H):
+    """Fill small dark specks (birds, marks in the capture) from the cloud
+    around them; the folds leading to them stay."""
+    for sx, sy in specks:
+        cx, cy, R = int(sx * W / 3840), int(sy * H / 2560), int(16 * W / 3840)
+        x0, y0, x1, y1 = cx - 4 * R, cy - 4 * R, cx + 4 * R, cy + 4 * R
+        win = skyg[y0:y1, x0:x1]
+        Yw = win @ LUMA
+        k = int(2 * R) | 1
+        closed = cv2.morphologyEx(Yw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        hole = ((closed - Yw) / (closed + 1e-5) > 0.2) & ((xx - cx) ** 2 + (yy - cy) ** 2 < R * R)
+        hole = cv2.dilate(hole.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))).astype(np.float32)
+        fill = nblur(win, 1 - hole, 0.8 * R)
+        f = np.minimum(cv2.GaussianBlur(hole, (0, 0), 3.0) * 1.6, 1)[..., None]
+        skyg[y0:y1, x0:x1] = win * (1 - f) + fill * f
+        print('retouch', (sx, sy), int(hole.sum()), 'px')
+    return skyg
+
+
+def heal(img, spots, W, H):
+    """Heal larger dark blots inside a cloud body (a hole the unmix let the
+    cobalt through, or a mark in the capture, laid in the plate as a hard
+    polygon): the blot is found against the cloud round it (a morphological
+    close at the blot's scale), its light filled in from the ring outside it
+    at low frequency, and its texture taken from a donor patch of the same
+    cloud, so the patch reads as more of the body, not a smooth spot.
+    spots: (x, y, radius, donor dx, donor dy) at the 3840 plate. img: linear."""
+    for sx, sy, sr, ddx, ddy in spots:
+        f = W / 3840
+        cx, cy, R = int(sx * f), int(sy * f), max(int(sr * f), 4)
+        dx, dy = int(ddx * f), int(ddy * f)
+        P = 3 * R
+        x0, y0, x1, y1 = max(cx - P, 0), max(cy - P, 0), min(cx + P, W), min(cy + P, H)
+        win = img[y0:y1, x0:x1].astype(np.float32)
+        Yw = win @ LUMA
+        k = int(2.4 * R) | 1
+        closed = cv2.morphologyEx(Yw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        closed = cv2.GaussianBlur(closed, (0, 0), 0.15 * R)
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        inside = ((xx - cx) ** 2 + (yy - cy) ** 2 < R * R)
+        hole = (((closed - Yw) / (closed + 1e-5) > 0.035) & inside).astype(np.uint8)
+        # close the blot's outline and take its soft dark skirt with it
+        e = max(int(0.2 * R) | 1, 3)
+        hole = cv2.morphologyEx(hole, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (e, e)))
+        hole = cv2.dilate(hole, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (e + 4, e + 4))).astype(np.float32)
+        # low frequency: the light of the ring round the blot, pulled in
+        sig = 0.35 * R
+        lowfill = nblur(win, 1 - hole, sig)
+        for _ in range(3):
+            lowfill = nblur(lowfill * hole[..., None] + win * (1 - hole[..., None]), np.ones_like(hole), 0.25 * R) * hole[..., None] \
+                + win * (1 - hole[..., None])
+        # texture: the donor's own folds, in log light, less its blur at the same scale
+        don = img[y0 + dy:y1 + dy, x0 + dx:x1 + dx].astype(np.float32)
+        lD = np.log(np.maximum(don @ LUMA, 1e-4))
+        hp = lD - cv2.GaussianBlur(lD, (0, 0), sig)
+        lW = np.log(np.maximum(Yw, 1e-4))
+        ring = (cv2.dilate(hole, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * e + 1, 2 * e + 1))) - hole) > 0
+        hpw = lW - cv2.GaussianBlur(lW, (0, 0), sig)
+        gain = np.clip(np.std(hpw[ring]) / (np.std(hp[hole > 0]) + 1e-5), 0.5, 1.5)
+        fill = lowfill * np.exp(np.clip(gain * hp, -0.3, 0.3))[..., None]
+        a = np.minimum(cv2.GaussianBlur(hole, (0, 0), 0.12 * R) * 1.5, 1)[..., None]
+        img[y0:y1, x0:x1] = win * (1 - a) + fill * a
+        print('heal', (sx, sy), int(hole.sum()), 'px, texture gain', round(float(gain), 2))
+    return img

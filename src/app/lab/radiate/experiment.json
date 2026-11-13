@@ -1,0 +1,11 @@
+{
+  "title": "Radiate",
+  "description": "A short word in heavy Geist on white, its outline echoed outward in evenly spaced black lines to every edge of the frame, after Lance Wyman's Mexico 68 logotype. The lines are true offset curves of the letters, solved exactly from the glyph outlines, so the first echoes of neighbouring letters meet in clean creases that round into continuous bends further out. The pointer packs new lines in between the old ones, down to a third of the period, and lays a copy of the field over itself, scaled a few percent about the hand, so the two sets of offset curves beat into broad op-art moiré contours that follow the letterforms and swim as the hand moves. A click sends a dense band out through the lines.",
+  "tags": ["WebGL", "Type", "Op art"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Translate Wyman's radiating parallel lines (https://www.vam.ac.uk/articles/iconic-design-official-poster-for-the-mexico-1968-olympic-games) into a live field: exact offset curves of real type, pulled by the hand.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.4], "to": [0.7, 0.6] },
+  "sources": ["https://www.vam.ac.uk/articles/iconic-design-official-poster-for-the-mexico-1968-olympic-games", "https://www.cooperhewitt.org/2016/08/16/1968-logo-gold"]
+}

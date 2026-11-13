@@ -1,0 +1,15 @@
+{
+  "title": "Landscape",
+  "description": "The making of one record, set as an information landscape: a title far off, four chapters of the year standing on their own planes in front of it, entries small beside their chapter, and notes smaller still beside the entries. Every plane stands on one grid, so each stop the camera settles on is cropped like a poster: the plane it frames hangs from a shared margin and baseline at its true size, the level that owns it passes behind at a much larger size and runs hard off the edge, and its children run down the same column. Scroll or drag and the camera flies on a spring from one stop to the next, swinging round the point it is flying to so the layers part in parallax. A plane too small to read on screen collapses all at once to one flat field of its own ink, and a note reads exactly when its entry does, so distant levels read as clean colour fields and no plane is ever half type, half shape; type the frame would tear through goes whole, so nothing hangs torn at the borders. Each level has its own flat ink, a pale vermilion title, chapters in full ink, entries in ultramarine and notes in red, and the planes are laid over each other with multiply, so the levels read as overlapping transparencies at clearly different depths rather than as a page fading out of focus.",
+  "tags": ["Type", "3D", "Camera"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Muriel Cooper and the MIT Visible Language Workshop's Information Landscapes (TED5, 1994; https://www.moma.org/calendar/exhibitions/1654, https://peterme.com/?p=1010): typography placed in an infinite 3D space at many scales, where zooming and flying between layers, with translucency and depth, reveals structure. Depth as Cooper built it, from translucent coloured layers at very different scales and turns, composited with multiply and only lightly defocused (never past 3px), not from fading. Real DOM text on projective planes, resolved to a flat 2D matrix at each viewpoint so it lands crisp at its true size, with tracking per the site's law at that rendered size.",
+  "tile": { "shape": "wide" },
+  "sources": [
+    "https://www.moma.org/calendar/exhibitions/1654",
+    "https://peterme.com/?p=1010",
+    "https://en.wikipedia.org/wiki/Muriel_Cooper",
+    "https://www.media.mit.edu/posts/muriel-cooper-lasting-imprint/"
+  ]
+}

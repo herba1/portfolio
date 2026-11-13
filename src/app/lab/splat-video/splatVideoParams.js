@@ -1,6 +1,8 @@
 import * as THREE from "three";
 
 export const EXPORTS_ROOT = "/splats/4d";
+export const BUNDLED_ROOT = "/lab/splat-video";
+export const DEFAULT_CLIP = "fumikiri-sky";
 export const FALLBACK_CLIP = "fake";
 export const CLIP_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
@@ -44,8 +46,9 @@ export function leanAmount(engine) {
 export function depthOfField(engine, meta) {
   const view = engine.view;
   if (!view || engine.reducedMotion) return { aperture: 0, focusDepth: meta.camera.pivotDepth };
+  const aperture = meta.camera.aperture ?? DEPTH_OF_FIELD.aperture;
   return {
-    aperture: DEPTH_OF_FIELD.aperture * Math.pow(leanAmount(engine), DEPTH_OF_FIELD.ease),
+    aperture: aperture * Math.pow(leanAmount(engine), DEPTH_OF_FIELD.ease),
     focusDepth: meta.camera.pivotDepth * view.dolly,
   };
 }
@@ -67,6 +70,45 @@ export const RENDER = {
   lowPass: 0.3,
   coverageFloor: 0.02,
   coverageSolid: 0.35,
+};
+
+// The anchor card (meta.card): a grid fine enough that the stereographic lens
+// bends its straight rows as smoothly as it bends the splats, trilinear and
+// anisotropic sampling, a film diffusion of half a device pixel each way, and
+// the strips the carried-on wires are drawn with.
+export const CARD = {
+  segments: [192, 128],
+  wiresMax: 12,
+  // a carried-on wire: plane units per step of s / (1 - s), how far along
+  // the strip it stops (t = 999 reach, at the vanishing point), and its samples
+  wireReach: 1,
+  wireEnd: 0.999,
+  wireSegments: 768,
+  anisotropy: 8,
+  diffusion: 0.5,
+};
+
+// The film finish laid over the resolved splats, in display (sRGB) values.
+// The silhouette's paint-flat navy is lifted towards an exposed cyan-navy,
+// the cloud bleeds a thin warm halation into the dark edges beside it, and a
+// luminance-only grain held at 24 fps sits over everything. Nothing passes
+// `cap` (250 / 255), so the highlights never clip.
+export const FILM = {
+  lift: [0.042, 0.106, 0.171],
+  toe: [0.13, 0.3],
+  haloThreshold: 0.8,
+  haloKnee: 0.12,
+  haloScale: 4,
+  haloSigma: 2.2,
+  haloTint: [1, 0.478, 0.227],
+  haloGain: 0.4,
+  haloDark: [0.12, 0.42],
+  shoulder: 0.92,
+  cap: 250 / 255,
+  grain: 0.025,
+  grainFloor: 0.3,
+  grainFps: 24,
+  grainCell: 0.75,
 };
 
 export const RGBD = {
@@ -109,6 +151,129 @@ export const LOOK_LABELS = {
   splats: "Splats",
   video: "Video",
 };
+
+// A worm's-eye remap of the source frame (meta.camera.remap). The phone saw
+// the signal through a 40 degree lens pitched gently up; the player instead
+// re-reads every source ray through a wider, keystoned lens (stretch widens
+// the angles, keystone tips the upper rows away so the post converges on a
+// zenith inside the frame), rests the camera pitched further up, and draws a
+// stereographic view of ~105 degrees. Above the photo's top edge the splats
+// fade into an analytic sky that keeps deepening toward that zenith.
+export const REMAP_LIMITS = {
+  stretch: [1, 4],
+  keystone: [0, 3],
+  pitchDeg: [0, 45],
+  yawDeg: [-20, 20],
+  rollDeg: [-30, 30],
+  lean: [0, 1],
+  vfovDeg: [60, 140],
+  aspect: [0.5, 2],
+};
+
+function inRange(value, [low, high]) {
+  return Number.isFinite(value) && value >= low && value <= high;
+}
+
+function isColor(value) {
+  return Array.isArray(value) && value.length === 3 && value.every((c) => Number.isFinite(c) && c >= 0 && c <= 255);
+}
+
+export function readRemap(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const fields = ["stretch", "keystone", "pitchDeg", "yawDeg", "rollDeg", "lean", "vfovDeg", "aspect"];
+  if (!fields.every((name) => inRange(raw[name], REMAP_LIMITS[name]))) return null;
+  if (!isVector3(raw.pivot) || !(raw.pivot[2] > 0)) return null;
+  if (!isRamp(raw.fade?.top) || !isRamp(raw.fade?.side)) return null;
+  const { nearDepth, nearBand, skyDepth } = raw.fade;
+  if (!(nearDepth >= 0) || !(nearBand > 0 && nearBand <= 1) || !(skyDepth > nearDepth)) return null;
+  const sky = raw.sky;
+  if (!sky || !isColor(sky.top) || !isColor(sky.zenith) || !isColor(sky.low) || !Number.isFinite(sky.topTan) || !(sky.lowSpanDeg > 0)) return null;
+  return {
+    stretch: raw.stretch,
+    keystone: raw.keystone,
+    pitchDeg: raw.pitchDeg,
+    yawDeg: raw.yawDeg,
+    rollDeg: raw.rollDeg,
+    lean: raw.lean,
+    vfovDeg: raw.vfovDeg,
+    aspect: raw.aspect,
+    pivot: raw.pivot.slice(),
+    fade: { top: raw.fade.top.slice(), side: raw.fade.side.slice(), nearDepth, nearBand, skyDepth },
+    sky: {
+      top: sky.top.slice(),
+      zenith: sky.zenith.slice(),
+      low: sky.low.slice(),
+      topTan: sky.topTan,
+      lowSpanDeg: sky.lowSpanDeg,
+      ease: sky.ease > 0 ? sky.ease : 1,
+    },
+  };
+}
+
+function isRamp(value) {
+  return Array.isArray(value) && value.length === 2 && value.every(Number.isFinite) && value[0] < value[1];
+}
+
+function isVector3(value) {
+  return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+}
+
+export function frameAspect(meta) {
+  return meta.camera.remap?.aspect ?? meta.camera.aspect;
+}
+
+// Stereographic scale: the image-plane radius 2 tan(theta / 2) that lands on
+// the top edge of the frame.
+export function stereoScale(remap) {
+  return 2 * Math.tan((remap.vfovDeg * Math.PI) / 720);
+}
+
+// The stage is full-bleed, so the viewport's aspect is whatever the window
+// is. The remap's frame (remap.aspect at remap.vfovDeg) is fitted like
+// object-fit: cover: a taller viewport keeps the full vertical view and loses
+// the sides, a wider one keeps the frame's horizontal view and gives up
+// height, so the lens never widens past the field the source was graded for.
+// FRAME.grow lets a wide window open the horizontal view a little (0 holds it,
+// 1 would hold the vertical view instead).
+export const FRAME = {
+  grow: 0.12,
+  portraitCentre: 0.34,
+};
+
+export function viewStereo(remap, width, height) {
+  const base = stereoScale(remap);
+  const aspect = width / Math.max(1, height);
+  if (!(aspect > remap.aspect)) return base;
+  return base * Math.pow(remap.aspect / aspect, 1 - FRAME.grow);
+}
+
+// A viewport narrower than the frame keeps only a vertical strip of it; the
+// strip is centred on the post (FRAME.portraitCentre across the frame), not
+// on the empty sky between post and cloud. The result is the lens centre's
+// offset in stereographic units.
+export function viewShift(remap, width, height) {
+  const aspect = width / Math.max(1, height);
+  if (!(aspect < remap.aspect)) return 0;
+  const strip = aspect / remap.aspect;
+  const centre = clamp(FRAME.portraitCentre, strip / 2, 1 - strip / 2);
+  return (centre - 0.5) * 2 * stereoScale(remap) * remap.aspect;
+}
+
+// OpenCV camera0 (x right, y down, z forward) into the three.js world: the
+// stretch widens every ray, the keystone pushes the upper rows further away
+// (z' = z - keystone * y, y is negative upward), then y and z flip.
+export function sourceMatrix(meta, target) {
+  const remap = meta.camera.remap;
+  const k = remap ? remap.stretch : 1;
+  const c = remap ? remap.keystone : 0;
+  return target.set(k, 0, 0, 0, 0, -k, 0, 0, 0, c, -1, 0, 0, 0, 0, 1);
+}
+
+// Where world "up" points once the source is remapped: the signal post's own
+// direction, so its vanishing point and the sky's zenith are the same place.
+export function remapZenith(remap, target) {
+  return target.set(0, remap.stretch, -remap.keystone).normalize();
+}
 
 export function viewFov(meta) {
   return meta.camera.viewFovDeg ?? meta.camera.vfovDeg;
@@ -189,6 +354,7 @@ export function createEngine() {
     reducedMotion: false,
     buffering: false,
     soundWaiting: false,
+    drawn: false,
     muted: true,
     sound: null,
     orbit: {

@@ -1,4 +1,4 @@
-import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, HYBRID, RGBD, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
+import { BUNDLED_ROOT, CARD, CLIP_NAME_RE, DEFAULT_CLIP, EXPORTS_ROOT, HYBRID, RGBD, TEXTURE_WIDTH, clipKind, readRemap } from "./splatVideoParams";
 
 const EVALUATION_PREFIX = "eval-";
 
@@ -26,31 +26,35 @@ function indexEntries(index) {
   return [];
 }
 
-async function readIndexNames(signal) {
-  const response = await fetch(`${EXPORTS_ROOT}/index.json`, { cache: "no-store", signal });
-  if (!response.ok) return [];
-  return indexEntries(await response.json())
-    .map(entryName)
-    .filter((name) => name && CLIP_NAME_RE.test(name));
+async function readIndexNames(root, signal) {
+  try {
+    const response = await fetch(`${root}/index.json`, { cache: "no-store", signal });
+    if (!response.ok) return [];
+    return indexEntries(await response.json())
+      .map(entryName)
+      .filter((name) => name && CLIP_NAME_RE.test(name));
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return [];
+  }
+}
+
+// Clips that ship with the piece live next to it in public/lab/splat-video;
+// anything else is a local export in public/splats/4d.
+async function clipFolder(clip, signal) {
+  const bundled = await readIndexNames(BUNDLED_ROOT, signal);
+  return `${bundled.includes(clip) ? BUNDLED_ROOT : EXPORTS_ROOT}/${clip}`;
 }
 
 export async function resolveClip(requested, signal) {
-  if (requested) {
-    if (!CLIP_NAME_RE.test(requested)) throw new Splat4dError(`“${requested}” is not a valid clip name.`, { clip: requested });
-    return requested;
-  }
-  try {
-    const names = await readIndexNames(signal);
-    return names.find((name) => name !== FALLBACK_CLIP && !name.startsWith(EVALUATION_PREFIX)) ?? FALLBACK_CLIP;
-  } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    return FALLBACK_CLIP;
-  }
+  if (!requested) return DEFAULT_CLIP;
+  if (!CLIP_NAME_RE.test(requested)) throw new Splat4dError(`“${requested}” is not a valid clip name.`, { clip: requested });
+  return requested;
 }
 
-async function readKind(name, signal) {
+async function readKind(folder, signal) {
   try {
-    const response = await fetch(`${EXPORTS_ROOT}/${name}/meta.json`, { cache: "no-store", signal });
+    const response = await fetch(`${folder}/meta.json`, { cache: "no-store", signal });
     if (!response.ok) return null;
     return clipKind(await response.json());
   } catch (error) {
@@ -60,15 +64,13 @@ async function readKind(name, signal) {
 }
 
 export async function listClips(signal) {
-  let names;
-  try {
-    names = [...new Set(await readIndexNames(signal))].filter((name) => !name.startsWith(EVALUATION_PREFIX));
-  } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    return [];
-  }
-  const kinds = await Promise.all(names.map((name) => readKind(name, signal)));
-  return names.map((name, i) => ({ name, kind: kinds[i] }));
+  const [bundled, local] = await Promise.all([readIndexNames(BUNDLED_ROOT, signal), readIndexNames(EXPORTS_ROOT, signal)]);
+  const entries = [
+    ...bundled.map((name) => ({ name, folder: `${BUNDLED_ROOT}/${name}` })),
+    ...local.filter((name) => !bundled.includes(name)).map((name) => ({ name, folder: `${EXPORTS_ROOT}/${name}` })),
+  ].filter(({ name }, i, all) => !name.startsWith(EVALUATION_PREFIX) && all.findIndex((other) => other.name === name) === i);
+  const kinds = await Promise.all(entries.map(({ folder }) => readKind(folder, signal)));
+  return entries.map(({ name }, i) => ({ name, kind: kinds[i] }));
 }
 
 function isCount(value) {
@@ -287,12 +289,67 @@ function validateMeta(meta, clip) {
   const [, , maxZ] = meta.bounds.max;
   return {
     ...meta,
+    card: readCard(meta.card, fail),
     camera: {
       vfovDeg: meta.camera.vfovDeg,
       aspect: meta.camera.aspect > 0 ? meta.camera.aspect : 16 / 9,
       pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : Math.max(0.5, (minZ + maxZ) / 2),
+      aperture: meta.camera.aperture >= 0 ? meta.camera.aperture : undefined,
+      remap: readRemap(meta.camera.remap),
     },
   };
+}
+
+// The anchor card: the near silhouette as one RGBA image on a plane
+// (1 / z = A x/z + B y/z + C, OpenCV camera0), covering `rect` of a photo
+// whose half-extent in camera tan is `tan`.
+function readCard(card, fail) {
+  if (card === undefined) return null;
+  const image = optionalAsset(card?.image, fail, "card image");
+  const finite = (list, length) => Array.isArray(list) && list.length === length && list.every(Number.isFinite);
+  if (!image || !finite(card.tan, 2) || !finite(card.rect, 4) || !finite(card.plane, 3)) fail("has an invalid card.");
+  if (!(card.tan[0] > 0 && card.tan[1] > 0)) fail("has an invalid card extent.");
+  const [u0, v0, u1, v1] = card.rect;
+  if (!(u0 >= 0 && v0 >= 0 && u1 <= 1 && v1 <= 1 && u1 > u0 && v1 > v0)) fail("has an invalid card rect.");
+  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice(), extend: readCardExtend(card.extend, finite) };
+}
+
+// How the card carries on past the photo's edges (card_extend.py): straight
+// wires run out to their vanishing points, a tiled truss on the card's
+// plane, and edge columns extruded outward. Anything malformed leaves the
+// card at the photo's own edge.
+function readCardExtend(extend, finite) {
+  if (!extend || typeof extend !== "object") return null;
+  const { rect, basis, wires, truss } = extend;
+  if (!finite(rect, 4) || !(rect[2] > rect[0] && rect[3] > rect[1])) return null;
+  if (!finite(extend.photo, 2) || !(extend.seamPx >= 0) || !(extend.edgeFade > 0)) return null;
+  if (!basis || !finite(basis.origin, 3) || !finite(basis.e1, 3) || !finite(basis.e2, 3)) return null;
+  const wireOk = (w) => w && finite(w.start, 3) && finite(w.run, 3) && finite(w.across, 3) && w.half > 0;
+  const lines = Array.isArray(wires) ? wires.filter(wireOk).slice(0, CARD.wiresMax) : [];
+  const trussOk = truss && finite(truss.ref, 2) && finite(truss.axis, 2) && finite(truss.window, 2) && finite(truss.band, 2) && truss.window[1] > truss.window[0];
+  return {
+    rect: rect.slice(),
+    photo: extend.photo.slice(),
+    seamPx: extend.seamPx,
+    edgeFade: extend.edgeFade,
+    basis: { origin: basis.origin.slice(), e1: basis.e1.slice(), e2: basis.e2.slice() },
+    wires: lines.map((w) => ({ start: w.start.slice(), run: w.run.slice(), across: w.across.slice(), half: w.half })),
+    wireColor: finite(extend.wireColor, 3) ? extend.wireColor.slice() : [0.08, 0.12, 0.18],
+    truss: trussOk ? { ref: truss.ref.slice(), axis: truss.axis.slice(), window: truss.window.slice(), band: truss.band.slice() } : null,
+    extrude: finite(extend.extrude, 2) ? extend.extrude.slice() : null,
+  };
+}
+
+async function fetchCard(folder, version, clip, card, signal) {
+  if (!card) return null;
+  const response = await fetch(`${folder}/${card.image}${version}`, { signal });
+  if (!response.ok) throw new Splat4dError(`${card.image} for “${clip}” answered ${response.status}.`, { clip });
+  const blob = await response.blob();
+  try {
+    return await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  } catch {
+    throw new Splat4dError(`${card.image} for “${clip}” is not an image this browser can read.`, { clip });
+  }
 }
 
 function versionQuery(meta) {
@@ -355,7 +412,7 @@ async function streamInto({ url, name, clip, expected, write, signal, onChunk })
 }
 
 export async function loadSplat4d(clip, { signal, onProgress } = {}) {
-  const folder = `${EXPORTS_ROOT}/${clip}`;
+  const folder = await clipFolder(clip, signal);
   let response;
   try {
     response = await fetch(`${folder}/meta.json`, { cache: "no-store", signal });
@@ -401,7 +458,8 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
   if (onProgress) onProgress(0, total);
 
   const version = versionQuery(meta);
-  await Promise.all([
+  const [cardImage] = await Promise.all([
+    fetchCard(folder, version, clip, meta.card, signal),
     streamInto({
       url: `${folder}/base.bin${version}`,
       name: "base.bin",
@@ -438,6 +496,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     base,
     staticPoints,
     dynamicPoints,
+    cardImage,
     layout: { width: TEXTURE_WIDTH, baseRows, staticRows, dynamicRows, layerTexels },
   };
 }

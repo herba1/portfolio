@@ -1,0 +1,15 @@
+{
+  "title": "Passes",
+  "description": "Tokyo Tower seen from the street between two building faces, and a sun you can move. Drag and the sun swings around the canyon: across is where it stands, from behind your left shoulder through straight ahead, behind the tower, to behind your right; up and down is how high. The concrete and the tower's lattice take its warm light from the surface normals a renderer would keep, the faces turned away fall into the sky's cyan. The plate's flat sky is replaced by a photographed summer cumulus dome, looked up along each pixel's true ray so the clouds converge with the walls, and turned with the sun so its piled cumulus stands low on the sun's side, over the wall tops and behind the tower, under a canyon of deep cobalt.",
+  "tags": ["WebGL", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:00:00.000Z",
+  "intent": "Reality pieces: the layers under a captured image, after Unreal's buffer visualization (https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine), photogrammetry tools like Polycam and RealityScan, and Thomas Ruff's jpegs, where the image's structure becomes the image. Photo by Jakob Owens on Unsplash; sky from Poly Haven's Rural Asphalt Road (Alexander Scholten, CC0). Depth by Depth Anything V2, normals by MoGe-2, mattes by SAM 2.1, baked offline.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.5], "to": [0.4, 0.5] },
+  "photo": {
+    "name": "Jakob Owens, Tokyo Tower framed by surrounding buildings (Unsplash)",
+    "url": "https://unsplash.com/photos/tokyo-tower-is-framed-by-surrounding-buildings-e5tHWAAj8gA"
+  },
+  "sources": ["https://unsplash.com/photos/tokyo-tower-is-framed-by-surrounding-buildings-e5tHWAAj8gA", "https://polyhaven.com/a/rural_asphalt_road", "https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine", "https://depth-anything-v2.github.io/", "https://wangrc.site/MoGe2Page/"]
+}

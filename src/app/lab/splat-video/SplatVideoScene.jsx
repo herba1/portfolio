@@ -1,13 +1,16 @@
 "use client";
 
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
+import { createCardLayer } from "./cardLayer";
+import { createFilmPass } from "./filmPass";
 import OrbitStage, { aimCamera } from "./OrbitStage";
 import { createSoundClock } from "./soundClock";
 import {
   bindMoments,
+  bindRemap,
   blendMoments,
   createResolvePass,
   createSplatGeometry,
@@ -30,8 +33,15 @@ import {
   momentBlend,
   momentPlan,
   momentTime,
+  remapZenith,
   sortCapacity,
+  sourceMatrix,
+  stereoScale,
+  viewShift,
+  viewStereo,
 } from "./splatVideoParams";
+
+const DEG = Math.PI / 180;
 
 export function applyDepthOfField(uniforms, engine, meta) {
   const { aperture, focusDepth } = depthOfField(engine, meta);
@@ -136,34 +146,128 @@ export function createSplatRuntime(clip) {
   };
 }
 
-export function createScratch(meta) {
+// Everything the worm's-eye remap needs per frame, worked out once: the rest
+// orientation, the zenith the lean turns round and the sky deepens toward,
+// and the elevation of the source's top edge where the analytic sky takes over.
+function remapRuntime(meta, source) {
+  const remap = meta.camera.remap;
+  if (!remap) return null;
+  const zenith = remapZenith(remap, new THREE.Vector3());
+  const rest = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(remap.pitchDeg * DEG, remap.yawDeg * DEG, remap.rollDeg * DEG, "YXZ"),
+  );
+  const top = new THREE.Vector3(0, -remap.sky.topTan, 1).applyMatrix4(source).normalize();
   return {
-    pivot: new THREE.Vector3(0, 0, -meta.camera.pivotDepth),
+    vfovDeg: remap.vfovDeg,
+    lean: remap.lean,
+    stereo: stereoScale(remap),
+    frame: remap,
+    rest,
+    zenith,
+    horizon: top.dot(zenith),
+    skyTop: remap.sky.top.map((c) => c / 255),
+    skyZenith: remap.sky.zenith.map((c) => c / 255),
+    skyLow: remap.sky.low.map((c) => c / 255),
+    skyLowSpan: remap.sky.lowSpanDeg * DEG,
+    skyEase: remap.sky.ease,
+  };
+}
+
+export function createScratch(meta) {
+  const source = sourceMatrix(meta, new THREE.Matrix4());
+  const remap = remapRuntime(meta, source);
+  const pivot = remap
+    ? new THREE.Vector3(...meta.camera.remap.pivot).applyMatrix4(source)
+    : new THREE.Vector3(0, 0, -meta.camera.pivotDepth);
+  return {
+    pivot,
+    source,
+    remap,
     modelView: new THREE.Matrix4(),
     viewport: new THREE.Vector2(),
     lens: new THREE.Matrix4(),
   };
 }
 
-function useResolvedRender(resolveRef, scratchRef) {
+function placeSource(group, scratch) {
+  group.matrixAutoUpdate = false;
+  group.matrix.copy(scratch.source);
+  group.matrixWorldNeedsUpdate = true;
+}
+
+// A slow GPU (software GL, an old phone) is never handed a new frame before it
+// has finished the last one, so commands cannot pile up behind the compositor.
+function gpuBusy(context, fenceRef) {
+  const fence = fenceRef.current;
+  if (!fence) return false;
+  if (context.getSyncParameter(fence, context.SYNC_STATUS) !== context.SIGNALED) return true;
+  context.deleteSync(fence);
+  fenceRef.current = null;
+  return false;
+}
+
+function useResolvedRender(resolveRef, scratchRef, engineRef, cardRef = null, groupRef = null) {
+  const fenceRef = useRef(null);
+  const filmRef = useRef(null);
+
+  useEffect(() => {
+    const film = createFilmPass();
+    filmRef.current = film;
+    return () => {
+      film.dispose();
+      filmRef.current = null;
+      fenceRef.current = null;
+    };
+  }, []);
+
   useFrame((state) => {
+    const context = state.gl.getContext();
+    const fenced = typeof context.fenceSync === "function";
+    if (fenced && gpuBusy(context, fenceRef)) return;
     const resolve = resolveRef.current;
     const scratch = scratchRef.current;
-    if (!resolve || !scratch) {
-      state.gl.render(state.scene, state.camera);
-      return;
+    const film = filmRef.current;
+    if (!resolve || !scratch) state.gl.render(state.scene, state.camera);
+    else {
+      const width = Math.max(1, scratch.viewport.x);
+      const height = Math.max(1, scratch.viewport.y);
+      const card = cardRef?.current;
+      const group = groupRef?.current;
+      const drawSplats = (gl) => {
+        resolve.render(gl, state.scene, state.camera, width, height);
+        if (card && group) card.render(gl, state.camera, group.matrixWorld, width, height, scratch.remap?.stereo, scratch.remap?.stereoShift);
+      };
+      if (!film) drawSplats(state.gl);
+      else {
+        film.render(state.gl, drawSplats, width, height, {
+          time: state.clock.elapsedTime,
+          still: Boolean(engineRef.current?.reducedMotion),
+          pixelRatio: state.gl.getPixelRatio(),
+          sky: scratch.remap,
+          camera: state.camera,
+        });
+      }
     }
-    resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
+    if (fenced) {
+      fenceRef.current = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      context.flush();
+    }
   }, 1);
 }
 
 export function aimAndMeasure(state, engine, meta, delta, scratch, group) {
   const camera = state.camera;
   const base = hasLensPath(meta) ? lensMatrix(meta, engine.time, scratch.lens) : null;
-  aimCamera(camera, engine, meta, delta, scratch.pivot, base);
+  aimCamera(camera, engine, meta, delta, scratch.pivot, base, scratch.remap);
   group.updateMatrixWorld();
   scratch.modelView.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);
   state.gl.getDrawingBufferSize(scratch.viewport);
+  // The lens fits the full-bleed viewport (cover), so its scale follows the
+  // window's aspect; the splats, the card and the film sky all read it here.
+  if (scratch.remap) {
+    scratch.remap.stereo = viewStereo(scratch.remap.frame, scratch.viewport.x, scratch.viewport.y);
+    scratch.remap.stereoShift = viewShift(scratch.remap.frame, scratch.viewport.x, scratch.viewport.y);
+  }
   const e = scratch.modelView.elements;
   return [e[2], e[6], e[10], e[14]];
 }
@@ -173,23 +277,35 @@ function SplatField({ clip, engineRef }) {
   const runtimeRef = useRef(null);
   const resolveRef = useRef(null);
   const scratchRef = useRef(null);
+  const cardRef = useRef(null);
+  const gl = useThree((state) => state.gl);
 
   useEffect(() => {
     const group = groupRef.current;
     const runtime = createSplatRuntime(clip);
     const resolve = createResolvePass();
+    const scratch = createScratch(clip.meta);
+    const card = clip.cardImage && clip.meta.card ? createCardLayer(clip.meta.card, clip.cardImage, clip.meta.camera.remap, gl) : null;
+    placeSource(group, scratch);
+    bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
+    // With a remap the film pass paints the sky behind the splats, so they
+    // composite straight over it.
+    resolve.uniforms.uOver.value = scratch.remap ? 1 : 0;
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;
-    scratchRef.current = createScratch(clip.meta);
+    scratchRef.current = scratch;
+    cardRef.current = card;
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
       resolve.dispose();
+      if (card) card.dispose();
       runtimeRef.current = null;
       resolveRef.current = null;
+      cardRef.current = null;
     };
-  }, [clip]);
+  }, [clip, gl]);
 
   useFrame((state, rawDelta) => {
     const runtime = runtimeRef.current;
@@ -212,17 +328,22 @@ function SplatField({ clip, engineRef }) {
     uniforms.uFrame1.value = cursor.frame1;
     uniforms.uBlend.value = cursor.blend;
     uniforms.uViewport.value.copy(scratch.viewport);
+    if (scratch.remap) {
+      uniforms.uStereo.value = scratch.remap.stereo;
+      uniforms.uStereoShift.value = scratch.remap.stereoShift;
+    }
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
     runtime.tick(engine.time, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, meta);
 
     if (isFlipbook(meta)) runtime.want({ zRow, ...momentPlan(meta, engine.time, { reducedMotion: engine.reducedMotion }) });
     else runtime.want({ zRow, ...cursor });
+    if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
-  useResolvedRender(resolveRef, scratchRef);
+  useResolvedRender(resolveRef, scratchRef, engineRef, cardRef, groupRef);
 
-  return <group ref={groupRef} rotation-x={Math.PI} />;
+  return <group ref={groupRef} matrixAutoUpdate={false} />;
 }
 
 function StreamField({ clip, engineRef }) {
@@ -240,11 +361,15 @@ function StreamField({ clip, engineRef }) {
     const sound = clip.audioUrl ? createSoundClock(clip.audioUrl, clip.meta.duration) : null;
     const controls = sound ? { gesture: () => sound.sync(engineRef.current, true) } : null;
     engine.sound = controls;
+    const scratch = createScratch(clip.meta);
+    placeSource(group, scratch);
+    bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
+    resolve.uniforms.uOver.value = scratch.remap ? 1 : 0;
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;
     soundRef.current = sound;
-    scratchRef.current = createScratch(clip.meta);
+    scratchRef.current = scratch;
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
@@ -280,16 +405,21 @@ function StreamField({ clip, engineRef }) {
     const zRow = aimAndMeasure(state, engine, meta, delta, scratch, group);
     const { uniforms } = runtime.material;
     uniforms.uViewport.value.copy(scratch.viewport);
+    if (scratch.remap) {
+      uniforms.uStereo.value = scratch.remap.stereo;
+      uniforms.uStereoShift.value = scratch.remap.stereoShift;
+    }
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
     runtime.tick(engine.time, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, meta);
 
     runtime.want(zRow, plan);
+    if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
-  useResolvedRender(resolveRef, scratchRef);
+  useResolvedRender(resolveRef, scratchRef, engineRef);
 
-  return <group ref={groupRef} rotation-x={Math.PI} />;
+  return <group ref={groupRef} matrixAutoUpdate={false} />;
 }
 
 export default function SplatVideoScene({ clip, engineRef, isMobile }) {

@@ -1,0 +1,26 @@
+{
+  "title": "Yuudachi",
+  "description": "Looking up from a street in Osaka on a summer afternoon: the buildings lean in over you, wires cross a cobalt sky, one cumulus. Hold the pointer down and the storm grows out of that cloud: it goes dark first, its base spreads across the blue, the sun goes out and it pours, the drops coming down at you out of the deck. Every surface wets by what it is made of: the pale cladding darkens face by face, water gathers into runs down the billboards, the signs, wires and glass bead. Let go and the rain stops, the blue clears from the edges in, washed deeper than before, the cloud lets go last, and the street dries back unevenly in the sun, the runs last.",
+  "tags": ["WebGL", "Photo", "Depth", "Film"],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:40:00.000Z",
+  "intent": "Techniques research piece 5, Yuudachi (the sudden summer evening shower): a material-aware wetness model on a real photograph. Wet surfaces after Sébastien Lagarde's 'Water drop' series (https://seblagarde.wordpress.com/2013/04/14/water-drop-3b-physically-based-wet-surfaces/): porous materials darken and saturate, gloss rises, puddles on flat up-facing ground, ripples per drop. Puddle placement by Priority-Flood (Barnes, Lehman & Mulla 2014, https://arxiv.org/abs/1511.04463) on the MoGe-2 height field of the road, for a plate with road in view; this plate is a worm's-eye frame (camera pitched 31 degrees up), all wall and sky. Japanese yuudachi: https://en.wikipedia.org/wiki/Yūdachi",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.6], "to": [0.5, 0.6] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.5, 0.6], [0.5, 0.6]], "ms": 7000 },
+    { "idle": 6000 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-city-street-with-tall-buildings-and-a-sky-background-UG6f_-bqS7c",
+      "file": "https://images.unsplash.com/photo-1718778779492-817c961189a0?w=6000&fit=max&q=90&fm=jpg",
+      "author": "Zhiqiang Wang (@yah_wang)",
+      "licence": "Unsplash License",
+      "note": "Osaka, Sony RX100 IV, 3648x4864 original, shipped at 1536x2048. Metric depth, normals and field of view from MoGe-2 ViT-S (Microsoft, MIT) via tools/depth/normals.py; up from the plumb building edges' vanishing point (camera pitched 31 degrees up) and the walls snapped to it; sky matte via tools/depth/segment.py sky, corrected inside MoGe's surface mask; billboards and signs via SAM 2.1 Hiera-Tiny (Meta, Apache-2.0) prompts; materials, the sun direction fitted to the walls' shading, and rain exposure baked by tools/depth/bakes/yuudachi (sam.sh, bake.py). Replaces the first plate, an eye-level street by note thanun (Unsplash, https://unsplash.com/photos/a-city-street-lined-with-tall-buildings-uimyjdIq7xw)."
+    },
+    "https://seblagarde.wordpress.com/2013/04/14/water-drop-3b-physically-based-wet-surfaces/",
+    "https://arxiv.org/abs/1511.04463"
+  ]
+}

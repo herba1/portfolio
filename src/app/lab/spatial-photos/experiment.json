@@ -1,0 +1,120 @@
+{
+  "title": "Spatial photos",
+  "description": "Five Japanese summer photographs looking up at crossings, catenary and cumulus, each one a spatial scene: move the pointer, or tilt the phone, and the view orbits a degree or two, the wires and the posts turning against a sky that carries on behind them. Swipe to the next photo the way Photos does, the frame following your finger and springing on with your speed, and the scenes keep their own depth as they pass the edge of the screen: the near wires lead, the far sky trails. Arrow keys work too.",
+  "tags": [
+    "WebGL",
+    "Photo",
+    "Depth",
+    "Film"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "iOS 26 Photos Spatial Scenes (Apple Newsroom, June 2025: https://www.apple.com/newsroom/2025/06/apple-elevates-the-iphone-experience-with-ios-26/ , photos turned into 3D scenes that respond as you move your iPhone) together with the Photos app's full-screen swipe between photos, on herb's summer-film set (factory/reality/genre-spec.md). Each photo is layered planes with inpainted backgrounds baked offline and per-plane depth meshes; the swipe is spatial. ?i=0..4 photo, ?swipe=0..1 towards the next, ?tilt=x,y in -1..1.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.7,
+      0.5
+    ],
+    "to": [
+      0.35,
+      0.5
+    ]
+  },
+  "probe": [
+    {
+      "idle": 3200
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.62,
+          0.38
+        ]
+      ],
+      "ms": 1600
+    },
+    {
+      "idle": 600
+    },
+    {
+      "drag": [
+        [
+          0.75,
+          0.5
+        ],
+        [
+          0.3,
+          0.5
+        ]
+      ],
+      "ms": 500
+    },
+    {
+      "idle": 1800
+    },
+    {
+      "drag": [
+        [
+          0.75,
+          0.5
+        ],
+        [
+          0.45,
+          0.5
+        ]
+      ],
+      "ms": 900
+    },
+    {
+      "idle": 2000
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-railroad-crossing-signal-against-a-blue-sky-lxlUQhR3GXk",
+      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "Ukyo, Kyoto, Japan, Ricoh GR II. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, edges.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
+    },
+    {
+      "url": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
+      "file": "https://images.unsplash.com/photo-1620233950363-7c0947527682?w=6000&fit=max&q=90&fm=jpg",
+      "author": "Kanata (@tanakanata)",
+      "licence": "Unsplash License",
+      "note": "Japan (fumikiri crossing signal + catenary; photographer Japanese, location not tagged), Canon EOS 60D. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, edges.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
+    },
+    {
+      "url": "https://unsplash.com/photos/utility-poles-and-overhead-wires-against-a-cloudy-blue-sky-6DHLBwmRkOw",
+      "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "Ine, Kyoto Prefecture, Japan, Sony a7 IV. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, edges.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
+    },
+    {
+      "url": "https://unsplash.com/photos/a-building-with-smokestacks-and-a-blue-sky-with-clouds-tysW7hTVcek",
+      "file": "https://images.unsplash.com/photo-1659666431684-01afd09e0235?w=6000&fit=max&q=90&fm=jpg",
+      "author": "Se. Tsuchiya (@s_tsuchiya)",
+      "licence": "Unsplash License",
+      "note": "Japan ('Summer in Japan'), Sony a6400. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, edges.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
+    },
+    {
+      "url": "https://unsplash.com/photos/railroad-crossing-with-barriers-and-warning-signs-b3Ow_DxiW7M",
+      "file": "https://images.unsplash.com/photo-1776586264901-f41bb46ebb3f?w=6000&fit=max&q=90&fm=jpg",
+      "author": "XS Xue (@xxs11)",
+      "licence": "Unsplash License",
+      "note": "Japanese fumikiri (location not tagged), Sony a7C II. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, edges.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
+    },
+    "https://www.apple.com/newsroom/2025/06/apple-elevates-the-iphone-experience-with-ios-26/",
+    "https://support.apple.com/guide/iphone/spatial-scenes"
+  ]
+}

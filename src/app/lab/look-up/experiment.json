@@ -1,0 +1,33 @@
+{
+  "title": "Look Up",
+  "description": "A street of towers at eye level. Drag upward and you tilt your head back: the lens widens from 70 to 140 degrees and eases from rectilinear to stereographic, so the towers lean in, bend and close into spokes around a summer sky. One 360 capture, projected exactly through r = f k tan(theta / k), developed like daylight negative film.",
+  "tags": ["WebGL", "Perspective", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:30:00.000Z",
+  "intent": "Summer-film genre spec, idea 1 (Look Up): herb's reference 2, the worm's-eye shot of skyscrapers converging into a cumulus sky, turned into a gesture. Reference: factory/reality/herb-refs/2-wormseye-skyscrapers.png; projection family from https://en.wikipedia.org/wiki/Fisheye_lens#Mapping_function",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.85], "to": [0.5, 0.15] },
+  "probe": [
+    { "idle": 2400 },
+    { "drag": [[0.5, 0.85], [0.52, 0.2]], "ms": 2200 },
+    { "idle": 1600 },
+    { "drag": [[0.52, 0.3], [0.5, 0.75]], "ms": 1400 },
+    { "idle": 1400 }
+  ],
+  "sources": [
+    {
+      "url": "https://polyhaven.com/a/canary_wharf",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/canary_wharf_8k.hdr",
+      "author": "Andreas Mischok",
+      "licence": "CC0",
+      "note": "8K HDR, the street and towers. Its sky is replaced inside the sky matte by the cumulus below; baked to a 2048 sRGB cubemap storing scene light / 1.35."
+    },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
+      "author": "Greg Zaal, Jarod Guest",
+      "licence": "CC0",
+      "note": "8K HDR, the sky above the towers: fair-weather cumulus turned so its sun stands behind the resting view, open blue regraded to a smooth cobalt ramp from zenith to horizon."
+    }
+  ]
+}

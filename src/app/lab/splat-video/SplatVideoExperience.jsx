@@ -19,6 +19,9 @@ import {
   formatCount,
   formatDuration,
   LOOKS,
+  ORBIT,
+  clamp,
+  frameAspect,
   isHybrid,
   isRgbd,
   isStream,
@@ -28,6 +31,9 @@ import {
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 const MOBILE = `(max-width: ${RENDER.mobileBreakpoint - 1}px)`;
 const COPY_RESET_MS = 1600;
+// While it plays, the pill and its scrim step aside once the pointer has been
+// still this long, and come back on the next move, touch or key.
+const IDLE_AFTER_MS = 2400;
 
 function subscribeMedia(query) {
   return (callback) => {
@@ -42,6 +48,36 @@ const subscribeMobile = subscribeMedia(MOBILE);
 const readReducedMotion = () => window.matchMedia(REDUCED_MOTION).matches;
 const readMobile = () => window.matchMedia(MOBILE).matches;
 const readOnServer = () => false;
+
+const DEG = Math.PI / 180;
+
+function readNumber(params, name) {
+  const raw = params.get(name);
+  if (raw === null || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+// ?yaw= and ?pitch= (degrees) pin the lean, ?dolly= the distance and ?t= (seconds)
+// a paused moment, so a still of any lean can be reproduced from its URL.
+function readStill() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    yaw: readNumber(params, "yaw"),
+    pitch: readNumber(params, "pitch"),
+    dolly: readNumber(params, "dolly"),
+    time: readNumber(params, "t"),
+  };
+}
+
+function applyStill(engine, still, meta) {
+  const { orbit } = engine;
+  if (still.yaw !== null) orbit.yaw = orbit.targetYaw = clamp(still.yaw, -ORBIT.yawLimitDeg, ORBIT.yawLimitDeg) * DEG;
+  if (still.pitch !== null) orbit.pitch = orbit.targetPitch = clamp(still.pitch, -ORBIT.pitchLimitDeg, ORBIT.pitchLimitDeg) * DEG;
+  if (still.dolly !== null) orbit.dolly = orbit.targetDolly = clamp(still.dolly, ORBIT.dollyMin, ORBIT.dollyMax);
+  if (still.yaw !== null || still.pitch !== null || still.dolly !== null) orbit.lastDragAt = performance.now() + 1e9;
+  if (still.time !== null) engine.time = clamp(still.time, 0, meta.duration);
+}
 
 function isTextEntry(target) {
   if (!(target instanceof HTMLElement)) return false;
@@ -168,9 +204,10 @@ export default function SplatVideoExperience() {
   const [look, setLook] = useState(LOOKS[0]);
   const [scrubbing, setScrubbing] = useState(false);
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
-  const [expanded, setExpanded] = useState(false);
+  const [idle, setIdle] = useState(false);
   const [requested, setRequested] = useState(null);
   const [clips, setClips] = useState([]);
+  const [drawn, setDrawn] = useState(false);
   const engineRef = useRef(createEngine());
 
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, readReducedMotion, readOnServer);
@@ -197,9 +234,12 @@ export default function SplatVideoExperience() {
         engine.time = 0;
         engine.direction = 1;
         engine.muted = true;
+        engine.drawn = false;
         resetOrbit(engine);
+        const still = readStill();
+        applyStill(engine, still, data.meta);
         setMuted(true);
-        setPlaying(!window.matchMedia(REDUCED_MOTION).matches);
+        setPlaying(still.time === null && !window.matchMedia(REDUCED_MOTION).matches);
         setLoad({ status: "ready", clip: data.clip, data });
       })
       .catch((error) => {
@@ -249,6 +289,20 @@ export default function SplatVideoExperience() {
 
   const ready = load.status === "ready";
 
+  useEffect(() => {
+    if (!ready) return undefined;
+    let frame = 0;
+    const watch = () => {
+      if (engineRef.current.drawn) setDrawn(true);
+      else frame = requestAnimationFrame(watch);
+    };
+    frame = requestAnimationFrame(watch);
+    return () => {
+      cancelAnimationFrame(frame);
+      setDrawn(false);
+    };
+  }, [ready, load.clip]);
+
   const togglePlaying = useCallback(() => {
     const engine = engineRef.current;
     engine.playing = !engine.playing;
@@ -286,7 +340,22 @@ export default function SplatVideoExperience() {
     engineRef.current.scrubbing = false;
     setScrubbing(false);
   }, []);
-  const handleToggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  useEffect(() => {
+    if (!ready) return undefined;
+    let timer = 0;
+    const wake = () => {
+      setIdle(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => setIdle(true), IDLE_AFTER_MS);
+    };
+    timer = setTimeout(() => setIdle(true), IDLE_AFTER_MS);
+    const events = ["pointermove", "pointerdown", "keydown", "wheel"];
+    for (const name of events) window.addEventListener(name, wake, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      for (const name of events) window.removeEventListener(name, wake);
+    };
+  }, [ready]);
   const handleSelectClip = useCallback(
     (name) => {
       if (name === load.clip && load.status !== "error") return;
@@ -303,25 +372,22 @@ export default function SplatVideoExperience() {
   );
 
   const meta = ready ? load.data.meta : null;
-  const aspect = meta ? meta.camera.aspect : 16 / 9;
+  const aspect = meta ? frameAspect(meta) : 16 / 9;
   const streaming = Boolean(meta && isStream(meta));
   const summary = summaryFor(load);
 
   return (
     <main
-      className="splat-video bg-surface text-ink"
+      className="splat-video text-ink"
       data-status={load.status}
+      data-playing={playing && !scrubbing}
+      data-idle={idle}
       style={{ "--splat-video-aspect": String(aspect) }}
     >
-      <header className="splat-video__head">
-        <h1 className="splat-video__title text-title-sm">Splat video</h1>
-        <p className="text-ui tabular-nums">{summary}</p>
-        <SplatVideoClips clips={clips} current={load.clip} onSelect={handleSelectClip} />
-      </header>
-
       <section
         className="splat-video__stage"
-        aria-label="Splat video stage. Drag to orbit, scroll to dolly."
+        data-ready={ready && drawn ? "" : undefined}
+        aria-label="Splat video stage. Drag to lean, scroll to dolly."
       >
         {ready ? (
           <ClientOnly
@@ -339,6 +405,14 @@ export default function SplatVideoExperience() {
         {streaming || (ready && isHybrid(meta)) ? <StageBuffering key={`${load.clip}-buffering`} engineRef={engineRef} /> : null}
       </section>
 
+      <header className="splat-video__head">
+        <h1 className="splat-video-sr">Splat video</h1>
+        <p className="splat-video-sr">{summary}</p>
+        {clips.length > 1 ? <SplatVideoClips clips={clips} current={load.clip} onSelect={handleSelectClip} /> : null}
+      </header>
+
+      {ready ? <div className="splat-video__scrim" aria-hidden="true" /> : null}
+
       {ready ? (
         <SplatVideoControls
           engineRef={engineRef}
@@ -346,7 +420,6 @@ export default function SplatVideoExperience() {
           playing={playing}
           scrubbing={scrubbing}
           speed={speed}
-          expanded={expanded}
           sound={(streaming || isRgbd(meta) || isHybrid(meta)) && Boolean(meta.audio)}
           muted={muted}
           onToggleMuted={handleToggleMuted}
@@ -358,7 +431,6 @@ export default function SplatVideoExperience() {
           onBackToLens={handleBackToLens}
           onScrubStart={handleScrubStart}
           onScrubEnd={handleScrubEnd}
-          onToggleExpanded={handleToggleExpanded}
         />
       ) : null}
     </main>

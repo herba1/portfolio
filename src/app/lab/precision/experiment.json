@@ -1,0 +1,18 @@
+{
+  "title": "Precision",
+  "description": "A scrubber for a four-minute track, set alone on warm paper. Drag the playhead and it follows the finger one to one; slide the pointer away from the track while you drag and the scrub slows continuously, from full speed through half, quarter and eighth to a sixteenth. Nothing says so: the ruler darkens under a loupe whose marks swell and sprout seconds, half-seconds and then tenths, and the time readout grows a tenth digit when seconds reach the glass and a hundredth when tenths do. Come back to the track and the playhead eases back under the finger without a jump. Only a full-speed release keeps its momentum.",
+  "tags": [
+    "Input",
+    "Motion",
+    "UI"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:00:00.000Z",
+  "intent": "From Rauno Freiberg's Adaptive precision (https://rauno.me/craft/adaptive-precision) and iOS scrubbing speeds: a time slider whose precision rises as the pointer moves away from the track, communicated by the material itself rather than a label.",
+  "tile": {
+    "shape": "wide"
+  },
+  "sources": [
+    "https://rauno.me/craft/adaptive-precision"
+  ]
+}

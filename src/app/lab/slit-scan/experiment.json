@@ -1,0 +1,77 @@
+{
+  "title": "Slit-Scan",
+  "description": "Ten seconds of a two-car train running past an old wooden country station in low evening sun, shown so that every point of the picture is at its own moment. Left is now, right is a few seconds ago, and in between time climbs along a front that rests already bent deep: across the left half it climbs faster than the train runs, so the carriage folds back on itself and its windows come out mirrored, one to a slit; further right it climbs slower, so doors and pillars are drawn out. Each row is also set at its own moment by where that rope lies, so the front cuts through the end of the train: the right third is already carved back to the empty station along a curve that sweeps from the roof down to the red stripe, and the platform shows through. Nothing is blended between moments: the picture is laid in rigid vertical slices, each one frame of the clip and each exactly as wide as the train runs in a frame, so every seam is a clean vertical edge. The bends drift slowly. Press and drag and the front follows your hand like a rope, and the edge between train and empty station goes with it; hold and it steepens. The station, the fence and the parked cars never moved, so they stay perfectly sharp whatever you do. Let go and it eases back.",
+  "tags": [
+    "generative",
+    "WebGL",
+    "Video",
+    "Time"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-07T02:00:00.000Z",
+  "intent": "Time displacement after Zbigniew Rybczyński's time-slicing work and Adam Magyar's Stainless (2010-11, https://nautil.us/a-photographer-who-tinkers-with-time-234772), and herb's generative reference 2 (a street photo whose region is pulled into rigid strips). One process pushed to the edge: a real slit-scan over real footage. The stabilised clip's moving band is decoded with WebCodecs into a ring of 157 frames (luma full-res, chroma half) and every output pixel samples t = clock - D(x, y), with D a single sculpted time front whose ramp is as wide as the train runs in `depth` seconds (2 s at rest), so its mean slope is exactly 1/v; D is spent along the train's measured run. The print is cropped tight to the carriage (source rows 190-790: the train is ~60% of its height, with a little eaves above and the fence below) and drawn at most one device pixel per source pixel, never upsampled. The rope that marks the front's half-way point rests bent deep, pulled to the print's left edge at the roof and windows and part way at the red stripe (?bend=0.44,0.04;0.64,0.09;0.82,0.18), on a ramp centred left of the middle (?slit=0.265,0.8) so its right knee falls in the print's right third, and breathes; the bias never puts the half-way point closer than 0.34 of the ramp to either end, so at rest the front is at most twice as steep as the train and the first frame already shows the carriage folded, its windows mirrored one to a slit cell, and doors drawn out; the pointer drags the rope further, read through a cubic B-spline so the train's magnification has no kinks. The rope also sets each row's moment: every row is offset by 7.6 s per print width that its rope stands right of the line's centre, and every row sits 1.23 s later again, so the roof and window rows are about 3 s later than the line and the stripe about 2 s, and the time front cuts through the train's tail along a curve that follows the rope. The clock rests at 7.6 s with the front mid-carriage: the left half holds the folded carriage and the right third is carved back to the empty station along a curve from about 0.66 of the print at the roof to about 0.9 at the stripe (it holds from about 7.3 to 7.9 s, the cut sliding left, never opening a hole on the left). The clock runs six times faster through the stretch where the rest pose is only the empty station (8.45 to 9.45 s; one still plate, so nothing visible is skipped). Time is discrete, as a slit-scan's is: every pixel is locked to the nearest whole ring frame, never blended or followed along the motion, and D is read once per slit cell, 2 device px tall and exactly as wide as the train runs in one ring frame (~44 px at 15 fps, ~44 device px on a 1:1 print), so where the front climbs at 1/v each cell is the next frame and the train is laid in rigid vertical slices of carriage, like the reference's pulled strips: every seam between two moments in a row lands on the cell grid as a clean vertical edge, never the comb a 2 px cell draws where an isochrone runs aslant. Pixels on the occluder mask (fence and grass in front of the train) and static pixels are drawn from a median plate of the empty station, so nothing that stood still ever moves. ?t=seconds holds the clock (the hero is ?t=7.6), ?front=flat shows the clip as shot, ?slit=x,lean, ?depth=seconds (also the ramp's width), ?bend=y,x;... sets the rest bends (none for the plain ramp). Where the isochrones run across the rows (where the front cuts the train's end) whole frames would step the end ~44 px at a time, so there each stratum's frame is shifted by the train's measured run over the sub-frame remainder (never blended), with the tracked nose and tail deciding train from station: the cut is a smooth curve. Below the red stripe each slit column is held at the moment of the stripe directly above it, so the undercarriage never streaks and continues the body's cut as fine vertical slivers.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.52,
+      0.5
+    ],
+    "to": [
+      0.28,
+      0.32
+    ]
+  },
+  "probe": [
+    {
+      "idle": 5000
+    },
+    {
+      "drag": [
+        [
+          0.52,
+          0.5
+        ],
+        [
+          0.28,
+          0.32
+        ]
+      ],
+      "ms": 2400
+    },
+    {
+      "idle": 2500
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.8
+        ],
+        [
+          0.75,
+          0.7
+        ]
+      ],
+      "ms": 1800
+    },
+    {
+      "idle": 3500
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://pixabay.com/videos/train-vehicle-station-traffic-84908/",
+      "file": "https://cdn.pixabay.com/video/2021/08/13/84908-587646663_large.mp4",
+      "author": "Luster2739",
+      "licence": "Pixabay Content License",
+      "note": "1920x1080 29.97 fps; Ohmi Railway, Koka, Shiga. Seconds 14-32 used: stabilised (phase correlation on the station roof, Lanczos warp), median plate from 14-21 s, band rows 256-704 of 21.5-32 s at 15 fps as VP9 (and H.264 fallback), occluder mask and train track (tools/depth/bakes/slit-scan/)."
+    },
+    "https://nautil.us/a-photographer-who-tinkers-with-time-234772",
+    "https://en.wikipedia.org/wiki/Slit-scan_photography",
+    "https://en.wikipedia.org/wiki/Zbigniew_Rybczy%C5%84ski"
+  ]
+}

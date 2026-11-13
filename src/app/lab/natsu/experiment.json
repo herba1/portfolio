@@ -1,0 +1,28 @@
+{
+  "title": "Natsu",
+  "description": "A railway crossing signal and its overhead wires, black against a cumulonimbus towering into deep summer blue, taken apart into its real layers: the signal, the wires, the cloud and the sky. Move the pointer and they part by their distance. The cloud keeps growing from its own texture, its lobes swelling one after another while the curd inside churns, and the wires sway on their springs. Hold, and the sun swings round behind the tower: the faces it lit go to skylight blue and the thin edges catch fire. Now and then a train comes and the crossing lamps start to alternate.",
+  "tags": ["WebGL", "Film", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T22:00:00.000Z",
+  "intent": "Genre spec idea 4, Natsu (factory/reality/genre-spec.md section 4), after herb's reference 3 (a utility pole and wires against towering cumulus) and Makoto Shinkai's summer skies: the moment alive inside the computer, from one photograph split into depth layers. Reference: https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4 . ?t=0..1 growth, ?light=0..1 sun, ?tilt=x,y parallax, ?lamp=1|2 holds a lamp lit.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.55, 0.45], "to": [0.6, 0.45] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.3, 0.5], [0.7, 0.45]], "ms": 2200 },
+    { "idle": 2000 },
+    { "drag": [[0.6, 0.45], [0.62, 0.45]], "ms": 2600 },
+    { "idle": 2500 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
+      "file": "https://images.unsplash.com/photo-1620233950363-7c0947527682",
+      "author": "Kanata (@tanakanata), Unsplash",
+      "licence": "Unsplash License",
+      "note": "5184x3456 Canon EOS 60D original, worked at 2592x1728. Depth from Depth Anything V2 (tools/depth/depth_hr.py). Silhouettes matted against an inpainted background (alpha = (I-B)·(F-B)/|F-B|²), split into a near layer (signal, crossbuck, lamps) and a wire layer (catenary, gantry, masts) by depth with hysteresis; the wires hidden behind the signal continued by inpainting. Sky refit as a smooth quadratic in linear light from the visible blue; the cloud kept as its excess over that sky, with normals, cloudness and an activity mask derived from its own shading."
+    },
+    "https://en.wikipedia.org/wiki/Cumulonimbus_cloud",
+    "https://en.wikipedia.org/wiki/Level_crossing#Japan"
+  ]
+}

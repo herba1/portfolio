@@ -1,0 +1,16 @@
+{
+  "title": "Miniature",
+  "description": "Piazza del Popolo from the Pincio terrace on a clear morning, with its depth, shown as a print. The pointer is the plane of focus: hover over the obelisk, the crowd round its fountains, the pines below the terrace or St Peter's dome on the horizon and the lens racks to that distance through the real depth of the square, a gently reverse-tilted plane that blurs top and bottom faster than any real lens at this scale would (except the sky, which at infinity takes no more blur than the horizon below it, so the cumulus keep their sunlit tops), until the people turn into painted figures and the square into a model of itself. Foreground blur spills over what sits behind it, never the other way. Click to hold focus.",
+  "tags": ["WebGL", "Photography", "Optics", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:45:00.000Z",
+  "intent": "After Olivo Barbieri's site specific_ city photographs (https://www.olivobarbieri.it/), which began with Rome, and Vincent Laforet's tilt-shift aerials (https://laforetvisuals.com/): depth of field that is physically wrong for the scale, from the high, downward vantage the illusion needs. The photograph is Alex Liivet's 'Rome' (CC0, https://commons.wikimedia.org/wiki/File:Rome_(26432070296).jpg), with a Depth Anything V2 map (tools/depth/bakes/miniature/bake.py), refined at load by a guided filter against the photograph's luminance so its edges sit on the photograph's silhouettes. Circle of confusion is proportional to the gap in inverse depth (the sky's capped at the horizon depth's, with no tilt term above the horizon or the focus), gathered at reduced resolution with occlusion-aware scatter-as-gather and a depth-aware joint upsample, while the near field is gathered as its own premultiplied layer over its CoC max-dilated by its own radius and composited over the rest, so a blurred pine overlaps what lies behind it; the sky, masked by the unbroken run of horizon depth down from the top of each column (so the far end of Via del Corso, which the map puts at the horizon, is never graded as sky) and by brightness and blue, read at the blur the lens has given each pixel so a defocused cloud is graded as cloud all the way out, is graded to a summer film blue that keeps the photograph's own clouds (a sharp pine's edge pixels are unmixed into pine and sky first, so only their sky share is graded and no dark contour is left), and the print lifts its blacks and rolls off below white instead of clipping. A film pass follows: the highlights diffused at 1/8 and 1/32 resolution as through a Pro-Mist, a thin red-orange halation ring where the brightest stone and the clouds meet darker ground, and luminance-driven grain renewed at 24 frames a second, halved over flat midtone blue sky.",
+  "tile": { "shape": "wide" },
+  "sources": [
+    "https://www.olivobarbieri.it/",
+    "https://laforetvisuals.com/",
+    "https://commons.wikimedia.org/wiki/File:Rome_(26432070296).jpg",
+    "http://blog.tuxedolabs.com/2018/05/04/bokeh-depth-of-field-in-single-pass.html",
+    "https://github.com/DepthAnything/Depth-Anything-V2"
+  ]
+}

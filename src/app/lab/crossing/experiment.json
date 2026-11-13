@@ -1,0 +1,34 @@
+{
+  "title": "Crossing",
+  "description": "A summer photograph of a Japanese level crossing, seen from below and looking up past the crossbuck into the sky, that turns out to be built like a paper tunnel book, seen through a window cut in the page. Drag, or tilt your phone, and it comes apart behind that window into its real depth planes: the sky card stands back, the wires hang in the middle, the crossbuck and its lamps float forward, each a cut-out with the street continued behind it, throwing soft shadows on the cards behind. The lens focuses on whichever plane is under your finger. Let go and it closes back into one flat photograph.",
+  "tags": ["WebGL", "Photo", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:00:00.000Z",
+  "intent": "Multiple layers of an image, the physical world inside the computer. After Disney's multiplane camera (1937, https://en.wikipedia.org/wiki/Multiplane_camera) and paper tunnel books (https://en.wikipedia.org/wiki/Tunnel_book): one low-angle photo cut offline into seven matted, inpainted planes that separate in z with true perspective, each scaled so that from the lens axis the stack is still exactly the photograph.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.5], "to": [0.72, 0.42] },
+  "probe": [
+    { "idle": 3800 },
+    { "drag": [[0.5, 0.5], [0.74, 0.42]], "ms": 1800 },
+    { "idle": 400 },
+    { "drag": [[0.74, 0.42], [0.3, 0.56]], "ms": 2000 },
+    { "idle": 1800 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-railroad-crossing-signal-against-a-blue-sky-lxlUQhR3GXk",
+      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=4000&h=4000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "Ukyo, Kyoto; 4928x3264 original (Ricoh GR II). Plated from the curated low-angle library frame kyoto-crossing-lowangle (4000x2649; chosen over setagaya-wires-up as the steeper, about 35 degrees up, and more cobalt frame). Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; planes, mattes and inpainting baked by tools/depth/bakes/crossing (labels.py, bake.py): the sky card filled from a dilated matte and outpainted a quarter past each side, every wire refitted as one catenary and redrawn at one dark colour by wires.py, running on under the old house far past the frame and behind the signal so no wire ends in open sky, hidden house and town texture and the town card's overscan margin by LaMa (tools/depth/fill.py), every card that meets the frame overscanned so the front mat never shows an edge."
+    },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/kloofendal_48d_partly_cloudy_puresky_16k.hdr",
+      "author": "Greg Zaal (Poly Haven)",
+      "licence": "CC0",
+      "note": "The cumulus behind the street: the 16k equirectangular's big side-lit cumulus (lon 127-155, lat 19-37; the sun is up and to the right, as in the photo), keyed from its sky at native resolution and split from the puff beside it, standing on the HDRI's own lower rows of cumulus through a second, flatter view so it grows up out of the horizon from behind the roofs with no base in the sky, its keyed rim eroded and feathered at native resolution so no pale edge or notch of sky shows and its shaded flank's silhouette rebuilt from its own billows, relit warm-white only on the tops that face the sun and, everywhere else, the HDRI's own billows (read from its luminance as shot, band by band at each band's local strength, each lobe lit on its sunward side) laid across a skylight blue-grey ramp from deep crevice to #9fb6d0 lobes, so the left flank, lower body and foot are lobed volume in shade, the foot thinning out lobe by lobe below the roofline, and projected stretched upright so it towers from behind the roofs past the crossbuck, by tools/depth/bakes/crossing/cumulus.py, on a card of its own between the sky and the far houses, feathered to nothing well inside its edges. The photo's own torn cloud wisps are gone from the sky card, which is now the clear gradient alone."
+    },
+    "https://en.wikipedia.org/wiki/Multiplane_camera"
+  ]
+}
