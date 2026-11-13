@@ -9,7 +9,9 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // the one sodium lamp head poking in at the bottom edge. Drag across and the
 // twenty minutes after sunset run: the skylight falls about three and a half
 // stops while the shaft deepens from pale peach-cyan to cobalt, darkest
-// overhead, the camera opens up as a photographer would, and the lamp trips
+// overhead, the clouds lose the sun on their own, faster curve (peach-white
+// to a dim rose-grey under the sky), the camera opens up as a photographer
+// would, and the lamp trips
 // on its photocell and warms slowly from pink to amber. All of it is
 // developed through _kit/film with its dusk preset easing into night, so the
 // lamp blooms and halates the way it would on CineStill.
@@ -97,7 +99,12 @@ uniform vec3 uZen; uniform vec3 uMid; uniform vec3 uHorSun; uniform vec3 uHorAnt
 uniform float uSkyLum;
 uniform float uSkySat;      // midtone saturation of the smooth sky
 uniform float uCloudGain;   // stops of lift per unit of cloud log-ratio
-uniform vec3 uCloudWhite;   // sunlit cloud, luminance 1 (warm neutral)
+uniform float uSunK;        // the sun's share of the cloud's light left (1 at sunset)
+uniform float uCloudSkyK;   // skylight the cloud passes on, relative to open sky
+uniform float uKnee;        // stops of lift kept linear
+uniform float uShoulder;    // and the most any pixel may reach
+uniform float uCloudKeep;   // how much skylight colour the cloud keeps (0..1)
+uniform vec3 uCloudWhite;   // lit cloud, luminance 1: peach-white to rose-grey
 uniform vec3 uCloudPeach;   // afterglow on the undersides, luminance 1
 uniform float uAfter;       // afterglow left, 1 at sunset, 0 by mid-span
 uniform float uFgGain;      // building layer: linear gain (0.42, about 1.25 stops down)
@@ -111,6 +118,14 @@ out vec4 o;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float FG_MID = 0.06;  // the plate's median facade luminance
 float lrAt(vec2 t){ return (texture(uAux, t).g - 0.5) / 0.3; }
+// A cloud's body: the log ratio blurred over about 4 plate px (a 3x3 tent).
+float bodyAt(vec2 t){
+  vec2 s = 3.0 / uTexSize;
+  float b = 4.0 * lrAt(t);
+  b += 2.0 * (lrAt(t + vec2(s.x, 0.0)) + lrAt(t - vec2(s.x, 0.0)) + lrAt(t + vec2(0.0, s.y)) + lrAt(t - vec2(0.0, s.y)));
+  b += lrAt(t + s) + lrAt(t - s) + lrAt(t + vec2(s.x, -s.y)) + lrAt(t + vec2(-s.x, s.y));
+  return b / 16.0;
+}
 // World view direction of a plate uv.
 vec3 dirAt(vec2 t){
   vec2 q = t * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
@@ -130,7 +145,9 @@ void main(){
   vec3 em = textureLod(uEmit, uv, uLod).rgb;
   vec4 ax = texture(uAux, uv);
   float a = ax.r;
-  float lr = (ax.g - 0.5) / 0.3;
+  // No pixel may stand far over its cloud's body: the plate's thin specular
+  // streaks would otherwise lift into hard white glints inside a puff.
+  float lr = min((ax.g - 0.5) / 0.3, bodyAt(uv) + 0.08);
   int id = int(texelFetch(uAux, ivec2(uv * uTexSize), 0).b * 255.0 + 0.5);
 
   // View direction of this plate pixel, for the sky gradient.
@@ -180,19 +197,31 @@ void main(){
   float lit = smoothstep(-0.12, 0.12, side);
   float cw = smoothstep(0.06, 0.45, lrc);            // cover
   float core = smoothstep(0.25, 0.6, lrc);          // dense, sunlit tops
-  // Clouds are the brightest thing in the sky after the lamp: a real lift
-  // over the sky in stops, more on the lit side, less in the lee.
-  float lift = max(lrc, 0.0) * uCloudGain * (0.7 + 0.45 * lit + 0.15 * core) + min(lrc, 0.0) * 0.6;
+  // At sunset clouds are the brightest thing in the sky after the lamp: a
+  // real lift over the sky in stops, more on the lit side, less in the lee,
+  // rolled into a soft shoulder past uKnee so no pixel spikes out of its
+  // cloud.
+  float up = max(lrc, 0.0) * uCloudGain * (0.7 + 0.45 * lit + 0.15 * core);
+  float room = uShoulder - uKnee;
+  up = up < uKnee ? up : uKnee + room * (1.0 - exp(-(up - uKnee) / room));
+  float down = min(lrc, 0.0) * 0.6;
   // Their colour: sunlit tops roll to a warm neutral white, the lee keeps
   // the skylight's blue, and while the afterglow lasts the undersides (the
   // thin flanks, strongest towards the sun's side) catch it in peach.
   // The brighter a cloud is lifted, the less sky colour it may keep, or a
   // dense lee core would go to a glowing cyan instead of white.
-  float wk = clamp(mix(0.25, 0.8, lit) + core * 0.85, 0.0, 1.0);
+  // Once the sun is off them they are lit by the sky alone and keep more of
+  // its colour: a dusty rose-grey, bluer in the lee.
+  float wk = clamp(mix(0.25, 0.8, lit) + core * 0.85, 0.0, 1.0) * (1.0 - uCloudKeep);
   vec3 ccol = mix(col, uCloudWhite, wk);
   float under = uAfter * (1.0 - 0.6 * core) * (0.35 + 0.65 * facing);
   ccol = mix(ccol, uCloudPeach, clamp(under, 0.0, 1.0) * 0.85);
-  vec3 sky = mix(col, ccol, cw) * lum * exp2(lift);
+  // The cloud's light is two parts: the skylight it scatters on (about the
+  // sky's own) and the lift the sun puts on its tops. The sun's part leaves
+  // on its own, faster curve (uSunK, solved per frame so a lit core follows
+  // CLOUD_STOPS), so by blue hour the sky holds the light and the cloud sits
+  // dim against it.
+  vec3 sky = mix(col * exp2(down), ccol * (1.0 + (exp2(up) - 1.0) * uSunK) * uCloudSkyK, cw) * lum;
 
   // The city is the frame, not the subject: about a stop down and a harder
   // log contrast about the plate's mid, so towers, crane and brick read as
@@ -317,10 +346,19 @@ const smooth = (a, b, x) => {
 
 // The sky at sunset (pale peach at the horizon under a cyan zenith) and at
 // +20 minutes (cobalt overhead, a cleaner, lighter blue low down).
-const SKY0 = { zen: lin("#5b9ddc"), mid: lin("#8bbae6"), horSun: lin("#f0caa0"), horAnti: lin("#b7d0e6"), lum: 0.72, sat: 1.25, cloudGain: 2.0, glow: 0.55, zenDeep: 0.6 };
-const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, sat: 0.95, cloudGain: 3.6, glow: 1.4, zenDeep: 1.5 };
-const CLOUD_WHITE = lin("#f4ede4");
+const SKY0 = { zen: lin("#5b9ddc"), mid: lin("#8bbae6"), horSun: lin("#f0caa0"), horAnti: lin("#b7d0e6"), lum: 0.72, sat: 1.25, glow: 0.55, zenDeep: 0.6 };
+const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, sat: 0.95, glow: 1.4, zenDeep: 1.5 };
+const CLOUD_WHITE0 = lin("#f4e9df"); // peach-white, the sun still on the tops
+const CLOUD_WHITE1 = lin("#bcaeb9"); // dusty rose-grey, skylight only
 const CLOUD_PEACH = lin("#ffb98f");
+const CLOUD_GAIN = 2.2; // stops per unit log ratio, fixed: the time lives in CLOUD_STOPS
+// The cloud's own curve. As printed (after the camera opens up) the shaft
+// loses about 3.5 stops over the span; a lit cloud core, which loses the sun
+// as well as the sky, loses CLOUD_STOPS, so its lift over the sky closes and
+// it ends a little under it.
+const CLOUD_STOPS = 4.8;
+const CORE_LIFT = 1.1; // stops: the reference lit core the curve is solved for
+const CLOUD_SKY1 = 0.8; // skylight a cloud passes on at +20 min, vs open sky
 
 function lerpParams(a, b, k) {
   const out = {};
@@ -581,6 +619,13 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     const expo = 0.62 * 2 ** (EXPO_STOPS * t + exposureLift);
     const wb = mix3([1.07, 1.0, 0.92], [0.82, 0.95, 1.22], s);
     const skyLevel = sky.lum * 1.25 * ambK * expo;
+    // printed level of the skylight and of the cloud, both relative to sunset
+    const skyFall = (sky.lum / SKY0.lum) * ambK * 2 ** (EXPO_STOPS * t);
+    // solve the sun's share so the reference core prints on the cloud curve
+    const core0 = 2 ** CORE_LIFT;
+    const cloudSkyK = 1 + (CLOUD_SKY1 - 1) * t;
+    const coreT = (core0 * 2 ** (-CLOUD_STOPS * t)) / skyFall / cloudSkyK;
+    const sunK = clamp((coreT - 1) / (core0 - 1), 0, 1);
 
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
@@ -614,8 +659,13 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uHorAnti, sky.horAnti);
     gl.uniform1f(u.uSkyLum, sky.lum * 1.25);
     gl.uniform1f(u.uSkySat, sky.sat);
-    gl.uniform1f(u.uCloudGain, sky.cloudGain);
-    gl.uniform3fv(u.uCloudWhite, CLOUD_WHITE);
+    gl.uniform1f(u.uCloudGain, CLOUD_GAIN);
+    gl.uniform1f(u.uSunK, sunK);
+    gl.uniform1f(u.uCloudSkyK, cloudSkyK);
+    gl.uniform1f(u.uKnee, 1.0);
+    gl.uniform1f(u.uShoulder, 1.6);
+    gl.uniform1f(u.uCloudKeep, 0.2 * s);
+    gl.uniform3fv(u.uCloudWhite, mix3(CLOUD_WHITE0, CLOUD_WHITE1, smooth(0.0, 0.7, t)));
     gl.uniform3fv(u.uCloudPeach, CLOUD_PEACH);
     gl.uniform1f(u.uAfter, 1 - smooth(0, 0.5, t));
     gl.uniform1f(u.uFgGain, 0.42);
