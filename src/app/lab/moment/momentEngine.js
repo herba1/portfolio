@@ -8,8 +8,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Everything between them is synthesised here, 3D Moments style, from what
 // was baked offline (tools/depth/bakes/moment):
 //   - a clean plate: the sky behind the jumper is real sky, taken from the
-//     frames in which he was elsewhere, split into an opaque sky layer and a
-//     matted near layer (tree, post, wires, box, hotel) with its own depth;
+//     frames in which he was elsewhere, split into an opaque sky layer, a
+//     matted near layer (tree, box, hotel) with its own depth, and the post
+//     with its wires as a matted layer of their own on one rigid plane;
 //   - the jumper at each shutter press, matted (SAM 2.1), with his depth
 //     (MoGe-2 relief, scaled by how much nearer he got) and his real motion
 //     to the other press (DIS optical flow chained through the eleven frames
@@ -69,6 +70,8 @@ const SKY_GRID = 48;
 // to one cobalt and crushed the thin veils of cloud into dark-blue blots.
 const FILM = { ...FILM_PRESETS.summer, halation: 0.2, halationLocal: 1, softness: 0.35, whitePoint: 1.45, blueDepth: 0.4 };
 const NEAR_STEP = 8; // plate px per near-layer cell
+const POST_STEP = 16; // plate px per cell of the post's plane (it is flat: few are needed)
+const TEAR = 0.03; // 1/m of disparity across one near cell that tears it (~2.4 plate px of parallax at the orbit's end)
 const SUBJ_STEP = 4; // plate px per jumper cell
 
 const PROJECT = `
@@ -94,21 +97,69 @@ vec4 project(vec2 p, float d, float zOrder) {
 }
 `;
 
+// Each vertex of the layer mesh carries its triangle's other two corners
+// (the mesh is unindexed), so all three agree on whether their triangle
+// spans a depth step. One that does would be drawn out across the step at
+// the orbit's ends, a rubber sheet dragging the nearer thing's soft edge over
+// the gap it leaves; it is collapsed instead, and the gap shows the sky
+// layer, which is clean behind everything. Only where the triangle holds
+// next to nothing of the near layer (its cell, averaged, under a tenth
+// covered): a step through content (the box against the conifers behind it,
+// a conifer's own crown) has no sky behind it to show, and cutting it would
+// punch a hole in the leaves.
 const LAYER_VERT = `#version 300 es
 precision highp float;
 in vec2 aGrid;
+in vec4 aOther;             // the triangle's other two corners, grid units
 uniform sampler2D uDepth;
+uniform sampler2D uTex;
 uniform float uDMax;
 uniform float uUseDepth;
+uniform float uTear;        // disparity step (1/m) across one triangle that tears it
+out vec2 vUv;
+${PROJECT}
+vec2 meshUv(vec2 g) {
+  // the mesh runs 6 % past the photo on every side, its edge pixels
+  // stretched (clamped), so no layer ever pulls in from the frame edge
+  return mix(vec2(-0.06), vec2(1.06), g);
+}
+void main() {
+  vec2 uv = meshUv(aGrid);
+  vUv = uv;
+  float d = 0.0;
+  if (uUseDepth > 0.5) {
+    vec2 u1 = meshUv(aOther.xy);
+    vec2 u2 = meshUv(aOther.zw);
+    d = textureLod(uDepth, uv, 0.0).r * uDMax;
+    float d1 = textureLod(uDepth, u1, 0.0).r * uDMax;
+    float d2 = textureLod(uDepth, u2, 0.0).r * uDMax;
+    float jump = max(d, max(d1, d2)) - min(d, min(d1, d2));
+    // coverage round each corner, over a cell's worth of plate px
+    float cover = max(textureLod(uTex, uv, 3.0).a, max(textureLod(uTex, u1, 3.0).a, textureLod(uTex, u2, 3.0).a));
+    if (jump > uTear && cover < 0.1) {
+      gl_Position = vec4(0.0, 0.0, 2.0, 1.0); // all three outside the clip volume: culled
+      return;
+    }
+  }
+  gl_Position = project(uv * uSize, d, 0.0);
+}`;
+
+// The post and its wires: one matted layer on one plane of disparity
+// (scene.post.plane, d = a + b x + c y over plate px; a plane through a
+// pinhole is linear in the image). Every point of it is carried by the same
+// rigid warp, so the shaft, the crossarm and the thin wires move as one
+// thing and cannot tear, stretch, or split into two copies.
+const POST_VERT = `#version 300 es
+precision highp float;
+in vec2 aGrid;
+uniform vec4 uRect;         // plate px (x0, y0, x1, y1)
+uniform vec3 uPlane;        // disparity = a + b x + c y
 out vec2 vUv;
 ${PROJECT}
 void main() {
-  // the mesh runs 6 % past the photo on every side, its edge pixels
-  // stretched (clamped), so no layer ever pulls in from the frame edge
-  vec2 uv = mix(vec2(-0.06), vec2(1.06), aGrid);
-  vUv = uv;
-  float d = uUseDepth > 0.5 ? textureLod(uDepth, uv, 0.0).r * uDMax : 0.0;
-  gl_Position = project(uv * uSize, d, 0.0);
+  vUv = aGrid;
+  vec2 p = mix(uRect.xy, uRect.zw, aGrid);
+  gl_Position = project(p, dot(uPlane, vec3(1.0, p)), 0.0);
 }`;
 
 const LAYER_FRAG = `#version 300 es
@@ -331,8 +382,7 @@ void main() {
   float mx = max(sky.r, max(sky.g, sky.b));
   float chroma = (mx - min(sky.r, min(sky.g, sky.b))) / max(mx, 1e-3);
   // what stands in front of the sky, unless it is itself cloud in front of
-  // cloud, near in tone (the strip of cloud the near layer's matte carried
-  // along between the two wires)
+  // cloud, near in tone (a gap of sky a layer's matte carried along)
   float smx = max(scene.r, max(scene.g, scene.b));
   float schroma = (smx - min(scene.r, min(scene.g, scene.b))) / max(smx, 1e-3);
   float cloudy = (1.0 - smoothstep(0.12, 0.2, schroma)) * smoothstep(0.55, 0.65, dot(scene.rgb, LUMA))
@@ -396,7 +446,7 @@ void main() {
   outColor = vec4(mix(col, graded, key), 1.0);
 }`;
 
-function compile(gl, vs, fs, attrib = "aGrid") {
+function compile(gl, vs, fs, attrib = "aGrid", attrib1 = "aOther") {
   const p = gl.createProgram();
   for (const [type, src] of [
     [gl.VERTEX_SHADER, vs],
@@ -410,6 +460,7 @@ function compile(gl, vs, fs, attrib = "aGrid") {
     gl.deleteShader(s);
   }
   gl.bindAttribLocation(p, 0, attrib);
+  gl.bindAttribLocation(p, 1, attrib1);
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
   const u = {};
@@ -474,6 +525,47 @@ function grid(gl, nx, ny) {
   return { vao, count: idx.length, free: () => (gl.deleteBuffer(vb), gl.deleteBuffer(ib), gl.deleteVertexArray(vao)) };
 }
 
+// The same grid unindexed, each vertex carrying its triangle's other two
+// corners (aOther), so a vertex shader can judge the whole triangle.
+function triGrid(gl, nx, ny) {
+  const n = nx * ny * 6;
+  const pos = new Float32Array(n * 2);
+  const other = new Float32Array(n * 4);
+  let k = 0;
+  const put = (a, b, c) => {
+    for (const [v, o1, o2] of [
+      [a, b, c],
+      [b, c, a],
+      [c, a, b],
+    ]) {
+      pos.set(v, k * 2);
+      other.set([o1[0], o1[1], o2[0], o2[1]], k * 4);
+      k++;
+    }
+  };
+  for (let y = 0; y < ny; y++)
+    for (let x = 0; x < nx; x++) {
+      const a = [x / nx, y / ny];
+      const b = [(x + 1) / nx, y / ny];
+      const c = [x / nx, (y + 1) / ny];
+      const d = [(x + 1) / nx, (y + 1) / ny];
+      put(a, c, b);
+      put(b, c, d);
+    }
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const bufs = [pos, other].map((data, i) => {
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(i);
+    gl.vertexAttribPointer(i, i ? 4 : 2, gl.FLOAT, false, 0, 0);
+    return b;
+  });
+  gl.bindVertexArray(null);
+  return { vao, count: n, free: () => (bufs.forEach((b) => gl.deleteBuffer(b)), gl.deleteVertexArray(vao)) };
+}
+
 // Apple's rubber band: resistance grows with the overshoot.
 const rubber = (x, c = 0.55) => (Math.sign(x) * (1 - 1 / (Math.abs(x) * c + 1))) / c;
 
@@ -502,12 +594,13 @@ export async function createMoment(host, { embedded = false } = {}) {
   stage.canvas.style.cursor = "grab";
 
   const scene = await fetch(`${BASE}scene.json`).then((r) => r.json());
-  const [imSky, imNear, imDepth, imA, imB, imMA, imMB] = await Promise.all(
-    ["sky.webp", "near.webp", "depth.png", "a.webp", "b.webp", "ma.png", "mb.png"].map((n) => loadImage(BASE + n)),
+  const [imSky, imNear, imPost, imDepth, imA, imB, imMA, imMB] = await Promise.all(
+    ["sky.webp", "near.webp", "post.webp", "depth.png", "a.webp", "b.webp", "ma.png", "mb.png"].map((n) => loadImage(BASE + n)),
   );
   const tex = {
     sky: texture(gl, imSky, { mips: true }),
     near: texture(gl, imNear, { mips: true }),
+    post: texture(gl, imPost, { mips: true }),
     depth: texture(gl, imDepth, { premultiply: false, raw: true }),
     a: texture(gl, imA, { mips: true }),
     b: texture(gl, imB, { mips: true }),
@@ -519,14 +612,17 @@ export async function createMoment(host, { embedded = false } = {}) {
   const rect = scene.subject.rect;
   const S = scene.subject.scale; // how much nearer he is at B than at A
 
+  const post = scene.post;
   const progLayer = compile(gl, LAYER_VERT, LAYER_FRAG);
+  const progPost = compile(gl, POST_VERT, LAYER_FRAG);
   const progSubj = compile(gl, SUBJ_VERT, SUBJ_FRAG);
   const progBlend = compile(gl, QUAD_VERT, BLEND_FRAG, "aPos");
   const progGrade = compile(gl, QUAD_VERT, GRADE_FRAG, "aPos");
   const film = createFilm(gl, { width: 2, height: 2 });
 
-  const gSky = grid(gl, SKY_GRID, Math.round((SKY_GRID * PH) / PW));
-  const gNear = grid(gl, Math.round(PW / NEAR_STEP), Math.round(PH / NEAR_STEP));
+  const gSky = triGrid(gl, SKY_GRID, Math.round((SKY_GRID * PH) / PW));
+  const gNear = triGrid(gl, Math.round(PW / NEAR_STEP), Math.round(PH / NEAR_STEP));
+  const gPost = grid(gl, Math.round((post.rect[2] - post.rect[0]) / POST_STEP), Math.round((post.rect[3] - post.rect[1]) / POST_STEP));
   const gSubj = grid(gl, Math.round((rect[2] - rect[0]) / SUBJ_STEP), Math.round((rect[3] - rect[1]) / SUBJ_STEP));
 
   const quad = gl.createBuffer();
@@ -832,6 +928,7 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.uniform1i(progLayer.u.uTex, 0);
     gl.uniform1i(progLayer.u.uDepth, 1);
     gl.uniform1f(progLayer.u.uDMax, scene.dmax);
+    gl.uniform1f(progLayer.u.uTear, TEAR);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, tex.depth);
     gl.activeTexture(gl.TEXTURE0);
@@ -843,17 +940,26 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.bindFramebuffer(gl.FRAMEBUFFER, targets.sky.fbo);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawElements(gl.TRIANGLES, gSky.count, gl.UNSIGNED_INT, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, gSky.count);
     gl.bindFramebuffer(gl.FRAMEBUFFER, targets.scene.fbo);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
-    gl.drawElements(gl.TRIANGLES, gSky.count, gl.UNSIGNED_INT, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, gSky.count);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindTexture(gl.TEXTURE_2D, tex.near);
     gl.uniform1f(progLayer.u.uUseDepth, 1);
     gl.bindVertexArray(gNear.vao);
-    gl.drawElements(gl.TRIANGLES, gNear.count, gl.UNSIGNED_INT, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, gNear.count);
+    // the post and its wires over it, rigid on their plane
+    gl.useProgram(progPost.p);
+    setProjection(progPost.u, cm, pw, ph);
+    gl.uniform1i(progPost.u.uTex, 0);
+    gl.uniform4f(progPost.u.uRect, post.rect[0], post.rect[1], post.rect[2], post.rect[3]);
+    gl.uniform3f(progPost.u.uPlane, post.plane[0], post.plane[1], post.plane[2]);
+    gl.bindTexture(gl.TEXTURE_2D, tex.post);
+    gl.bindVertexArray(gPost.vao);
+    gl.drawElements(gl.TRIANGLES, gPost.count, gl.UNSIGNED_INT, 0);
 
     // 3. the jumper over it: one matte (the trusted union), colour blended inside it
     gl.enable(gl.SCISSOR_TEST);
@@ -999,10 +1105,11 @@ export async function createMoment(host, { embedded = false } = {}) {
       for (const k of Object.keys(tex)) gl.deleteTexture(tex[k]);
       gSky.free();
       gNear.free();
+      gPost.free();
       gSubj.free();
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(quadVao);
-      for (const p of [progLayer, progSubj, progBlend, progGrade]) gl.deleteProgram(p.p);
+      for (const p of [progLayer, progPost, progSubj, progBlend, progGrade]) gl.deleteProgram(p.p);
       stage.destroy();
     },
   };
