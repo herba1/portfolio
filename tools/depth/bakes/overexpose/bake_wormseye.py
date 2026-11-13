@@ -4,6 +4,7 @@
 #     && python3 relight.py <copy of scene.webp> <copy of optics.png>   (cumulus relit, cloud key -> alpha)
 #     && python3 sunburst.py <copy of scene.webp> <copy of optics.png>  (the hidden sun lit: aureole, rim, optics, glow key)
 #     && python3 polarise.py <copy of scene.webp> <copy of optics.png>  (dense radial cobalt sky around the zenith)
+#     && python3 canopy.py <copy of scene.webp> <copy of optics.png>    (near-black, crisp canopy; the top crown's leader)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image

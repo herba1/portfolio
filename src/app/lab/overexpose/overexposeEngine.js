@@ -35,6 +35,13 @@ export const FILM = {
   paperGamma: 3.6,
   paperDmin: [0.042, 0.044, 0.052], // paper white, a touch warm: never 255
   paperDmax: [1.9, 1.8, 1.75], // the scanned black, lifted and cyan
+  // The paper's dense end, past the midtones and the sky: the canopy (canopy.py)
+  // is a near-black silhouette at 0 EV, about #141a18, and the scanned black above
+  // would have lifted it to a muddy rgb(34,38,39). Past shadowX[0] on the paper's
+  // logistic (the cobalt zenith's red sits at ~1.2, the needles at 2-5) each layer
+  // takes up to shadowExt more density, easing in over shadowX[1].
+  shadowExt: [0.36, 0.29, 0.34],
+  shadowX: [1.6, 1.5],
   printGrey: 0.25,
   saturation: 1.15,
   blueDepth: 1.5,
@@ -78,12 +85,24 @@ export const FILM = {
   // needle's lit side back almost as far as its shadow sat above it, so at +3
   // the canopy's midtones collapsed onto one level and posterized into flat
   // grey-green and lilac blobs. Spread out, each stop of needle still prints
-  // at least 0.7 stop apart at +3.
-  skyHoldNeedle: 0.3,
+  // at least 0.7 stop apart at +3. Since canopy.py took the needles about 1.3
+  // stops down, so they print near-black at 0 EV, the darkest of them are not
+  // held at all (0.3 before), or at +3 they stayed mid-green instead of opening.
+  skyHoldNeedle: 0,
   skyHoldY: [-9.0, -3.3],
   skyHoldFull: 1.67,
 
   hiWarm: 0.025,
+  // The softness belongs to the sky. At low exposure the needles (keyed on the
+  // scene's luminance, needleY) take only 1 - needleBloomCap of the Pro-Mist veil
+  // and 1 - needleHalCap of the halation, and are sampled from the full-size
+  // scene rather than the blurrier mip, so the silhouette stays crisp against
+  // a diffused sky. The caps ease off by needleCapEV, where the overexposure
+  // is meant to lift and soften the shadows.
+  needleY: [0.02, 0.06],
+  needleBloomCap: 0.85,
+  needleHalCap: 0.6,
+  needleCapEV: 2,
   bloom: 0.08,
   halation: 0.15,
   halationColor: [1.0, 0.3, 0.08],
@@ -113,7 +132,9 @@ uniform vec4 uRect;         // square in device px: x, y, size, size
 uniform float uExp;         // norm * 2^ev
 uniform vec3 uGamma; uniform vec3 uShoulder; uniform float uToe; uniform float uShP;
 uniform vec3 uGref;         // negative density of the printer-light grey
-uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax;
+uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax; uniform vec3 uShExt; uniform vec2 uShX;
+uniform vec2 uNeedleY; uniform vec2 uNeedleCap; // luminance key; bloom and halation caps, already scaled by exposure
+uniform float uLod;         // mip level the print is minified to
 uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm;
 uniform vec2 uSkyQ; uniform float uHold; uniform float uHoldNeedle; uniform vec2 uHoldY; uniform float uHoldDepth; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
@@ -140,6 +161,11 @@ void main(){
   vec2 p = (gl_FragCoord.xy - uRect.xy) / uRect.zw;
   vec2 uv = vec2(p.x, 1.0 - p.y); // textures are uploaded top row first
   vec4 sc = texture(uScene, uv);
+  // the needles are read from the full-size scene, the sky from the minified one
+  vec4 sc0 = textureLod(uScene, uv, 0.0);
+  vec3 L0 = uLogIn > 0.5 ? dec(sc0.rgb) : sc0.rgb;
+  float needle = 1.0 - smoothstep(log2(uNeedleY.x), log2(uNeedleY.y), log2(max(dot(L0, LUMA), 1e-6)));
+  sc = mix(sc, sc0, needle * step(0.01, uLod));
   vec3 L = uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb;
   float Ys = dot(L, LUMA);
   float hx = clamp(uv.x, 0.002, 0.998) * 0.5;
@@ -147,10 +173,10 @@ void main(){
   float Yb = dec(texture(uOptics, vec2(hx + 0.5, uv.y)).rgb).g;
 
   // Pro-Mist: a fixed share of all light lands spread out.
-  L = mix(L, D, uBloom);
+  L = mix(L, D, uBloom * (1.0 - uNeedleCap.x * needle));
   // Halation: light bounced off the base comes back through the red layer,
   // landing just outside bright areas (a ring, not a fill).
-  L += uHalColor * max(Yb - dot(L, LUMA), 0.0) * uHal;
+  L += uHalColor * max(Yb - dot(L, LUMA), 0.0) * uHal * (1.0 - uNeedleCap.y * needle);
   // The printer holds all but the cloud back (after the optics, so the hold does not
   // read as a dark gap for the halation to fill).
   float open = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0); // 1 - the bake's cloud share
@@ -162,7 +188,11 @@ void main(){
   vec3 d = negD(log2(max(H, 1e-6) / 0.18));
   // Print: fixed printer light, then the paper's own S-curve.
   vec3 lp = -(d - uGref);
-  vec3 dens = uDmin + (uDmax - uDmin) / (1.0 + exp(-(uPk * lp + uPx0)));
+  vec3 px = uPk * lp + uPx0;
+  vec3 dens = uDmin + (uDmax - uDmin) / (1.0 + exp(-px));
+  vec3 xs = px - uShX.x;
+  vec3 sp = log(1.0 + exp(-abs(xs * 4.0))) / 4.0 + max(xs, 0.0);
+  dens += uShExt * (1.0 - exp(-sp / uShX.y));
   vec3 c = pow(vec3(10.0), -dens);
 
   // Scan: summer sky leans cobalt, colour sits in the midtones and bleaches
@@ -249,6 +279,11 @@ function negD(stops, c, F) {
   return lin / (1 + (lin / F.negShoulder[c]) ** F.shoulderP) ** (1 / F.shoulderP);
 }
 
+const smoothstep = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
 // Rubber band past the ends of the dial.
 const rubber = (v, lo, hi) => {
   const band = (x) => (1 - 1 / (x * 0.45 + 1)) / 0.45 * 0.35;
@@ -334,6 +369,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.deleteFramebuffer(fbo);
   }
+  const sceneW = sceneImg.width;
   sceneImg.close?.();
   opticsImg.close?.();
 
@@ -457,6 +493,12 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uPx0, px0);
     gl.uniform3fv(u.uDmin, F.paperDmin);
     gl.uniform3fv(u.uDmax, F.paperDmax);
+    gl.uniform3fv(u.uShExt, F.shadowExt);
+    gl.uniform2fv(u.uShX, F.shadowX);
+    gl.uniform2fv(u.uNeedleY, F.needleY);
+    const capK = 1 - smoothstep(0, F.needleCapEV, e);
+    gl.uniform2f(u.uNeedleCap, F.needleBloomCap * capK, F.needleHalCap * capK);
+    gl.uniform1f(u.uLod, logIn ? 0 : Math.max(0, Math.log2(sceneW / s)));
     gl.uniform1f(u.uSat, F.saturation);
     gl.uniform1f(u.uBlueSat, F.blueDepth);
     gl.uniform3fv(u.uBlueHue, F.blueHue);
