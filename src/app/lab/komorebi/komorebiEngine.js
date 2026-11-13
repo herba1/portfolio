@@ -40,9 +40,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // gust swings it clear (its drag grows with the square of a breeze) and it
 // swings back and closes. What leaks through is the only bright thing in
 // the scene, and everything round it scales with how much of the disc is
-// open: the white core widens from a pinpoint, a warm bloom spreads over
-// the crown, the needle edges round the gap glint, and the film's
-// halation follows. The film only diffuses what is past its thresholds;
+// open: the white core widens from a pinpoint, a warm bloom fills the gap
+// with a thin red-orange ring of halation, the needle edges round it glint,
+// and the film's halation follows. The glare is added only where it reaches
+// the lens, on the open gap and the needle edges beside it (found from the
+// canopy's alpha gradient), never mixed over the crown as a veil, so the
+// body of the crown keeps its own dark green and the needles stay crisp
+// silhouettes against the glow. The film only diffuses what is past its thresholds;
 // its pyramid has long wings, so the disc goes in heavily filtered.
 //
 // The lower canopy, the cypresses and far pines against the low sky, is
@@ -86,18 +90,23 @@ const SUN_ND = 0.001;
 // clips near 2.8, so the white core is ~2.4 widths across: a few pixels
 // shut, ~1.5% of the frame open (under 0.3% of the print clips). All of it
 // scales with how much of the disc the needles leave open, and a warm bloom
-// spreads over the crown as it opens (peak, e-folding width shut .. open).
+// fills the gap as it opens (peak, e-folding width shut .. open).
 const GLARE = {
   peak: 30,
   color: [1, 0.9, 0.74],
   width: [0.0022, 0.0085],
-  bloom: 0.65,
+  bloom: 0.9,
   bloomColor: [1, 0.7, 0.4],
   bloomWidth: [0.02, 0.075],
 };
-// Glints: the needle edges round an open sun, lit through from behind.
-// Strength (scene light) and gaussian radius in asset widths.
-const GLINT = { peak: 2.2, color: [1, 0.8, 0.52], width: 0.032 };
+// Where the glare lands. It is added, never mixed: in full on the open gap,
+// a trace (body) on the body of a crown, and along the needle edges, found
+// from the canopy's alpha gradient across span px, as glints (peak, scene
+// light) that reach this many bloom widths, warm by the disc and red-orange
+// further out. The halation ring sits just outside the clipped core
+// (radius in core widths).
+const GLINT = { peak: 2.8, color: [1, 0.82, 0.56], span: 1.5, body: 0.05, reach: 1.1 };
+const HALO = { peak: 0.9, color: [1, 0.46, 0.16], radius: 3.4 };
 
 // Per layer: deflection per unit wind (asset widths), natural frequency,
 // damping. The branch centres the wind is sampled at come with the
@@ -199,7 +208,9 @@ uniform float uGain;
 uniform vec3 uGlare;         // core peak
 uniform vec3 uBloom;         // the warm bloom over the crown, peak
 uniform vec4 uGlareW;        // core width shut, open; bloom width shut, open
-uniform vec4 uGlint;         // rgb peak, a: e-folding distance (asset widths)
+uniform vec3 uGlint;         // needle-edge glint, rgb peak
+uniform vec3 uEdge;          // x gradient half-span (px), y share on a crown's body, z glint reach (bloom widths)
+uniform vec4 uHalo;          // halation ring: rgb peak, a radius (core widths)
 uniform float uSil;          // how far the lower canopy sinks into silhouette
 uniform vec4 uTuft;          // xy tuft offset (asset uv), z radius (asset widths), w pinhole
 uniform vec2 uLog;
@@ -267,6 +278,15 @@ float nearCover(vec2 uv, out vec2 ub, out vec2 ut, out float ab, out float at) {
     at *= 1.0 - uTuft.w * exp(-dot(pq, pq)) * smoothstep(0.4, -0.6, n);
   }
   return min(ab + at, 1.0);
+}
+
+// All the canopy between the sky and the lens at a point: every layer,
+// bent as it stands this frame.
+float coverAt(vec2 s) {
+  vec2 sb, st;
+  float sab, sat;
+  float c = (1.0 - texture(uLayers, s - disp(0, s)).r) * (1.0 - texture(uLayers, s - disp(1, s)).g);
+  return 1.0 - c * (1.0 - nearCover(s, sb, st, sab, sat));
 }
 
 vec3 withLuma(vec3 tint, float y) {
@@ -370,19 +390,51 @@ void main() {
     c *= 1.0 - nearCover(s, sb, st, sab, sat);
     open += c * (i == 0 ? 0.2 : 0.1);
   }
-  // A white-hot core that clips and a warm bloom spreading over the crown,
-  // both growing as the gap opens: shut, a pinpoint; open, the sun in full.
+  // A white-hot core that clips, a warm bloom and a thin red-orange ring of
+  // halation, all growing as the gap opens: shut, a pinpoint; open, the sun
+  // in full. None of it is a veil: the light is added only where it can
+  // reach the lens, so it lands in full on the open gap, glints along the
+  // needle edges next to it (thin enough there to pass the light, lit from
+  // behind), and leaves the body of a crown at its own dark green, a crisp
+  // silhouette against the glow.
   float cw = mix(uGlareW.x, uGlareW.y, open);
+  float bw = mix(uGlareW.z, uGlareW.w, open);
   float x = rh / cw;
-  vec3 g = uGlare * exp(-x);
-  g += uBloom * pow(open, 1.5) * exp(-rh / mix(uGlareW.z, uGlareW.w, open));
-  col += g * open;
-  // Glints: needle edges round the sun lit through from behind, where the
-  // canopy is part see-through.
   float cov = 1.0 - (1.0 - a0) * (1.0 - a1) * (1.0 - a2);
-  float rim = 4.0 * cov * (1.0 - cov);
-  float gq = sd / uGlint.a;
-  col += uGlint.rgb * open * open * rim * exp(-gq * gq);
+  float glintEdge = 0.0;
+  float facing = 1.0;
+  if (open > 0.002 && rh < 4.0 * bw) {
+    // The canopy's alpha gradient a needle's width across, through every
+    // layer as it stands this frame.
+    vec2 h = uEdge.x * vec2(uCrop.z / uRes.x, uCrop.w / uRes.y);
+    vec2 gr = vec2(coverAt(uv + vec2(h.x, 0.0)) - coverAt(uv - vec2(h.x, 0.0)),
+                   coverAt(uv + vec2(0.0, h.y)) - coverAt(uv - vec2(0.0, h.y)));
+    float gm = length(gr);
+    glintEdge = smoothstep(0.1, 0.55, gm);
+    // Edges that face the sun catch it first.
+    vec2 toSun = normalize(-dv + 1e-6);
+    vec2 n = -gr / max(gm, 1e-4);
+    facing = smoothstep(-0.6, 0.8, dot(n * vec2(1.0, 1.0 / ASPECT), toSun));
+    // Broken up by the needles themselves: the clumps that catch the light
+    // glint, the dark gaps between them stay dark, so an edge reads as
+    // needles, not an outline.
+    facing *= 0.25 + 0.75 * smoothstep(-0.4, 0.5, needles(ub) * a2 + needles(u1) * a1 * (1.0 - a2));
+  }
+  float gap = 1.0 - cov;
+  float lands = mix(uEdge.y, 1.0, gap);
+  vec3 g = uGlare * exp(-x);
+  g += uBloom * pow(open, 1.5) * exp(-rh / bw);
+  col += g * open * lands;
+  // Halation: a thin red-orange ring just outside the clipped core, on the
+  // gap and its edges.
+  float hr = (rh / cw - uHalo.a) / (0.3 * uHalo.a);
+  col += uHalo.rgb * open * open * exp(-hr * hr) * (0.5 * gap + glintEdge);
+  // Glints: the needle edges round the open disc, warm near it, going
+  // red-orange further out where only the long light gets through.
+  // Lit on the needle's side of the edge, not spilled onto the sky.
+  float gq = rh / (uEdge.z * bw);
+  vec3 gc = mix(uGlint.rgb, uHalo.rgb * (uGlint.r / uHalo.r), smoothstep(0.3, 1.3, gq));
+  col += gc * open * open * glintEdge * facing * exp(-gq * gq) * smoothstep(0.2, 0.7, cov);
 
   outColor = vec4(col * uGain, 1.0);
 }`;
@@ -893,7 +945,9 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform3f(u.uGlare, GLARE.peak * GLARE.color[0], GLARE.peak * GLARE.color[1], GLARE.peak * GLARE.color[2]);
     gl.uniform3f(u.uBloom, GLARE.bloom * GLARE.bloomColor[0], GLARE.bloom * GLARE.bloomColor[1], GLARE.bloom * GLARE.bloomColor[2]);
     gl.uniform4f(u.uGlareW, GLARE.width[0], GLARE.width[1], GLARE.bloomWidth[0], GLARE.bloomWidth[1]);
-    gl.uniform4f(u.uGlint, GLINT.peak * GLINT.color[0], GLINT.peak * GLINT.color[1], GLINT.peak * GLINT.color[2], GLINT.width);
+    gl.uniform3f(u.uGlint, GLINT.peak * GLINT.color[0], GLINT.peak * GLINT.color[1], GLINT.peak * GLINT.color[2]);
+    gl.uniform3f(u.uEdge, GLINT.span, GLINT.body, GLINT.reach);
+    gl.uniform4f(u.uHalo, HALO.peak * HALO.color[0], HALO.peak * HALO.color[1], HALO.peak * HALO.color[2], HALO.radius);
     const tx = tuft.x - tuft.sx + tuft.fx;
     const ty = tuft.y - tuft.sy + tuft.fy;
     gl.uniform1f(u.uSil, SILHOUETTE);
