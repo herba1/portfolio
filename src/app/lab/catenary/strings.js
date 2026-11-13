@@ -15,6 +15,8 @@ export const TUNE = {
   east3: { f1: 1.55, reach: 24, sway: 1.3, coup: 1 },
   east4: { f1: 1.6, reach: 24, sway: 1.3, coup: 1 },
 };
+// Peak transverse give of a held wire, as a fraction of its visible run.
+export const TAUT = 0.035;
 const GAMMA = 0.55; // broadband damping, 1/s: the fundamental rings ~3.5 s
 const VOIGT = 0.0045; // high modes die first (rate ~ VOIGT (n pi)^2 / 2)
 export const STRUCT = { omega: 2 * Math.PI * 4.2, zeta: 0.3, gain: 0.8 };
@@ -140,22 +142,17 @@ export function makeString(def, index) {
   const nx = new Float64Array(N + 1);
   const ny = new Float64Array(N + 1);
   for (let j = 0; j <= N; j++) [px[j], py[j], nx[j], ny[j]] = rest(j * ds);
-  // Where the photograph keeps its own wire (the feeder's clamp), the drawn
-  // displacement eases in from nothing with zero slope and curvature, so the
-  // live wire leaves the photographed one tangentially instead of hinging off
-  // it, the way a heavy cable stiffened at its clamp does. The ease is long
-  // (~30% of the visible run): a short one has to overshoot to catch up with
-  // the string, and bends nearly as hard as the corner it replaces. The hand
-  // works in drawn space (see `lead` in the engine), so the wire stays under
-  // it.
+  // Where the photograph keeps its own wire (the feeder, across the mast's
+  // steel by its insulator), the string is pinned mid-way along that handoff:
+  // nodes up to j0 hold the support and the free string starts there. A taut
+  // wire turns only at its clamp, so the live wire leaves the photographed one
+  // inside the crossfade (a few px at a full pull, under a 40 px wire) and
+  // runs out straight, with no long ease to bend it into an S. The feeder is
+  // a heavy, stiff cable, so the turn at the clamp is a short fillet (see
+  // drawnY), not a hinge.
   const ho = def.handoff || [0, 0];
-  const lead0 = ho[1] > ho[0] ? ho[0] : 0;
-  const lead1 = ho[1] > ho[0] ? ho[0] + 0.3 * def.exit : 0;
-  const lead = (s) => {
-    if (lead1 <= lead0) return 1;
-    const u = clamp((s - lead0) / (lead1 - lead0), 0, 1);
-    return u * u * u * (u * (u * 6 - 15) + 10);
-  };
+  const j0 = ho[1] > ho[0] ? Math.round((ho[0] + ho[1]) / 2 / ds) : 0;
+  const jExit = Math.min(N, Math.ceil(def.exit / ds) + 2);
   const knot = (arr, s) => {
     const f = clamp(s / def.span, 0, 1) * (arr.length - 1);
     const i = Math.min(arr.length - 2, Math.floor(f));
@@ -174,15 +171,23 @@ export function makeString(def, index) {
     nx,
     ny,
     rest,
-    lead,
-    // First node a hand can take: where the drawn wire carries a fifth of
-    // the string's displacement.
-    jGrip: lead1 > lead0 ? (lead0 + 0.35 * (lead1 - lead0)) / ds : 0.6,
-    // Width of the fingertip pad, nodes: a pull rounds over this, never a V.
-    pad: Math.max(1.6, 0.09 * Math.min(N, Math.ceil(def.exit / ds) + 2)),
+    j0,
+    // Fillet at the pin, image px (sigma of the smoothed turn).
+    bend: j0 > 0 ? 1.1 * ds : 0,
+    // Free length, image px: the string between its pin and the far support.
+    L: def.span - j0 * ds,
+    // First node a hand can take: clear of the pin.
+    jGrip: j0 + 1.5,
+    // Width of the fingertip pad, nodes: a fingertip, not a palm. A tensioned
+    // wire pushed aside runs out in two straight legs to its supports and
+    // rounds only over the few nodes under the pad, never a V, never a hose.
+    pad: 1.2,
+    // The most a hand can hold it aside, image px: a taut wire gives only a
+    // few percent of its visible run before the tension wins.
+    give: TAUT * (jExit - j0) * ds,
     knot,
     shade,
-    jExit: Math.min(N, Math.ceil(def.exit / ds) + 2),
+    jExit,
     y: new Float64Array(N + 1), // displacement along the rest normal, image px
     v: new Float64Array(N + 1),
     f: new Float64Array(N + 1), // external force this step
@@ -197,8 +202,8 @@ export function makeString(def, index) {
 export function locate(w, x, y) {
   let best = null;
   for (let j = 0; j < w.jExit; j++) {
-    const ya = w.y[j] * w.lead(j * w.ds);
-    const yb = w.y[j + 1] * w.lead((j + 1) * w.ds);
+    const ya = w.y[j];
+    const yb = w.y[j + 1];
     const ax = w.px[j] + w.nx[j] * ya;
     const ay = w.py[j] + w.ny[j] * ya;
     const bx = w.px[j + 1] + w.nx[j + 1] * yb;
@@ -244,20 +249,42 @@ export function sampleY(w, j) {
   return 0.5 * (2 * y1 + (-y0 + y2) * t + (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3);
 }
 
+const erf = (x) => {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const e = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return x < 0 ? -e : e;
+};
+
+// The displacement as drawn: the string, with the turn at its pin rounded the
+// way a stiff cable leaves its clamp. The first free segment's slope a turns
+// on over a Gaussian-smoothed ramp of width w.bend instead of a corner:
+// y + a (R(x) - max(x, 0)), R the ramp max(x, 0) blurred by that Gaussian.
+// The correction vanishes a few widths from the pin, so the legs stay
+// straight and the crown is untouched.
+export function drawnY(w, j) {
+  const y = sampleY(w, j);
+  if (!w.j0) return y;
+  const x = ((j - w.j0) * w.ds) / w.bend;
+  if (x < -4 || x > 4) return y;
+  const a = (w.y[w.j0 + 1] - w.y[w.j0]) / w.ds;
+  const R = x * 0.5 * (1 + erf(x / Math.SQRT2)) + Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+  return y + a * w.bend * (R - Math.max(x, 0));
+}
+
 // A wire drawn aside by a fingertip and held: the static shape of the string
-// under a load spread over a Gaussian pad (sigma = w.pad nodes) at node jc,
-// y'' = -q with both ends where the supports hold them, scaled so the wire
-// stands A image px off its rest line at jc. Straight runs out to the
-// supports, a rounded crown under the pad: smooth everywhere, so neither the
-// held pull nor the two pulses it releases ever show a corner.
+// under a load spread over a narrow Gaussian pad (sigma = w.pad nodes) at node
+// jc, y'' = -q with both ends where the supports hold them (the pin j0 and
+// node N), scaled so the wire stands A image px off its rest line at jc. Two
+// straight legs out to the supports and a small rounded crown under the pad:
+// the shape of a tensioned wire pushed aside, smooth everywhere, so neither
+// the held pull nor the two pulses it releases ever show a corner.
 export function pullShape(w, jc, A) {
-  const { N, y } = w;
+  const { N, y, j0 } = w;
   const pad = w.pad;
-  y[0] = 0;
-  y[1] = 0;
-  for (let j = 1; j < N; j++) y[j + 1] = 2 * y[j] - y[j - 1] - Math.exp(-((j - jc) ** 2) / (2 * pad * pad));
-  const tilt = y[N] / N;
-  for (let j = 0; j <= N; j++) y[j] -= tilt * j;
+  for (let j = 0; j <= j0 + 1; j++) y[j] = 0;
+  for (let j = j0 + 1; j < N; j++) y[j + 1] = 2 * y[j] - y[j - 1] - Math.exp(-((j - jc) ** 2) / (2 * pad * pad));
+  const tilt = y[N] / (N - j0);
+  for (let j = j0; j <= N; j++) y[j] -= tilt * (j - j0);
   const i = clamp(Math.floor(jc), 0, N - 1);
   const peak = y[i] + (y[i + 1] - y[i]) * (jc - i);
   const sc = Math.abs(peak) > 1e-9 ? A / peak : 0;
@@ -287,29 +314,31 @@ export function createWorld(defs) {
     simT += h;
     for (const g of Object.values(groups)) {
       let pull = 0;
-      for (const w of g.wires) pull += (w.y[1] - w.y[0]) * w.tune.coup;
+      for (const w of g.wires) pull += (w.y[w.j0 + 1] - w.y[w.j0]) * w.tune.coup;
       const om = STRUCT.omega;
       const a = -om * om * (g.m - STRUCT.gain * pull) - 2 * STRUCT.zeta * om * g.v;
       g.v += a * h;
       g.m += g.v * h;
     }
     for (const w of wires) {
-      const { N, y, v } = w;
-      const c = 2 * w.def.span * w.tune.f1; // image px / s
+      const { N, y, v, j0, L } = w;
+      const c = 2 * L * w.tune.f1; // image px / s
       const c2 = (c * c) / (w.ds * w.ds);
-      const visc = (VOIGT * (w.def.span * w.def.span)) / (w.ds * w.ds);
+      const visc = (VOIGT * (L * L)) / (w.ds * w.ds);
       // Breeze: a uniform push sized to give `sway` device px at mid span.
       const swayImg = w.tune.sway / Math.max(k, 0.05);
-      const fw = ((wind * 8 * (c * c)) / (w.def.span * w.def.span)) * swayImg * windAt(simT, w.index * 0.35);
+      const fw = ((wind * 8 * (c * c)) / (L * L)) * swayImg * windAt(simT, w.index * 0.35);
       const g = groups[w.def.group];
-      y[0] = g.m;
-      v[0] = g.v;
+      for (let j = 0; j <= j0; j++) {
+        y[j] = g.m;
+        v[j] = g.v;
+      }
       y[N] = 0;
       v[N] = 0;
       const cg = w.caught;
       // The hand is a pad, not a point: the wire rounds over it.
       const hs = 0.5 * w.pad;
-      for (let j = 1; j < N; j++) {
+      for (let j = j0 + 1; j < N; j++) {
         const lap = y[j + 1] - 2 * y[j] + y[j - 1];
         const lapv = v[j + 1] - 2 * v[j] + v[j - 1];
         const gust = 1 + 0.25 * Math.sin((Math.PI * 3 * j) / N + simT * 0.6 + w.phase);
@@ -320,7 +349,7 @@ export function createWorld(defs) {
         }
         v[j] += h * (c2 * lap + visc * lapv - GAMMA * v[j] + fw * gust + hand);
       }
-      for (let j = 1; j < N; j++) y[j] += h * v[j];
+      for (let j = j0 + 1; j < N; j++) y[j] += h * v[j];
     }
   };
   return { wires, groups, step, time: () => simT };
