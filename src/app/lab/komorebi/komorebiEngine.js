@@ -8,7 +8,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // HDRI, reprojected offline to a stereographic view pitched 64° up. Offline,
 // the lens's own veiling glare and diffraction spikes were taken out, the sky
 // was rebuilt as a smooth field, and the trees were pulled apart from it into
-// three depth layers (far pines and the cypresses round the sun, the middle
+// three depth layers (far pines and the cypresses low in the frame, the middle
 // crowns, the crown overhead), each with its needle-scale matte, its hidden
 // part filled in behind the nearer layers so a moving crown uncovers foliage
 // or sky, never a hole.
@@ -33,16 +33,21 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // rolls through; the pointer is a breath of wind, a puff that travels with
 // the hand and fades. Branches bend from their trunks, so trunks hold still.
 //
-// The sun is drawn behind all of it, about four degrees left of where it
-// stood in the capture so it sits on a cypress's ragged edge: a gust bends
-// the needles across it but never buries it. What leaks through the gaps is
-// the only bright thing in the scene. Round it sits a steep glare, a white
-// core and a thin warm ring within 2% of the frame, scaled by how much of
-// the disc the needles leave open, so it flickers as the gaps open and
-// close. The film only diffuses what is past its thresholds and adds a
-// narrow halation fringe where the light meets the cypress edge; its
-// pyramid has long wings, so the disc goes in heavily filtered, or it fogs
-// the whole lower canopy maroon.
+// The sun is drawn behind all of it, raised from the low sun of the capture
+// into the heart of the overhead crown, where the eye goes first. One tuft
+// of needles hangs over it on a twig of its own: at rest it covers the disc
+// but for a few thin gaps, so the sun is a star through the needles; a
+// gust swings it clear (its drag grows with the square of a breeze) and it
+// swings back and closes. What leaks through is the only bright thing in
+// the scene, and everything round it scales with how much of the disc is
+// open: the white core widens from a pinpoint, a warm bloom spreads over
+// the crown, the needle edges round the gap glint, and the film's
+// halation follows. The film only diffuses what is past its thresholds;
+// its pyramid has long wings, so the disc goes in heavily filtered.
+//
+// The lower canopy, the cypresses and far pines against the low sky, is
+// pressed into silhouette and the scan's black kept low, so the bloom
+// above sits over a real dark rather than a grey-teal veil.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..1 a breath of that strength sets off at t = 0.5 s.
@@ -57,38 +62,59 @@ const LOG = [-14, 2]; // canopy.webp: v = (log2(c) - LO) / (HI - LO)
 // premultiplied by its cover; a = cover.
 const CLOUD_LOG = [-9, 6];
 
-// Sun, in asset uv (y down): placed on the ragged edge of the cypress,
-// where a gust bends needles across it but never buries it; the capture's
-// sun was at (0.4502, 0.8798).
-const SUN = { x: 0.4094, y: 0.89429, r: 0.0028631, L: 194211, color: [1.0375, 1.006, 0.83] };
+// Sun, in asset uv (y down): set behind the heart of the overhead crown,
+// where the eye goes first, on clear sky (no cumulus, no farther crown in
+// the way), so the only thing between it and the lens is one tuft of
+// needles. (The capture's sun stood low, at (0.4502, 0.8798).)
+const SUN = { x: 0.52, y: 0.362, r: 0.0028631, L: 194211, color: [1.0375, 1.006, 0.83] };
+// The tuft over the sun: the near crown's needles within r (asset widths)
+// of the disc hang on a twig of their own. At rest they cover the sun; the
+// drag of the wind (quadratic in a breeze, linear in a gust) swings them
+// clear, so a breath opens the needles across the disc and lets them close
+// again. amp: deflection per unit wind, in tuft radii.
+// settle: seconds over which its rest follows the slow breeze; pinhole:
+// how thin the needles are right over the disc.
+const TUFT = { r: 0.026, amp: 1.15, hz: 0.95, zeta: 0.16, flutter: 0.1, settle: 2.5, pinhole: 0.75 };
 // Scene light is written at 1/16 so the sun fits a half float; film adds it back.
 const GAIN = 1 / 16;
 // Share of the measured radiance the disc keeps. Still ~100x past the clip,
-// so it reads white; much more and the film's wide diffusion lifts the
-// cypresses 100 px (DPR 2) away.
+// so it reads white; much more and the film's wide diffusion fogs the
+// crown 100 px (DPR 2) away.
 const SUN_ND = 0.001;
 // Glare round the disc, in scene light (before GAIN): core peak and colour at
-// the sun's centre, e-folding width in frame heights; the warm ring is a
-// band 3.6 widths out. The film clips near 2.8, so the white core is ~2.4
-// widths across and the ring is gone by ~6 (about 2% of the frame).
-const GLARE = { peak: 28, color: [1, 0.9, 0.74], width: 0.004, ring: 0.7, ringColor: [1, 0.5, 0.24] };
+// the sun's centre, e-folding width in frame heights, shut .. open. The film
+// clips near 2.8, so the white core is ~2.4 widths across: a few pixels
+// shut, ~1.5% of the frame open (under 0.3% of the print clips). All of it
+// scales with how much of the disc the needles leave open, and a warm bloom
+// spreads over the crown as it opens (peak, e-folding width shut .. open).
+const GLARE = {
+  peak: 30,
+  color: [1, 0.9, 0.74],
+  width: [0.0022, 0.0085],
+  bloom: 0.65,
+  bloomColor: [1, 0.7, 0.4],
+  bloomWidth: [0.02, 0.075],
+};
+// Glints: the needle edges round an open sun, lit through from behind.
+// Strength (scene light) and gaussian radius in asset widths.
+const GLINT = { peak: 2.2, color: [1, 0.8, 0.52], width: 0.032 };
 
 // Per layer: deflection per unit wind (asset widths), natural frequency,
 // damping. The branch centres the wind is sampled at come with the
 // weights, in branches.json (asset uv, one list per layer, channel order).
 const LAYERS = [
   {
-    amp: 0.0042,
+    amp: 0.0068,
     hz: 0.78,
     zeta: 0.16,
   },
   {
-    amp: 0.0036,
+    amp: 0.0072,
     hz: 0.55,
     zeta: 0.14,
   },
   {
-    amp: 0.005,
+    amp: 0.0095,
     hz: 0.38,
     zeta: 0.12,
   },
@@ -102,7 +128,8 @@ const FILM = {
   contrast: 1.2,
   shoulder: 0.95,
   // Halation only off the sun, judged from the surround: a narrow red-orange
-  // fringe where the glare meets the cypress, not a red veil on every twig.
+  // fringe where the glare meets the needles, not a red veil on every twig;
+  // scaled per frame by how far the tuft has swung off the disc.
   halation: 0.15,
   halationThreshold: 2.5 * GAIN,
   halationLocal: 0.6,
@@ -113,7 +140,9 @@ const FILM = {
   softness: 0.42,
   saturation: 1.12,
   blueDepth: 0.7,
-  toe: 0.045,
+  // A scan's black, kept low so the lower canopy is a silhouette, not a
+  // grey-teal veil.
+  toe: 0.022,
   grain: 0.34,
   vignette: 0.22,
 };
@@ -138,6 +167,8 @@ const CLOUD_GRADE = {
   roll: 0.4,
   detail: 1.3, // local contrast against the cloud's own blur
 };
+// The lower canopy's shadows sink by c / (c + 0.02): 0 off, 1 full.
+const SILHOUETTE = 0.85;
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -165,8 +196,12 @@ uniform vec2 uSun;
 uniform float uSunR;
 uniform vec3 uSunL;
 uniform float uGain;
-uniform vec4 uGlare;         // rgb peak, a: width (frame heights)
-uniform vec3 uGlareRing;     // the warm band round the core
+uniform vec3 uGlare;         // core peak
+uniform vec3 uBloom;         // the warm bloom over the crown, peak
+uniform vec4 uGlareW;        // core width shut, open; bloom width shut, open
+uniform vec4 uGlint;         // rgb peak, a: e-folding distance (asset widths)
+uniform float uSil;          // how far the lower canopy sinks into silhouette
+uniform vec4 uTuft;          // xy tuft offset (asset uv), z radius (asset widths), w pinhole
 uniform vec2 uLog;
 uniform sampler2D uCloudsBlur; // same texture, mipmapped sampler
 uniform vec3 uSkyHor;
@@ -186,7 +221,52 @@ vec3 canopy(vec2 uv) {
 vec2 disp(int k, vec2 uv) {
   vec4 w = texture(uBranches, vec2(uv.x, (uv.y + float(k)) / 3.0));
   vec2 d = w.r * uOff[k * 4] + w.g * uOff[k * 4 + 1] + w.b * uOff[k * 4 + 2] + w.a * uOff[k * 4 + 3];
-  return vec2(d.x, d.y * ASPECT);
+  // Held at the print's edges, so a swing never reaches past the capture.
+  vec2 e = smoothstep(0.0, 0.05, min(uv, 1.0 - uv));
+  return vec2(d.x, d.y * ASPECT) * e.x * e.y;
+}
+
+// The tuft: the needles round the sun hang on their own twig. A needle's
+// share of it falls off with its distance from the disc, and the clumps
+// that catch the light go with the twig first while the dark gaps between
+// them stay, so the gap it leaves has a rim drawn by needles, not a circle.
+float tuftMask(vec2 p) {
+  float q = length((p - uSun) * vec2(1.0, 1.0 / ASPECT));
+  return 1.0 - smoothstep(0.4 * uTuft.z, 1.3 * uTuft.z, q);
+}
+// Needle detail: the foliage light here against its surround, in stops.
+float needles(vec2 p) {
+  const vec2 o = vec2(7.0 / ${AW}.0, 7.0 / ${AH}.0);
+  float v = dot(texture(uCanopy, p).rgb, LUMA);
+  float m = dot(texture(uCanopy, p + vec2(o.x, 0.0)).rgb + texture(uCanopy, p - vec2(o.x, 0.0)).rgb
+    + texture(uCanopy, p + vec2(0.0, o.y)).rgb + texture(uCanopy, p - vec2(0.0, o.y)).rgb, LUMA) * 0.25;
+  return (v - m) * (uLog.y - uLog.x);
+}
+float tuftShare(float a, float m, float n) {
+  return clamp((m - 0.5) * 2.5 + 1.2 * (a - 0.6) + 0.7 * n + 0.5, 0.0, 1.0);
+}
+// The near crown, with the tuft riding on its branch and swung by its own
+// offset. Its needles and the rest are parts of one matte, so at rest
+// they sum back to it exactly.
+float nearCover(vec2 uv, out vec2 ub, out vec2 ut, out float ab, out float at) {
+  ub = uv - disp(2, uv);
+  ut = ub - uTuft.xy;
+  ab = texture(uLayers, ub).b;
+  at = 0.0;
+  float mb = tuftMask(ub);
+  float mt = tuftMask(ut);
+  if (mb > 0.0) ab *= 1.0 - tuftShare(ab, mb, needles(ub));
+  if (mt > 0.0) {
+    at = texture(uLayers, ut).b;
+    float n = needles(ut);
+    at *= tuftShare(at, mt, n);
+    // A pinhole in the tuft: the dark gaps between the needles right over
+    // the disc are thin, so at rest the sun is a star through them; it
+    // swings away with the tuft.
+    vec2 pq = (ut - uSun) * vec2(1.0, 1.0 / ASPECT) / (1.9 * uSunR);
+    at *= 1.0 - uTuft.w * exp(-dot(pq, pq)) * smoothstep(0.4, -0.6, n);
+  }
+  return min(ab + at, 1.0);
 }
 
 vec3 withLuma(vec3 tint, float y) {
@@ -248,42 +328,61 @@ void main() {
   col = col * (1.0 - cl.a) + cP * smoothstep(0.0, 2.0 / 255.0, cl.a);
 
   // Back to front; each layer bends with its own branches.
-  vec2 d0 = disp(0, uv);
-  vec2 d1 = disp(1, uv);
-  vec2 d2 = disp(2, uv);
-  vec2 u0 = uv - d0;
-  vec2 u1 = uv - d1;
-  vec2 u2 = uv - d2;
+  vec2 u0 = uv - disp(0, uv);
+  vec2 u1 = uv - disp(1, uv);
   float a0 = texture(uLayers, u0).r;
   float a1 = texture(uLayers, u1).g;
-  float a2 = texture(uLayers, u2).b;
-  col = mix(col, canopy(u0), a0);
-  col = mix(col, canopy(u1), a1);
-  col = mix(col, canopy(u2), a2);
+  vec2 ub, ut;
+  float ab, at;
+  float a2 = nearCover(uv, ub, ut, ab, at);
+  // The lower canopy, the cypresses and far pines against the low sky, is
+  // pressed down into silhouette: its shadows sink towards black, its lit
+  // needles keep most of their light.
+  float sil = uSil * smoothstep(0.5, 0.95, uv.y);
+  vec3 c0 = canopy(u0);
+  vec3 c1 = canopy(u1);
+  c0 *= mix(vec3(1.0), c0 / (c0 + 0.02), sil);
+  c1 *= mix(vec3(1.0), c1 / (c1 + 0.02), sil);
+  col = mix(col, c0, a0);
+  col = mix(col, c1, a1);
+  if (a2 > 0.0) {
+    vec3 c2 = (canopy(ub) * ab + canopy(ut) * at) / (ab + at);
+    col = mix(col, c2, a2);
+  }
 
   // Glare: the light that scatters inside the lens and off the emulsion
-  // right next to the disc. Steep, a ring of a few percent of the frame, in
-  // front of everything; it tracks how much of the disc the needles leave
-  // open, so it flickers with them. (The film's own scatter is far wider:
-  // fed the full disc it fogs the whole lower canopy.)
+  // right next to the disc, in front of everything; it tracks how much of
+  // the disc the needles leave open, so it flickers with them. (The film's
+  // own scatter is far wider: fed the full disc it fogs the canopy.)
   float rh = length(dv) / px / uRes.y;
-  float x = rh / uGlare.a;
-  if (x < 12.0) {
-    float open = 0.0;
-    for (int i = 0; i < 5; i++) {
-      vec2 o = i == 0 ? vec2(0.0) : 1.6 * r * vec2(i == 1 ? 1.0 : i == 2 ? -1.0 : 0.0, i == 3 ? ASPECT : i == 4 ? -ASPECT : 0.0);
-      vec2 s = uSun + o;
-      float c = 1.0 - texture(uClouds, s).a * 0.6;
-      c *= 1.0 - texture(uLayers, s - disp(0, s)).r;
-      c *= 1.0 - texture(uLayers, s - disp(1, s)).g;
-      c *= 1.0 - texture(uLayers, s - disp(2, s)).b;
-      open += c * (i == 0 ? 0.4 : 0.15);
-    }
-    // A white-hot core that clips, then a narrow warm band just outside it.
-    float ring = (x - 3.6) / 1.4;
-    vec3 g = uGlare.rgb * exp(-x) + uGlareRing * exp(-ring * ring);
-    col += g * open;
+  // How much of the disc the needles leave open: the centre and a ring of
+  // taps just past the limb, through every layer.
+  float open = 0.0;
+  for (int i = 0; i < 9; i++) {
+    float ang = float(i) * 0.7853982;
+    vec2 o = i == 0 ? vec2(0.0) : 1.2 * r * vec2(cos(ang), sin(ang) * ASPECT);
+    vec2 s = uSun + o;
+    vec2 sb, st;
+    float sab, sat;
+    float c = 1.0 - texture(uClouds, s).a * 0.6;
+    c *= 1.0 - texture(uLayers, s - disp(0, s)).r;
+    c *= 1.0 - texture(uLayers, s - disp(1, s)).g;
+    c *= 1.0 - nearCover(s, sb, st, sab, sat);
+    open += c * (i == 0 ? 0.2 : 0.1);
   }
+  // A white-hot core that clips and a warm bloom spreading over the crown,
+  // both growing as the gap opens: shut, a pinpoint; open, the sun in full.
+  float cw = mix(uGlareW.x, uGlareW.y, open);
+  float x = rh / cw;
+  vec3 g = uGlare * exp(-x);
+  g += uBloom * pow(open, 1.5) * exp(-rh / mix(uGlareW.z, uGlareW.w, open));
+  col += g * open;
+  // Glints: needle edges round the sun lit through from behind, where the
+  // canopy is part see-through.
+  float cov = 1.0 - (1.0 - a0) * (1.0 - a1) * (1.0 - a2);
+  float rim = 4.0 * cov * (1.0 - cov);
+  float gq = sd / uGlint.a;
+  col += uGlint.rgb * open * open * rim * exp(-gq * gq);
 
   outColor = vec4(col * uGain, 1.0);
 }`;
@@ -370,6 +469,10 @@ const freeTarget = (gl, t) => {
   gl.deleteFramebuffer(t.fbo);
 };
 
+const smooth = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const TAU = Math.PI * 2;
 
@@ -416,6 +519,30 @@ function createCanopy(centres) {
       });
     });
   });
+  // The tuft over the sun, last: a spring of its own, not a branch tile.
+  branches.push({
+    k: -1,
+    c: 0,
+    cx: SUN.x,
+    cy: SUN.y / ASPECT,
+    omega: TAU * TUFT.hz,
+    zeta: TUFT.zeta,
+    amp: TUFT.amp * TUFT.r,
+    drag: true,
+    sx: 0,
+    sy: 0,
+    fOmega: TAU * 3.1,
+    fAmp: TUFT.flutter * TUFT.r,
+    ph: [rand() * TAU, rand() * TAU, rand() * TAU, rand() * TAU],
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    fx: 0,
+    fy: 0,
+    fvx: 0,
+    fvy: 0,
+  });
   return branches;
 }
 
@@ -434,32 +561,42 @@ function breeze(t, b, scale) {
   return [s * (0.92 + tx), s * (-0.3 + ty)];
 }
 
+// Wind at a branch: breeze plus every live puff of the hand.
+function windAt(b, puffs, t, breezeScale) {
+  const [bx, by] = breeze(t, b, breezeScale);
+  let wx = 0;
+  let wy = 0;
+  for (const p of puffs) {
+    const env = (1 - Math.exp(-p.age / 0.07)) * Math.exp(-p.age / 0.75);
+    const R = 0.2 + 0.28 * p.age;
+    const dx = b.cx - p.x;
+    const dy = b.cy - p.y;
+    const w = p.s * env * Math.exp(-(dx * dx + dy * dy) / (R * R));
+    wx += p.dx * w;
+    wy += p.dy * w;
+  }
+  // Overlapping puffs of one breath do not add without limit: the air
+  // saturates at a strong gust however fast or long the hand moves.
+  const m = Math.hypot(wx, wy);
+  if (m > 1e-6) {
+    const k = (GUST_MAX * Math.tanh(m / GUST_MAX)) / m;
+    wx *= k;
+    wy *= k;
+  }
+  return [wx + bx, wy + by];
+}
+
 function stepCanopy(branches, puffs, t, dt, breezeScale) {
-  // Wind at each branch: breeze plus every live puff of the hand.
   for (const b of branches) {
-    const [bx, by] = breeze(t, b, breezeScale);
-    let wx = 0;
-    let wy = 0;
-    for (const p of puffs) {
-      const env = (1 - Math.exp(-p.age / 0.07)) * Math.exp(-p.age / 0.75);
-      const R = 0.2 + 0.28 * p.age;
-      const dx = b.cx - p.x;
-      const dy = b.cy - p.y;
-      const w = p.s * env * Math.exp(-(dx * dx + dy * dy) / (R * R));
-      wx += p.dx * w;
-      wy += p.dy * w;
-    }
-    // Overlapping puffs of one breath do not add without limit: the air
-    // saturates at a strong gust however fast or long the hand moves.
-    const m = Math.hypot(wx, wy);
-    if (m > 1e-6) {
-      const k = (GUST_MAX * Math.tanh(m / GUST_MAX)) / m;
+    let [wx, wy] = windAt(b, puffs, t, breezeScale);
+    const speed = Math.hypot(wx, wy);
+    // The tuft's drag grows with the square of a breeze, so it barely
+    // stirs at rest and swings wide in a gust.
+    if (b.drag) {
+      const k = Math.min(speed, 1);
       wx *= k;
       wy *= k;
     }
-    wx += bx;
-    wy += by;
-    const speed = Math.hypot(wx, wy);
     // Sway: damped spring towards the drag deflection.
     const o2 = b.omega * b.omega;
     const ax = o2 * (b.amp * wx - b.x) - 2 * b.zeta * b.omega * b.vx;
@@ -468,6 +605,13 @@ function stepCanopy(branches, puffs, t, dt, breezeScale) {
     b.vy += ay * dt;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
+    // The tuft settles into the slow swell of the breeze (its rest is
+    // wherever the air has been leaning lately), so only a change in the
+    // wind, a gust or a breath, swings it off the sun.
+    if (b.drag) {
+      b.sx += (b.x - b.sx) * Math.min(1, dt / TUFT.settle);
+      b.sy += (b.y - b.sy) * Math.min(1, dt / TUFT.settle);
+    }
     // Flutter: twigs shiver in proportion to the wind speed.
     const n1 = Math.sin(TAU * 1.7 * t + b.ph[1]) * 0.6 + Math.sin(TAU * 3.1 * t + b.ph[2]) * 0.4;
     const n2 = Math.sin(TAU * 2.3 * t + b.ph[3]) * 0.6 + Math.sin(TAU * 4.1 * t + b.ph[0]) * 0.4;
@@ -582,7 +726,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     const a = L.pw / L.ph;
     if (a >= ASPECT) {
       const hh = ASPECT / a;
-      const y0 = clamp(SUN.y - 0.82 * hh, 0, 1 - hh);
+      const y0 = clamp(SUN.y - 0.45 * hh, 0, 1 - hh);
       L.crop = [0, y0, 1, hh];
     } else {
       const ww = a / ASPECT;
@@ -661,10 +805,11 @@ export async function createKomorebi(host, { embedded = false } = {}) {
   // the only hint), and for held stills.
   const scripted = [];
   const breath = (t0, strength) => {
-    // From the left edge, low, sweeping up and right through the sun's trees.
+    // From the left edge, low, sweeping up and right through the crown and
+    // across the sun.
     for (let i = 0; i < 14; i++) {
       const u = i / 13;
-      scripted.push({ at: t0 + u * 0.55, x: -0.05 + u * 0.75, y: (0.95 - u * 0.35) / ASPECT, vx: 1.3, vy: -0.6, s: strength });
+      scripted.push({ at: t0 + u * 0.55, x: -0.05 + u * 0.75, y: (0.8 - u * 0.55) / ASPECT, vx: 1.3, vy: -0.8, s: strength });
     }
     scripted.sort((a, b) => a.at - b.at);
   };
@@ -700,9 +845,11 @@ export async function createKomorebi(host, { embedded = false } = {}) {
   }
 
   const offs = new Float32Array(24);
+  const tuft = branches[branches.length - 1];
   const fillOffsets = () => {
     offs.fill(0);
     for (const b of branches) {
+      if (b.k < 0) continue;
       const i = (b.k * 4 + b.c) * 2;
       offs[i] = b.x + b.fx;
       offs[i + 1] = b.y + b.fy;
@@ -743,8 +890,17 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSunR, SUN.r);
     gl.uniform3f(u.uSunL, SUN.L * SUN_ND * SUN.color[0], SUN.L * SUN_ND * SUN.color[1], SUN.L * SUN_ND * SUN.color[2]);
     gl.uniform1f(u.uGain, sceneT.ok ? GAIN : GAIN / 64);
-    gl.uniform4f(u.uGlare, GLARE.peak * GLARE.color[0], GLARE.peak * GLARE.color[1], GLARE.peak * GLARE.color[2], GLARE.width);
-    gl.uniform3f(u.uGlareRing, GLARE.ring * GLARE.ringColor[0], GLARE.ring * GLARE.ringColor[1], GLARE.ring * GLARE.ringColor[2]);
+    gl.uniform3f(u.uGlare, GLARE.peak * GLARE.color[0], GLARE.peak * GLARE.color[1], GLARE.peak * GLARE.color[2]);
+    gl.uniform3f(u.uBloom, GLARE.bloom * GLARE.bloomColor[0], GLARE.bloom * GLARE.bloomColor[1], GLARE.bloom * GLARE.bloomColor[2]);
+    gl.uniform4f(u.uGlareW, GLARE.width[0], GLARE.width[1], GLARE.bloomWidth[0], GLARE.bloomWidth[1]);
+    gl.uniform4f(u.uGlint, GLINT.peak * GLINT.color[0], GLINT.peak * GLINT.color[1], GLINT.peak * GLINT.color[2], GLINT.width);
+    const tx = tuft.x - tuft.sx + tuft.fx;
+    const ty = tuft.y - tuft.sy + tuft.fy;
+    gl.uniform1f(u.uSil, SILHOUETTE);
+    gl.uniform4f(u.uTuft, tx, ty * ASPECT, TUFT.r, TUFT.pinhole);
+    // The film's halation follows the gap too: a red fringe round the open
+    // sun, next to none round the pinpoint.
+    const gap = smooth(0.35, 1.15, Math.hypot(tx, ty) / TUFT.r);
     gl.uniform2f(u.uLog, LOG[0], LOG[1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.pw, L.ph);
@@ -756,6 +912,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
       {
         ...FILM,
         input: sceneT.ok ? "linear" : "srgb",
+        halation: FILM.halation * (0.5 + 1.5 * gap),
         exposure: BASE_EXPOSURE + expoStops + Math.log2(1 / GAIN) + (sceneT.ok ? 0 : 6),
         grainSeed,
       },
