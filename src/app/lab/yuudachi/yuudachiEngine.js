@@ -1,76 +1,85 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 
-// Yuudachi: the sudden summer evening shower, on a real Osaka street.
+// Yuudachi: the sudden summer evening shower, on a real Osaka street, seen
+// from the pavement looking up past the buildings into the cumulus.
 //
-// Hold the pointer down and the clouds roll in from the far end of the street,
-// the sun goes, and it pours. Let go and the rain stops, the cloud edge runs
-// back down the street toward you, and everything dries unevenly.
+// Hold the pointer down and the storm grows out of that cloud: its dark base
+// spreads across the sky from it, the sun goes, and it pours, the drops
+// coming down at you out of the deck. Let go and the rain stops, the deck
+// draws back into the cloud, the sun comes back, and everything dries
+// unevenly.
 //
 // Everything is baked from the one photograph (tools/depth/bakes/yuudachi):
 //  - geo:   MoGe-2 metric depth and normals, so every pixel is a point in
 //           metres with gravity;
-//  - mat:   what each surface is made of (asphalt, lane paint, concrete,
-//           brick, metal, glass, foliage, painted signs, cloth), as porosity,
+//  - mat:   what each surface is made of (glazed tile and panel cladding,
+//           stone, concrete, metal, glass, foliage, painted billboards and
+//           signs; asphalt and lane paint where a plate has road), as porosity,
 //           wet gloss, beading and foliage;
-//  - water: when each patch of road goes under (Priority-Flood on the road's
-//           height field: hollows fill in order of stored volume over
-//           catchment), the hollow's depth, how much rain reaches the surface
-//           (overhangs cast a rain shadow), and where the sun was in the photo.
+//  - water: how much rain reaches each surface (overhangs cast a rain
+//           shadow) and where the sun was in the photo (and, for a plate with
+//           road in view, when each hollow of it goes under: Priority-Flood;
+//           this one is all wall and sky, so there are no puddles).
 //
 // Each material wets by its own physics. Porous surfaces (asphalt, concrete,
 // brick) darken and deepen in colour as water replaces the air in their
 // pores, evenly across a face, with only a slow unevenness over metres; walls
-// take only wind-driven rain. Asphalt's film turns its micro-roughness to a
-// sheen, a rough mirror of the street weighted by Fresnel, so the road goes to
-// glass toward its grazing far end. The scene is lit by the storm deck alone:
+// take only wind-driven rain, and on a wall the water gathers into runs down
+// the face, the last of it to dry. The scene is lit by the storm deck alone:
 // lower, cooler, but keeping the colour of what is really coloured (signs,
-// flowers, leaves). Metal, paint and glass hardly
-// darken but bead. Leaves go darker and glisten. Puddles are level water:
-// mirrors whose reflection is found by marching the reflected ray through the
-// point map (screen-space reflection), rippled by every drop while it rains.
+// posters, leaves). Metal, paint and glass hardly darken but bead. Leaves go
+// darker and glisten. (Road, where a plate has it: asphalt's film turns its
+// micro-roughness to a sheen, a rough mirror of the street weighted by
+// Fresnel, and puddles are level water, mirrors found by marching the
+// reflected ray through the point map, rippled by every drop.)
 // The rain itself sits in the street's depth. A few thousand drops in metres,
 // within 18 m of the lens: each falls at its own terminal speed, is one
 // 1/30 s exposure long, is depth tested against the street and defocused by
 // distance, and is lit by the sky, so a streak shows only where it crosses
 // something darker than that sky (and goes faintly dark over the bright gap).
+// Looking up into it, the fall is toward the lens: every streak points back
+// to the zenith above the frame, short where it comes at you, long at the
+// frame's edges.
 // The few within arm's reach are long, wide and nearly clear; the rest thin
 // out with distance into the rain shaft, a soft sheet that thickens along the
-// line of sight, veils the street's far end and the cumulus, and is lit from
-// behind by the gap. Drops that land on the road throw up a crown and leave a
-// ring, the same drops in both.
+// line of sight, veils the far buildings and the cumulus, and is lit from
+// behind by the gap low over the rooftops.
 //
 // Query: ?rain=0..1 holds the shower that far in; ?dry=0..1 holds the drying
-// after it (sun out); ?sun=0..1 holds the cloud edge part-way up the street;
+// after it (sun out); ?sun=0..1 holds the deck's edge part-way across the sky;
 // ?t=seconds freezes the clock; ?still=1 skips the reveal.
 
 const BASE = "/lab/yuudachi/";
 const IMG_W = 1536;
-const IMG_H = 2040;
+const IMG_H = 2048;
 const MAP_W = 768;
-const MAP_H = 1020;
-const FX = 2564.23;
+const MAP_H = 1024;
+// MoGe-2's focal; up from the plumb edges' vanishing point (the camera is
+// pitched 31 degrees up, so the frame runs from the rooftops' horizon to 65
+// degrees up the sky).
+const FX = 1526.64;
 const CX = 767.5;
-const CY = 1019.5;
-const UP = [-0.0061, 0.97514, -0.22151];
-const RIGHT = [0.99998, 0.00626, 0];
-const FWD = [0.00139, -0.2215, -0.97516];
-const PLANE = [-0.000439, 0.043731, -1.87755];
-// Sun+sky over sky alone: on the asphalt this is measured by the bake
-// (meta.sunOverSky, the same asphalt either side of the right-hand block's
-// shadow). A wall takes the summer sun at a glancing angle, so less of it.
-const SUN_GROUND = 25.5;
-const SUN_WALL = 12;
-// The overcast's light relative to the clear sky's shade light: a whole sky
-// of bright cloud, against the slot of blue a shaded street sees.
-const OVERCAST = 2.5;
+const CY = 1023.5;
+const UP = [-0.03885, 0.85405, -0.51875];
+const RIGHT = [0.99897, 0.04545, 0];
+const FWD = [0.02358, -0.51821, -0.85493];
+// Sun+sky over sky alone, on a wall turned to the sun (meta.sunOverSky: the
+// bake fits the sun to the walls' shading). Soffits and other faces the sun
+// never reached directly take it from bounce, so less.
+const SUN_WALL = 2.0;
+const SUN_GROUND = 2.0;
+// The storm deck's light relative to the clear sky's shade light. Looking up
+// a wide street the shade is lit by a whole sky of blue; the deck is darker
+// than that.
+const OVERCAST = 0.5;
+// The cumulus the storm grows out of (image uv): the deck spreads from it
+// and draws back into it.
+const CLOUD = [0.68, 0.36];
 const ASPECT = IMG_W / IMG_H;
 const DROPS = 13000;
-// Ripple / splash grid on the road (metres, along RIGHT and FWD): the cells
-// of ripples() layer 0, from where the road comes into view (~10 m) to 35 m.
-const SPLASH_CELL = 0.28;
-const SPLASH_I = [-14, 14];
-const SPLASH_J = [36, 125];
+// a light breeze, level: across the frame and a little away from you
+const WIND = RIGHT.map((v, i) => 0.07 * v + 0.02 * FWD[i]);
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -98,6 +107,11 @@ float depthAt(sampler2D geo, vec2 iuv) {
 vec3 viewRay(vec2 iuv) {
   vec2 px = iuv * IMG;
   return vec3((px.x - C0.x) / FX, -(px.y - C0.y) / FX, -1.0);
+}
+const vec3 UPV = vec3(${UP.join(", ")});
+// sine of the elevation of the view ray through an image uv
+float elevAt(vec2 iuv) {
+  return dot(normalize(viewRay(iuv)), UPV);
 }
 vec2 project(vec3 P) {
   float z = max(-P.z, 1e-3);
@@ -141,7 +155,7 @@ uniform float uTime;
 uniform float uRain;     // falling now, 0..1
 uniform float uAcc;      // rain that has fallen this shower, 0..1.3
 uniform float uEvap;     // drying since it stopped, 0..2.2
-uniform float uSun;      // the cloud edge: 0 = overcast everywhere, 1 = sun everywhere
+uniform float uSun;      // the deck's edge: 0 = overcast everywhere, 1 = sun everywhere
 uniform float uExpo;
 uniform float uLodBias;
 uniform vec3 uUp;
@@ -155,16 +169,27 @@ ${COMMON}
 const float SUN_GROUND = ${SUN_GROUND.toFixed(2)};
 const float SUN_WALL = ${SUN_WALL.toFixed(2)};
 const float OVERCAST = ${OVERCAST.toFixed(2)};
+const vec2 CLOUD = vec2(${CLOUD.join(", ")});
+const float ASPECT = ${(IMG_W / IMG_H).toFixed(4)};
 
-// The storm deck without the cumulus: slate cobalt overhead, deepening toward
-// the zenith, and under its far edge the bright gap: a band of pale sky low
-// over the street's end, where the cell ends and daylight still comes in
-// sideways. That gap is what the puddles and the rain catch.
-vec3 stormBase(float y) {
-  float h = clamp(y / 0.62, 0.0, 1.0);
-  vec3 c = mix(vec3(0.055, 0.07, 0.095), vec3(0.2, 0.22, 0.25), pow(h, 1.2));
-  float gap = smoothstep(0.5, 0.74, y);
-  return mix(c, vec3(0.58, 0.61, 0.64), gap);
+// The storm deck without the cumulus, by elevation (sine of it, e): a dark
+// slate-cobalt base overhead, deepening toward the zenith, and low over the
+// rooftops the bright gap: a band of pale sky under the deck's far edge,
+// where the cell ends and daylight still comes in sideways. That gap is what
+// the rain catches.
+vec3 stormBase(float e) {
+  float h = clamp(1.0 - e / 0.9, 0.0, 1.0);
+  vec3 c = mix(vec3(0.045, 0.06, 0.095), vec3(0.19, 0.215, 0.26), pow(h, 1.4));
+  float gap = smoothstep(0.3, 0.06, e);
+  return mix(c, vec3(0.56, 0.6, 0.64), gap);
+}
+
+// how much cloud the clear sky holds here (the cumulus is white, the sky blue)
+float cloudAt(vec2 iuv, float lod) {
+  vec3 cl = textureLod(uClean, iuv, lod).rgb;
+  float mx = max(cl.r, max(cl.g, cl.b));
+  float sat = (mx - min(cl.r, min(cl.g, cl.b))) / max(mx, 1e-4);
+  return smoothstep(0.42, 0.18, sat);
 }
 
 // The rain sky is the photo's own sky gone over: the clear sky (sky matte
@@ -177,31 +202,48 @@ vec3 stormBase(float y) {
 vec3 rainSky(vec2 iuv) {
   vec3 cl = srgbToLinear(textureLod(uClean, iuv, 1.8 * uRain).rgb);
   float Y = luma(cl);
-  float Yb = luma(srgbToLinear(textureLod(uClean, iuv, 4.5).rgb));
+  float Yb = luma(srgbToLinear(textureLod(uClean, iuv, 5.5).rgb));
   float mx = max(cl.r, max(cl.g, cl.b));
   float sat = (mx - min(cl.r, min(cl.g, cl.b))) / max(mx, 1e-4);
   float cloud = smoothstep(0.45, 0.15, sat);
   vec3 body = vec3(0.15, 0.165, 0.19) * (0.5 + 1.0 * smoothstep(0.3, 1.0, Y));
-  vec3 c = mix(stormBase(iuv.y), body, cloud);
-  c *= clamp(pow(max(Y, 1e-4) / max(Yb, 1e-4), mix(1.6, 1.1, uRain)), 0.3, mix(3.3, 1.7, uRain));
+  // A storm cell seen from under it: its thick core is the darkest thing in
+  // the sky, its thin margins glow with the light coming through them, and
+  // its billows show as darker and lighter masses (the photo's cumulus is
+  // nearly white all over, so the billows are drawn at its scale).
+  float thick = smoothstep(0.25, 0.95, cloudAt(iuv, 5.5));
+  float billow = fbm3(vec3(iuv * vec2(7.0, 9.0) + vec2(uTime * 0.01, 0.0), 2.0 + uTime * 0.03));
+  body *= mix(1.25, 0.7, thick) * (0.82 + 0.36 * billow);
+  vec3 c = mix(stormBase(elevAt(iuv)), body, cloud);
+  // (on the cloud its own light and shade, steepened, so it stays the photo's
+  // cumulus gone dark rather than a grey shape cut out of it)
+  c *= clamp(pow(max(Y, 1e-4) / max(Yb, 1e-4), mix(1.6, 1.1, uRain) + 1.6 * cloud), 0.25, mix(3.3, 1.7, uRain));
   // and it moves: slow darker masses in the deck
   float m = fbm3(vec3(iuv * vec2(1.6, 2.4) + vec2(uTime * 0.012, 0.0), uTime * 0.02));
   return c * (0.84 + 0.32 * m);
 }
 
-// How far the cloud edge is from covering this point: the sun leaves the far
-// end of the street first and comes back to it first.
+// How far the deck's edge is from covering this point. The storm grows out
+// of the cumulus: the cloud's own body goes over first and its base spreads
+// across the blue from it, nearest first; the shadow it throws runs over the
+// walls with it. On the way back the blue clears first, from the frame's
+// edges in, the walls have the sun back a beat before the sky round the
+// cloud, and the cloud is the last to let go. The edge is ragged at two
+// scales and drifts.
 float sunAt(float z, vec2 iuv) {
-  float k = clamp(log2(max(z, 1.0)) / 9.0, 0.0, 1.0);   // 0 near .. 1 sky
-  float key = 1.0 - k;                                   // far: low
-  // the sky opens at the street's end first, overhead last
-  float w = 0.06;
-  if (z > 400.0) {
-    key = 0.06 + 0.34 * clamp(1.0 - iuv.y / 0.62, 0.0, 1.0);
-    w = 0.11;
+  vec2 dv = (iuv - CLOUD) * vec2(ASPECT, 1.0);
+  float near = clamp(1.0 - length(dv) / 0.95, 0.0, 1.0);
+  // (inside the cloud the change runs softer, thick core first)
+  float cl = cloudAt(iuv, 4.5);
+  float key = 0.08 + 0.3 * pow(near, 0.8) + 0.25 * cl * near;
+  float w = mix(0.06, 0.09, cl);
+  if (z < 400.0) {
+    key = 0.1 + 0.22 * near;
+    w = 0.07;
   }
-  // the cloud's edge is ragged, and it drifts
-  key += (fbm3(vec3(iuv * vec2(2.6, 3.4) + vec2(uTime * 0.01, 0.0), 4.0)) - 0.5) * 0.22;
+  // the deck's edge is ragged, and it drifts
+  vec2 q = iuv + vec2(uTime * 0.01, 0.0);
+  key += (fbm3(vec3(q * vec2(2.6, 3.4), 4.0)) - 0.5) * 0.16 + (fbm3(vec3(q * vec2(8.0, 10.0), 9.0)) - 0.5) * 0.1;
   float f = uSun * 1.25 - 0.12;
   return smoothstep(key - w, key + w, f);
 }
@@ -321,18 +363,19 @@ vec2 ripples(vec2 g, float t) {
 // fine and too many to see drop by drop: tens to hundreds of metres of it
 // merge into a soft sheet. It thickens along the line of sight (a reflection
 // gets it for the whole of its path, there and back), so the near street
-// stays clear and dark and the street's end and the cumulus behind it go
-// soft. The sheet is lit from behind by the bright gap low over the street's
-// end, and from above by the deck: a little brighter than the dark walls it
+// stays clear and dark and the far buildings and the cumulus behind them go
+// soft. The sheet is lit from behind by the bright gap low over the
+// rooftops, and from above by the deck: a little brighter than the dark walls it
 // veils, about as dark as the deck it hangs from. It is not even: heavier
 // columns drift across, and the fall combs it into fine merged streaks.
 vec3 shaftLight(vec2 iuv) {
-  float glow = exp(-pow((iuv.y - 0.55) / 0.17, 2.0)) * (1.0 - 0.45 * smoothstep(0.1, 0.5, abs(iuv.x - 0.55)));
-  return mix(vec3(0.12, 0.126, 0.138), vec3(0.42, 0.425, 0.43), glow);
+  float e = elevAt(iuv);
+  float glow = exp(-pow((e - 0.06) / 0.2, 2.0)) * (1.0 - 0.45 * smoothstep(0.1, 0.5, abs(iuv.x - 0.45)));
+  return mix(vec3(0.12, 0.13, 0.15), vec3(0.42, 0.43, 0.45), glow);
 }
-// (looking up, the deck is closer than the street's end: less of it there)
-float shaftAt(float d, float y) {
-  float k = mix(1.0, mix(0.4, 1.0, smoothstep(0.12, 0.55, y)), smoothstep(300.0, 500.0, d));
+// (looking up, the deck is close above you: little rain between you and it)
+float shaftAt(float d, vec2 iuv) {
+  float k = mix(1.0, mix(1.0, 0.4, smoothstep(0.15, 0.75, elevAt(iuv))), smoothstep(300.0, 500.0, d));
   return uRain * (1.0 - exp(-max(min(d, 900.0) - 8.0, 0.0) / 160.0)) * 0.7 * k;
 }
 float shaftComb(vec2 iuv) {
@@ -342,7 +385,7 @@ float shaftComb(vec2 iuv) {
 }
 
 // The sky as a reflection sees it, at an image uv: the storm deck (with its
-// bright gap low over the street's end) or the clear sky, by the cloud edge.
+// bright gap low over the rooftops) or the clear sky, by the deck's edge.
 vec3 skyAt(vec2 su, float lod) {
   vec3 clear = srgbToLinear(textureLod(uClean, su, lod).rgb);
   return mix(rainSky(su), clear, smoothstep(0.0, 1.0, sunAt(1000.0, su)));
@@ -393,13 +436,13 @@ vec3 reflectRay(vec3 P, vec3 R, float lod, out float hit) {
   // seen through the shaft.
   vec2 su = clamp(project(P + R * 400.0), vec2(0.02), vec2(0.98));
   vec3 sky = skyAt(su, max(lod, 2.0));
-  sky = mix(sky, shaftLight(su), shaftAt(900.0, su.y));
+  sky = mix(sky, shaftLight(su), shaftAt(900.0, su));
   if (hit > 0.5) {
     float zh = depthAt(uGeo, uv);
     vec3 c = relit(uv, lod, sunAt(zh, uv), sunAt(1000.0, uv), s);
     // seen through the rain, there and back: the far street's end mirrors
     // as the pale sheet it is in the downpour
-    c = mix(c, shaftLight(uv), shaftAt(length(P) + tHit, uv.y) * (1.0 - s));
+    c = mix(c, shaftLight(uv), shaftAt(length(P) + tHit, uv) * (1.0 - s));
     // fade toward the frame edges so the reflection never ends on a line
     vec2 e = smoothstep(vec2(0.0), vec2(0.06), uv) * smoothstep(vec2(0.0), vec2(0.06), 1.0 - uv);
     return mix(sky, c, e.x * e.y);
@@ -429,6 +472,15 @@ void main() {
   float skyA;
   vec3 col = relit(iuv, uLodBias, sunNow, sunSky, skyA);
   float surf = 1.0 - skyA;
+  // After the shower the air is washed: the haze has rained out, and the blue
+  // that comes back is deeper than the photo's, toward cobalt, until the
+  // street has nearly dried.
+  float washed = smoothstep(0.1, 0.6, uAcc) * (1.0 - smoothstep(0.8, 2.2, uEvap)) * sunSky;
+  if (washed > 0.0 && skyA > 0.0) {
+    float mxs = max(col.r, max(col.g, col.b));
+    float blue = smoothstep(0.25, 0.55, (mxs - min(col.r, min(col.g, col.b))) / max(mxs, 1e-4)) * step(col.r, col.b);
+    col = mix(col, col * vec3(0.72, 0.88, 1.0), skyA * washed * blue);
+  }
 
   vec2 gp = vec2(dot(P, uRight), dot(P, uFwd));
   float isGround = step(0.85, dot(N, uUp)) * surf;
@@ -474,6 +526,33 @@ void main() {
   float wet = wetIn * (1.0 - smoothstep(cap - 0.06, cap + 0.06, ev)) * surf;
   // a surface that was dry stays dry under its rain shadow
   wet *= smoothstep(0.02, 0.2, expoW + 0.05 * isGround);
+  // Runs: on a wall the water does not sit as an even film. It gathers into
+  // runs down the face from every ledge and panel joint, a hand's width wide
+  // and a metre or two long, on paint and glazed tile as much as on concrete,
+  // and they are the last of a wall to dry.
+  float runs = 0.0;
+  if (vert > 0.6 && surf > 0.5 && wetIn > 0.02) {
+    vec3 along = normalize(cross(N, uUp) + vec3(1e-4));
+    float rx = dot(P, along) / 0.3;
+    float ci = floor(rx);
+    vec2 hc = hash22(vec2(ci, 3.0));
+    // each 30 cm column of the face: a run or not, in 5 m lengths of it
+    // (staggered column to column), starting under a joint and running down
+    // most of the way, tapering
+    float sy = yUp / 5.0 + hc.x * 3.0;
+    float seg = floor(sy);
+    vec2 hs = hash22(vec2(ci, seg + 11.0));
+    float yl = fract(sy);
+    float top = 0.8 + 0.2 * hs.x;
+    float bot = top - 0.4 - 0.5 * hs.y;
+    float taper = clamp((yl - bot) / max(top - bot, 1e-3), 0.0, 1.0);
+    float halfW = (0.12 + 0.18 * hc.y) * (0.35 + 0.65 * taper);
+    float xm = smoothstep(halfW, halfW * 0.4, abs(fract(rx) - 0.5 - (hc.x - 0.5) * 0.4));
+    float ym = smoothstep(bot - 0.02, bot + 0.08, yl) * smoothstep(top + 0.01, top - 0.02, yl);
+    float rn = xm * ym * step(0.5, hash12(vec2(ci, seg + 23.0)));
+    float capR = cap + 0.35 + 0.3 * hs.x;
+    runs = rn * wetIn * (1.0 - smoothstep(capR - 0.08, capR + 0.08, ev)) * smoothstep(0.02, 0.2, expoW);
+  }
 
   // --- standing water ----------------------------------------------------
   float water = 0.0;
@@ -496,6 +575,9 @@ void main() {
   c = mix(vec3(yl), c, 1.0 + 0.45 * dark);
   // (the road most: its open texture fills and goes near black under a film)
   c *= 1.0 - (0.62 + 0.22 * isGround) * dark * (0.9 + 0.2 * blot);
+  // a run darkens what it wets (less on a sealed face) and, in the sun, carries
+  // a thin bright line of sky down its edge
+  c *= 1.0 - runs * mix(0.18, 0.32, por);
   // leaves: darker, greener
   c = mix(c, c * vec3(0.78, 0.86, 0.8), fol * wet * 0.6);
 
@@ -564,7 +646,7 @@ void main() {
     vec2 cell = floor(sp);
     vec2 h = hash22(cell);
     float dd = length(fract(sp) - 0.5 - (h - 0.5) * 0.6);
-    float drop = smoothstep(0.3, 0.1, dd) * step(0.88, h.x);
+    float drop = smoothstep(0.3, 0.1, dd) * step(0.975, h.x);
     vec3 skyc = mix(rainSky(vec2(0.5, 0.1)), vec3(1.0, 0.98, 0.94) * 1.4, sunNow);
     c = mix(c, skyc * 0.75, drop * bead * min(wetIn, 1.0) * 0.3 * (1.0 - smoothstep(0.0, 0.5, ev)));
   }
@@ -582,7 +664,7 @@ void main() {
 
   // The rain shaft over everything, the sky included (it hangs in front of
   // the cumulus as much as the far buildings).
-  float shaft = shaftAt(mix(dist, 900.0, skyA), iuv.y) * shaftComb(iuv);
+  float shaft = shaftAt(mix(dist, 900.0, skyA), iuv) * shaftComb(iuv);
   c = mix(c, shaftLight(iuv), clamp(shaft, 0.0, 0.9));
 
   // Steam, sparingly: sun on wet, warm asphalt just after the shower.
@@ -604,6 +686,10 @@ void main() {
 // width is its diameter plus the lens's defocus at its depth, and the same
 // light spread over a wider streak is fainter. Past ~6 m it fades out into the
 // rain shaft drawn in the scene pass, which is the same rain, merged.
+// Each drop sits on the view ray through its own point of the frame, at its
+// own distance, and falls along gravity through it: with the camera pitched
+// up, that fall comes toward the lens and down the frame, so the streaks fan
+// out from the zenith's vanishing point above the frame.
 const RAIN_VS = `#version 300 es
 in vec4 aDrop;    // screen x (0..1, with margin), depth (m), phase, diameter (m)
 in vec2 aCorner;  // (0|1 along the streak, -1|1 across)
@@ -611,7 +697,6 @@ uniform float uTime;
 uniform vec3 uUp;
 uniform vec3 uWind;
 uniform float uShutter;   // s
-uniform vec2 uView;       // tan of the half field (x, y)
 uniform vec2 uRes;        // render target px
 uniform float uFocus;     // m
 uniform float uFar;       // m: past this the streaks have merged into the shaft
@@ -624,35 +709,38 @@ out float vLight;
 out vec2 vIuv;
 ${COMMON}
 void main() {
+  gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   float d = aDrop.y;
   // terminal speed (Gunn & Kinzer): ~4 m/s at 1 mm, ~8 m/s at 3 mm
   float v = 9.65 - 10.3 * exp(-0.6 * aDrop.w * 1000.0);
   vec3 g = normalize(-uUp + uWind);
-  // the frustum at this depth: the drop's column, wrapped vertically
-  float halfH = d * uView.y * 1.35;
-  vec3 c0 = vec3((aDrop.x * 2.0 - 1.0) * d * uView.x, 0.0, -d);
-  float span = halfH * 2.0;
-  float s = mod(uTime * v + aDrop.z * span, span) - halfH;
+  // its place: the ray through a point of the frame (with margin), d along it
+  float sy = fract(aDrop.z * 7.913 + aDrop.x * 3.17) * 1.3 - 0.15;
+  vec2 iu = uCrop.xy + vec2(aDrop.x, sy) * uCrop.zw;
+  vec3 c0 = normalize(viewRay(iu)) * d;
+  // a column of fall through it, wrapped: the drop is somewhere on it
+  float span = d * 1.1;
+  float s = mod(uTime * v + fract(aDrop.z * 13.7) * span, span) - span * 0.5;
   vec3 head = c0 + g * s;
-  // centre the column on the frustum's middle row (the camera looks up 13°)
-  head.y += d * ((${CY.toFixed(1)} - ${IMG_H / 2}.0) / FX);
   vec3 tail = head - g * v * uShutter;
+  if (-tail.z < 0.25 || -head.z < 0.25) return;
   vec2 ph = (project(head) - uCrop.xy) / uCrop.zw * uRes;
   vec2 pt = (project(tail) - uCrop.xy) / uCrop.zw * uRes;
   vec2 dir = ph - pt;
   float len = length(dir);
   vec2 t = len > 1e-3 ? dir / len : vec2(0.0, 1.0);
   vec2 nrm = vec2(-t.y, t.x);
-  // width: drop diameter in px, plus defocus (the lens focuses down the street)
+  float zh = -head.z;
+  // width: drop diameter in px, plus defocus (the lens focuses on the buildings)
   float px = uRes.y / (IMG.y * uCrop.w) * FX;
-  float diam = aDrop.w * px / d;
-  float coc = 0.0055 * px * abs(1.0 / d - 1.0 / uFocus) * 1.4;
+  float diam = aDrop.w * px / zh;
+  float coc = 0.0055 * px * abs(1.0 / zh - 1.0 / uFocus) * 1.4;
   float w = max(diam + coc, 1.1);
   vec2 p = mix(pt, ph, aCorner.x) + nrm * aCorner.y * w * 0.5 - t * (aCorner.x * 2.0 - 1.0) * -w * 0.5;
   // coverage: a thin drop covers a fraction of its 1px-wide line; a blurred
   // one spreads the same light over a wider one. With distance the streaks
   // thin out into the shaft.
-  float fade = 1.0 - smoothstep(uFar * 0.5, uFar, d);
+  float fade = 1.0 - smoothstep(uFar * 0.5, uFar, zh);
   // (the few right at the lens are so far out of focus they are barely there)
   vAlpha = clamp(diam / w, 0.0, 1.0) * min(1.0, len / max(w, 1.0) + 0.3) * fade * mix(1.0, 0.4, smoothstep(3.0, 14.0, w));
   vLight = 0.75 + 0.5 * fract(aDrop.z * 37.13);
@@ -684,115 +772,6 @@ void main() {
   float along = smoothstep(0.0, 0.2, vAlong) * smoothstep(1.0, 0.8, vAlong);
   float a = clamp(vAlpha * across * along * uGain, 0.0, 0.8);
   outColor = vec4(uDropLight * vLight * a, a);
-}`;
-
-// Splash crowns: one per ripple cell on the road, at the moment its drop
-// lands (the same hash as ripples() layer 0, so a crown leaves its ring).
-// Each is a small sprite on the road plane, depth tested against the street
-// so nothing that stands in the road (a person, the truck) is splashed through.
-const SPLASH_VS = `#version 300 es
-in vec2 aCell;    // ripple cell (along RIGHT, along FWD)
-in vec2 aCorner;  // (-1|1 across, 0|1 up)
-uniform float uTime;
-uniform float uRain;
-uniform vec3 uUp;
-uniform vec3 uRight;
-uniform vec3 uFwd;
-uniform vec3 uPlane;      // road height h = a x + b z + c (camera x, z)
-uniform vec2 uRes;
-uniform vec4 uCrop;
-uniform sampler2D uGeo;
-uniform sampler2D uWater;
-out vec2 vLocal;
-out float vK;
-out float vFlat;
-out float vAlpha;
-out float vZ;
-out vec2 vIuv;
-out float vSeed;
-${COMMON}
-const float CS = ${SPLASH_CELL.toFixed(2)};
-const float LIFE = 0.1;    // of the drop's cycle: ~70 ms
-const float CR = 0.05;     // crown radius, m
-void main() {
-  gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-  vec2 h = hash22(aCell);
-  float ph = uTime * (1.1 + h.x * 0.6) + h.y;
-  float age = fract(ph);
-  vec2 seed = hash22(aCell + floor(ph) * 1.37);
-  if (age > LIFE || seed.x >= uRain) return;
-  vec2 g = (aCell + seed) * CS;
-  vec3 P0 = uRight * g.x + uFwd * g.y;
-  float hgt = (uPlane.x * P0.x + uPlane.y * P0.z + uPlane.z) / (1.0 - uPlane.x * uUp.x - uPlane.y * uUp.z);
-  vec3 P = P0 + uUp * hgt;
-  vec2 iuv = project(P);
-  if (any(lessThan(iuv, uCrop.xy)) || any(greaterThan(iuv, uCrop.xy + uCrop.zw))) return;
-  float z = -P.z;
-  // only on open road: the depth there is the road's, the surface faces up,
-  // and the rain reaches it
-  vec4 gh = texelFetch(uGeo, clamp(ivec2(iuv * vec2(MAP)), ivec2(0), MAP - 1), 0);
-  vec3 N = vec3(gh.b * 2.0 - 1.0, (gh.a - 0.75) * 4.0, 0.0);
-  N.z = sqrt(max(0.0, 1.0 - dot(N.xy, N.xy)));
-  float zs = depthAt(uGeo, iuv);
-  float expo = textureLod(uWater, iuv, 0.0).b;
-  if (abs(zs - z) > 0.05 * z + 0.1 || dot(N, uUp) < 0.75 || expo < 0.3) return;
-  float px = uRes.y / (IMG.y * uCrop.w) * FX;
-  float sPx = CR * px / z;
-  vec2 base = (iuv - uCrop.xy) / uCrop.zw * uRes;
-  vLocal = vec2(aCorner.x * 1.5, mix(-0.7, 2.0, aCorner.y));
-  vec2 p = base + vec2(vLocal.x, -vLocal.y) * sPx;
-  vK = age / LIFE;
-  vFlat = clamp(dot(normalize(-P), uUp), 0.08, 1.0);
-  vAlpha = smoothstep(1.2, 3.0, sPx) * (1.0 - smoothstep(22.0, 35.0, z));
-  vZ = z;
-  vSeed = seed.y;
-  vIuv = iuv;
-  vec2 ndc = p / uRes * 2.0 - 1.0;
-  gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
-}`;
-
-const SPLASH_FS = `#version 300 es
-precision highp float;
-in vec2 vLocal;
-in float vK;
-in float vFlat;
-in float vAlpha;
-in float vZ;
-in vec2 vIuv;
-in float vSeed;
-out vec4 outColor;
-uniform sampler2D uGeo;
-uniform vec3 uDropLight;
-${COMMON}
-void main() {
-  // the street in front of the crown (a foot, a wheel) hides it
-  if (depthAt(uGeo, vIuv) < vZ * 0.93 - 0.15) discard;
-  float k = vK;
-  vec2 l = vLocal;
-  // The crown: a thin sheet thrown up round the impact, spreading as it rises
-  // and breaking at its lip into a ring of droplets that fly up and out.
-  float r = 0.45 + 0.55 * sqrt(k);
-  float H = 1.35 * sin(3.14159 * min(k * 1.15, 1.0));
-  float xr = clamp(abs(l.x) / r, 0.0, 1.0);
-  float front = -vFlat * r * sqrt(1.0 - xr * xr);
-  float inside = 1.0 - smoothstep(r - 0.12, r + 0.04, abs(l.x));
-  // the sheet, brightest where it is seen edge-on at its sides
-  float sheet = inside * smoothstep(front - 0.1, front + 0.05, l.y) * smoothstep(H * 0.85, H * 0.55, l.y);
-  sheet *= 0.2 + 0.8 * pow(xr, 3.0);
-  // the ring where the sheet meets the water
-  float e = length(vec2(l.x, l.y / vFlat));
-  float rim = exp(-pow((e - r) / 0.13, 2.0)) * (1.0 - smoothstep(0.0, 0.25, l.y));
-  // the droplets on its lip
-  float dr = 0.0;
-  for (int i = 0; i < 7; i++) {
-    float a = (float(i) + 0.5 + (vSeed - 0.5) * 0.8) / 7.0 * 3.14159;
-    float o = 1.0 + 0.35 * k;
-    vec2 q = vec2(cos(a) * r * o, H * (0.85 + 0.25 * sin(a * 3.0 + vSeed * 6.0)) + vFlat * r * 0.4 * sin(a));
-    vec2 dq = l - q;
-    dr += exp(-dot(dq, dq) / 0.018);
-  }
-  float a = clamp(sheet * 0.55 + rim * 0.5 + dr * 0.9, 0.0, 1.0) * vAlpha * (1.0 - k * k) * 0.8;
-  outColor = vec4(uDropLight * 3.4 * a, a);
 }`;
 
 const BLIT = `#version 300 es
@@ -935,12 +914,6 @@ function makeDrops() {
   return a;
 }
 
-function makeSplashCells() {
-  const out = [];
-  for (let j = SPLASH_J[0]; j <= SPLASH_J[1]; j++) for (let i = SPLASH_I[0]; i <= SPLASH_I[1]; i++) out.push(i, j);
-  return new Float32Array(out);
-}
-
 export async function createYuudachi(host, { embedded = false } = {}) {
   const q = new URLSearchParams(window.location.search);
   const num = (k) => {
@@ -995,33 +968,15 @@ export async function createYuudachi(host, { embedded = false } = {}) {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 0, 1, 1, 1]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(1);
   gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-  // Splash crowns: one instance per ripple cell on the road.
-  const splashVao = gl.createVertexArray();
-  gl.bindVertexArray(splashVao);
-  const splashCells = makeSplashCells();
-  const cellBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, cellBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, splashCells, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.vertexAttribDivisor(0, 1);
-  const splashCorner = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, splashCorner);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, 0, 1, 0, -1, 1, 1, 1]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
   gl.bindVertexArray(null);
 
   const scene = program(gl, VERT, SCENE);
   const rain = program(gl, RAIN_VS, RAIN_FS, ["aDrop", "aCorner"]);
-  const splash = program(gl, SPLASH_VS, SPLASH_FS, ["aCell", "aCorner"]);
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
 
-  // Road normal from the plane fit of the point map: h = a x + b z + c.
-  const rn = [UP[0] - PLANE[0], UP[1], UP[2] - PLANE[1]];
-  const rl = Math.hypot(...rn);
-  const ROADN = rn.map((v) => v / rl);
+  // Standing water is level (this plate has no road in view to fit a camber to).
+  const ROADN = UP;
 
   const L = { x: 0, y: 0, w: 1, h: 1 };
   let sceneT = null;
@@ -1045,12 +1000,12 @@ export async function createYuudachi(host, { embedded = false } = {}) {
       Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - (W < 640 ? 8 : 12) });
     }
     // An embedded tile is wider than the photo: show its full width and the
-    // band from the cumulus down to the road.
+    // band from the cumulus down to the rooftops.
     L.crop = [0, 0, 1, 1];
     const a = L.w / L.h;
     if (a > ASPECT * 1.02) {
       const hh = ASPECT / a;
-      L.crop = [0, clamp(0.66 - hh / 2, 0, 1 - hh), 1, hh];
+      L.crop = [0, clamp(0.56 - hh / 2, 0, 1 - hh), 1, hh];
     } else if (a < ASPECT * 0.98) {
       const ww = a / ASPECT;
       L.crop = [(1 - ww) / 2, 0, ww, 1];
@@ -1107,10 +1062,10 @@ export async function createYuudachi(host, { embedded = false } = {}) {
   host.addEventListener("keyup", onKeyUp);
 
   // ---- the weather, one step ----
-  // While held: the cloud edge runs up the street toward you (τ 0.9 s), the
+  // While held: the deck spreads out of the cloud over you (τ 0.9 s), the
   // first big drops, then the downpour (τ 1.1 s); rain piles up (~6 s to
   // fill the hollows to the brim) and rewets anything that had started to dry. Let go:
-  // the rain stops (τ 0.45 s), the sun comes back down the street (τ 1.6 s),
+  // the rain stops (τ 0.45 s), the deck draws back into the cloud (τ 1.6 s),
   // and evaporation runs, three times faster in the sun than in the shade.
   const EVAP_END = 2.2;
   const step = (dt, wet) => {
@@ -1189,7 +1144,7 @@ export async function createYuudachi(host, { embedded = false } = {}) {
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // Rain streaks and splash crowns, composited over the street in linear
+    // Rain streaks, composited over the street in linear
     // light. A drop is a tiny lens: it shows the sky above and behind, so
     // under the storm it is about as bright as the deck (lighter than the
     // walls, a touch darker than the gap); in the sun it glints.
@@ -1205,33 +1160,15 @@ export async function createYuudachi(host, { embedded = false } = {}) {
       gl.uniform1i(rain.u.uGeo, 0);
       gl.uniform1f(rain.u.uTime, time);
       gl.uniform3fv(rain.u.uUp, UP);
-      gl.uniform3fv(rain.u.uWind, [0.07, 0, 0.02]);
+      gl.uniform3fv(rain.u.uWind, WIND);
       gl.uniform1f(rain.u.uShutter, 1 / 30);
-      gl.uniform2f(rain.u.uView, IMG_W / 2 / FX, IMG_H / 2 / FX);
       gl.uniform2f(rain.u.uRes, L.rw, L.rh);
-      gl.uniform1f(rain.u.uFocus, 14);
+      gl.uniform1f(rain.u.uFocus, 35);
       gl.uniform1f(rain.u.uFar, 18);
       gl.uniform4fv(rain.u.uCrop, L.crop);
       gl.uniform3fv(rain.u.uDropLight, dropLight);
       gl.uniform1f(rain.u.uGain, 3.6);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
-
-      gl.useProgram(splash.p);
-      gl.bindVertexArray(splashVao);
-      gl.uniform1i(splash.u.uGeo, 0);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, tex.water);
-      gl.uniform1i(splash.u.uWater, 1);
-      gl.uniform1f(splash.u.uTime, time);
-      gl.uniform1f(splash.u.uRain, S.rain);
-      gl.uniform3fv(splash.u.uUp, UP);
-      gl.uniform3fv(splash.u.uRight, RIGHT);
-      gl.uniform3fv(splash.u.uFwd, FWD);
-      gl.uniform3fv(splash.u.uPlane, PLANE);
-      gl.uniform2f(splash.u.uRes, L.rw, L.rh);
-      gl.uniform4fv(splash.u.uCrop, L.crop);
-      gl.uniform3fv(splash.u.uDropLight, dropLight);
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, splashCells.length / 2);
       gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
     }
@@ -1321,16 +1258,12 @@ export async function createYuudachi(host, { embedded = false } = {}) {
       Object.values(tex).forEach((t) => gl.deleteTexture(t));
       gl.deleteProgram(scene.p);
       gl.deleteProgram(rain.p);
-      gl.deleteProgram(splash.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);
       gl.deleteBuffer(dropBuf);
       gl.deleteBuffer(cornerBuf);
-      gl.deleteBuffer(cellBuf);
-      gl.deleteBuffer(splashCorner);
       gl.deleteVertexArray(vao);
       gl.deleteVertexArray(rainVao);
-      gl.deleteVertexArray(splashVao);
       stage.destroy();
     },
   };

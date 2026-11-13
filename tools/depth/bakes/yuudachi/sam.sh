@@ -1,18 +1,15 @@
 #!/bin/sh
-# SAM 2.1 masks for the objects whose material can't be told by colour and geometry.
-# Coordinates are pixels of the 1536x2040 working photo.
+# SAM 2.1 masks for the things whose material can't be told by colour and
+# geometry: the blank billboard panels (painted sheet metal, not concrete
+# cladding), the bank's red sign and the poster under the billboard.
+# Coordinates are pixels of the 1536x2048 working photo.
 W=${1:-/tmp/claude-0/yuu}
 S="python3 -I tools/depth/segment.py prompt $W/photo.png"
-C="--cache $W/seg/photo.sam.npz --threads 3"
+C="--cache $W/seg/photo.sam.npz --threads 3 --refine none"
 mkdir -p $W/seg
-$S $W/seg/p-father.png --point 1060,1900 --point 1050,2000 --neg 1220,1960 $C
-$S $W/seg/p-kid.png --point 1220,1960 --point 1225,1880 --neg 1060,1900 $C
-$S $W/seg/p-far.png --point 930,1790 --point 885,1745 --point 970,1790 --point 905,1720 $C
-$S $W/seg/p-left.png --point 600,1770 --point 690,1765 --point 712,1770 $C
-$S $W/seg/m-truck.png --point 760,1700 --point 760,1740 $C
-$S $W/seg/m-van.png --point 715,1735 --point 690,1720 $C
-$S $W/seg/m-bike.png --point 1330,1960 --point 1300,1920 $C
-$S $W/seg/s-times.png --point 110,1830 --point 105,1880 $C
-$S $W/seg/s-pylon.png --point 125,1900 --point 128,1860 $C
-$S $W/seg/s-p.png --point 1200,1560 --point 1250,1600 $C
-$S $W/seg/s-man.png --point 1205,1652 --point 1180,1650 $C
+$S $W/seg/s-board-top.png --point 860,1300 --point 760,1280 --point 960,1330 --neg 860,1180 $C
+$S $W/seg/s-board.png --point 910,1660 --point 860,1560 --point 980,1780 --neg 700,1660 $C
+$S $W/seg/s-board-side.png --point 670,1660 --point 680,1580 --neg 910,1660 $C
+$S $W/seg/s-bank.png --point 1256,1600 --point 1240,1450 --point 1270,1800 $C
+$S $W/seg/s-poster.png --point 940,1970 --point 860,1960 --point 1020,1975 $C
+$S $W/seg/s-red.png --point 716,1980 --point 718,1940 --neg 760,1980 $C
