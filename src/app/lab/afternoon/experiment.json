@@ -1,6 +1,6 @@
 {
   "title": "Afternoon",
-  "description": "A summer intersection in Kyoto, taken apart into what it is made of and lit again. Drag sideways to move the sun through the afternoon, from half past twelve to the last low light before half past six. The poles, the lamp standards and the buildings throw shadows that swing round and stretch across the road, the walls turn toward and away from the light, the cumulus warm on the faces the sun reaches, and the shadows of the clouds overhead drift slowly over the street and the hills. At the photographer's own sun it is the photograph.",
+  "description": "Looking straight up from the corner of Honjo 3-chome in Tokyo on a February afternoon: the signal gantry and its street sign hang over you, the pole and the wires cross a clear sky, the building edges lean in, one small cloud. The street is taken apart into what it is made of and lit again. Drag sideways to move the sun through the afternoon, from half past twelve to the last light at five. The faces turn toward and away from it, the pole and the signal heads throw their shadows across the walls, the low sun goes behind the buildings and leaves them in the blue of the open sky, the sky deepens to cobalt overhead and warms low down toward the sun, and the cloud goes gold. At the photographer's own sun it is the photograph.",
   "tags": [
     "WebGL",
     "Light",
@@ -9,7 +9,7 @@
   ],
   "status": "draft",
   "createdAt": "2026-11-06T21:30:00.000Z",
-  "intent": "Reality pieces: depth maps and material maps, making a real place as real as possible but interactive. One photograph is baked into material maps (metric depth calibrated from the crosswalk and horizon, normals planar-fitted to the road and to walls read from the photo's own vanishing lines, albedo by dividing out the estimated sun and sky shading, the sun-shadow mask of the original light, a sky and cloud matte) and relit live: Lambert sun plus hemispheric sky, cast shadows by screen-space ray marching the depth toward a real solar position (Kyoto, 35 N, early August) plus exact capsule shadows for the hand-fitted poles and lamp standards and box shadows for the photographer's own corner just out of shot, sky and cumulus shaded from the same sun, cloud shadows projected through the photo's own cumulus, then developed through the shared film kit. Reference: https://en.wikipedia.org/wiki/Intrinsic_image_decomposition",
+  "intent": "Reality pieces: depth maps and material maps, making a real place as real as possible but interactive. One photograph is baked into material maps (MoGe-2 metric depth and normals for a worm's-eye frame, the camera pitched 29 degrees up, true up from the vanishing point of the plumb building edges and the walls snapped to their azimuths around it; albedo by dividing out the shading of the photo's own sun, which is fitted to the walls; the sun mask of that light; a sky and cloud matte) and relit live: Lambert sun plus hemispheric sky about the true up, cast shadows by screen-space ray marching the depth toward a real solar position (Tokyo, 35.7 N, early February) plus exact capsule shadows for the pole, its lamp and the signal mast arm, and the sky re-lit by an analytic clear-sky model (zenith deepening, horizon band warming toward a low sun, circumsolar glow) applied against the photo's own sky, then developed through the shared film kit. Reference: https://en.wikipedia.org/wiki/Intrinsic_image_decomposition",
   "tile": {
     "shape": "wide"
   },
@@ -63,9 +63,16 @@
     }
   ],
   "sources": [
-    "Photograph: street intersection in Japanese town (Kyoto, Sony a7 II) by Richard Tao (@richardtao28) on Unsplash, Unsplash License. https://unsplash.com/photos/street-intersection-in-japanese-town-jlJFU9QBfFc (file: https://images.unsplash.com/photo-1583200786218-ccee132a8567). Cropped to 3:2 and resampled to 2400x1600. Depth by Depth Anything V2 (tools/depth/depth_hr.py), fitted to the ground plane's exact depth; maps baked by tools/depth/bakes/afternoon (prep.py, geo.py, orient.py, shade.py, light.json) into albedo.webp, normal.png (octahedral normal, occluder thickness), depth.png (16-bit log depth, the photo's sun-shadow mask) and matte.png (sky, cloud density, road).",
+    {
+      "url": "https://unsplash.com/photos/a-traffic-light-suspended-over-a-city-street-2cPG-6y1bHA",
+      "file": "https://images.unsplash.com/photo-1738714946113-46cad602bfd1?w=6000&fit=max&q=90&fm=jpg",
+      "author": "Patrick Beznoska (@patrick_beznoska)",
+      "licence": "Unsplash License",
+      "note": "Tokyo (Honjo 3-chome, Sumida), published 5 February 2025; 5612x3741 original, shipped at 2400x1600. Metric depth, normals and field of view (70.7 degrees) from MoGe-2 ViT-S (Microsoft, MIT) via tools/depth/normals.py; sky matte via tools/depth/segment.py sky, corrected inside MoGe's surface mask; up from the plumb edges' vanishing point, wall snapping, the photo's sun fitted to the walls, its sun mask, albedo, cloud matte and the thin-occluder capsules baked by tools/depth/bakes/afternoon (bake.py, light.json, capsules.json) into albedo.webp, normal.png (octahedral normal, occluder thickness), depth.png (16-bit log depth, the photo's sun mask) and matte.png (sky, cloud). Replaces the first plate, an eye-level intersection in Kyoto by Richard Tao (Unsplash, https://unsplash.com/photos/street-intersection-in-japanese-town-jlJFU9QBfFc)."
+    },
     "https://en.wikipedia.org/wiki/Intrinsic_image_decomposition",
     "https://en.wikipedia.org/wiki/Solar_zenith_angle",
-    "https://en.wikipedia.org/wiki/Air_mass_(solar_energy)"
+    "https://en.wikipedia.org/wiki/Air_mass_(solar_energy)",
+    "https://en.wikipedia.org/wiki/Diffuse_sky_radiation"
   ]
 }

@@ -1,10 +1,9 @@
 {
-  "f": 2797.0, "cx": 1200.0, "cy": 1398.0, "camH": 1.5,
-  "lat": 35.0, "decl": 17.5, "heading": 40.0, "t0": 13.0,
-  "tau": [0.08, 0.13, 0.26], "sunK": 1.2,
+  "lat": 35.7, "decl": -16.0, "heading": 304.0, "t0": 14.41,
+  "tau": [0.07, 0.15, 0.3], "sunK": 1.2,
   "skyNoon": [0.17, 0.22, 0.3], "skyWarm": [0.12, 0.02, -0.1],
   "bounce": 0.18,
-  "gradeLo": [0.115, 0.125, 0.0], "gradeHi": [0.96, 0.95, 0.96],
-  "albedoMax": 1.0,
-  "thickMin": 1.0, "thickMax": 8.0
+  "gradeLo": [0.0, 0.07, 0.07], "gradeHi": [0.86, 0.88, 0.9],
+  "albedoMax": 1.0, "photoExpo": 1.6,
+  "thickMin": 0.3, "thickMax": 10.0
 }
