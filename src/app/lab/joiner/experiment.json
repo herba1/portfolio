@@ -19,7 +19,7 @@
     "url": "https://polyhaven.com/a/docklands_01"
   },
   "sources": [
-    "HDRI: Docklands 01, Poly Haven, by Savva Zakharov, CC0. https://polyhaven.com/a/docklands_01 (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/docklands_01_8k.hdr). Baked to a 4096 px zenith-centred azimuthal-equidistant disk (120 degrees at the rim) as log2 radiance -8..+5 in 8 bits with TPDF dither (scene.webp), a sky matte from tools/depth/segment.py sky repaired for cloud interiors (mask.webp), and a 2048 px sky-only plate with the structures push-pull filled (sky.webp). Bake: tools/depth/bakes/joiner (crop.py, skyfix.py, bake.py, then seal.py to close hairline cracks left in the matte; skyplate.py re-bakes sky.webp from the shipped disk and matte).",
+    "HDRI: Docklands 01, Poly Haven, by Savva Zakharov, CC0. https://polyhaven.com/a/docklands_01 (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/docklands_01_8k.hdr). Baked to a 4096 px zenith-centred azimuthal-equidistant disk (120 degrees at the rim) as log2 radiance -8..+5 in 8 bits with TPDF dither (scene.webp), a sky matte from tools/depth/segment.py sky repaired for cloud interiors (mask.webp), and a 2048 px sky-only plate with the structures push-pull filled (sky.webp). Bake: tools/depth/bakes/joiner (crop.py, skyfix.py, bake.py, then seal.py to close hairline cracks left in the matte and snap.py to pull its edge onto the structures; skyplate.py re-bakes sky.webp from the shipped disk and matte, with the structures grown 8 px so none of them ghosts into the plate).",
     "https://www.edwardtufte.com/notebook/space-time-joiner-photographs/",
     "https://en.wikipedia.org/wiki/David_Hockney#Photocollages",
     "https://en.wikipedia.org/wiki/Polaroid_SX-70",

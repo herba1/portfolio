@@ -113,6 +113,22 @@ vec2 diskUv(vec3 d) {
 }
 vec3 rad(vec3 v) { return exp2(LO + v * (HI - LO)); }
 
+// The sky matte eroded by r plate pixels (a min over rings one pixel apart),
+// then feathered: a structure's anti-aliased rim and the noisy inside of a
+// thin pole's matte read as part of the structure, so the drifted cloud never
+// shows through a lamp post or a facade edge as a light rim.
+float skyWeight(vec2 uv, int r) {
+  vec2 t = 1.0 / vec2(textureSize(uMask, 0));
+  float e = texture(uMask, uv).r;
+  for (int j = 1; j <= r; j++) {
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * 0.785398 + float(j) * 0.39;
+      e = min(e, texture(uMask, uv + vec2(cos(a), sin(a)) * t * float(j)).r);
+    }
+  }
+  return smoothstep(0.3, 0.95, e);
+}
+
 void main() {
   vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;   // y down
   vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
@@ -133,11 +149,20 @@ void main() {
     vec2 uv2 = diskUv(d2);
     vec3 moved = rad(texture(uScene, uv2).rgb);
     vec3 fill = rad(texture(uSky, uv2).rgb);
-    float m2 = texture(uMask, uv2).r;
-    vec3 sky = mix(fill, moved, smoothstep(0.55, 0.98, m2));
-    col = mix(base, sky, m);
+    // Where the drift lands on a structure, or near it, the sky stays where it
+    // was (the plate stands in only right against a structure), so a wall's
+    // edge is never dragged into the open sky and no smooth pale band of fill
+    // trails a facade. The margin is wider on the drifted side: the matte
+    // sits a few pixels inside the shadow side of a pole, and drifted, that
+    // sliver reads as a thin dark twin. A coarse mip of the matte softens the
+    // hand-over so it reads as cloud, not as a seam.
+    float w = skyWeight(uv, 2);
+    vec3 here = mix(fill, base, w);
+    float w2 = skyWeight(uv2, 4) * smoothstep(0.6, 1.0, textureLod(uMask, uv2, 3.0).r);
+    vec3 sky = mix(here, moved, w2);
+    col = mix(base, sky, w);
     float blue = smoothstep(0.4, 0.85, (col.b - col.r) / (col.b + 1e-4));
-    col *= mix(vec3(1.0), POL, blue * m);
+    col *= mix(vec3(1.0), POL, blue * w);
     key = m * smoothstep(0.01, 0.06, d.z);
   }
   col *= uGain;

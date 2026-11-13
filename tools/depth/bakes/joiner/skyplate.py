@@ -3,17 +3,29 @@
 # edges inside every print: a print spans ~30 degrees of the 240-degree disk).
 # Same log encoding and push-pull fill as bake.py; only clean sky feeds the fill,
 # so advected cloud never drags a wall or a lamp post with it.
-# usage: python3 -I skyplate.py scene.webp mask.webp out-sky.webp [size]
+# The matte's structure region is grown by GROW plate pixels before the fill:
+# a lamp post's matte is a hollow, noisy outline and its anti-aliased rim reads
+# as near-sky, so without the margin pole, sculpture and facade pixels leak
+# into the plate as a pale ghost that the cloud drift then slides off the real
+# silhouette (a translucent twin under the lamp post, a halo round a facade).
+# usage: python3 -I skyplate.py scene.webp mask.webp out-sky.webp [size] [grow]
 import sys, numpy as np, cv2
 from PIL import Image
 LO, HI = -8.0, 5.0
 N = int(sys.argv[4]) if len(sys.argv) > 4 else 2048
+GROW = float(sys.argv[5]) if len(sys.argv) > 5 else 8.0  # plate pixels
 scene = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(np.float32) / 255
 logc = LO + scene * (HI - LO)  # log2 radiance, still dithered
 s1 = cv2.resize(logc, (N, N), interpolation=cv2.INTER_AREA)
 m = np.asarray(Image.open(sys.argv[2]).convert("L")).astype(np.float32) / 255
 w1 = cv2.resize(m, (N, N), interpolation=cv2.INTER_AREA if m.shape[0] > N else cv2.INTER_LINEAR)
 w1 = np.clip((w1 - .85) / .15, 0, 1) ** 2
+# anything that is not clearly sky (the soft rim included) is structure; grow it
+# by GROW px, so only sky well clear of every structure feeds the fill
+r = max(1, int(round(GROW * N / 2048)))
+k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+grown = cv2.dilate((w1 < 0.5).astype(np.uint8), k) > 0
+w1[grown] = 0
 
 def pushpull(img, w):
     if min(w.shape) <= 4:
@@ -30,4 +42,4 @@ rng = np.random.default_rng(7)
 l = (np.clip(fill, LO, HI) - LO) / (HI - LO) * 255
 l = l + rng.random(l.shape) - rng.random(l.shape)
 Image.fromarray(np.clip(np.round(l), 0, 255).astype(np.uint8)).save(sys.argv[3], quality=90, method=6)
-print("sky plate", N, "px")
+print("sky plate", N, "px, structure grown", r, "px, fed", round(float((w1 > 0).mean()) * 100, 1), "%")
