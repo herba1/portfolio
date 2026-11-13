@@ -65,7 +65,12 @@ APERTURE = 0.0015          # lean depth of field: a phone lens, the sky stays ne
 # from the silhouette plane at photo pixel 340, 1067). Past the source's top
 # and side edges (fade, in source tan) the cloud blends into the analytic sky,
 # which deepens from the plate's top-row blue toward the remapped zenith.
-REMAP = {"stretch": 3.0, "keystone": 1.2, "pitchDeg": 20, "yawDeg": 4, "rollDeg": 0, "lean": 0.75, "vfovDeg": 105, "aspect": 1.2, "pivot": [-1.8, 2.08, 5.64], "fade": {"top": [-0.37, -0.29], "side": [0.62, 0.7], "nearDepth": 15, "nearBand": 0.3, "skyDepth": 37}, "sky": {"top": [16, 96, 184], "zenith": [10, 80, 166], "low": [40, 124, 200], "topTan": 0.33, "lowSpanDeg": 35, "ease": 1.0}}
+# pitchDeg 8 rather than 20: pitched further up the stage looked past the
+# cumulus into bare analytic sky, so the cloud sat in the bottom corner; at 8
+# its sunlit towers fill the right half behind the signal while the post still
+# converges on the zenith. The side fade starts at 0.66 so the cloud's right
+# flank runs to the frame edge before the outpainted margin hands over.
+REMAP = {"stretch": 3.0, "keystone": 1.2, "pitchDeg": 8, "yawDeg": 4, "rollDeg": 0, "lean": 0.75, "vfovDeg": 105, "aspect": 1.2, "pivot": [-1.8, 2.08, 5.64], "fade": {"top": [-0.37, -0.29], "side": [0.66, 0.75], "nearDepth": 15, "nearBand": 0.3, "skyDepth": 37}, "sky": {"top": [16, 96, 184], "zenith": [10, 80, 166], "low": [40, 124, 200], "topTan": 0.33, "lowSpanDeg": 35, "ease": 1.0}}
 
 Z_CLOUD = 30.0
 CLOUD_RELIEF = 5.0

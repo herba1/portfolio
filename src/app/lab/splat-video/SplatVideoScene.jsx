@@ -56,12 +56,48 @@ function covers(sent, wanted) {
   return sent.frame0 === wanted.frame0 && sent.frame1 === wanted.frame1 && Math.abs(sent.blend - wanted.blend) <= SORT.blendEpsilon;
 }
 
+// Until the worker's first sort lands, draw every splat far to near along the
+// source's own axis (frame 0 for the moving ones), so the very first frame
+// already carries the cloud. A slow GPU can take seconds to reach its second
+// frame, and an unsorted first frame showed only the silhouette on bare sky.
+// The camera looks within a few tens of degrees of that axis, so the order is
+// close to the worker's until its reply replaces it.
+const SEED_BUCKETS = 1024;
+
+function seedOrder(geometry, clip) {
+  const { meta, staticPoints, dynamicPoints } = clip;
+  if (isFlipbook(meta)) return;
+  const count = meta.staticCount + meta.dynamicCount;
+  const attribute = geometry.getAttribute("aSplat");
+  if (attribute.array.length < count) return;
+  const keys = new Uint16Array(count);
+  const counts = new Uint32Array(SEED_BUCKETS);
+  const shift = 16 - Math.log2(SEED_BUCKETS);
+  for (let i = 0; i < meta.staticCount; i += 1) keys[i] = staticPoints[i * 4 + 2] >> shift;
+  for (let j = 0; j < meta.dynamicCount; j += 1) keys[meta.staticCount + j] = dynamicPoints[j * 4 + 2] >> shift;
+  for (let i = 0; i < count; i += 1) counts[keys[i]] += 1;
+  let running = 0;
+  for (let k = SEED_BUCKETS - 1; k >= 0; k -= 1) {
+    const size = counts[k];
+    counts[k] = running;
+    running += size;
+  }
+  const order = attribute.array;
+  for (let i = 0; i < count; i += 1) {
+    order[counts[keys[i]]] = i;
+    counts[keys[i]] += 1;
+  }
+  attribute.needsUpdate = true;
+  geometry.instanceCount = count;
+}
+
 export function createSplatRuntime(clip) {
   const { meta, layout } = clip;
   const textures = createSplatTextures(clip);
   const material = createSplatMaterial(textures, meta);
   const capacity = sortCapacity(meta);
   const geometry = createSplatGeometry(capacity);
+  seedOrder(geometry, clip);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
 

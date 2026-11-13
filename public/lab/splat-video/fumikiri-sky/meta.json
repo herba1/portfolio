@@ -29,7 +29,7 @@
     "remap": {
       "stretch": 3.0,
       "keystone": 1.2,
-      "pitchDeg": 20,
+      "pitchDeg": 8,
       "yawDeg": 4,
       "rollDeg": 0,
       "lean": 0.75,
@@ -46,8 +46,8 @@
           -0.29
         ],
         "side": [
-          0.62,
-          0.7
+          0.66,
+          0.75
         ],
         "nearDepth": 15,
         "nearBand": 0.3,
