@@ -11,7 +11,7 @@
     { "idle": 2600 },
     { "drag": [[0.5, 0.1], [0.56, 0.3]], "ms": 600 },
     { "idle": 2400 },
-    { "drag": [[0.93, 0.72], [0.95, 0.9]], "ms": 500 },
+    { "drag": [[0.965, 0.72], [0.985, 0.95]], "ms": 500 },
     { "idle": 2000 }
   ],
   "sources": [
@@ -20,7 +20,7 @@
       "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
       "author": "PJH (@dokae)",
       "licence": "Unsplash License",
-      "note": "6000x4000, Ine, Kyoto Prefecture, Sony a7 IV. Six wires fitted as catenaries and painted out (clean plate 3600x2400 webp); the two in-line strain insulators cut out as sprites that ride their wires; per-wire width, blur, opacity and cross-cable shade measured against the clean plate, blur and opacity regressed on a Depth Anything V2 depth map of the photo. Shown with the camera turned a further 18 degrees up about its own centre: a pure-rotation homography H = K R K^-1 (K from a 24 mm lens on the full-frame sensor, no EXIF in the source), applied to the plate, the redrawn wires and the insulator sprites alike."
+      "note": "6000x4000, Ine, Kyoto Prefecture, Sony a7 IV. Six wires fitted as catenaries and painted out (clean plate 3600x2400 webp); the two in-line strain insulators cut out as sprites that ride their wires; per-wire width, blur, opacity and cross-cable shade measured against the clean plate, blur and opacity regressed on a Depth Anything V2 depth map of the photo. Shown with the camera turned a further 27 degrees up about its own centre, a worm's-eye some 57 degrees above the horizon: a pure-rotation homography H = K R K^-1 (K from a 24 mm lens on the full-frame sensor, no EXIF in the source), applied to the plate, the redrawn wires and the insulator sprites alike, and the frame cropped inside the turned photograph's footprint so no corner shows past the plate."
     },
     "https://en.wikipedia.org/wiki/Catenary",
     "https://en.wikipedia.org/wiki/String_vibration"

@@ -51,23 +51,31 @@ const WIDTH_TRIM = 0.6; // image px
 // The view: a worm's-eye. The photograph looks up at about 30 degrees (its
 // verticals meet some 7000 px above its centre); the virtual camera turns
 // PITCH further up about its own centre (pitchView in strings.js: a pure
-// rotation, so the homography H = K R K^-1 is exact without depth). The mast
-// and the far pole then converge hard on a vanishing point just above the
-// frame, the scene drops, and the droppers, hooks and caged platform low in
-// the photograph fall out of the bottom. Everything drawn goes through the
+// rotation, so the homography H = K R K^-1 is exact without depth): the
+// worm's-eye of the genre, 57 degrees above the horizon in all. The mast and
+// the far pole then converge hard on a vanishing point about one frame
+// height above the top edge, the lower pole leans in across the frame, the
+// scene drops, and the droppers and hooks low in the photograph fall out of
+// the bottom. Everything drawn goes through the
 // same H: the plate (per pixel, in PLATE), the wires (each sample of the
 // fitted catenary plus its displacement, the profile across the projected
 // tangent), the insulators (their corners, perspective-correct). The strings
 // themselves stay in the photograph's plane: physics in image px.
 // The crop sits inside the turned photograph (a trapezoid, narrow at the
-// top), VIEW.zoom past cover on a 16:10 box, its top edge at the
-// photograph's row VIEW.top and the mast top at poleAt of the width; it
-// zooms further only if a corner would leave the plate. A box narrower than
-// 16:10 keeps the crop's width down to its height (4:3 shows more sky below,
-// not less mast); a portrait box covers at its height.
-const PITCH = 18; // degrees
+// top, so no corner ever shows past the plate), VIEW.zoom past cover on a
+// 16:10 box, its top edge at the photograph's row VIEW.top (the mast cap's
+// headroom) and the mast top at poleAt of the width or, where the plate's
+// right edge binds at the top, as far left as the trapezoid allows; it zooms
+// further only if a corner would still leave the plate. The turn magnifies
+// the bottom of the frame, so at this pitch the zoom stays wide enough to
+// keep the truss's far end on the lower pole and the mast's whole lean in
+// frame (the transformer and the top of the caged platform come in on the
+// left). A box
+// narrower than 16:10 keeps the crop's width down to its height (4:3 shows
+// more sky below, not less mast); a portrait box covers at its height.
+const PITCH = 27; // degrees
 const VIEW = {
-  zoom: 1.45, // past cover, on a 16:10 box
+  zoom: 1.3, // past cover, on a 16:10 box
   top: 120, // the crop's top edge, a row of the photograph
   mast: [1915, 360], // the mast top, image px
   poleAt: 0.11, // the furthest left it may sit, as a share of the width
