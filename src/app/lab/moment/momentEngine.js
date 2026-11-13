@@ -73,6 +73,11 @@ const NEAR_STEP = 8; // plate px per near-layer cell
 const POST_STEP = 16; // plate px per cell of the post's plane (it is flat: few are needed)
 const TEAR = 0.03; // 1/m of disparity across one near cell that tears it (~2.4 plate px of parallax at the orbit's end)
 const SUBJ_STEP = 4; // plate px per jumper cell
+// The fill on him: about +1.5 stops, a little warmer than daylight (the
+// sky round him is ~7000 K; the fill reads as a flash, ~5000 K).
+const FILL_STOPS = 1.5;
+const FILL_TINT = [1.08, 1.0, 0.86];
+const FILL = FILL_TINT.map((k) => k * Math.pow(2, FILL_STOPS));
 
 const PROJECT = `
 uniform vec2 uSize;     // plate px
@@ -162,13 +167,59 @@ void main() {
   gl_Position = project(p, dot(uPlane, vec3(1.0, p)), 0.0);
 }`;
 
+// The near layer (the birch, the conifers, the box, the hotel) is drawn
+// through two corrections that the sky and the post skip (uShade 0):
+//   - a chroma-only deblock: the clip's H.264 coded the canopy's colour in
+//     4:2:0 blocks, so every hole of sky in the leaves had a stair-stepped
+//     fringe of blue. The colour ratio (hue and saturation) is averaged over
+//     about 1.5 plate px, weighted by coverage, while the luma, which holds
+//     the leaves' drawing, stays the pixel's own; only in the dark half of
+//     the layer (foliage), never on the hotel's white ribs;
+//   - the sky's blue spill taken out of the shaded leaves (blue held to
+//     their green), so the holes' blue edges do not lift into navy halos;
+//   - the shadows opened before the film: the GoPro crushed the shaded
+//     canopy into its bottom 15 code values, and the film's own toe would
+//     crush those to one black. The luma under ~0.3 is lifted on a power
+//     curve (gamma 0.65, joining the identity smoothly at 0.3) and the
+//     colour scaled with it, so the leaves keep their hue and their shape.
 const LAYER_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uTex;
+uniform float uShade;
 out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 void main() {
-  outColor = texture(uTex, vUv); // premultiplied
+  vec4 c = texture(uTex, vUv); // premultiplied
+  if (uShade < 0.5 || c.a < 0.004) {
+    outColor = c;
+    return;
+  }
+  vec2 tx = 1.5 / vec2(textureSize(uTex, 0));
+  vec4 acc = vec4(0.0);
+  for (int j = -1; j <= 1; j++)
+    for (int i = -1; i <= 1; i++) {
+      float w = (i == 0 ? 2.0 : 1.0) * (j == 0 ? 2.0 : 1.0);
+      acc += w * texture(uTex, vUv + vec2(float(i), float(j)) * tx);
+    }
+  acc /= 16.0;
+  float E = 0.02;
+  float y = dot(c.rgb, LUMA);
+  vec3 ratio = (acc.rgb + E * acc.a) / (dot(acc.rgb, LUMA) + E * acc.a);
+  vec3 deb = max(ratio * (y + E * c.a) - E * c.a, 0.0);
+  float yu = y / c.a;
+  float dark = 1.0 - smoothstep(0.22, 0.45, yu);
+  vec3 rgb = mix(c.rgb, deb, dark) / c.a;
+  // the leaves round each hole carry the sky's blue (the matte's edge, and
+  // the codec's chroma bleeding across it), which the lift below would print
+  // as a navy halo round every gap: no leaf in shade is bluer than it is green
+  rgb.b = mix(rgb.b, min(rgb.b, max(rgb.r, rgb.g) * 1.04), dark);
+  // shadows opened, as a ratio on luma
+  const float K = 0.3;
+  float y0 = dot(rgb, LUMA);
+  float y1 = mix(K * pow(max(y0, 0.0) / K, 0.65), y0, smoothstep(0.0, K, y0));
+  rgb *= y0 > 1e-4 ? y1 / y0 : 1.0;
+  outColor = vec4(rgb * c.a, c.a);
 }`;
 
 // One shutter frame of the jumper, carried along its flow by w of the way.
@@ -308,7 +359,14 @@ uniform sampler2D uB;
 uniform sampler2D uCA;
 uniform sampler2D uCB;
 uniform float uT;
+uniform vec3 uFill;         // linear gain of the fill on him, per channel (warm)
 out vec4 outColor;
+vec3 toLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
 void main() {
   vec4 a = texture(uA, vUv);   // premultiplied
   vec4 b = texture(uB, vUv);
@@ -330,6 +388,14 @@ void main() {
   float wb = sb * b.a;
   vec3 col = wa + wb > 1e-5 ? (sa * a.rgb + sb * b.rgb) / (wa + wb)
     : (a.a + b.a > 1e-5 ? (a.rgb + b.rgb) / (a.a + b.a) : vec3(0.0));
+  // the fill: he was shot against the sun, a navy silhouette on the blue.
+  // A flash's worth of light on him alone (his matte is this alpha), in
+  // linear light: a gain on what he reflects, warmer than the skylight, so
+  // the skin, the shirt's print, the denim and the soles take their own
+  // colour back; rolled off towards white, so nothing on him clips.
+  vec3 lin = toLinear(clamp(col, 0.0, 1.0));
+  lin = uFill * lin / (1.0 + (uFill - 1.0) * lin);
+  col = toSrgb(lin);
   outColor = vec4(col * alpha, alpha);
 }`;
 
@@ -360,6 +426,7 @@ uniform sampler2D uScene; // the scene before film; alpha: what stands in front 
 uniform vec2 uTexel;      // 1 / target px
 uniform float uPx;        // device px per CSS px
 uniform float uOver;      // 0..1: the reveal's overexposure, 1 at its start
+uniform sampler2D uSubj;  // the jumper alone, filled, before film (premultiplied; alpha his matte)
 out vec4 outColor;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // shoulder on display luma: 0.5 stays (the key's edge), the body lifts and
@@ -375,8 +442,37 @@ float shoulder(float y) {
   float s = y - 0.5;
   return ceiling(0.5 + s * 1.65 / (1.0 + 1.311 * s));
 }
+// The toe. The film lands black on its scan floor (FLOOR, its toe x
+// toeColor), so the shaded canopy, a third of the frame, printed as one dead
+// navy-black. Here the floor itself is lifted to a dense blue-teal (DEEP,
+// ~14/22/30) and the shadows above it are opened (slope ~2 off the floor),
+// joining the film's own curve smoothly by display luma 0.3. The blue sky
+// (luma 0.23 and up, blue-dominant) is never touched, so its hue holds.
+const vec3 FLOOR = vec3(0.034, 0.045, 0.054);
+const vec3 DEEP = vec3(14.0, 22.0, 30.0) / 255.0;
+vec3 toe(vec3 x) {
+  float y = dot(x, LUMA);
+  float s = clamp((y - 0.044) / (0.3 - 0.044), 0.0, 1.0);
+  float w = (1.0 - s) * (1.0 - s) * (1.0 - s);
+  w *= 1.0 - smoothstep(0.3, 0.5, (x.b - x.r) / max(x.b, 1e-3)) * smoothstep(0.16, 0.22, y);
+  return x + w * ((DEEP - FLOOR) + 1.2 * max(x - FLOOR, 0.0));
+}
 void main() {
   vec3 col = texture(uFilm, vUv).rgb;
+  // He keeps his fill's colour. The film's dye-cloud bleed reads colour over
+  // ~8 px and its split tone and toe run cool, so on a figure this dark
+  // against the blue the warm fill came out lilac-grey. Inside his matte
+  // the colour ratio is his own (filled, before the film); the luma, grain
+  // and curve stay the film's. His soft edge (matte under ~0.9) eases back
+  // to the film, so no hard line runs round him.
+  vec4 subj = texture(uSubj, vUv);
+  if (subj.a > 0.01) {
+    const float E = 0.02;
+    vec3 own = subj.rgb / subj.a;
+    vec3 ratio = (own + E) / (dot(own, LUMA) + E);
+    float yf = dot(col, LUMA);
+    col = mix(col, max(ratio * (yf + E) - E, 0.0), 0.85 * smoothstep(0.3, 0.9, subj.a));
+  }
   vec3 sky = texture(uSky, vUv).rgb;
   vec4 scene = texture(uScene, vUv);
   float mx = max(sky.r, max(sky.g, sky.b));
@@ -395,7 +491,7 @@ void main() {
   float skirt = (1.0 - smoothstep(0.2, 0.5, chroma)) * smoothstep(0.3, 0.58, dot(sky, LUMA));
   float key = max(inner, 0.9 * skirt) * (1.0 - front);
   if (key < 1e-3) {
-    outColor = vec4(col, 1.0);
+    outColor = vec4(toe(col), 1.0);
     return;
   }
   // local contrast: the sky layer's own luma against a ~30 px gaussian of
@@ -443,7 +539,7 @@ void main() {
   // a little of the cloud's own colour survives, so the folds keep their drawing
   vec3 own = (col - y0) * (yo / max(y0, 1e-3));
   vec3 graded = yo * tint + own * mix(0.12, 0.06, smoothstep(0.6, 0.85, yo));
-  outColor = vec4(mix(col, graded, key), 1.0);
+  outColor = vec4(toe(mix(col, graded, key)), 1.0);
 }`;
 
 function compile(gl, vs, fs, attrib = "aGrid", attrib1 = "aOther") {
@@ -761,6 +857,7 @@ export async function createMoment(host, { embedded = false } = {}) {
     targets.scene = makeTarget(box.pw, box.ph, false);
     targets.sky = makeTarget(box.pw, box.ph, false);
     targets.film = makeTarget(box.pw, box.ph, false);
+    targets.subj = makeTarget(box.pw, box.ph, false);
     // the sky alone is mipmapped, for the cloud pass's wide unsharp
     gl.bindTexture(gl.TEXTURE_2D, targets.sky.tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
@@ -934,6 +1031,7 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex.sky);
     gl.uniform1f(progLayer.u.uUseDepth, 0);
+    gl.uniform1f(progLayer.u.uShade, 0);
     gl.bindVertexArray(gSky.vao);
     gl.clearColor(0, 0, 0, 0);
     gl.viewport(0, 0, pw, ph);
@@ -949,12 +1047,14 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindTexture(gl.TEXTURE_2D, tex.near);
     gl.uniform1f(progLayer.u.uUseDepth, 1);
+    gl.uniform1f(progLayer.u.uShade, 1);
     gl.bindVertexArray(gNear.vao);
     gl.drawArrays(gl.TRIANGLES, 0, gNear.count);
     // the post and its wires over it, rigid on their plane
     gl.useProgram(progPost.p);
     setProjection(progPost.u, cm, pw, ph);
     gl.uniform1i(progPost.u.uTex, 0);
+    gl.uniform1f(progPost.u.uShade, 0);
     gl.uniform4f(progPost.u.uRect, post.rect[0], post.rect[1], post.rect[2], post.rect[3]);
     gl.uniform3f(progPost.u.uPlane, post.plane[0], post.plane[1], post.plane[2]);
     gl.bindTexture(gl.TEXTURE_2D, tex.post);
@@ -974,8 +1074,16 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.uniform1i(progBlend.u.uCA, 2);
     gl.uniform1i(progBlend.u.uCB, 3);
     gl.uniform1f(progBlend.u.uT, tt);
+    gl.uniform3fv(progBlend.u.uFill, FILL);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.BLEND);
+    // and him alone, for the grade (his colour inside his matte)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.subj.fbo);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
     gl.bindVertexArray(null);
 
@@ -993,13 +1101,14 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.useProgram(progGrade.p);
     gl.bindVertexArray(quadVao);
-    for (const [unit, t2] of [targets.film.tex, targets.sky.tex, targets.scene.tex].entries()) {
+    for (const [unit, t2] of [targets.film.tex, targets.sky.tex, targets.scene.tex, targets.subj.tex].entries()) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, t2);
     }
     gl.uniform1i(progGrade.u.uFilm, 0);
     gl.uniform1i(progGrade.u.uSky, 1);
     gl.uniform1i(progGrade.u.uScene, 2);
+    gl.uniform1i(progGrade.u.uSubj, 3);
     gl.uniform2f(progGrade.u.uTexel, 1 / pw, 1 / ph);
     gl.uniform1f(progGrade.u.uPx, dpr);
     gl.uniform1f(progGrade.u.uOver, clamp((exposure - 0.12) / 2.4, 0, 1));
