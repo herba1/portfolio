@@ -1,25 +1,25 @@
 {
   "format": "splat4d",
   "version": 1,
-  "exportId": "1794504962",
-  "count": 116288,
-  "staticCount": 83893,
-  "dynamicCount": 32395,
+  "exportId": "1794564473",
+  "count": 251940,
+  "staticCount": 198599,
+  "dynamicCount": 53341,
   "frames": 5,
   "duration": 6.0,
   "bounds": {
     "min": [
-      -37.192436987705356,
-      -21.940974504115367,
-      3.8141480850219724
+      -26.569204890857137,
+      -17.22513447746367,
+      27.4999
     ],
     "max": [
-      37.63948495841847,
-      22.403949612106157,
-      40.0001
+      26.679766557401596,
+      16.218679559305436,
+      34.4366463256836
     ]
   },
-  "covScale": 3699.8402952023084,
+  "covScale": 1666.636318435009,
   "coords": "opencv-camera0",
   "camera": {
     "vfovDeg": 33.0,
@@ -74,15 +74,6 @@
         "ease": 1.0
       }
     }
-  },
-  "source": {
-    "clip": "signal-cumulonimbus",
-    "width": 1600,
-    "height": 868,
-    "photo": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
-    "author": "Kanata (@tanakanata)",
-    "licence": "Unsplash License",
-    "generator": "tools/depth/bakes/splat-video/bake.py"
   },
   "card": {
     "image": "card.webp",
@@ -325,5 +316,14 @@
         1615
       ]
     }
+  },
+  "source": {
+    "clip": "signal-cumulonimbus",
+    "width": 1600,
+    "height": 868,
+    "photo": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
+    "author": "Kanata (@tanakanata)",
+    "licence": "Unsplash License",
+    "generator": "tools/depth/bakes/splat-video/bake.py"
   }
 }
