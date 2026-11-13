@@ -2,27 +2,33 @@ import { clamp, damp } from "../_kit/stage";
 import { createFilm } from "../_kit/film";
 
 // Focal Length: lie on the pavement between towers, look straight up, and
-// turn the zoom ring from 50 mm to 10 mm.
+// turn the zoom ring from 24 mm to 10 mm.
 //
 // The plate is one 360 capture of Canary Wharf (Poly Haven, CC0) with a
 // summer cumulus sky (Poly Haven, CC0) set in behind the towers, graded
 // offline and stored as a zenith cap: an azimuthal equidistant map, theta
 // from the zenith out to 95 degrees, plus a native-resolution inset of the
-// centre 47.5 degrees, which holds the whole frame from 20 mm to 50 mm and
+// centre 47.5 degrees, which holds the whole frame from 20 mm to 24 mm and
 // the middle of it below that. Every pixel is a ray through one radial family,
 //
 //   r = f k tan(theta / k)
 //
 // with f the focal length itself (the frame's diagonal is full frame's
 // 43.3 mm), so the centre of the picture is drawn at exactly the scale that
-// lens would draw it. From 50 to 16 mm it is a plain rectilinear lens
+// lens would draw it. From 24 to 16 mm it is a plain rectilinear lens
 // (k = 1): towers lean in from the edges and the corners stretch. Below
 // 16 mm k eases toward stereographic, the way an ultra-wide is drawn when it
 // stops pretending to be a pinhole: the corners stop stretching and start
 // to bend, the field opens past what rectilinear can reach, and the towers
 // close into spokes round the sky.
 //
-// Query: ?mm=10..50 holds a focal length.
+// The ring stops at 24 mm because that is as long as the capture resolves:
+// the 16k plate holds about 45 px a degree, and a 24 mm frame at DPR 2 asks
+// for about 30 at its centre (a 50 mm one asked for 65, so the clouds went
+// soft and their shadows turned to grey blotches under magnification). At
+// 24 mm the frame is still mostly cumulus, the towers only at the corners.
+//
+// Query: ?mm=10..24 holds a focal length.
 
 const ASSET = "/lab/focal-length/";
 const TM = 95; // degrees from the zenith covered by the outer cap
@@ -30,12 +36,12 @@ const RI = 0.5; // the inner inset covers rho <= 0.5 (47.5 degrees: the whole fr
 const ENC = 2.0; // the caps store scene light / 2, sRGB-encoded
 const HALF_DIAG = 21.633; // mm, full frame
 
-const MM_LONG = 50;
+const MM_LONG = 24;
 const MM_WIDE = 10;
-const DETENTS = [50, 35, 24, 16, 10];
-const MM_REST = 16; // where the reveal hands over
+const DETENTS = [24, 20, 16, 12, 10];
+const MM_REST = 14; // where the reveal hands over
 const LN = Math.log(MM_LONG / MM_WIDE);
-const uOf = (mm) => Math.log(MM_LONG / mm) / LN; // 0 at 50 mm, 1 at 10 mm
+const uOf = (mm) => Math.log(MM_LONG / mm) / LN; // 0 at 24 mm, 1 at 10 mm
 const mmOf = (u) => MM_LONG / Math.exp(u * LN);
 const DETENT_U = DETENTS.map(uOf);
 
@@ -309,7 +315,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   let wheelPending = false;
 
   const pointer = { x: 0, y: 0, inside: false, vx: 0, t: 0 };
-  // px for the whole 50 -> 10 turn: about a hand's sweep, whatever the width
+  // px for the whole 24 -> 10 turn: about a hand's sweep, whatever the width
   const dragScale = () => clamp(W * 0.55, 360, 720);
 
   const local = (e) => {
@@ -424,7 +430,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     const now = performance.now();
     const age = (now - born) / 1000;
 
-    // Reveal: open on the long end, overexposed, and widen to 16 mm, so the
+    // Reveal: open on the long end, overexposed, and widen to 14 mm, so the
     // towers lean in from the edges and the lens shows what it does.
     if (!introDone) {
       const u = clamp((age - 0.5) / 2.2, 0, 1);
