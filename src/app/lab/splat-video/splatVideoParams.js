@@ -72,6 +72,15 @@ export const RENDER = {
   coverageSolid: 0.35,
 };
 
+// The anchor card (meta.card): a grid fine enough that the stereographic lens
+// bends its straight rows as smoothly as it bends the splats, trilinear and
+// anisotropic sampling, and a film diffusion of half a device pixel each way.
+export const CARD = {
+  segments: [192, 128],
+  anisotropy: 8,
+  diffusion: 0.5,
+};
+
 // The film finish laid over the resolved splats, in display (sRGB) values.
 // The silhouette's paint-flat navy is lifted towards an exposed cyan-navy,
 // the cloud bleeds a thin warm halation into the dark edges beside it, and a

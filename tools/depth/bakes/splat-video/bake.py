@@ -13,22 +13,26 @@
 #   # 4. this script
 #   python3 -I tools/depth/bakes/splat-video/bake.py $W public/lab/splat-video/fumikiri-sky
 #
+#   # 5. the silhouette card (full-resolution sky matte, see card.py)
+#   python3 -I tools/depth/bakes/splat-video/card.py $W/photo-full.jpg $W/sky-full.png \
+#       public/lab/splat-video/fumikiri-sky
+#
 # Three layers, all in the OpenCV camera frame of the phone (x right, y down,
 # z forward), so the player's lean pivots round the silhouette:
-#   sky     big soft splats on a plane far behind everything, coloured by a
-#           push-pull of the visible blue, running well past the frame so a
-#           lean never opens a hole;
-#   cloud   the plate unmixed against that blue (alpha from how far a pixel
-#           has left the sky colour), on a shallow relief where the sunlit
-#           billows sit nearer than the shadowed folds. Its upper towers are
-#           the dynamic set: they climb and boil slowly over the clip;
-#   near    the signal, gantry and wires, unmixed against the plate with the
-#           sky matte, on one rigid plane fitted to the depth map (never
-#           per-pixel depth, which bends thin wires). Flat interiors collapse into
-#           larger splats (a quadtree held clear of every edge), wires stay at
-#           full resolution.
-# The grade is baked into the colours: cobalt zenith deepening upward, cloud
-# tops held below white, a lifted cyan toe in the silhouettes.
+#   sky     not splats: the player paints it per pixel behind everything from
+#           meta.camera.remap.sky, a smooth dithered cyan-cobalt gradient that
+#           deepens toward the remapped zenith;
+#   cloud   the plate unmixed against a push-pull of the visible blue (alpha
+#           from how far a pixel has left the sky colour), on a shallow relief
+#           where the sunlit billows sit nearer than the shadowed folds, run
+#           well past the frame so a lean never opens a hole. Its upper towers
+#           are the dynamic set: they climb and boil slowly over the clip;
+#   near    the signal, gantry and wires: one rigid plane fitted here to the
+#           depth map (never per-pixel depth, which bends thin wires), written
+#           to meta.card.plane; card.py draws the silhouette on it as one
+#           textured card from the full-resolution matte.
+# The grade is baked into the colours: cloud tops held below white, folds
+# toward skylight; the silhouette's cyan toe is card.py's.
 
 import json
 import os
@@ -59,19 +63,14 @@ APERTURE = 0.0015          # lean depth of field: a phone lens, the sky stays ne
 # rests the camera pitched further up and draws a ~105 degree stereographic
 # view on a near-square stage, leaning round the post's base (pivot, OpenCV,
 # from the silhouette plane at photo pixel 340, 1067). Past the source's top
-# and side edges (fade, in source tan) the sky plane hands over to an analytic
-# sky that deepens from the plate's top-row blue toward the remapped zenith.
-REMAP = {"stretch": 3.0, "keystone": 1.2, "pitchDeg": 20, "yawDeg": 4, "rollDeg": 0, "lean": 0.75, "vfovDeg": 105, "aspect": 1.2, "pivot": [-1.8, 2.08, 5.64], "fade": {"top": [-0.37, -0.29], "side": [0.62, 0.7], "nearDepth": 15, "nearBand": 0.3, "skyDepth": 37}, "sky": {"top": [6, 66, 138], "zenith": [3, 34, 94], "low": [28, 104, 176], "topTan": 0.33, "lowSpanDeg": 35, "ease": 0.75}}
+# and side edges (fade, in source tan) the cloud blends into the analytic sky,
+# which deepens from the plate's top-row blue toward the remapped zenith.
+REMAP = {"stretch": 3.0, "keystone": 1.2, "pitchDeg": 20, "yawDeg": 4, "rollDeg": 0, "lean": 0.75, "vfovDeg": 105, "aspect": 1.2, "pivot": [-1.8, 2.08, 5.64], "fade": {"top": [-0.37, -0.29], "side": [0.62, 0.7], "nearDepth": 15, "nearBand": 0.3, "skyDepth": 37}, "sky": {"top": [16, 96, 184], "zenith": [10, 80, 166], "low": [40, 124, 200], "topTan": 0.33, "lowSpanDeg": 35, "ease": 1.0}}
 
-Z_SKY = 40.0
 Z_CLOUD = 30.0
 CLOUD_RELIEF = 5.0
 
-NEAR_SCALE = 0.7           # near layer grid: 1120 px across the photo
 CLOUD_STEP = 3.0           # cloud grid step in 1600 px photo pixels
-SKY_STEP = 20.0
-SIGMA_PER_CELL = 0.62
-NEAR_SIGMA = 0.72           # a touch wider than the grid, so a lean that stretches a silhouette never opens slits
 FLAT = 0.2
 
 BOIL_PX = 5.0              # boil displacement over the clip, photo px
@@ -136,20 +135,8 @@ cloud_lin = np.clip((lin_plate - (1 - a3) * sky_field) / a3, 0, 1)
 cloud_lin = np.where(cloud_alpha[..., None] > 0.04, cloud_lin, lin_plate)
 
 
-# ---- grade (genre spec 1.1 / 1.2): cobalt zenith, cloud tops below white,
-# shadowed folds toward skylight, lifted cyan toe
-def grade_sky(lin, v_photo):
-    up = smoothstep(0.75, -0.25, v_photo / H)[..., None]       # 1 at the top
-    target_low = s2l(np.array([0x2a, 0x7c, 0xc4]) / 255)
-    target_top = s2l(np.array([0x06, 0x3f, 0x8f]) / 255)
-    lum = lin @ np.array([0.2126, 0.7152, 0.0722])
-    target = target_low * (1 - up) + target_top * up
-    tlum = target @ np.array([0.2126, 0.7152, 0.0722])
-    keep = lin / np.maximum(lum, 1e-4)[..., None] * tlum[..., None]
-    mixed = 0.55 * target * (lum / tlum)[..., None] ** 0.35 + 0.45 * keep
-    return mixed
-
-
+# ---- grade (genre spec 1.1 / 1.2): cloud tops below white, shadowed folds
+# toward skylight
 def grade_cloud(lin):
     lum = lin @ np.array([0.2126, 0.7152, 0.0722])
     # neutralise the late-sun peach a little; folds lean to skylight
@@ -161,11 +148,6 @@ def grade_cloud(lin):
     # filmic shoulder: tops land on ~#f0eee8, never 255
     out = 0.93 * (1 - np.exp(-out * 2.6)) / (1 - np.exp(-2.6))
     return out
-
-
-def grade_near(lin):
-    toe = s2l(np.array([0x10, 0x1c, 0x2a]) / 255)
-    return toe + lin * (1 - toe) * 1.05
 
 
 def to_rgb8(lin):
@@ -194,23 +176,12 @@ def disc_cov(points, sigma):
 
 layers = {}
 
-# ---- sky: a plane of big soft splats
+# ---- the margin the cloud layer runs past the photo, so a lean never opens
+# a hole. The sky itself is no longer splats: the player paints it per pixel
+# in its film pass (meta.camera.remap.sky), one smooth dithered gradient.
 view_half_w = np.tan(np.radians(VIEW_VFOV_DEG) / 2) * 1.5
 span_x = (np.tan(np.arctan(view_half_w) + np.radians(15)) * F) * 1.15
 span_y = (np.tan(np.radians(VIEW_VFOV_DEG) / 2 + np.radians(9)) * F) * 1.15
-us = np.arange(CX - span_x, CX + span_x + SKY_STEP, SKY_STEP)
-vs = np.arange(CY - span_y, CY + span_y + SKY_STEP, SKY_STEP)
-su, sv = np.meshgrid(us, vs)
-su, sv = su.ravel(), sv.ravel()
-sky_col = sample(sky_field.astype(np.float32), su + OX, sv + OY).reshape(-1, 3)
-sky_col = grade_sky(sky_col, sv)
-sky_pts = unproject(su, sv, np.full_like(su, Z_SKY))
-layers["sky"] = dict(
-    pos=sky_pts,
-    cov=disc_cov(sky_pts, SIGMA_PER_CELL * 1.3 * SKY_STEP * Z_SKY / F),
-    rgb=to_rgb8(sky_col),
-    opacity=np.full(len(su), 0.98),
-)
 
 # ---- cloud: the plate's cloud pixels on a relief
 margin_x = span_x - W / 2
@@ -277,21 +248,10 @@ dyn = dict(
     opacity=cloud_opacity[moving],
 )
 
-# ---- near: signal, gantry and wires
-NW, NH = int(round(W * NEAR_SCALE)), int(round(H * NEAR_SCALE))
-n_photo = cv2.resize(s2l(photo), (NW, NH), interpolation=cv2.INTER_AREA)
-n_sky = cv2.resize(sky, (NW, NH), interpolation=cv2.INTER_AREA)
-n_plate = cv2.resize(lin_plate[OY:OY + H, OX:OX + W], (NW, NH), interpolation=cv2.INTER_AREA)
-n_alpha = 1 - n_sky
-na3 = np.maximum(n_alpha, 1e-3)[..., None]
-n_col = np.clip((n_photo - (1 - na3) * n_plate) / na3, 0, 1)
-# Unmixing a faint edge pixel amplifies noise into pale or blue fringes; the
-# silhouettes are one dark material, so faint pixels borrow the colour of the
-# nearest solid ones.
-solid = (n_alpha > 0.9).astype(np.float32)
-solid_col = pushpull(n_col.astype(np.float32), solid, 3.0)
-trust = smoothstep(0.45, 0.92, n_alpha)[..., None]
-n_col = solid_col * (1 - trust) + n_col * trust
+# ---- near: the silhouette plane. The signal, gantry and wires are not splats
+# any more: card.py draws them from the full-resolution matte as one textured
+# card on this plane (meta.card), so the anchor keeps the photo's own crisp
+# edge instead of a field of rounded splat blobs.
 # Depth Anything cannot place a 1-3 px wire: its value bleeds toward the sky
 # and wanders along the span, and per-pixel depth turns that noise into
 # parallax, so a lean bent hangers into S-curves, combed the post edges and
@@ -324,68 +284,17 @@ def plane_z(u, v):
     return 1.0 / (0.025 + 0.3 * disparity)
 
 
-yy, xx = np.mgrid[0:NH, 0:NW]
-n_z = plane_z((xx + 0.5) / NEAR_SCALE, (yy + 0.5) / NEAR_SCALE).astype(np.float32)
 # the lean pivots where the optical axis meets the silhouette plane, so the
 # subject holds still in the middle of the frame and the cloud slides behind it
 Z_PIVOT = float(plane_z(CX, CY))
-print(f"near plane: disparity {plane.round(3)}, z {n_z.min():.2f} .. {n_z.max():.2f}, pivot {Z_PIVOT:.2f}")
-# fade the layer out at the photo's edge, where the plate keeps going
-edge = np.minimum.reduce([xx, NW - 1 - xx, yy, NH - 1 - yy]).astype(np.float32)
-n_alpha_eff = n_alpha * smoothstep(0, 0.012 * NW, edge)
-# The sky matte leaves a grey mist of 0.1-0.3 alpha in the sky beside every
-# wire and dropper. Unmixed, it borrows the silhouette's ink and prints as hair
-# and beads along the wires, so the alpha band is held to the antialiased rim
-# of a solid core: full strength next to the core, gone two pixels out.
-core = (n_alpha > 0.4).astype(np.uint8)
-from_core = cv2.distanceTransform(1 - core, cv2.DIST_L2, 3)
-n_alpha_eff = n_alpha_eff * smoothstep(2.0, 1.0, from_core)
-
-opaque = (n_alpha > 0.96).astype(np.uint8)
-dist = cv2.distanceTransform(opaque, cv2.DIST_L2, 3)
-taken = np.zeros((NH, NW), bool)
-pos_list, sig_list, col_list, op_list = [], [], [], []
-for L in (16, 8, 4, 2):
-    bh, bw = NH // L, NW // L
-    sl = (slice(0, bh * L), slice(0, bw * L))
-
-    def blocks(a):
-        return a[sl].reshape(bh, L, bw, L, *a.shape[2:]).swapaxes(1, 2).reshape(bh, bw, L * L, *a.shape[2:])
-
-    d_ok = blocks(dist).min(axis=2) >= 1.25 * L
-    free = ~blocks(taken).any(axis=2)
-    cb = blocks(n_col)
-    c_ok = (cb.max(axis=2) - cb.min(axis=2)).max(axis=-1) < 0.02 + 0.004 * (16 / L)
-    zb = blocks(n_z)
-    z_ok = (zb.max(axis=2) - zb.min(axis=2)) / zb.mean(axis=2) < 0.04
-    ok = d_ok & free & c_ok & z_ok
-    by, bx = np.nonzero(ok)
-    if len(by):
-        u = (bx + 0.5) * L
-        v = (by + 0.5) * L
-        z = zb[by, bx].mean(axis=1)
-        pos_list.append(unproject(u / NEAR_SCALE, v / NEAR_SCALE, z))
-        sig_list.append(0.8 * L / NEAR_SCALE * z / F)
-        col_list.append(cb[by, bx].mean(axis=1))
-        op_list.append(np.full(len(by), 0.99))
-        for yb, xb in zip(by, bx):
-            taken[yb * L:(yb + 1) * L, xb * L:(xb + 1) * L] = True
-    print(f"near L={L}: {len(by)} blocks")
-rest = (~taken) & (n_alpha_eff > 0.15)
-ry, rx = np.nonzero(rest)
-z = n_z[ry, rx]
-pos_list.append(unproject((rx + 0.5) / NEAR_SCALE, (ry + 0.5) / NEAR_SCALE, z))
-sig_list.append(NEAR_SIGMA / NEAR_SCALE * z / F)
-col_list.append(n_col[ry, rx])
-op_list.append(np.clip(n_alpha_eff[ry, rx], 0, 0.97))
-print(f"near L=1: {len(ry)} pixels, {(n_alpha[ry, rx] > 0.96).sum()} opaque, {(n_alpha_eff[ry, rx] < 0.2).sum()} faint")
-near_pts = np.concatenate(pos_list)
-layers["near"] = dict(
-    pos=near_pts,
-    cov=disc_cov(near_pts, np.concatenate(sig_list)),
-    rgb=to_rgb8(grade_near(np.concatenate(col_list))),
-    opacity=np.concatenate(op_list),
-)
+# The same plane in camera tan (1 / z = A x/z + B y/z + C), for the card:
+# u = CX + F x/z and v = CY + F y/z put the photo-pixel plane into tan.
+CARD_PLANE = [
+    float(0.3 * plane[0] * F / W),
+    float(0.3 * plane[1] * F / H),
+    float(0.025 + 0.3 * (0.5 * plane[0] + 0.5 * plane[1] + plane[2])),
+]
+print(f"near plane: disparity {plane.round(3)}, card {np.round(CARD_PLANE, 5)}, pivot {Z_PIVOT:.2f}")
 
 
 # ---- write splat4d v1
@@ -393,7 +302,7 @@ def to_half(x):
     return np.asarray(x, np.float32).astype(np.float16).view(np.uint16)
 
 
-static_parts = [layers["sky"], layers["cloud"], layers["near"]]
+static_parts = [layers["cloud"]]
 s_pos = np.concatenate([p["pos"] for p in static_parts])
 s_cov = np.concatenate([p["cov"] for p in static_parts])
 s_rgb = np.concatenate([p["rgb"] for p in static_parts])
@@ -448,6 +357,8 @@ meta = {
     "covScale": cov_scale,
     "coords": "opencv-camera0",
     "camera": {"vfovDeg": VIEW_VFOV_DEG, "aspect": 1.5, "pivotDepth": Z_PIVOT, "aperture": APERTURE, "remap": REMAP},
+    # card.py adds the image, its extent and rect; the plane is the bake's.
+    "card": {"plane": CARD_PLANE},
     "source": {
         "clip": "signal-cumulonimbus",
         "width": W,
@@ -461,5 +372,5 @@ meta = {
 with open(os.path.join(OUT, "meta.json"), "w") as fh:
     fh.write(json.dumps(meta, indent=2) + "\n")
 mb = lambda n: f"{n / 1e6:.2f} MB"
-print(f"splats {count} (static {n_static}: sky {len(layers['sky']['pos'])}, cloud {len(layers['cloud']['pos'])}, near {len(near_pts)}; dynamic {n_dyn} x {FRAMES})")
+print(f"splats {count} (static {n_static} cloud; dynamic {n_dyn} x {FRAMES}); now run card.py for the silhouette")
 print(f"base {mb(base.nbytes)}  static {mb(static.nbytes)}  dynamic {mb(dynamic.nbytes)}  in {time.time() - t0:.1f}s")

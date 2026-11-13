@@ -289,6 +289,7 @@ function validateMeta(meta, clip) {
   const [, , maxZ] = meta.bounds.max;
   return {
     ...meta,
+    card: readCard(meta.card, fail),
     camera: {
       vfovDeg: meta.camera.vfovDeg,
       aspect: meta.camera.aspect > 0 ? meta.camera.aspect : 16 / 9,
@@ -297,6 +298,32 @@ function validateMeta(meta, clip) {
       remap: readRemap(meta.camera.remap),
     },
   };
+}
+
+// The anchor card: the near silhouette as one RGBA image on a plane
+// (1 / z = A x/z + B y/z + C, OpenCV camera0), covering `rect` of a photo
+// whose half-extent in camera tan is `tan`.
+function readCard(card, fail) {
+  if (card === undefined) return null;
+  const image = optionalAsset(card?.image, fail, "card image");
+  const finite = (list, length) => Array.isArray(list) && list.length === length && list.every(Number.isFinite);
+  if (!image || !finite(card.tan, 2) || !finite(card.rect, 4) || !finite(card.plane, 3)) fail("has an invalid card.");
+  if (!(card.tan[0] > 0 && card.tan[1] > 0)) fail("has an invalid card extent.");
+  const [u0, v0, u1, v1] = card.rect;
+  if (!(u0 >= 0 && v0 >= 0 && u1 <= 1 && v1 <= 1 && u1 > u0 && v1 > v0)) fail("has an invalid card rect.");
+  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice() };
+}
+
+async function fetchCard(folder, version, clip, card, signal) {
+  if (!card) return null;
+  const response = await fetch(`${folder}/${card.image}${version}`, { signal });
+  if (!response.ok) throw new Splat4dError(`${card.image} for “${clip}” answered ${response.status}.`, { clip });
+  const blob = await response.blob();
+  try {
+    return await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  } catch {
+    throw new Splat4dError(`${card.image} for “${clip}” is not an image this browser can read.`, { clip });
+  }
 }
 
 function versionQuery(meta) {
@@ -405,7 +432,8 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
   if (onProgress) onProgress(0, total);
 
   const version = versionQuery(meta);
-  await Promise.all([
+  const [cardImage] = await Promise.all([
+    fetchCard(folder, version, clip, meta.card, signal),
     streamInto({
       url: `${folder}/base.bin${version}`,
       name: "base.bin",
@@ -442,6 +470,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     base,
     staticPoints,
     dynamicPoints,
+    cardImage,
     layout: { width: TEXTURE_WIDTH, baseRows, staticRows, dynamicRows, layerTexels },
   };
 }

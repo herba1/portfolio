@@ -1,9 +1,10 @@
 "use client";
 
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
+import { createCardLayer } from "./cardLayer";
 import { createFilmPass } from "./filmPass";
 import OrbitStage, { aimCamera } from "./OrbitStage";
 import { createSoundClock } from "./soundClock";
@@ -202,7 +203,7 @@ function gpuBusy(context, fenceRef) {
   return false;
 }
 
-function useResolvedRender(resolveRef, scratchRef, engineRef) {
+function useResolvedRender(resolveRef, scratchRef, engineRef, cardRef = null, groupRef = null) {
   const fenceRef = useRef(null);
   const filmRef = useRef(null);
 
@@ -227,7 +228,12 @@ function useResolvedRender(resolveRef, scratchRef, engineRef) {
     else {
       const width = Math.max(1, scratch.viewport.x);
       const height = Math.max(1, scratch.viewport.y);
-      const drawSplats = (gl) => resolve.render(gl, state.scene, state.camera, width, height);
+      const card = cardRef?.current;
+      const group = groupRef?.current;
+      const drawSplats = (gl) => {
+        resolve.render(gl, state.scene, state.camera, width, height);
+        if (card && group) card.render(gl, state.camera, group.matrixWorld, width, height);
+      };
       if (!film) drawSplats(state.gl);
       else {
         film.render(state.gl, drawSplats, width, height, {
@@ -262,26 +268,35 @@ function SplatField({ clip, engineRef }) {
   const runtimeRef = useRef(null);
   const resolveRef = useRef(null);
   const scratchRef = useRef(null);
+  const cardRef = useRef(null);
+  const gl = useThree((state) => state.gl);
 
   useEffect(() => {
     const group = groupRef.current;
     const runtime = createSplatRuntime(clip);
     const resolve = createResolvePass();
     const scratch = createScratch(clip.meta);
+    const card = clip.cardImage && clip.meta.card ? createCardLayer(clip.meta.card, clip.cardImage, clip.meta.camera.remap, gl) : null;
     placeSource(group, scratch);
     bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
+    // With a remap the film pass paints the sky behind the splats, so they
+    // composite straight over it.
+    resolve.uniforms.uOver.value = scratch.remap ? 1 : 0;
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;
     scratchRef.current = scratch;
+    cardRef.current = card;
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
       resolve.dispose();
+      if (card) card.dispose();
       runtimeRef.current = null;
       resolveRef.current = null;
+      cardRef.current = null;
     };
-  }, [clip]);
+  }, [clip, gl]);
 
   useFrame((state, rawDelta) => {
     const runtime = runtimeRef.current;
@@ -313,7 +328,7 @@ function SplatField({ clip, engineRef }) {
     if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
-  useResolvedRender(resolveRef, scratchRef, engineRef);
+  useResolvedRender(resolveRef, scratchRef, engineRef, cardRef, groupRef);
 
   return <group ref={groupRef} matrixAutoUpdate={false} />;
 }
@@ -336,6 +351,7 @@ function StreamField({ clip, engineRef }) {
     const scratch = createScratch(clip.meta);
     placeSource(group, scratch);
     bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
+    resolve.uniforms.uOver.value = scratch.remap ? 1 : 0;
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;

@@ -161,6 +161,11 @@ void main() {
   float amount = uGrain * (uGrainFloor + (1.0 - uGrainFloor) * 4.0 * g * (1.0 - g));
   c += grainAt(gl_FragCoord.xy) * amount;
 
+  // Triangular dither of one 8-bit step, fresh per pixel and frame, so the
+  // long sky ramp toward the zenith never settles into bands or blotches.
+  uvec3 cell = uvec3(uvec2(gl_FragCoord.xy) + 8192u, uint(uGrainFrame) + 50021u);
+  c += (uniformAt(cell) - uniformAt(cell + uvec3(0u, 0u, 15485863u))) / 255.0;
+
   c = clamp(c, 0.0, uCap);
   fragColor = vec4(c * scene.a, scene.a);
 }

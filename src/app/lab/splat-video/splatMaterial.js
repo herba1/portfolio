@@ -73,15 +73,20 @@ void main() {
   float opacity;
   readPoint(index, center, opacity);
 
-  // The far sky plane takes the analytic sky's colour outright, so the photo's
-  // sky and the new upper sky are one gradient. Cloud splats past the source's
+  // Cloud splats past the source's
   // top and side edges blend toward it too: by colour, never opacity, since
   // the resolve renormalises coverage and a fading opacity would still end in
   // a hard line. The near silhouette instead thins out over a short band in
   // front of the sky plane, so the gantry ends crisply rather than smearing.
+  // Splats on the far sky plane are not drawn at all: the film pass paints
+  // that sky per pixel, one smooth dithered gradient, where a lattice of soft
+  // discs each carrying its centre's colour mottled the zenith.
+  if (center.z > uSkyDepth) {
+    cull();
+    return;
+  }
   vec2 sourceTan = center.xy / max(center.z, MIN_DEPTH);
   float own = smoothstep(uTopFade.x, uTopFade.y, sourceTan.y) * (1.0 - smoothstep(uSideFade.x, uSideFade.y, abs(sourceTan.x)));
-  if (center.z > uSkyDepth) own = 0.0;
   if (center.z < uNearDepth) {
     opacity *= smoothstep(uTopFade.x, mix(uTopFade.x, uTopFade.y, uNearBand), sourceTan.y);
     own = 1.0;
@@ -590,6 +595,7 @@ uniform sampler2D uSplats;
 uniform float uFloor;
 uniform float uSolid;
 uniform vec3 uGain;
+uniform float uOver;
 
 in vec2 vUv;
 
@@ -597,6 +603,14 @@ out vec4 fragColor;
 
 void main() {
   vec4 accumulated = texture(uSplats, vUv);
+  // Over a backdrop (the film pass's analytic sky) the splats composite
+  // straight, as they would over a sky drawn in splats: a faint cloud rim
+  // keeps its own small weight instead of being renormalised to full colour.
+  if (uOver > 0.5) {
+    float a = min(accumulated.a, 1.0);
+    fragColor = vec4(accumulated.rgb * uGain, a);
+    return;
+  }
   float coverage = accumulated.a;
   if (coverage < uFloor) discard;
   vec3 color = accumulated.rgb / coverage * uGain;
@@ -623,6 +637,7 @@ export function createResolvePass() {
       uFloor: { value: RENDER.coverageFloor },
       uSolid: { value: RENDER.coverageSolid },
       uGain: { value: new THREE.Vector3(1, 1, 1) },
+      uOver: { value: 0 },
     },
     transparent: true,
     depthTest: false,

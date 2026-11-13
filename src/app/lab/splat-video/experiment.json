@@ -16,7 +16,7 @@
       "file": "https://images.unsplash.com/photo-1620233950363-7c0947527682",
       "author": "Kanata (@tanakanata)",
       "licence": "Unsplash License",
-      "note": "Depth from Depth Anything V2 Small, sky matte and LaMa plate from tools/depth, baked to splat4d by tools/depth/bakes/splat-video/bake.py into public/lab/splat-video/fumikiri-sky."
+      "note": "Depth from Depth Anything V2 Small, sky matte and LaMa plate from tools/depth, baked to splat4d by tools/depth/bakes/splat-video/bake.py into public/lab/splat-video/fumikiri-sky; the signal and catenary are one textured card cut from the full-resolution sky matte by card.py."
     }
   ]
 }

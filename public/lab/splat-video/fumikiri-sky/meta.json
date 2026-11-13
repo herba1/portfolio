@@ -1,9 +1,9 @@
 {
   "format": "splat4d",
   "version": 1,
-  "exportId": "1794504959",
-  "count": 219756,
-  "staticCount": 187361,
+  "exportId": "1794504962",
+  "count": 116288,
+  "staticCount": 83893,
   "dynamicCount": 32395,
   "frames": 5,
   "duration": 6.0,
@@ -55,23 +55,23 @@
       },
       "sky": {
         "top": [
-          6,
-          66,
-          138
+          16,
+          96,
+          184
         ],
         "zenith": [
-          3,
-          34,
-          94
+          10,
+          80,
+          166
         ],
         "low": [
-          28,
-          104,
-          176
+          40,
+          124,
+          200
         ],
         "topTan": 0.33,
         "lowSpanDeg": 35,
-        "ease": 0.75
+        "ease": 1.0
       }
     }
   },
@@ -83,5 +83,25 @@
     "author": "Kanata (@tanakanata)",
     "licence": "Unsplash License",
     "generator": "tools/depth/bakes/splat-video/bake.py"
+  },
+  "card": {
+    "image": "card.webp",
+    "width": 3000,
+    "height": 2000,
+    "tan": [
+      0.554309051452769,
+      0.36953936763517936
+    ],
+    "rect": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+    ],
+    "plane": [
+      -0.08372838934581163,
+      -0.08858809842502897,
+      0.1833575585221392
+    ]
   }
 }
