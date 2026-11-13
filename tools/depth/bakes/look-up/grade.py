@@ -322,9 +322,9 @@ def _profile2(K, b, elev1, P):
 # --- towers: their own grade, under the inverse of the sky matte.
 # A split tone keyed on face luminance: each face is measured at ~half a degree
 # (a masked blur, so the bright sky never bleeds into the tower edge), its level
-# pushed apart in log space around a pivot, and its colour swung from a deep
-# navy-black (shaded faces, glass) to a pale warm stone (sunlit faces). The
-# per-pixel ratio to the face level rides on top, so the window grid survives.
+# pushed apart in log space around a pivot, and its colour swung from a
+# warm-neutral near-black (shaded faces, glass) to a pale warm stone (sunlit
+# faces). The per-pixel ratio to the face level rides on top, so the window grid survives.
 def _buildings(rest, wsky, w, P):
     # In row strips with a wide overlap (past every blur's reach), so an 8K
     # grade fits in memory; the result is the same as one pass.
@@ -365,7 +365,7 @@ def _buildings1(rest, wsky, w, P):
     lvl = np.exp(lnY + (lsY - lnY) * u)
     det = np.clip(Y / Yf, 0.05, 20) ** P['bDetail']
     Yn = lvl * det
-    Yn = np.sqrt(Yn * Yn + (nY * P['bFloor']) ** 2)  # soft floor: the navy never crushes to black
+    Yn = np.sqrt(Yn * Yn + (nY * P['bFloor']) ** 2)  # a low soft floor; the black itself comes from _tower_curve's toe
     tn = navy / nY; ts = stone / float(stone @ LUMA)
     hl = smooth(P['bHlLo'], P['bHlHi'], u)[..., None]
     tint = tn + (ts - tn) * u[..., None]
@@ -386,7 +386,36 @@ def _buildings1(rest, wsky, w, P):
     # the ticker reads at its face level, not as a lit sign
     Yn = Yn + (np.minimum(Yn, lvl) - Yn) * led
     graded = Yn[..., None] * col
+    graded = _tower_curve(graded, mblur, w, P)
     return rest + (graded - rest) * m[..., None]
+
+# --- the towers' own film curve, applied only under the tower matte (the sky
+# keeps the engine's print curve alone). Daylight negative printed for the
+# sky leaves the street wall a lifted blue-grey; printed for the stone it
+# has a real toe: shaded faces and glass go down to a near-neutral black, so
+# the towers stand as one dark, sharp silhouette against the cobalt.
+#   bLocal  local contrast at facade scale (bLcR degrees, a masked blur, so
+#           the bright sky never darkens the tower edge): the window grid
+#           and the mullions stay crisp
+#   bCon    midtone contrast in log space about bPivot; above the pivot it
+#           eases back to 1 by bConTop, so the sunlit stone (the one warm
+#           accent) keeps its level and nothing new reaches the shoulder
+#   bToe    a film toe in scene light, y^2 / (y + bToe): the deep shade
+#           sinks toward black instead of resting on a floor
+def _tower_curve(graded, mblur, w, P):
+    Yg = np.maximum(graded @ LUMA, 1e-5)
+    lY = np.log(Yg)
+    if P.get('bLocal', 0) > 0:
+        # the detail term is soft-clipped, so a big step (sunlit tower
+        # against shaded tower) gets no dark rim, only the window grid gains
+        d = lY - mblur(lY, w / 360 * P['bLcR'])
+        lY = lY + np.tanh(d / P['bLcClip']) * P['bLcClip'] * P['bLocal']
+    lp, lt = float(np.log(P['bPivot'])), float(np.log(P['bConTop']))
+    k = (P['bCon'] - 1) * (1 - smooth(lp, lt, lY))
+    lY = lY + (lY - lp) * k
+    Yt = np.exp(lY)
+    Yt = Yt * Yt / (Yt + P['bToe'])
+    return graded * (Yt / Yg)[..., None]
 
 # Cloud: a wide, feathered matte (aLo..aHi, alphaBlur in degrees) and form
 # contrast near 1, so the capture's own cumulus carry through rather than
@@ -407,8 +436,9 @@ P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          skyHex=['#1a63c0', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
          expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.52, 0.72, 1.0],
          restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3,
-         bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#1b2633', bLit='#d6c3a2', bLitGain=1.12, bFloor=0.75,
+         bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#201f1e', bLit='#d6c3a2', bLitGain=1.12, bFloor=0.25,
          bDetail=1.0, bHlLo=0.35, bHlHi=1.0, bWarmR=0.2, bWarmB=0.2, bKeep=0.12,
+         bLocal=0.35, bLcR=0.35, bLcClip=0.35, bCon=1.18, bPivot=0.12, bConTop=0.5, bToe=0.007,
          # the second sky (see _sky2)
          sky2Yaw=-14.0, s2Clamp=40.0, s2Expo=0.8, s2Denoise=1.0, s2Lo=0.45, s2Hi=0.9,
          s2Gap1=1.5, s2Gap2=8.0, s2ShLo=0.25, s2ShHi=1.1, s2Keep=0.1, s2Mid=0.7, s2Form=0.25, s2ShadeLift=0.3,

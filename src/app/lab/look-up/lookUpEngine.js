@@ -133,7 +133,12 @@ const FILM = {
   // The warmth of the highlights comes from the print shoulder below; the
   // kit's cool default highlight tint would cancel it.
   highlightTint: [1.0, 1.0, 0.99],
-  shadowTint: [0.95, 1, 1.04],
+  // The towers carry their own toe from the bake (grade.py, _tower_curve):
+  // the scan's black is barely lifted and warm-neutral, not the kit's blue,
+  // so the shaded stone and glass stay a solid near-black silhouette.
+  toe: 0.026,
+  toeColor: [1.0, 1, 0.97],
+  shadowTint: [1, 1, 0.99],
   grain: 0.55,
   grainSize: 1.7,
   vignette: 0.22,
