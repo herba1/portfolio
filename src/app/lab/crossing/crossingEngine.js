@@ -16,9 +16,10 @@ import { createFilm } from "../_kit/film";
 // The photo's own clouds were faint torn wisps, so the sky card holds the
 // clear cobalt gradient alone and an eighth card between it and the far
 // houses carries real cumulus (cumulus.py, from a Poly Haven summer HDRI):
-// sunlit warm tops that roll off below clipping, a skylight blue-grey left
-// flank and lower lobes, and a darker, flat base that thins into the sky's
-// horizon above the old house's roof and the town.
+// sunlit warm tops that roll off below clipping, a lobed left flank and lower
+// body in skylight blue-grey shade that keep the HDRI's own billows, and no
+// base in the sky: it grows up out of the horizon, its foot (the HDRI's lower
+// rows of cumulus) running on down behind the roofs and the town.
 //
 // Every plane k sits at its own distance z_k from the camera and is scaled by
 // z_k / f, so from the lens axis the stack projects back onto the photo
@@ -68,13 +69,14 @@ const PLANES = [
   { file: "p0", rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
   // The cumulus (cumulus.py): real cloud from a summer HDRI, its own card
   // between the sky and the town so a swing slides it against the roofs.
-  // A cut-out on a wide transparent margin, feathered to 0 well inside every
+  // Its foot runs on far below the roofline (the card reaches v 1.2), so a
+  // swing never uncovers a base hanging in the sky. A cut-out on a wide transparent margin, feathered to 0 well inside every
   // edge, so it need not cover the window; it throws no shadow on the sky
   // behind it (a cloud is not paper). It is far off, almost at infinity: it
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
   // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [0.0957, 0.09587, 0.93359, 0.85546], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  { file: "clouds", rect: [-0.16406, 0.09587, 0.94629, 1.20059], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
