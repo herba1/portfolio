@@ -53,9 +53,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // light of its own. Release and it carries the hand's speed with friction;
 // the strata, stirred by that speed, settle on a spring.
 //
-// The painted sky is graded towards a deep cobalt in log light, darkest at
-// the zenith (the top of the print), keyed off the cloud so the cores stay
-// white and their shadow sides take the skylight's blue (gradeSky).
+// The sky is graded in the bake, round the vanishing point: a deep cobalt at
+// the zenith the pole points at, opening paler and more cyan towards the
+// corners, the cloud's rims a cyan-grey and its tops a warm neutral, so the
+// latent, developed and far-first states all carry the same sky.
 //
 // The developed print gets a film finish of its own (finish, grain): a
 // Pro-Mist diffusion of its high-key light, so the cloud's cores bleed into
@@ -274,35 +275,16 @@ void main() {
   o = ws > 1e-4 ? acc / ws : c0;
 }`;
 
-const GRADE = `
-// The sky graded towards a deep summer cobalt, the way a polariser and a
-// Superia scan render a sky straight overhead. The photograph's sky is a pale,
-// washed cerulean; here the clear blue is pulled, in log light, towards a
-// target that is darkest and most saturated at the top of the print (the
-// zenith) and eases lighter towards the bottom (nearer the horizon). It is a
-// gain per channel, target over the photo's typical clear blue, so the sky's
-// own drawing and grain ride on it unchanged. Keyed by how much of a pixel is
-// clear sky: cloud cores (white, little chroma, bright) keep their light, and
-// the shadow sides between, grey and a little blue, take part of the gain, so
-// they pick up the skylight's blue instead of going grey.
-const vec3 SKY_REF = vec3(0.101, 0.276, 0.487);  // the photo's clear blue, linear
-const vec3 SKY_TOP = vec3(0.055, 0.118, 0.34);   // through the film: ~hue 212, sat .8, value .58
-const vec3 SKY_BOT = vec3(0.095, 0.2, 0.5);      // ...easing to ~sat .72, value .7
-float skyness(vec3 c) {
-  float mx = max(max(c.r, c.g), c.b);
-  float mn = min(min(c.r, c.g), c.b);
-  float white = mn / max(mx, 1e-4);
-  float l = dot(c, LUMA);
-  // clear blue: low whiteness, blue over red, not bright
-  float m = 1.0 - smoothstep(0.42, 0.78, white);
-  m *= smoothstep(0.0, 0.08, c.b - c.r);
-  m *= 1.0 - smoothstep(0.42, 0.7, l);
-  return m;
-}
-vec3 gradeSky(vec3 c, vec2 iuv) {
-  float y = smoothstep(0.0, 1.0, iuv.y);
-  vec3 lg = mix(log(SKY_TOP), log(SKY_BOT), y) - log(SKY_REF);
-  return c * exp(lg * skyness(c));
+// The sky is graded in the bake (tools/depth/bakes/develop/bake.py): deep
+// cobalt round the vanishing point the pole points at, opening paler and
+// more cyan towards the corners, the cloud's rims cyan-grey and its tops a
+// warm neutral. The shader takes the plate and the fill as they are. Where
+// the shader needs the sky's own fall-off (the latent level) it is this
+// distance from that zenith: 0 there, 1 at the furthest corner.
+const ZENITH = `
+const vec2 ZEN_UV = vec2(0.47, 0.16875); // (1128, 270) of 2400 x 1600
+float zenithDist(vec2 iuv) {
+  return clamp(length((iuv - ZEN_UV) * vec2(1.5, 1.0)) / 1.09, 0.0, 1.0);
 }
 `;
 
@@ -319,11 +301,8 @@ in vec2 vUv;
 out vec4 o;
 uniform vec2 uPx; // one print pixel, in uv
 ${COMMON}
-${GRADE}
 vec3 printAt(vec2 iuv) {
-  float a = textureLod(uAlpha, iuv, 1.0).r;
-  vec3 fill = textureLod(uFill, iuv, 1.0).rgb;
-  return textureLod(uPlate, iuv, 1.0).rgb + (1.0 - a) * (gradeSky(fill, iuv) - fill);
+  return textureLod(uPlate, iuv, 1.0).rgb;
 }
 vec3 highKey(vec3 c) {
   float l = max(dot(c, LUMA), 1e-4);
@@ -395,7 +374,7 @@ float vnoise(vec2 p) {
   return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
 }
 
-${GRADE}
+${ZENITH}
 
 // The sky's latent image holds the developed sky's chroma: its luminance
 // is drawn up towards a light level (low contrast, fainter the further from
@@ -407,11 +386,11 @@ ${GRADE}
 // finished print, and it needs no local cap: a cap drawn from the cloud
 // round each pixel lifted the blue only near cloud, in round patches the
 // shape of its samples, a polka-dot over the clear sky.
-vec3 latentSky(vec3 c, float d, float dev, float y) {
+vec3 latentSky(vec3 c, float d, float dev, vec2 iuv) {
   float an = clamp(d / AHEAD, 0.0, 1.0);
   float lc = max(dot(c, LUMA), 1e-4);
   // the level follows the graded sky's own fall-off, deeper towards the zenith
-  float lat = SKY_LAT * mix(0.72, 1.25, smoothstep(0.0, 1.0, y));
+  float lat = SKY_LAT * mix(0.72, 1.25, smoothstep(0.0, 1.0, zenithDist(iuv)));
   float lt = max(lc, mix(lat, lc, mix(0.55, 0.3, an)));
   return c * pow(lt / lc, 1.0 - dev);
 }
@@ -421,14 +400,14 @@ vec3 latentSky(vec3 c, float d, float dev, float y) {
 // level never steps), the level its whites come up to.
 float cloudWhite(vec2 iuv) {
   vec2 px = vec2(1.0 / 2400.0, 1.0 / 1600.0);
-  float m = dot(gradeSky(textureLod(uFill, iuv, 5.0).rgb, iuv), LUMA);
+  float m = dot(textureLod(uFill, iuv, 5.0).rgb, LUMA);
   for (int i = 0; i < 6; i++) {
     float an = float(i) * 1.047198 + 0.4;
     vec2 dir = vec2(cos(an), sin(an)) * px;
     vec2 u1 = iuv + dir * 70.0;
     vec2 u2 = iuv + dir.yx * vec2(1.5, 0.667) * 170.0;
-    m = max(m, dot(gradeSky(textureLod(uFill, u1, 5.0).rgb, u1), LUMA));
-    m = max(m, dot(gradeSky(textureLod(uFill, u2, 5.5).rgb, u2), LUMA));
+    m = max(m, dot(textureLod(uFill, u1, 5.0).rgb, LUMA));
+    m = max(m, dot(textureLod(uFill, u2, 5.5).rgb, LUMA));
   }
   return m;
 }
@@ -442,7 +421,7 @@ float cloudWhite(vec2 iuv) {
 vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   float w = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(d));
   float dev = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
-  return mix(c, latentSky(c, d, dev, iuv.y), 1.0 - cov);
+  return mix(c, latentSky(c, d, dev, iuv), 1.0 - cov);
 }
 
 // The latent steel. Ahead of the front the structure is not drawn at all as
@@ -570,9 +549,9 @@ void main() {
   // this pixel.
   float dB = ahead(skyKey(iuv));
   float rB = SKY_COC * cocOf(dB);
-  vec3 skyDev = gradeSky(texture(uFill, iuv).rgb, iuv);
+  vec3 skyDev = texture(uFill, iuv).rgb;
   float cap = max(dot(skyDev, LUMA), cloudWhite(iuv));
-  vec3 sky = mix(skyDev, gradeSky(texture(uBgBlur, vUv).rgb, iuv), smoothstep(0.25, 1.25, rB));
+  vec3 sky = mix(skyDev, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, rB));
   sky = developSky(sky, dB, iuv, cov * devF);
 
   // The steel over it: developed, or a density in that sky (develop()).

@@ -2,15 +2,25 @@
 
     python3 -I bake.py <out_dir> [work_dir]
     python3 -I bake.py --fill-only <out_dir> [work_dir]
+    python3 -I bake.py --grade-only <out_dir> [work_dir]
 
---fill-only re-paints the sky from the plate.webp and alpha.png already in
-out_dir, and leaves the matte's edges and key.png as they are (the 6000 px
-original this was first baked from is gone, and a full bake from a smaller
-copy moves the matte by a pixel here and there). It rewrites fill.webp, and
-alpha.png only where the new fill needs more of it (see relight_fill).
+plate.webp and fill.webp ship graded (grade_sky): the sky re-graded radially
+round the zenith the pole points at, deep cobalt there opening to a paler
+cyan at the corners, the cloud's rims turned off lilac and its tops warmed to
+a neutral. A bake also leaves the ungraded layers in work_dir
+(raw-plate.webp, raw-fill.webp, lossless), and the two modes below start
+from those, never from the graded ones in out_dir.
+
+--grade-only re-grades from them and rewrites plate.webp and fill.webp.
+
+--fill-only re-paints the sky from the ungraded plate and out_dir's
+alpha.png, and leaves the matte's edges and key.png as they are (a full bake
+from a different copy of the original moves the matte by a pixel here and
+there). It rewrites fill.webp and plate.webp (graded), and alpha.png only
+where the new fill needs more of it (see relight_fill).
 
 Layers (2400x1600):
-  plate.webp  the photograph (sRGB)
+  plate.webp  the photograph (sRGB), its sky graded through the matte
   fill.webp   the sky behind the structure: every pole, girder and wire painted
               out by LaMa (big-lama, ONNX) through a mask dilated well past
               the silhouettes, matched to the sky round each hole in log
@@ -254,20 +264,191 @@ def relight_fill(srgb, lin, alpha, prev, model=LAMA, scale=2):
     return fill, alpha
 
 
+# --- the sky's grade -------------------------------------------------------
+# The camera looks almost straight up the pole: its verticals meet at the
+# zenith, in the upper third of the print, at ZEN (print px; found by running
+# the pole's two edges, rows 1100-1575, up to where they cross). F_PX is the focal
+# length in print px (a ~24 mm-equivalent field, 74 degrees across).
+ZEN, F_PX = (1128.0, 270.0), 1600.0
+
+
+def zenith_angle(h=H, w=W):
+    """Each print pixel's angle from the ray the pole points along, radians."""
+    xx, yy = np.meshgrid(np.arange(w, dtype=np.float32) + 0.5, np.arange(h, dtype=np.float32) + 0.5)
+    ray = np.stack([xx - w / 2, yy - h / 2, np.full_like(xx, F_PX)], 2)
+    ray /= np.linalg.norm(ray, axis=2, keepdims=True)
+    zr = np.array([ZEN[0] - w / 2, ZEN[1] - h / 2, F_PX], np.float32)
+    zr /= np.linalg.norm(zr)
+    return np.arccos(np.clip(ray @ zr, -1, 1)).astype(np.float32)
+
+
+def _hex(s):
+    return np.array([int(s[i:i + 2], 16) for i in (1, 3, 5)], np.float32) / 255
+
+
+# The photograph's sky is a pale, washed cerulean, near uniform, if anything
+# lighter round the zenith than at the edges: no depth overhead. A real sky
+# seen straight up is darkest and most saturated at the zenith and opens
+# paler and more cyan away from it. So the clear blue is re-graded radially
+# round the vanishing point, in log light: a gain per channel, the target
+# over the sky's own low-frequency colour (measured from clear-sky pixels
+# only), so its drawing and grain ride on it unchanged. These are the bake's
+# colours; the print's film (contrast, blue depth, the highlight tint) takes
+# them to a deep cobalt, ~#0a4a8a at the vanishing point, and a paler cyan,
+# ~#2a82b0, at the corners.
+GRADE_ZEN = _hex(os.environ.get("GRADE_ZEN", "#1e4f8e"))
+GRADE_RIM = _hex(os.environ.get("GRADE_RIM", "#7aa2c8"))
+GRADE_EASE = 1.25  # >1 holds the cobalt round the zenith before it opens
+# The cloud's mid-tones and rims (sRGB luma ~140-200) went lilac under a
+# per-channel gain made for the blue. Their hue is turned to RIM_HUE and their
+# chroma lifted a touch, a cyan-grey skylight shadow; the top 3% of the cloud's
+# light rolls off to a warm neutral (HI_COL, before the film's cool highlight
+# tint) instead of a cool blue-white.
+RIM_HUE = float(os.environ.get("RIM_HUE", "203"))
+RIM_SAT = 1.12
+HI_COL = _hex(os.environ.get("HI_COL", "#ece4d6"))
+
+
+def _skyness(c):
+    """How much of a (linear) pixel is clear blue sky: low whiteness, blue
+    over red, not bright. Cloud cores 0, their shadow sides partly."""
+    mx, mn = c.max(2), c.min(2)
+    white = mn / np.maximum(mx, 1e-4)
+    m = 1 - smoothstep(0.42, 0.78, white)
+    m = m * smoothstep(0.0, 0.08, c[..., 2] - c[..., 0])
+    return (m * (1 - smoothstep(0.42, 0.7, c @ LUMA))).astype(np.float32)
+
+
+def _rot_hue(g, ang):
+    """Rotate sRGB colours g about the grey axis by ang (radians; + goes
+    R -> G -> B, as HSV hue does)."""
+    k = 1 / np.sqrt(3)
+    c, s = np.cos(ang)[..., None], np.sin(ang)[..., None]
+    kxg = k * np.stack([g[..., 2] - g[..., 1], g[..., 0] - g[..., 2], g[..., 1] - g[..., 0]], -1)
+    kdg = (k * g.sum(-1))[..., None] * k
+    return g * c + kxg * s + kdg * (1 - c)
+
+
+def _hue(g):
+    mx, mn = g.max(-1), g.min(-1)
+    d = np.maximum(mx - mn, 1e-6)
+    r, gg, b = g[..., 0], g[..., 1], g[..., 2]
+    h = np.where(mx == r, ((gg - b) / d) % 6, np.where(mx == gg, (b - r) / d + 2, (r - gg) / d + 4))
+    return (h * 60).astype(np.float32)
+
+
+def grade_sky(lin, fill, alpha):
+    """The sky graded, the fill and through the matte the photograph's own sky
+    behind the structure (plate + (1 - alpha) (graded fill - fill), so the
+    steel keeps its colour and the composite is unchanged where it covers).
+    Returns (plate, fill), linear."""
+    h, w = alpha.shape
+    s = _skyness(fill)
+    # the sky's own low-frequency colour, from clear sky only (log light)
+    q = 4
+    lg = np.log(np.maximum(fill, 1e-4))
+    lq = cv2.resize(lg, (w // q, h // q), interpolation=cv2.INTER_AREA)
+    sq = cv2.resize(s, (w // q, h // q), interpolation=cv2.INTER_AREA)
+    wq = (sq > 0.85).astype(np.float32) * sq
+    num = cv2.GaussianBlur(lq * wq[..., None], (0, 0), 20)
+    den = cv2.GaussianBlur(wq, (0, 0), 20)
+    est = num / np.maximum(den, 1e-5)[..., None]
+    est = pushpull(est, np.clip(den / 0.25, 0, 1))
+    est = cv2.resize(est, (w, h), interpolation=cv2.INTER_CUBIC)
+    # the target: cobalt at the zenith opening to cyan, by angle from it
+    th = zenith_angle(h, w)
+    t = np.clip(th / th.max(), 0, 1) ** GRADE_EASE
+    t = t * t * (3 - 2 * t) * 0.35 + t * 0.65
+    lt = np.log(s2l(GRADE_ZEN)) * (1 - t[..., None]) + np.log(s2l(GRADE_RIM)) * t[..., None]
+    # Clear sky takes the gain (its grain and drawing scale with it). A thin
+    # cloud edge is cloud light plus the sky's behind it, so there only the
+    # sky's share is swapped, additively: a per-channel gain on a pale edge
+    # (as blue as the sky in linear light, only lighter) tints the whole of
+    # its light, and the rims went lilac and pink. The gain is kept to what
+    # is as light as the clear sky round it.
+    S, T = np.exp(est), np.exp(lt)
+    sv = s[..., None]
+    mul = fill * (T / S)
+    add = np.maximum(fill + sv * (T - S), 0.2 * fill)
+    near = np.exp(-np.log(np.maximum(fill @ LUMA, 1e-4) / np.maximum(S @ LUMA, 1e-4)) ** 2 / (2 * 0.2 ** 2))
+    k = (s * near)[..., None]
+    B = mul * k + add * (1 - k)
+
+    # the cloud, in sRGB: mid-tones and rims turned off lilac towards
+    # cyan-grey, the top of its light warmed to neutral
+    g = l2s(B)
+    Y = g @ LUMA
+    w_rim = smoothstep(0.5, 0.57, Y) * (1 - smoothstep(0.8, 0.9, Y))
+    hu = _hue(g)
+    dh = np.clip((RIM_HUE - hu + 180) % 360 - 180, -30, 15)
+    sat = (g.max(-1) - g.min(-1)) / np.maximum(g.max(-1), 1e-4)
+    dh *= smoothstep(0.03, 0.08, sat)  # a grey has no hue to turn
+    gr = _rot_hue(g, np.radians(dh * w_rim))
+    Yr = gr @ LUMA
+    gr = Yr[..., None] + (gr - Yr[..., None]) * (1 + (RIM_SAT - 1) * w_rim)[..., None]
+    cloud = (Y > 0.55) & (s < 0.5)
+    p97 = float(np.percentile(Y[cloud], 97)) if cloud.any() else 0.9
+    w_hi = smoothstep(p97 - 0.03, p97 + 0.01, Y)
+    hi = Yr[..., None] * (HI_COL / float(HI_COL @ LUMA))
+    gr = gr * (1 - w_hi[..., None]) + hi * w_hi[..., None]
+    print("grade: cloud p97 luma", round(p97 * 255), "rim px", round(float((w_rim > 0.5).mean()), 3), "hi px", round(float((w_hi > 0.5).mean()), 4))
+    B = s2l(np.clip(gr, 0, 1))
+    plate = np.clip(lin + (1 - alpha[..., None]) * (B - fill), 0, 1)
+    return plate.astype(np.float32), B.astype(np.float32)
+
+
+def write_srgb(path, lin_img, seed):
+    """Linear to an sRGB webp, dithered (triangular, one code value) so the
+    smooth ramp in log light does not terrace at 8 bits."""
+    rng = np.random.default_rng(seed)
+    n = rng.random(lin_img.shape, np.float32) - rng.random(lin_img.shape, np.float32)
+    v = np.clip(np.round(l2s(lin_img) * 255 + n), 0, 255).astype(np.uint8)
+    cv2.imwrite(path, v[:, :, ::-1], [cv2.IMWRITE_WEBP_QUALITY, 92])
+
+
+def write_layers(lin, fill, alpha):
+    """The ungraded layers to WK (lossless: --grade-only starts from them),
+    the graded ones to OUT."""
+    os.makedirs(WK, exist_ok=True)
+    for n, a in (("raw-plate.webp", lin), ("raw-fill.webp", fill)):
+        cv2.imwrite(os.path.join(WK, n), np.round(l2s(a)[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 101])
+    plate, gfill = grade_sky(lin, fill, alpha)
+    os.makedirs(OUT, exist_ok=True)
+    write_srgb(os.path.join(OUT, "plate.webp"), plate, 11)
+    write_srgb(os.path.join(OUT, "fill.webp"), gfill, 12)
+    save8(os.path.join(WK, "p-fill.png"), l2s(gfill)[:, :, ::-1])
+    save8(os.path.join(WK, "p-plate.png"), l2s(plate)[:, :, ::-1])
+
+
+def _read_lin(path):
+    return s2l(cv2.imread(path, cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255)
+
+
+# --grade-only: re-grade from the ungraded layers a bake left in WK
+# (raw-plate.webp, raw-fill.webp) and OUT's alpha.png.
+if "--grade-only" in sys.argv:
+    alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+    lin = _read_lin(os.path.join(WK, "raw-plate.webp"))
+    fill = _read_lin(os.path.join(WK, "raw-fill.webp"))
+    write_layers(lin, fill, alpha)
+    print("grade only: wrote plate.webp, fill.webp")
+    sys.exit(0)
+
+
 if FILL_ONLY:
-    srgb = cv2.imread(os.path.join(OUT, "plate.webp"), cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255
+    # from the ungraded plate and fill (WK), never the graded ones in OUT
+    srgb = cv2.imread(os.path.join(WK, "raw-plate.webp"), cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255
     lin = s2l(srgb)
     alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
-    prev = s2l(cv2.imread(os.path.join(OUT, "fill.webp"), cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255)
+    prev = _read_lin(os.path.join(WK, "raw-fill.webp"))
     fill, alpha2 = relight_fill(srgb, lin, alpha, prev)
-    cv2.imwrite(os.path.join(OUT, "fill.webp"), np.round(l2s(fill)[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 92])
     a8 = np.round(alpha * 255)
     a8n = np.round(alpha2 * 255)
     # alpha only ever rises; the rest of the matte as it was, bit for bit
-    cv2.imwrite(os.path.join(OUT, "alpha.png"), np.where(a8n > a8, a8n, a8).astype(np.uint8))
-    os.makedirs(WK, exist_ok=True)
-    save8(os.path.join(WK, "p-fill.png"), l2s(fill)[:, :, ::-1])
-    print("fill only: wrote fill.webp, alpha.png")
+    a8 = np.where(a8n > a8, a8n, a8).astype(np.uint8)
+    cv2.imwrite(os.path.join(OUT, "alpha.png"), a8)
+    write_layers(lin, fill, a8.astype(np.float32) / 255)
+    print("fill only: wrote fill.webp, plate.webp, alpha.png")
     sys.exit(0)
 
 
@@ -511,19 +692,10 @@ dens = cv2.GaussianBlur(dens.astype(np.float32), (0, 0), 0.03 * W)
 sky_px = alpha < 0.5
 lo, hi = np.percentile(dens[sky_px], 1), np.percentile(dens[sky_px], 99)
 dens = np.clip((dens - lo) / max(1e-4, hi - lo), 0, 1)
-# The camera looks almost straight up the pole: its verticals meet at the
-# zenith, in the upper third of the print, at ZEN (print px; found by running
-# the pole's two edges, rows 1100-1575, up to where they cross). F_PX is the focal
-# length in print px (a ~24 mm-equivalent field, 74 degrees across). A ray's
-# elevation is its angle from the zenith's ray, so the cloud overhead, round
-# the vanishing point, is nearest and the bottom corners furthest.
-ZEN, F_PX = (1128.0, 270.0), 1600.0
-xx, yy = np.meshgrid(np.arange(W, dtype=np.float32) + 0.5, np.arange(H, dtype=np.float32) + 0.5)
-ray = np.stack([xx - W / 2, yy - H / 2, np.full_like(xx, F_PX)], 2)
-ray /= np.linalg.norm(ray, axis=2, keepdims=True)
-zr = np.array([ZEN[0] - W / 2, ZEN[1] - H / 2, F_PX], np.float32)
-zr /= np.linalg.norm(zr)
-el = np.arcsin(np.clip(ray @ zr, 1e-3, 1))
+# A ray's elevation is its angle from the zenith's ray (ZEN, F_PX above), so
+# the cloud overhead, round the vanishing point, is nearest and the bottom
+# corners furthest.
+el = np.arcsin(np.clip(np.cos(zenith_angle()), 1e-3, 1))
 dist = np.log(1 / np.sin(el))
 kd = ((dist.max() - dist) / (dist.max() - dist.min())).astype(np.float32)
 ks = (KD_W * kd + (1 - KD_W) * dens).astype(np.float32)
@@ -531,9 +703,7 @@ order = np.sort(ks[sky_px])
 sky_key = (np.searchsorted(order, ks, side="left") / max(1, len(order) - 1)).astype(np.float32)
 sky_key = cv2.GaussianBlur(sky_key, (0, 0), 4)
 
-os.makedirs(OUT, exist_ok=True)
-cv2.imwrite(os.path.join(OUT, "plate.webp"), np.round(srgb[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 92])
-cv2.imwrite(os.path.join(OUT, "fill.webp"), np.round(l2s(fill)[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 92])
+write_layers(lin, fill, alpha)
 # alpha at full size (wires stay crisp); key and cloudness are smooth, so half
 save8(os.path.join(OUT, "alpha.png"), alpha)
 ks = cv2.resize(sky_key, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
@@ -549,7 +719,6 @@ save8(os.path.join(WK, "p-alpha.png"), alpha)
 save8(os.path.join(WK, "p-key.png"), key_full)
 save8(os.path.join(WK, "p-cloud.png"), cloud)
 save8(os.path.join(WK, "p-skykey.png"), sky_key)
-save8(os.path.join(WK, "p-fill.png"), l2s(fill)[:, :, ::-1])
 prem = np.clip(lin - (1 - alpha[..., None]) * fill, 0, 1)
 save8(os.path.join(WK, "p-fg.png"), l2s(prem + (1 - alpha[..., None]) * np.array([0.9, 0.2, 0.9]))[:, :, ::-1])
 print("alpha>0.5", (alpha > 0.5).mean(), "roi", roi.mean())
