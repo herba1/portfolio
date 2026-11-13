@@ -25,9 +25,15 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    scale of the curds, the front was an iso-contour round every puff, a
 //    tide line round dozens of islands; at this scale it is a few large
 //    lobes threading the cumulus.
-//  - Structure key: Depth Anything V2, percentile-normalised, median-
-//    filtered, near values dilated, half rank-equalised so the front spends
-//    its time evenly up the pole and out along the cables.
+//  - Structure reach (baked, reach.png R, G, 16 bit, full size): not the
+//    structure's depth but its own length, the geodesic distance from the
+//    pole's foot measured inside the matte, so it rises monotonically up the
+//    pole, into the crossarms and out along every cable and brace, and is
+//    the same across a member's width. (The depth model sees a two-pixel
+//    cable only in patches: a front through its depth broke each wire into
+//    tapered slivers and left dark fragments floating in the sky.) The
+//    front's place along it is eased (REACH_GAMMA), so the wood is up
+//    early and the cables spend longer drawing out of the knot.
 //
 // A front sweeps that key, far to near (press on the sky) or near to far
 // (press on the pole). Behind it, the photograph. Ahead of it:
@@ -43,7 +49,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    and always sharp, the frame's one crisp anchor: never defocused, never
 //    lifted or offset, never drawn as a faint copy of itself. Ahead of the
 //    front there is only the sky behind it; at the front it comes up out of
-//    that sky, its density building in log light over a narrow band.
+//    that sky, its density building in log light over a feather of ten
+//    device pixels of its length, so each cable grows out of the
+//    pole as one unbroken stroke with a short soft end.
 // The front itself is the film's halation: a thin amber line along the
 // depth's iso-band only, a few device pixels wide, weighted by the light
 // under it, so it glows where it crosses cloud, all but vanishes over the
@@ -78,7 +86,14 @@ const SKY_SPAN = 0.5;
 const FG_LO = 0.54;
 const SKY_COC = 1.55; // the sky's circle of confusion over the structure's
 const AHEAD = 0.36; // key distance over which a layer goes from just-ahead to fully latent
-const SIGMA = 0.016; // structure band half-width in key units
+const SIGMA = 0.016; // the front's band at rest (speed widens it by uSig / SIGMA)
+// The structure's reach (reach.png, 0 at the pole's foot .. 1 at the furthest
+// cable tip) to its key: 1 - reach^REACH_GAMMA, so the wood (about the first
+// two fifths of the reach) takes about a fifth of the structure's leg and
+// the cables draw out over the rest.
+const REACH_GAMMA = 1.8;
+// The soft end of a growing member, in device px of its length.
+const FEATHER_PX = 10;
 const SKY_BAND = 0.12; // sky band width, in the sky's own key (0..1)
 const SKY_PX = 80; // ...and never narrower on screen than this, in print px
 const HALO = 0.22; // the front's halation line over cloud, linear
@@ -89,13 +104,17 @@ const F_END = 1.06;
 
 // Drag progress to the front. The key runs structure 1..FG_LO and sky
 // SKY_SPAN..0 (from the pole) or the other way (from the far sky). From the
-// pole the structure takes the first SPLIT of the drag and the sky the rest,
-// at an even pace (the sky key is rank-equalised, so its share developed is
-// t^SKY_GAMMA): by mid-drag about three tenths of the sky has developed,
-// by three quarters nearly two thirds, rather than a pale sheet that rushes in
-// at the end. The last few hundredths carry the band off the far edge.
-const SPLIT = 0.25;
-const SKY_GAMMA = 1.1;
+// pole the structure takes the first SPLIT of the drag and the sky the rest.
+// The sky key is rank-equalised, so its share behind the front is
+// t^SKY_GAMMA; but the sky reads as developed well ahead of the front (its
+// defocus closes over AHEAD of the key), so the front itself is held back:
+// at mid-drag about a sixth of the sky is behind it, by three quarters
+// under half, by nine tenths about three quarters, and the far sky is
+// still coming into focus over the last tenth of the drag. (At an even
+// pace the frame read as done by 0.4 and the back half of the drag did
+// nothing.) The last few hundredths carry the band off the far edge.
+const SPLIT = 0.3;
+const SKY_GAMMA = 2.2;
 const GAP = 0.52; // between the layers, from the far sky
 const knotOf = (dir) => (dir < 0 ? [SPLIT, 1 - SKY_SPAN] : [1 - SPLIT, GAP]);
 const frontOf = (p, dir) => {
@@ -147,7 +166,7 @@ const COMMON = `
 uniform sampler2D uPlate;  // sRGB texture: reads linear
 uniform sampler2D uFill;   // sRGB texture
 uniform sampler2D uAlpha;
-uniform sampler2D uKey;    // r structure key, b g sky key (16 bit)
+uniform sampler2D uKey;    // b g sky key (16 bit); r (the old depth key) is not read
 uniform float uFront;
 uniform float uDir;
 uniform float uCoC;
@@ -306,6 +325,7 @@ uniform sampler2D uBgBlur;
 uniform sampler2D uHk4;  // the developed print's high-key light, 1/4 res
 uniform sampler2D uHk8;  // ...1/8
 uniform sampler2D uHk16; // ...1/16
+uniform sampler2D uReach; // r g the structure's reach (16 bit)
 uniform float uSig;
 uniform float uBand;
 uniform float uGrainSeed;
@@ -322,6 +342,8 @@ const float HAL_GAIN = ${f(HAL_GAIN)};
 const vec3 HAL_TINT = vec3(1.0, 0.35, 0.08);
 const float GRAIN = ${f(GRAIN)};
 const float SIGMA = ${f(SIGMA)};
+const float REACH_GAMMA = ${f(REACH_GAMMA)};
+const float FEATHER_PX = ${f(FEATHER_PX)};
 const float SKY_BAND = ${f(SKY_BAND)};
 const float SKY_PX = ${f(SKY_PX)};
 const float BAND = ${f(BAND)};
@@ -513,7 +535,10 @@ void main() {
   float a = texture(uAlpha, iuv).r;
   vec3 pm = max(texture(uPlate, iuv).rgb - (1.0 - a) * texture(uFill, iuv).rgb, 0.0);
   pm = min(pm, vec3(a)) * step(0.004, a);
-  float dF = ahead(toFg(texture(uKey, iuv).r));
+  // The structure's key: its reach along itself from the pole's foot,
+  // 16 bit across r (high byte) and g (low), linear filtering exact.
+  float reach = dot(texture(uReach, iuv).rg, vec2(65280.0, 255.0) / 65535.0);
+  float dF = ahead(toFg(1.0 - pow(reach, REACH_GAMMA)));
   vec4 fg = vec4(pm, a);
   // Where the structure is, dilated, so the latent sky's lift never lands on
   // a wire's edge.
@@ -524,7 +549,11 @@ void main() {
   // not there at all, and the lift runs under it. (A share of the steel's
   // density let in just ahead of the front made it translucent there, a
   // ghost of the steel over the cloud: a second exposure, not a print.)
-  float devF = 1.0 - smoothstep(-0.3 * uSig, 0.7 * uSig, dF);
+  // Its band: a feather of FEATHER_PX along the member on screen (its
+  // reach is smooth along a cable and constant across it, so this is the
+  // soft end of a stroke, never a taper), widened with the hand's speed.
+  float wF = max(0.002, FEATHER_PX * fwidth(dF)) * uSig / SIGMA;
+  float devF = 1.0 - smoothstep(-0.3 * wF, 0.7 * wF, dF);
 
   // Sky, as the lens sees it. The cap, for the print's finish: the developed
   // cloud's luminance here, the brightest the finished print reaches round
@@ -630,6 +659,22 @@ function upload(gl, img, srgb, red = false) {
   return t;
 }
 
+// The reach: two bytes of one 16-bit value, so no mipmaps (a mip of the
+// bytes apart is not a mip of the value) and linear filtering only.
+function uploadReach(gl, img) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+
 // Rubber band past the ends.
 const rubber = (v, lo, hi) => {
   const r = (x) => 0.35 * (1 - 1 / (1 + (x / 0.35) * 0.55));
@@ -650,8 +695,8 @@ export async function createDevelop(host, { embedded = false } = {}) {
   ).matches;
   const still = fixed != null || params.has("still");
 
-  const [plateImg, fillImg, alphaImg, keyImg] = await Promise.all(
-    ["plate.webp", "fill.webp", "alpha.png", "key.png"].map((n) =>
+  const [plateImg, fillImg, alphaImg, keyImg, reachImg] = await Promise.all(
+    ["plate.webp", "fill.webp", "alpha.png", "key.png", "reach.png"].map((n) =>
       bitmap(BASE + n),
     ),
   );
@@ -717,8 +762,10 @@ export async function createDevelop(host, { embedded = false } = {}) {
     fill: upload(gl, fillImg, true),
     alpha: upload(gl, alphaImg, false, true),
     key: upload(gl, keyImg, false),
+    reach: uploadReach(gl, reachImg),
   };
-  for (const im of [plateImg, fillImg, alphaImg, keyImg]) im.close?.();
+  for (const im of [plateImg, fillImg, alphaImg, keyImg, reachImg])
+    im.close?.();
 
   const film = createFilm(gl, { width: 2, height: 2 });
 
@@ -1039,6 +1086,8 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.uniform1i(P.comp.u.uHk4, 6);
     gl.uniform1i(P.comp.u.uHk8, 7);
     gl.uniform1i(P.comp.u.uHk16, 8);
+    bindTex(9, tex.reach);
+    gl.uniform1i(P.comp.u.uReach, 9);
     gl.uniform1f(P.comp.u.uGrainSeed, seed);
     gl.uniform1f(P.comp.u.uGrainPx, Math.max(1, (GRAIN_PX * stage.dpr) / 2));
     gl.uniform1f(

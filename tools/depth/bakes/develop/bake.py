@@ -3,6 +3,7 @@
     python3 -I bake.py <out_dir> [work_dir]
     python3 -I bake.py --fill-only <out_dir> [work_dir]
     python3 -I bake.py --grade-only <out_dir> [work_dir]
+    python3 -I bake.py --reach <out_dir> [work_dir]
 
 plate.webp and fill.webp ship graded (grade_sky): the sky re-graded radially
 round the zenith the pole points at, deep cobalt there opening to a paler
@@ -12,6 +13,9 @@ a neutral. A bake also leaves the ungraded layers in work_dir
 from those, never from the graded ones in out_dir.
 
 --grade-only re-grades from them and rewrites plate.webp and fill.webp.
+
+--reach measures the structure's reach (reach_of) from out_dir's alpha.png
+alone and writes reach.png; nothing else is touched.
 
 --fill-only re-paints the sky from the ungraded plate and out_dir's
 alpha.png, and leaves the matte's edges and key.png as they are (a full bake
@@ -32,7 +36,12 @@ Layers (2400x1600):
               is a smooth pale smear, which the defocused latent sky shows
               as a seam.)
   key.png     (1200x800) R  structure depth key, 0 far .. 1 near, defined everywhere
-                 (pushed out from the structure so its defocus is continuous)
+                 (pushed out from the structure so its defocus is continuous);
+                 no longer read by the shader, which develops the structure
+                 by reach.png instead
+  reach.png   (2400x1600) the structure's reach, 0 at the pole's foot .. 1 at
+              the furthest cable tip, 16 bit (R high byte, G low): geodesic
+              distance along the matte from the foot (reach_of)
   alpha.png   structure alpha: known-background matte, alpha =
                  (I - B).(F - B) / |F - B|^2, with B the fill and F the local
                  structure colour (from dark core pixels only); the depth map
@@ -568,6 +577,113 @@ def regrade_cumulus(P):
     return np.clip(out, 0, 1).astype(np.float32)
 
 
+# --- structure reach, 0 at the pole's foot .. 1 at the furthest tip --------
+# The structure develops along its own length, not by its depth. The depth
+# model sees a two-pixel cable only in patches, so a front through its depth
+# broke each wire into tapered slivers and left dark fragments floating in
+# the sky. Instead: the geodesic distance from the pole's foot measured
+# inside the matte (Dijkstra over its pixels, 8-connected). Every pixel is
+# reached through pixels nearer the foot than itself, so the value rises
+# monotonically outward along every path: up the pole, into the crossarms,
+# out along each cable and brace from where it leaves the knot (a cable that
+# only touches the structure at a crossing grows both ways from it). Nothing
+# can come up apart from what has already developed.
+#  - a step through solid steel costs 1, through the matte's soft edge 3, and
+#    across the 2 px the matte is grown by (which bridges a one-pixel break
+#    in a cable's matte) 8, so the front runs along a cable's core and its
+#    wavefront stays square across the cable rather than racing up its
+#    edges;
+#  - the foot is the widest run of solid wood along the bottom row;
+#  - a speck of matte not joined to the structure but within a few pixels of
+#    it (hardware across a gap in the matte) takes the value of the nearest
+#    reached steel, so it comes up with the cable it hangs by; one further
+#    out (grit, a bird, a fleck of the matte in open sky) takes 1, the last:
+#    it is never a fragment out on its own ahead of the structure;
+#  - every pixel off the structure takes the value of the nearest reached
+#    structure pixel, so a cable's soft edge, and the dilated cover the shader
+#    keeps the latent sky's lift off, carry its value exactly;
+#  - linear in length, normalised by the longest path (REACH_LEN, printed),
+#    so a feather of so many pixels of length at the front is a constant in
+#    the shader's units.
+# reach.png: full size, 16 bit across R (high byte) and G (low): at 8 bits a
+# code is ~10 px of cable and a tip would advance in visible steps.
+def reach_of(alpha):
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    h, w = alpha.shape
+    solid = alpha > 0.3
+    soft = alpha > 0.04
+    node = cv2.dilate(_u8(soft), disk(2)) > 0
+    idx = -np.ones((h, w), np.int64)
+    ys, xs = np.nonzero(node)
+    idx[ys, xs] = np.arange(len(ys))
+    cost = np.where(solid, 1.0, np.where(soft, 3.0, 8.0)).astype(np.float32)
+    rows, cols, wts = [], [], []
+    for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        y2, x2 = ys + dy, xs + dx
+        ok = (y2 < h) & (x2 >= 0) & (x2 < w)
+        a_ = np.nonzero(ok)[0]
+        j = idx[y2[ok], x2[ok]]
+        m = j >= 0
+        a_, j = a_[m], j[m]
+        wt = 0.5 * (cost[ys[a_], xs[a_]] + cost[ys[j], xs[j]]) * float(np.hypot(dy, dx))
+        rows += [a_, j]
+        cols += [j, a_]
+        wts += [wt, wt]
+    g = csr_matrix((np.concatenate(wts), (np.concatenate(rows), np.concatenate(cols))), shape=(len(ys),) * 2)
+    row = solid[h - 1].astype(np.int8)
+    edges = np.diff(np.concatenate([[0], row, [0]]))
+    s0, s1 = np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]
+    k = int(np.argmax(s1 - s0))
+    foot = idx[h - 1, s0[k]:s1[k]]
+    foot = foot[foot >= 0]
+    d = dijkstra(g, directed=False, indices=foot, min_only=True)
+    D = np.full((h, w), np.inf, np.float32)
+    D[ys, xs] = d
+    fin = np.isfinite(D)
+    # the length is measured on the steel itself, not the bridges round it
+    length = float(D[fin & soft].max())
+    r = np.clip(np.where(fin, D / length, 1.0), 0, 1).astype(np.float32)
+    # everything else (sky, unreached specks): the nearest reached steel
+    on = fin & soft
+    _, lbl = cv2.distanceTransformWithLabels(_u8(~on), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    src = np.zeros(int(lbl.max()) + 1, np.float32)
+    oy, ox = np.nonzero(on)
+    src[lbl[oy, ox]] = r[oy, ox]
+    dist = cv2.distanceTransform(_u8(~on), cv2.DIST_L2, 5)
+    r = np.where(on, r, src[lbl]).astype(np.float32)
+    n, cc = cv2.connectedComponents(_u8(soft & ~fin), connectivity=8)
+    near = np.zeros(n, bool)
+    np.logical_or.at(near, cc[soft & ~fin & (dist <= 6)].ravel(), True)
+    near[0] = True
+    far = (soft & ~fin) & ~near[cc]
+    r = np.where(far, 1.0, r).astype(np.float32)
+    print("reach: foot x", int(s0[k]), "..", int(s1[k]), "REACH_LEN", round(length, 1),
+          "unreached matte px", int((soft & ~fin).sum()), "of them adrift", int(far.sum()))
+    return r, length
+
+
+def write_reach(path, r):
+    """reach.png: R = high byte, G = low byte (16 bit), B = 0, full size."""
+    r16 = np.clip(np.round(r * 65535), 0, 65535).astype(np.uint32)
+    z = np.zeros(r.shape, np.uint8)
+    cv2.imwrite(path, np.stack([z, (r16 & 255).astype(np.uint8), (r16 >> 8).astype(np.uint8)], 2),
+                [cv2.IMWRITE_PNG_COMPRESSION, 9])
+
+
+# --reach: the structure's reach from OUT's alpha.png alone (reach.png);
+# nothing else is touched.
+if "--reach" in sys.argv:
+    alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+    r, _ = reach_of(alpha)
+    write_reach(os.path.join(OUT, "reach.png"), r)
+    os.makedirs(WK, exist_ok=True)
+    save8(os.path.join(WK, "p-reach.png"), cv2.resize(1 - r, (W // 2, H // 2), interpolation=cv2.INTER_AREA))
+    print("reach: wrote reach.png")
+    sys.exit(0)
+
+
 if "--sky" in sys.argv:
     alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
     os.makedirs(WK, exist_ok=True)
@@ -851,6 +967,7 @@ save8(os.path.join(OUT, "alpha.png"), alpha)
 kr = cv2.resize(key_full, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
 kr8 = np.clip(np.round(kr * 255), 0, 255).astype(np.uint8)
 write_sky_key(os.path.join(OUT, "key.png"), sky_key, kr8)
+write_reach(os.path.join(OUT, "reach.png"), reach_of(alpha)[0])
 
 # previews
 save8(os.path.join(WK, "p-alpha.png"), alpha)
