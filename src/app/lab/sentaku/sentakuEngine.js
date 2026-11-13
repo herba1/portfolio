@@ -1,6 +1,6 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
-import { createCloth, project, PHANTOM, PX, ROPE } from "./cloth";
+import { createCloth, drift, PHANTOM, PX, ROPE } from "./cloth";
 
 // Sentaku (laundry): a washing line seen from underneath against a cobalt
 // sky, the sun behind a sheer polka-dot dress. Every garment was cut out of
@@ -27,24 +27,33 @@ import { createCloth, project, PHANTOM, PX, ROPE } from "./cloth";
 // sink toward rim-lit silhouettes against it, and the exposure breathes back
 // as the dress covers it again.
 //
-// The view: the lens looks much further up than the photographer did. The
-// camera pitches toward the zenith about the photograph's own optical centre,
-// a pure rotation, which reprojects every depth exactly, so the cut-out cloth
-// keeps its geometry wherever it hangs. It looks out through a stereographic
-// lens about 100 degrees across: conformal, so nothing stretches toward the
-// edges as it would through a rectilinear lens that wide. The line bows, the
-// garments hang toward the viewer, their sides converging on the zenith, and
-// the sky the photograph never held (above its top edge, and the wedges
+// The view: the lens looks much further up than the photographer did, from
+// further down and further in. The camera pitches toward the zenith, and as
+// it does the eye drops (along the garments' hang, the world's gravity) and
+// moves in toward the line, until it is under the line in front of the
+// dress, at about the height of its hem. The sky is at infinity, the same
+// from any eye, so it stays on the rotation's exact map. The cloth and the
+// line are drawn by full perspective from the eye: each vertex is placed in
+// 3D, on the photograph's own ray to it (so from the photograph's eye it is
+// the photograph) on a plane turned so the line recedes to the right, plus the
+// cloth's displacement. From below, gravity points at the lens: the pegs
+// and the line recede and converge, the garments' sides converge on the
+// zenith above the frame, and the hems come toward the lens and loom. It all
+// goes out through a stereographic lens about 100 degrees across: conformal,
+// so nothing stretches toward the edges as through a rectilinear lens that
+// wide. The sky the photograph never held (above its top edge, and the wedges
 // either side) is its smooth fit carried on by angle. Everything is lit in
-// the photograph's own pixels and only drawn through the lens, so the sun, its
-// halo, the disc's coverage and the cloth's light stay registered. On load
-// the camera tilts up on a spring, the lens easing from the photograph's own
-// to the stereographic as it goes.
+// the photograph's own pixels (a vertex's are where its ray from the eye
+// meets the photograph's image plane, which is where the sky behind it is),
+// so the sun, its halo, the disc's coverage and the cloth's light stay
+// registered. On load the camera tilts up on a spring, the lens easing from
+// the photograph's own to the stereographic and the eye moving in as it goes.
 //
 // Query: ?gust=0..1 holds a steady gust (with ?dir=-1|1 and ?t=seconds of it,
 // default 2.4), simulated deterministically and frozen, for stills.
 // ?still=1 is the photograph with no wind. ?tilt=degrees sets the pitch (0 is
-// the photograph's own view). Numeric FILM keys override the grade.
+// the photograph's own view, and its own eye); ?drop, ?fwd and ?yaw move the
+// eye and turn the line's plane. Numeric FILM keys override the grade.
 
 const ASSET = "/lab/sentaku/";
 const PAPER = [0xf2, 0xf0, 0xeb];
@@ -113,7 +122,7 @@ const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the
 const ADAPT = 0.7; // stops the exposure gives back with the disc in clear view
 const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
 const EDGE_GLOW = 1; // every garment's clean edge, lit warm from the sun behind it
-const VS = 10; // floats per cloth vertex
+const VS = 13; // floats per cloth vertex
 const MU_MIN = 0.15; // the view cosine's floor: edge-on is dense, not opaque
 // The dress's belt tie, in photograph px: a strip cut square at its end, so
 // its matte is rounded there, or a flipped tie reads as a paper tab.
@@ -127,10 +136,24 @@ const LENS_F = 1550;
 const LENS_C = [700, 1050];
 const TILT = 40; // degrees the camera pitches up past the photographer's view
 const WIDEN = 1.8; // and the lens widens by this much as it does
-const LENS_OY = 623; // the optical centre's row in the tilted frame
+const LENS_OY = 700; // the optical centre's row in the tilted frame: the line across the upper third, the hem low
 const TILT_W = 5.2; // the tilt's spring: rad/s, about 1.2 s to settle
 const TILT_Z = 0.82;
 const TILT_AT = 0.35; // s after load before it starts
+// The eye. A rotation alone only moves the line down the frame: nothing nears
+// the lens. So as it tilts the eye also moves, down (along the garments' hang,
+// the world's gravity) by EYE_DROP of the dress's hang and toward the line by
+// EYE_FWD of its distance, under the line and in front of it. The cloth is
+// drawn by full perspective from there; the sky, at infinity, is the same
+// from any eye, and stays on the rotation's exact map. It goes no further
+// than this because the sun is low behind the dress: from here its ray still
+// meets the skirt just above the hem, so at rest the sun stays behind it.
+const EYE_DROP = 0.45;
+const EYE_FWD = 0.66;
+const YAW = 20; // degrees the line's plane turns from square to the photograph's lens, its right end away
+// the photograph's plane: the garments hang this far along its axis, where a
+// metre reads as PX px through its lens
+const Z0 = LENS_F / PX;
 
 // The photograph's pixels to the tilted frame's: back through the lens to a
 // ray, turned by the pitch about the lens's x axis (image y points down, so up
@@ -167,11 +190,13 @@ const LENS_GLSL = `
 uniform mat3 uR;
 uniform vec4 uLens; // the photograph's focal length and centre, the frame's focal length
 uniform vec2 uOut;  // the frame's optical centre row, and kappa
-vec2 toFrame(vec2 p) {
-  vec3 d = uR * vec3((p - uLens.yz) / uLens.x, 1.0);
+// a ray, in the photograph's camera's axes, to the frame's px
+vec2 rayToFrame(vec3 r) {
+  vec3 d = uR * r;
   float K = uOut.y;
   return vec2(uLens.y, uOut.x) + d.xy * (uLens.w * (1.0 + K) / (K * length(d) + d.z));
 }
+vec2 toFrame(vec2 p) { return rayToFrame(vec3((p - uLens.yz) / uLens.x, 1.0)); }
 // The frame's px back to the photograph's: the ray from kappa behind the
 // sphere through the pixel meets it at t, and is turned back into the
 // photograph's lens. Inside the photograph that is its own pixel. Past its
@@ -401,6 +426,7 @@ in vec2 aPos;
 in vec2 aRest;
 in vec3 aShade;
 in vec3 aStrain;
+in vec3 aRay; // from the eye to the vertex, in the photograph's camera's axes
 uniform vec2 uSize;
 ${LENS_GLSL}
 out vec2 vRest;
@@ -412,9 +438,10 @@ void main() {
   vPos = aPos;
   vShade = aShade;
   vStrain = aStrain;
-  // each vertex through the stereographic lens; a cell is small enough
-  // (30 px of the photograph) that the map is near affine across it
-  vec2 h = toFrame(aPos);
+  // each vertex by full perspective from the eye, through the same
+  // stereographic lens as the sky; a cell is small enough (30 px of the
+  // photograph) that the map is near affine across it
+  vec2 h = rayToFrame(aRay);
   gl_Position = vec4(h.x / uSize.x * 2.0 - 1.0, 1.0 - h.y / uSize.y * 2.0, 0.0, 1.0);
 }`;
 
@@ -778,7 +805,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
   // ---- GL
   const plateP = compile(gl, VERT_FULL, PLATE_F, ["aPos"]);
   const blitP = compile(gl, VERT_FULL, BLIT_F, ["aPos"]);
-  const clothP = compile(gl, CLOTH_V, CLOTH_F, ["aPos", "aRest", "aShade", "aStrain"]);
+  const clothP = compile(gl, CLOTH_V, CLOTH_F, ["aPos", "aRest", "aShade", "aStrain", "aRay"]);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -855,6 +882,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
   }
   gl.enableVertexAttribArray(3);
   gl.vertexAttribPointer(3, 3, gl.FLOAT, false, VS * 4, 7 * 4);
+  gl.enableVertexAttribArray(4);
+  gl.vertexAttribPointer(4, 3, gl.FLOAT, false, VS * 4, 10 * 4);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
   gl.bindVertexArray(null);
@@ -1002,10 +1031,18 @@ export async function createSentaku(host, { embedded = false } = {}) {
   let tiltV = 0;
   const skyQ = new Float32Array(18);
   for (let k = 0; k < 6; k++) for (let c = 0; c < 3; c++) skyQ[k * 3 + c] = meta.sky.quad[c][k];
-  // the framing (lens and centre) goes with the angle, so ?tilt=0 is the photograph
+  // The dress's hang, from the line to its hem, in metres: the eye drops by a
+  // share of it.
+  const dressG = meta.garments.find((g) => g.name === "dress") ?? meta.garments[0];
+  const HANG = (dressG.bbox[3] - ropeY((dressG.bbox[0] + dressG.bbox[2]) / 2)) / PX;
+  const eyeTo = [0, num("drop", EYE_DROP) * HANG, num("fwd", EYE_FWD) * Z0];
+  // the framing (lens, centre and eye) goes with the angle, so ?tilt=0 is the
+  // photograph, seen from where it was taken
   const viewNow = () => {
     const k = (tiltP * tiltTo) / TILT;
-    return viewOf(tiltTo * tiltP, 1 + (widenTo - 1) * k, LENS_C[1] + (oyTo - LENS_C[1]) * k, k);
+    const view = viewOf(tiltTo * tiltP, 1 + (widenTo - 1) * k, LENS_C[1] + (oyTo - LENS_C[1]) * k, k);
+    view.eye = eyeTo.map((e) => e * clamp(k, 0, 1.5));
+    return view;
   };
   const stepTilt = (dt, age) => {
     const n = Math.max(1, Math.ceil(dt * 120));
@@ -1017,14 +1054,52 @@ export async function createSentaku(host, { embedded = false } = {}) {
   };
 
   // ---- per frame: positions, light, draw
+  // Each vertex is placed in the photograph's camera's frame (x across, y
+  // down its frame, which is the garments' hang and the world's gravity, z
+  // along its axis): its rest is its pixel on the photograph's plane, Z0 out,
+  // and the cloth's displacement is added in metres (drift()). It is drawn by
+  // full perspective from the eye: the ray to it goes to the lens (aRay),
+  // and where that ray meets the photograph's image plane is its place in the
+  // photograph's px (aPos), the frame the sky, the sun and the disc's
+  // coverage live in, since the sky is at infinity and the same from any eye.
+  const dv3 = [0, 0, 0];
   const disp = [0, 0, 0];
-  const cu = IW / 2;
-  const cv = IH / 2;
-  const writeVerts = () => {
+  // where each vertex is as the photograph's own eye sees it: the cloth's
+  // folds are read off this (below), as they were tuned on it
+  const seen = new Float32Array(N * 2);
+  const toPhotoPx = (X, Y, Z, out, o) => {
+    const z = Math.max(Z, 0.05 * Math.hypot(X, Y, Z));
+    out[o] = LENS_C[0] + (LENS_F * X) / z;
+    out[o + 1] = LENS_C[1] + (LENS_F * Y) / z;
+  };
+  // The line's plane is not square to the photograph's lens: it turns about
+  // the vertical through the lens's axis by YAW, so the line recedes toward
+  // one end. Each pixel stays on its own ray, at the depth where that ray
+  // meets the turned plane, and the cloth's motion there is scaled with it,
+  // so the photograph's eye still sees exactly the photograph.
+  const yawK = Math.tan((num("yaw", YAW) * Math.PI) / 180);
+  const place = (u0, v0, dx, dy, dz, view, o, so) => {
+    const { eye } = view;
+    const rx = (u0 - LENS_C[0]) / LENS_F;
+    const t = Z0 / Math.max(0.25, 1 - rx * yawK); // the plane's depth on this ray
+    const m = t / Z0;
+    drift(dx, dy, dz, dv3);
+    const X = rx * t + m * dv3[0];
+    const Y = ((v0 - LENS_C[1]) / LENS_F) * t + m * dv3[1];
+    const Z = t * (1 + dv3[2]);
+    if (so >= 0) toPhotoPx(X, Y, Z, seen, so);
+    const ex = X - eye[0], ey = Y - eye[1], ez = Z - eye[2];
+    const l = Math.hypot(ex, ey, ez) || 1;
+    vdata[o + 10] = ex / l;
+    vdata[o + 11] = ey / l;
+    vdata[o + 12] = ez / l;
+    toPhotoPx(ex, ey, ez, vdata, o);
+  };
+  const writeVerts = (view) => {
     cloth.computeNormals();
     for (let k = 0; k < N; k++) {
       const i = k * 3;
-      project(rest[k * 2], rest[k * 2 + 1], x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2], cu, cv, vdata, k * VS);
+      place(rest[k * 2], rest[k * 2 + 1], x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2], view, k * VS, k * 2);
       const L = lightById.get(gid[k]);
       const g = lit(L, nrm[i], nrm[i + 1], nrm[i + 2]) / lit(L, nrm0[i], nrm0[i + 1], nrm0[i + 2]);
       vdata[k * VS + 4] = clamp(g, 0.5, 1.8);
@@ -1036,18 +1111,22 @@ export async function createSentaku(host, { embedded = false } = {}) {
       vdata[k * VS + 5] = Math.min(1, Math.hypot(x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2]) / 0.06);
       vdata[k * VS + 6] = Math.min(1.18, 1 / Math.max(0.05, mu0[k]), mu[k] / Math.max(0.05, mu0[k]));
     }
-    // the gradient of the drawn map at each vertex, as its metric J^T J
+    // The gradient of the cloth's map at each vertex, as its metric J^T J,
+    // as the photograph's eye sees it (1, 0, 1 at rest). Seen from the moved
+    // eye, cloth carried toward or away from it grows or shrinks a lot, and
+    // that is perspective, not the cloth gathering into folds; the folds are
+    // the cloth's own, and the perspective carries them where it draws it.
     for (let k = 0; k < N; k++) {
       const [l, r, u, d] = [nbr[k * 4], nbr[k * 4 + 1], nbr[k * 4 + 2], nbr[k * 4 + 3]];
       const du = rest[r * 2] - rest[l * 2], dv = rest[d * 2 + 1] - rest[u * 2 + 1];
       let jx0 = 1, jx1 = 0, jy0 = 0, jy1 = 1;
       if (du > 0) {
-        jx0 = (vdata[r * VS] - vdata[l * VS]) / du;
-        jx1 = (vdata[r * VS + 1] - vdata[l * VS + 1]) / du;
+        jx0 = (seen[r * 2] - seen[l * 2]) / du;
+        jx1 = (seen[r * 2 + 1] - seen[l * 2 + 1]) / du;
       }
       if (dv > 0) {
-        jy0 = (vdata[d * VS] - vdata[u * VS]) / dv;
-        jy1 = (vdata[d * VS + 1] - vdata[u * VS + 1]) / dv;
+        jy0 = (seen[d * 2] - seen[u * 2]) / dv;
+        jy1 = (seen[d * 2 + 1] - seen[u * 2 + 1]) / dv;
       }
       vdata[k * VS + 7] = jx0 * jx0 + jx1 * jx1;
       vdata[k * VS + 8] = jx0 * jy0 + jx1 * jy1;
@@ -1058,7 +1137,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       const u = vdata[k * VS + 2];
       const v = vdata[k * VS + 3];
       cloth.ropeDisp(clamp((u - ROPE.left) / (ROPE.right - ROPE.left), 0, 1), disp);
-      project(u, v, disp[0], disp[1], disp[2], cu, cv, vdata, k * VS);
+      place(u, v, disp[0], disp[1], disp[2], view, k * VS, -1);
     }
     void ropeRest;
   };
@@ -1161,9 +1240,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
   let tick = 0;
   const render = (exposure = film0.exposure) => {
     if (!scene) build();
-    writeVerts();
-    coverage();
     const view = viewNow();
+    writeVerts(view);
+    coverage();
     drawScene(view);
     if (!rawView) film.render(scene.tex, { ...film0, exposure: exposure + adapt, grainSeed: tick * 7.31 }, developed.fbo);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1210,7 +1289,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       pushGust(holdGust, dir);
       cloth.step(1 / 60, windFn);
       simT += 1 / 60;
-      writeVerts();
+      writeVerts(viewNow());
       coverage();
       stepAdapt(1 / 60);
     }

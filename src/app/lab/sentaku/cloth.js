@@ -6,8 +6,8 @@
 // (the camera is below the line, looking up past it). A vertex's rest place
 // is its pixel in the photograph read as X = u / PX, Y = -v / PX, Z = 0: the
 // garments hang in the line's vertical plane. Drawing maps a vertex's
-// displacement from that rest back onto the photograph (project()), so with
-// no wind the frame is the photograph to the pixel.
+// displacement from that rest into the photograph's camera (drift()), so with
+// no wind, seen from the photograph's eye, the frame is the photograph.
 //
 // The photograph is the equilibrium: there weight and tension balance, and
 // away from it weight pulls each vertex back as it would a pendulum the
@@ -122,13 +122,18 @@ const FILL = [0.3, 0.9]; // s for the air to fill a skirt, and to leave it
 
 export const ROPE = { left: -320, right: 1760, sag: 0.11 };
 
-export function project(u0, v0, dx, dy, dz, cu, cv, out, o) {
-  const u1 = u0 + PX * dx;
-  const v1 = v0 - PX * dy + SZ * dz;
-  const depth = Math.max(-0.3 * DIST, CZ * dz + CY * dy);
-  const k = DIST / (DIST + depth);
-  out[o] = cu + (u1 - cu) * k;
-  out[o + 1] = cv + (v1 - cv) * k;
+// A displacement in this world, as the photograph's camera sees it: metres
+// across (x), down its frame (y; level motion away reads partly as down, as
+// above) and the depth it adds, as a share of DIST (z). The drawing places
+// each vertex by this in that camera's frame and looks at it by perspective
+// from wherever its eye is (sentakuEngine.js): seen from the photograph's own
+// eye, with no wind, the frame is the photograph to the pixel. The sim's
+// constraints (across, down) hold the cloth unfolded as this map sees it, so
+// the drawing keeps it from any eye.
+export function drift(dx, dy, dz, out) {
+  out[0] = dx;
+  out[1] = -dy + (SZ / PX) * dz;
+  out[2] = Math.max(-0.3, (CZ * dz + CY * dy) / DIST);
 }
 
 const LENS = [0, -LOOK[0], -LOOK[1]]; // from the cloth toward the lens
