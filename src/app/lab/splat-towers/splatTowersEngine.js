@@ -35,7 +35,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // tower's edge. The cloud itself was developed soft in the bake (develop.py).
 //
 // Query: ?yaw=&pitch= (degrees of orbit) hold a still; ?reveal=0..1 holds the
-// opening; ?blur= scales the lens (0: none); ?hal= the halation ring (0: none).
+// opening; ?blur= scales the lens (0: none); ?hal= the halation ring (0: none);
+// ?dome= the sky's dome grade (0: none).
 
 const ASSET = "/lab/splat-towers/";
 const DATA_W = 2048; // texels per row of the splat texture (2 per splat)
@@ -81,6 +82,113 @@ const FILM = {
   vignette: 0.24,
 };
 const HEADROOM = 0.9; // near-white photo values pushed past 1.0 so cloud carries energy
+
+// The sky's dome grade (domeGrade in SPLAT_FS). The photograph's clear sky is
+// one flat teal-grey from the middle of the frame to its edges; a real sky
+// seen straight up is deepest at the zenith and opens paler and more cyan
+// toward the horizon. Its zenith is a fixed world direction, the one at the
+// middle of the hero still (?yaw=-4&pitch=4), where the towers converge, so
+// the dome stays on the sky as the camera swings. The grade moves the deep
+// sky's own colour (DOME_IN, measured on photo.webp's clear sky, linear) to
+// cobalt at the zenith and pale cyan DOME_DEG out,
+// which is about where the frame's long edges sit; the film then develops it
+// to ~(35, 85, 140) in the middle and ~(100, 155, 190) at the edges, kept a
+// little under the grey of a cloud's edge so the cloud never outlines dark.
+const DOME_ZENITH = [-4, 4]; // yaw, pitch of the orbit whose centre ray is the zenith
+const DOME_DEG = 30;
+const DOME_POW = 1;
+const DOME_IN = [0.048, 0.153, 0.27];
+const DOME_TOP = [0.017, 0.066, 0.2];
+const DOME_LOW = [0.139, 0.303, 0.511];
+const DOME_SKYLIGHT = 0.15; // share of skylight blue on the cloud's shadow side
+
+// A 64x64 blue-noise tile (void and cluster, Ulichney 1993) for dithering the
+// dome: rank of every texel, as 0..255.
+function blueNoise(N = 64, sigma = 1.5) {
+  const n = N * N;
+  const K = new Float32Array(n);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const dx = Math.min(x, N - x);
+      const dy = Math.min(y, N - y);
+      K[y * N + x] = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+    }
+  const M = N - 1;
+  const splat = (E, q, sgn) => {
+    const qx = q % N;
+    const qy = (q / N) | 0;
+    for (let y = 0; y < N; y++) {
+      const row = ((y - qy) & M) * N;
+      for (let x = 0; x < N; x++) E[y * N + x] += sgn * K[row + ((x - qx) & M)];
+    }
+  };
+  const pick = (E, bits, want, max) => {
+    let best = -1;
+    let bv = max ? -Infinity : Infinity;
+    for (let i = 0; i < n; i++) {
+      if (bits[i] !== want) continue;
+      if (max ? E[i] > bv : E[i] < bv) {
+        bv = E[i];
+        best = i;
+      }
+    }
+    return best;
+  };
+  // a seeded random start, relaxed until the tightest cluster is the largest void
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const init = new Uint8Array(n);
+  const E0 = new Float32Array(n);
+  const ones = n >> 4;
+  for (let c = 0; c < ones; ) {
+    const i = Math.floor(rnd() * n);
+    if (init[i]) continue;
+    init[i] = 1;
+    splat(E0, i, 1);
+    c++;
+  }
+  for (let it = 0; it < n; it++) {
+    const a = pick(E0, init, 1, true);
+    init[a] = 0;
+    splat(E0, a, -1);
+    const b = pick(E0, init, 0, false);
+    init[b] = 1;
+    splat(E0, b, 1);
+    if (a === b) break;
+  }
+  const rank = new Uint16Array(n);
+  // phase 1: take the initial points away, tightest cluster first
+  let bits = init.slice();
+  let E = E0.slice();
+  for (let r = ones - 1; r >= 0; r--) {
+    const a = pick(E, bits, 1, true);
+    bits[a] = 0;
+    splat(E, a, -1);
+    rank[a] = r;
+  }
+  // phase 2: fill the largest voids up to half
+  bits = init.slice();
+  E = E0.slice();
+  let r = ones;
+  for (; r < n >> 1; r++) {
+    const b = pick(E, bits, 0, false);
+    bits[b] = 1;
+    splat(E, b, 1);
+    rank[b] = r;
+  }
+  // phase 3: the rest, from the zeros' own energy, tightest cluster of zeros first
+  const Z = new Float32Array(n);
+  for (let i = 0; i < n; i++) if (!bits[i]) splat(Z, i, 1);
+  for (; r < n; r++) {
+    const b = pick(Z, bits, 0, true);
+    bits[b] = 1;
+    splat(Z, b, -1);
+    rank[b] = r;
+  }
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) out[i] = Math.floor((rank[i] * 256) / n);
+  return out;
+}
 
 const SPLAT_VS = `#version 300 es
 precision highp float;
@@ -204,7 +312,55 @@ uniform vec2 uPad;       // the outpainted margin round it in the texture, px
 uniform vec4 uM2inv;
 uniform vec2 uRes;
 uniform float uHeadroom;
+uniform vec3 uZen;       // the dome's zenith, world: where the towers converge
+uniform vec4 uDome;      // radius of the dome grade (rad), its curve power, amount, skylight on cloud
+uniform vec3 uDomeIn;    // the deep sky's own colour, linear
+uniform vec3 uDomeTop;   // what it becomes at the zenith (cobalt)
+uniform vec3 uDomeLow;   // and toward the frame's edges (the pale cyan low sky)
+uniform sampler2D uBlue; // 64x64 blue noise, R8
 out vec4 outColor;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+// The sky graded as a dome round the zenith: deep cobalt straight up opening
+// to a paler cyan toward the horizon, which the frame's edges stand in for.
+// The radius is the ray's angle to the zenith, so the gradient stays on the
+// sky as the camera swings. A cloud is near neutral and the clear sky shows
+// through a thin one, so a pixel is read as a share of clear sky (its blue
+// over red, against the deep sky's own, judged on the picture a couple of
+// texels soft, cb, so the share runs smoothly across a cloud's edge) plus
+// neutral cloud, and only the sky's share is regraded: the regrade is added,
+// never multiplied into the cloud, so a wisp keeps its white and its edge
+// takes no fringe or dark outline. The cloud's shadow side then takes a
+// little skylight.
+vec3 domeGrade(vec3 c, vec3 cb, vec3 dir, float skyMask) {
+  float th = acos(clamp(dot(normalize(dir), uZen), -1.0, 1.0));
+  float t = th / uDome.x;
+  float s = clamp(t, 0.0, 1.0);
+  s = pow(s, uDome.y);
+  s = s * s * (3.0 - 2.0 * s);
+  // past the frame's long edges it opens a little further, against the vignette
+  s += 0.3 * clamp(t - 1.0, 0.0, 0.35);
+  float chroma = 1.0 - c.r / max(c.b, 1e-4);
+  float chb = 1.0 - cb.r / max(cb.b, 1e-4);
+  float clear = skyMask * uDome.z
+    * clamp((cb.b - cb.r) / (0.9 * (uDomeIn.b - uDomeIn.r)), 0.0, 1.0)
+    * smoothstep(0.12, 0.5, chb);
+  vec3 g = max(c + clear * (mix(uDomeTop, uDomeLow, s) - uDomeIn), 0.25 * c);
+  // Blue-noise dither, about an 8-bit step and a half in display terms, so the
+  // long gradient does not band.
+  float n = texelFetch(uBlue, ivec2(gl_FragCoord.xy) & 63, 0).r - 0.5;
+  vec3 e = sqrt(max(g, 0.0)) + clear * n * (1.5 / 255.0);
+  g = mix(g, e * e, step(1e-4, clear));
+  // The cumulus's shadow side (display luminance ~0.55-0.8) turns toward the
+  // skylight that lights it, so sunlit tops sit over cool shadows.
+  float l = dot(g, LUMA);
+  float lp = pow(max(l, 0.0), 1.0 / 2.2);
+  float cloud = 1.0 - smoothstep(0.3, 0.5, chroma);
+  float band = smoothstep(0.38, 0.52, lp) * (1.0 - smoothstep(0.74, 0.86, lp));
+  vec3 skyl = uDomeLow * (l / max(dot(uDomeLow, LUMA), 1e-4));
+  return mix(g, skyl, cloud * band * uDome.w);
+}
 
 // One photo texel against a tower fragment's own surface, at log depth lp.
 // x: the texel is this surface (take the photo); y: something nearer stood in
@@ -265,7 +421,8 @@ void main() {
             + sm.z * texelFetch(uPhoto, clamp(i0 + ivec2(0, 1), ivec2(0), cl), 0).rgb
             + sm.w * texelFetch(uPhoto, clamp(i0 + ivec2(1, 1), ivec2(0), cl), 0).rgb) / sky;
       }
-      look = mix(pl, ph, sky);
+      vec3 soft = mix(textureLod(uPlate, uv, 1.5).rgb, textureLod(uPhoto, uv, 1.5).rgb, sky);
+      look = domeGrade(mix(pl, ph, sky), soft, dir, 1.0);
       keep = 1.0;
     } else if (t > 0.0 && P.z > 0.1) {
       // Depth test the lookup on the four texels around it, unfiltered, and
@@ -609,6 +766,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   const qReveal = num("reveal");
   const qBlur = num("blur"); // scales the lens (0 holds a still with no edge softening)
   const qHal = num("hal"); // scales the halation ring (0: none)
+  const qDome = num("dome"); // scales the sky's dome grade (0: the photograph's own sky)
   const held = qYaw != null || qPitch != null || qReveal != null;
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
@@ -634,7 +792,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
         return r.blob();
       })
       .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }));
-  const [buf, bitmap, depthBitmap, plateBitmap] = await Promise.all([
+  const assets = Promise.all([
     fetch(`${ASSET}splats.bin`).then((r) => {
       if (!r.ok) throw new Error(`splats.bin ${r.status}`);
       return r.arrayBuffer();
@@ -643,6 +801,8 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     loadBitmap("depth.png"),
     loadBitmap("plate.webp"),
   ]);
+  const blue = blueNoise(); // ~0.2 s, while the assets load
+  const [buf, bitmap, depthBitmap, plateBitmap] = await assets;
   const D = decode(buf);
 
   // ---- textures
@@ -690,6 +850,16 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  // Blue noise for the dome's dither, tiled across the frame texel for texel.
+  const blueTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, blueTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 64, 64, 0, gl.RED, gl.UNSIGNED_BYTE, blue);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const zR = rotation(DOME_ZENITH[0], DOME_ZENITH[1]);
+  const zenith = [zR[2], zR[5], zR[8]];
 
   // ---- geometry: one quad, instanced per splat index
   const prog = compile(gl, SPLAT_VS, SPLAT_FS);
@@ -852,6 +1022,14 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, plate);
     gl.uniform1i(u.uPlate, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, blueTex);
+    gl.uniform1i(u.uBlue, 4);
+    gl.uniform3fv(u.uZen, zenith);
+    gl.uniform4f(u.uDome, (DOME_DEG * Math.PI) / 180, DOME_POW, qDome ?? 1, DOME_SKYLIGHT * (qDome ?? 1));
+    gl.uniform3fv(u.uDomeIn, DOME_IN);
+    gl.uniform3fv(u.uDomeTop, DOME_TOP);
+    gl.uniform3fv(u.uDomeLow, DOME_LOW);
     gl.uniform2f(u.uDr, Math.log(DEPTH_LO), Math.log(DEPTH_HI / DEPTH_LO) / 254);
     gl.uniform2f(u.uTol, DEPTH_TOL[0], DEPTH_TOL[1]);
     // world -> view is R^T: R row major read as column major is exactly R^T.
@@ -1078,6 +1256,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
       gl.deleteTexture(photo);
       gl.deleteTexture(depthTex);
       gl.deleteTexture(plate);
+      gl.deleteTexture(blueTex);
       gl.deleteBuffer(corners);
       gl.deleteBuffer(order);
       gl.deleteVertexArray(vao);
