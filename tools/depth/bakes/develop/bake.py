@@ -4,6 +4,7 @@
     python3 -I bake.py --fill-only <out_dir> [work_dir]
     python3 -I bake.py --grade-only <out_dir> [work_dir]
     python3 -I bake.py --reach <out_dir> [work_dir]
+    python3 -I bake.py --sky <out_dir> [work_dir]
 
 plate.webp and fill.webp ship graded (grade_sky): the sky re-graded radially
 round the zenith the pole points at, deep cobalt there opening to a paler
@@ -495,8 +496,13 @@ SKY_SRC = os.environ.get("SKY_SRC", "/tmp/claude-0/climb/develop/work/cc0/big.jp
 SKY_WIN = tuple(float(v) for v in os.environ.get("SKY_WIN", "0.5,0.5,1.0").split(","))
 SKY_FLIP = os.environ.get("SKY_FLIP", "0") == "1"
 TOP = float(os.environ.get("TOP", "0.9"))
-SHADE_COL = _hex(os.environ.get("SHADE_COL", "#8aa6c8"))
-SHADE = float(os.environ.get("SHADE", "0.7"))
+SHADE_COL = _hex(os.environ.get("SHADE_COL", "#76a6d4"))
+SHADE = float(os.environ.get("SHADE", "0.85"))
+SHADE_LIFT = float(os.environ.get("SHADE_LIFT", "0.2"))
+SKY_GAIN = float(os.environ.get("SKY_GAIN", "0"))
+SKY_EST = float(os.environ.get("SKY_EST", "10"))  # the clear sky estimate's blur, quarter-size px
+SKY_LC = float(os.environ.get("SKY_LC", "0.8"))
+SKY_LC_PX = float(os.environ.get("SKY_LC_PX", "6"))
 
 
 def _sky_window(path):
@@ -517,7 +523,161 @@ def _sky_window(path):
     return s2l(sub[:, :, ::-1].astype(np.float32) / 255)
 
 
-def regrade_cumulus(P):
+# The sky looked up into. A cumulus photograph taken at eye level, put in
+# flat behind the pole, is a backdrop: its curds are all one size and face
+# the camera, while everything in the structure converges on the zenith.
+# Seen from the foot of a pole, a summer sky is a dome: clear cobalt
+# overhead, the towers standing round its rim, their bases at the frame's
+# edges and their tops leaning in towards the vanishing point the pole runs
+# into, foreshortened and stretched outward as they near the horizon.
+#
+# So the sky is re-plated by a radial look-up round the zenith (ZEN, F_PX):
+# each print pixel's angle from the zenith ray (theta) and its azimuth round
+# it. The azimuth is kept; the radius is stereographic, v = ln tan(theta / 2),
+# which is what turns an eye-level strip of sky (the horizon along its foot)
+# into a dome conformally: a cloud keeps its shape, only its size changes,
+# growing from nothing at the zenith to the full photograph at the frame's
+# edge, where the rectilinear lens stretches it further outward. The source is
+# one or more horizon photographs of congestus (SKY_SRCS), each the half of
+# the azimuth either side of the pole: their horizon rows sit at SKY_VH (just
+# beyond the furthest corner, so the frame shows no sea), one photo width per
+# half turn. The two halves meet under the pole (it hides the join) and in
+# the short run above the zenith, crossfaded over a few degrees.
+# Sampled from a pyramid by the map's own local scale, so the towers do not
+# alias where they shrink towards the zenith; and taken a touch soft (SKY_SOFT
+# px), so the finished print shows cloud, not a sharpened photograph.
+#   SKY_SRCS  path:horizon_row[:flip], one per half (left of the pole first):
+#             Sandgate foreshore P1090276 (left) and P1090330 (right), CC0,
+#             Wikimedia Commons, at 3840 px (see experiment.json)
+SKY_SRCS = os.environ.get("SKY_SRCS", "/tmp/claude-0/climb/develop/work/r2s/src/s11.jpg:2420,/tmp/claude-0/climb/develop/work/r2s/src/s12.jpg:2570")
+SKY_VH = float(os.environ.get("SKY_VH", "-0.52"))
+PHI_POLE = np.radians(float(os.environ.get("PHI_POLE", "3.4")))  # the pole's axis, from straight down
+SKY_SOFT = float(os.environ.get("SKY_SOFT", "0.4"))
+SKY_ZOOM = float(os.environ.get("SKY_ZOOM", "1.2"))  # >1: towers larger (the middle 1/ZOOM of each photo spans its half turn)
+# The towers are kept, and the sky above them cleared: a horizon photograph's
+# upper sky (here cirrostratus ripples) wound round the zenith reads as a
+# zoom-blur swirl, and a sky seen straight up is clear cobalt overhead. Thin
+# cloud is kept up to SKY_KEEP[0] above the horizon and gone by SKY_KEEP[1]
+# (in photo widths / pi, the photo's own scale), a dense, bright mass (a
+# tower, SKY_DENSE in linear luminance) up to SKY_KEEP_TOWER; past them the
+# photo's own clear sky (_clear_sky), so the regrade's radial cobalt has a
+# clean field to ride on.
+SKY_KEEP = tuple(float(x) for x in os.environ.get("SKY_KEEP", "0.3,0.6").split(","))
+SKY_KEEP_TOWER = tuple(float(x) for x in os.environ.get("SKY_KEEP_TOWER", "1.0,1.3").split(","))
+SKY_DENSE = tuple(float(x) for x in os.environ.get("SKY_DENSE", "0.3,0.5").split(","))
+# The Sandgate frames are shot cool (their sunlit tops sit at ~#71909c):
+# each is balanced so its brightest cloud is neutral, and exposed so that
+# cloud lands at SKY_EXP (linear), before the regrade's shoulder.
+SKY_EXP = float(os.environ.get("SKY_EXP", "0.88"))
+
+
+def _clear_sky(src, hrow):
+    """The photo's clear sky with its cloud taken out (linear, at 1/8 size):
+    every pixel that is not open blue (whiteness over 0.3) or is under the
+    horizon is a hole, filled by push-pull from the open sky round it in log
+    light and smoothed. Its corners' vignetting and the haze round a tower's
+    foot are in it, so the cloud's share of a pixel is measured against the
+    sky actually behind it."""
+    sh, sw = src.shape[:2]
+    q = 8
+    sm = cv2.resize(src, (sw // q, sh // q), interpolation=cv2.INTER_AREA)
+    wh = sm.min(2) / np.maximum(sm.max(2), 1e-4)
+    ok = (wh < 0.3).astype(np.float32)
+    ok[int(hrow) // q - 2:] = 0
+    ok = cv2.erode(ok, disk(3))
+    lg = np.log(np.maximum(sm, 1e-4)) * ok[..., None]
+    c = np.exp(pushpull(lg, ok))
+    c = cv2.GaussianBlur(c, (0, 0), 6)
+    return cv2.resize(c, (sw, sh), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+
+
+def _sky_lookup(spec):
+    h, w = H, W
+    th = zenith_angle(h, w).astype(np.float64)
+    v = np.log(np.tan(np.maximum(th, 1e-4) / 2))
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64) + 0.5
+    phi = np.arctan2(-(xx - ZEN[0]), yy - ZEN[1]) - PHI_POLE
+    phi = (phi + np.pi) % (2 * np.pi) - np.pi  # 0 along the pole, + to its left
+    halves = [s.split(":") for s in spec.split(",")]
+    if len(halves) == 1:
+        halves = halves * 2
+    acc = np.zeros((h, w, 3), np.float64)
+    wsum = np.zeros((h, w), np.float64)
+    sacc = np.zeros((h, w, 3), np.float64)
+    hgt = np.zeros((h, w), np.float64)
+    d0, d1 = np.radians(4), np.radians(12)
+    near_top = np.abs(phi) > np.pi / 2
+    tphi = np.where(phi > 0, phi - np.pi, phi + np.pi)
+    wL = np.where(near_top, smoothstep(-d1, d1, -tphi), smoothstep(-d0, d0, phi))
+    for i, hv in enumerate(halves):
+        path, hrow = hv[0], float(hv[1])
+        flip = len(hv) > 2 and hv[2] == "flip"
+        bgr = cv2.imread(path, cv2.IMREAD_COLOR)
+        if flip:
+            bgr = bgr[:, ::-1]
+        src = s2l(bgr[:, :, ::-1].astype(np.float32) / 255)
+        sh, sw = src.shape[:2]
+        above = src[: int(hrow) - 20]
+        Ys = above @ LUMA
+        top = above[Ys > np.percentile(Ys, 99.0)].mean(0)
+        src = src * (float(top @ LUMA) / top) * (SKY_EXP / float(top @ LUMA))
+        csky = _clear_sky(src, hrow)
+        if SKY_SOFT > 0:
+            src = cv2.GaussianBlur(src, (0, 0), SKY_SOFT)
+        s0 = sw / np.pi
+        s = s0 / SKY_ZOOM
+        psi = phi if i == 0 else -phi  # 0 at the pole, pi above the zenith
+        mx = (1 - psi / np.pi) * sw / SKY_ZOOM + (sw - sw / SKY_ZOOM) / 2
+        my = hrow + (v - SKY_VH) * s
+        # the map's local scale (source px per print px) picks a pyramid level
+        gx = np.gradient(mx)
+        gy = np.gradient(my)
+        k = np.sqrt(np.abs(gx[1] * gy[0] - gx[0] * gy[1]))
+        lev = np.clip(np.log2(np.maximum(k, 1e-6)), 0, 7)
+        pyr = [src]
+        for _ in range(8):
+            pyr.append(cv2.pyrDown(pyr[-1]))
+        out = np.zeros((h, w, 3), np.float64)
+        for n in range(8):
+            wn = np.clip(1 - np.abs(lev - n), 0, 1)
+            if not (wn > 0).any():
+                continue
+            sc = 2.0 ** n
+            smp = cv2.remap(pyr[n], ((mx + 0.5) / sc - 0.5).astype(np.float32), ((my + 0.5) / sc - 0.5).astype(np.float32),
+                            cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
+            out += smp * wn[..., None]
+        clear = cv2.remap(csky, mx.astype(np.float32), np.clip(my, 0, sh - 1).astype(np.float32),
+                          cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+        print("lookup: balance gains", np.round(float(top @ LUMA) / top, 2))
+        wi = wL if i == 0 else 1 - wL
+        acc += out * wi[..., None]
+        wsum += wi
+        sacc += clear * wi[..., None]
+        # height above the horizon in the photo's own units (one photo width
+        # per half turn), so SKY_KEEP holds whatever SKY_ZOOM is
+        hgt += (v - SKY_VH) * (s / s0) * wi
+        print("lookup:", os.path.basename(path), "rows", int(my.min()), "..", int(my.max()), "of", sh, "scale", round(float(k.min()), 2), "..", round(float(k.max()), 1))
+    out = acc / np.maximum(wsum, 1e-6)[..., None]
+    # thin cloud (the cirrus and the ripples) goes by SKY_KEEP; a dense,
+    # bright mass (a tower) is kept to SKY_KEEP_TOWER, so its top is not cut
+    hgt = hgt / np.maximum(wsum, 1e-6)
+    keep = smoothstep(-SKY_KEEP[1], -SKY_KEEP[0], hgt)
+    Yo = cv2.GaussianBlur((out @ LUMA).astype(np.float32), (0, 0), 3)
+    dense = smoothstep(SKY_DENSE[0], SKY_DENSE[1], Yo).astype(np.float32)
+    dense = cv2.GaussianBlur(cv2.dilate(dense, disk(5)), (0, 0), 4)
+    keep_t = smoothstep(-SKY_KEEP_TOWER[1], -SKY_KEEP_TOWER[0], hgt)
+    keep = np.maximum(keep, dense * keep_t)[..., None]
+    # the clear sky behind it all, known here (each photo's own, cloud taken
+    # out), so the regrade need not estimate it round the cloud (an estimate
+    # pushed in from the open sky left a pale halo round every mass). Where
+    # the cloud is cleared the sky is exactly this, and the regrade's swap
+    # (P + T - S) lands exactly on its cobalt: no seam where the halves meet.
+    S = (sacc / np.maximum(wsum, 1e-6)[..., None]).astype(np.float32)
+    clear = S
+    return np.clip(out * keep + clear * (1 - keep), 0, 1).astype(np.float32), np.maximum(S, 1e-4)
+
+
+def regrade_cumulus(P, S_known=None):
     """A photographed cumulus sky (linear) graded for the print: cobalt round
     the zenith opening to cyan, sunlit warm-neutral tops, skylight-blue
     undersides. Returns linear."""
@@ -528,10 +688,12 @@ def regrade_cumulus(P):
     lq = cv2.resize(lg, (w // q, h // q), interpolation=cv2.INTER_AREA)
     sq = cv2.resize(s, (w // q, h // q), interpolation=cv2.INTER_AREA)
     wq = (sq > 0.85).astype(np.float32) * sq
-    num = cv2.GaussianBlur(lq * wq[..., None], (0, 0), 20)
-    den = cv2.GaussianBlur(wq, (0, 0), 20)
+    num = cv2.GaussianBlur(lq * wq[..., None], (0, 0), SKY_EST)
+    den = cv2.GaussianBlur(wq, (0, 0), SKY_EST)
     est = pushpull(num / np.maximum(den, 1e-5)[..., None], np.clip(den / 0.25, 0, 1))
     S = np.exp(cv2.resize(est, (w, h), interpolation=cv2.INTER_CUBIC))
+    if S_known is not None:
+        S = S_known
     th = zenith_angle(h, w)
     t = np.clip(th / th.max(), 0, 1) ** GRADE_EASE
     t = t * t * (3 - 2 * t) * 0.35 + t * 0.65
@@ -543,15 +705,27 @@ def regrade_cumulus(P):
     op = np.clip((wh - wS) / np.maximum(0.92 - wS, 1e-3), 0, 1)
     op = smoothstep(0.0, 1.0, op).astype(np.float32)
     # the sky's share swapped: a gain where it is clear, additively under a
-    # thin edge (a gain on a pale edge tints all of its light)
+    # thin edge (a gain on a pale edge tints all of its light). The Sandgate
+    # sky has almost no red, so its gain's red is ~10x, and on every fringe
+    # and wisp that the cloud share misses it went pink: there the swap is
+    # additive throughout (SKY_GAIN 0), the photo's grain riding on the new
+    # blue as an offset rather than a gain.
     clear = (1 - op)[..., None]
     mul = P * (T / S)
     add = np.maximum(P + clear * (T - S), 0.2 * P)
-    k = clear ** 2
+    k = SKY_GAIN * (1 - smoothstep(0.0, 0.25, op))[..., None]
     B = mul * k + add * (1 - k)
-    # The cloud's own light: its luminance, on a shoulder under TOP (sRGB)
-    Y = l2s(np.clip(B @ LUMA, 0, 1))
-    knee = TOP - 0.16
+    # The cloud's own light. Its local contrast is pulled back first, in log
+    # light (LC of the detail over a SKY_LC_PX blur kept, in the cloud only):
+    # a cumulus photographed at a few hundred metres has every curd's edge
+    # crisp, and under the print's film and grain that read as crunchy,
+    # mottled texture. The masses keep their modelling; the curds go soft.
+    Lb = np.log(np.maximum(B @ LUMA, 1e-5)).astype(np.float32)
+    base = cv2.GaussianBlur(Lb, (0, 0), SKY_LC_PX)
+    Lb = Lb + op * (SKY_LC - 1) * (Lb - base)
+    # then on a shoulder under TOP (sRGB)
+    Y = l2s(np.clip(np.exp(Lb), 0, 1))
+    knee = TOP - 0.2
     Ys = np.where(Y < knee, Y, knee + (TOP - knee) * np.tanh((Y - knee) / (TOP - knee)))
     Yl = s2l(Ys)
     # lit by the sun (warm neutral) at the tops, by the sky (blue) in shade:
@@ -561,7 +735,12 @@ def regrade_cumulus(P):
     top = cv2.GaussianBlur(cv2.dilate(top, disk(36)), (0, 0), 12)
     top = cv2.resize(top, (w, h), interpolation=cv2.INTER_CUBIC)
     rel = Yl / np.maximum(top, 1e-3)
-    shade = (1 - smoothstep(0.35, 0.95, rel)) * SHADE
+    shade = (1 - smoothstep(0.3, 0.95, rel)) * SHADE
+    # A shadowed underside is lit by the whole dome of blue round it, not a
+    # grey: it takes the skylight's hue (SHADE_COL, ~210) at a raised
+    # saturation, and is lifted a little (SHADE_LIFT stops at full shade) so
+    # it sits a mid skylight blue rather than going down into mud.
+    Yl = Yl * np.exp2(SHADE_LIFT * shade * op)
     warm = HI_COL / float(HI_COL @ LUMA)
     blue = SHADE_COL / float(SHADE_COL @ LUMA)
     tint = warm * (1 - shade[..., None]) + blue * shade[..., None]
@@ -695,7 +874,9 @@ if "--sky" in sys.argv:
     fill0 = _read_lin(os.path.join(WK, "orig-fill.webp"))
     a3 = alpha[..., None]
     pm = np.minimum(np.maximum(plate0 - (1 - a3) * fill0, 0), a3) * (a3 > 0.004)
-    sky = regrade_cumulus(_sky_window(SKY_SRC))
+    raw, S_known = _sky_lookup(SKY_SRCS) if SKY_SRCS else (_sky_window(SKY_SRC), None)
+    save8(os.path.join(WK, "p-sky-raw.png"), l2s(raw)[:, :, ::-1])
+    sky = regrade_cumulus(raw, S_known)
     plate = np.clip(pm + (1 - a3) * sky, 0, 1)
     write_srgb(os.path.join(OUT, "plate.webp"), plate, 11)
     write_srgb(os.path.join(OUT, "fill.webp"), sky, 12)
