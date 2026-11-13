@@ -18,13 +18,16 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    is partially polarised and fades on one face while the other holds.
 //
 // The plate is a fixed stereographic render of Poly Haven's docklands_01
-// HDRI (linear, unclipped; sun at az 38°, alt 28.8°, found from its
-// brightest point and checked against the time and place of capture): a
-// worm's-eye view 89° up, a degree off the zenith, rolled so the towers wrap
-// the frame: the big apartment block leans in across the top and left edges,
-// the pointed tower from the left, the glass block and the red mast from the
-// bottom and a second glass block from the bottom right, and the dark band
-// 90° from the sun arcs across the open sky in the middle of that canyon.
+// HDRI at 16k, its native maximum (linear, unclipped; sun at az 38°, alt
+// 28.8°, found from its brightest point and checked against the time and
+// place of capture), 2x2 supersampled to 3840x4800 so the print always
+// downsamples it: a worm's-eye view 89° up, a degree off the zenith, rolled
+// so the towers wrap the frame: the big apartment block leans in across the
+// top left, the pointed tower from the left, the glass block from the bottom
+// left, the red mast stands up from the foot of the print and a second glass
+// block comes in from the bottom right, and the dark band 90° from the sun
+// arcs across the open sky in the middle of that canyon. The roll keeps the
+// quay's chevron hoarding off the print, so the mast is its only warm colour.
 // Each pixel's view direction is rebuilt from the camera through the same
 // projection, so γ is exact.
 //
@@ -38,9 +41,15 @@ const AUX = "/lab/polariser/aux.png";
 // stereographic, so a plane point p = 2 d⊥ / (1 + d·f), with the plate's
 // horizontal edge at hfov / 2 from the axis. The 4:5 print crops 92% of it,
 // a 140° horizontal field on the page.
-const CAM = { yaw: 17, pitch: 89, roll: 135, hfov: 149.09834806856665, aspect: 2400 / 1920 };
+const CAM = { yaw: 17, pitch: 89, roll: 119, hfov: 149.09834806856665, aspect: 4800 / 3840 };
 // The print crops this share of the plate.
 const CROP = 0.92;
+// Mip bias on the plate and aux lookups. The print minifies the plate 1.6 to
+// 3.3x, and plain trilinear filtering would blend in the next mip down, which
+// is coarser than the print, so the towers would come out upscaled and soft.
+// Biasing a level finer keeps every blended level at or above the print's own
+// resolution; the mips are box-prefiltered, so the window grids do not alias.
+const LOD_BIAS = -0.7;
 const SUN = { lon: 38.12255859375, lat: 28.762207031249996 };
 const GLASS_A = [-0.85284216, 0, 0.5221688];
 const GLASS_B = [-0.54538212, 0, -0.83818754];
@@ -49,7 +58,7 @@ const K = 0.6;
 // The filter angle that deepens this frame most (mean sky transmission is
 // lowest there, tools/depth/bakes/polariser/hero.py); the hero still and the
 // end of the reveal.
-const HERO = 0.14;
+const HERO = 0.05;
 // Effective maximum degree of polarisation. A clean Rayleigh sky reaches about
 // 0.75, but a March cumulus sky is multiply scattered off bright cloud and a
 // real circular polariser does not extinguish fully, so the band 90° from the
@@ -131,6 +140,7 @@ uniform float uVignette; // lens cos^4 falloff, before the emulsion
 uniform float uPrintAsp; // print w / h
 uniform vec3 uShade;     // cloud split tone: skylight-lit shadow, sunlit top
 uniform vec3 uSunlit;
+uniform float uLodBias;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // Negative to print. Print density is a sigmoid in log exposure, so the
@@ -180,8 +190,8 @@ vec2 glass(vec3 d, vec3 n) {
 
 void main() {
   vec2 puv = vec2(vUv.x, 1.0 - vUv.y) * uCrop.xy + uCrop.zw;
-  vec3 C = decode(texture(uPlate, puv).rgb);
-  vec3 aux = texture(uAux, puv).rgb;
+  vec3 C = decode(texture(uPlate, puv, uLodBias).rgb);
+  vec3 aux = texture(uAux, puv, uLodBias).rgb;
   // Inverse stereographic: p on the plane, back to the unit sphere.
   vec2 s = puv * 2.0 - 1.0;
   vec2 p = vec2(s.x, -s.y * uAsp) * uX;
@@ -285,13 +295,31 @@ function program(gl, vs, fs) {
   return { p, u };
 }
 
+// The plate is 3840x4800; a GPU that caps textures below that gets it
+// halved (or more) through a canvas rather than a failed upload.
+function fitTexture(gl, img) {
+  const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (Math.max(w, h) <= max) return img;
+  let s = 1;
+  while (Math.max(w, h) * s > max) s /= 2;
+  const c = document.createElement("canvas");
+  c.width = Math.round(w * s);
+  c.height = Math.round(h * s);
+  const g = c.getContext("2d");
+  g.imageSmoothingQuality = "high";
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return c;
+}
+
 function imageTexture(gl, img, mips) {
   const t = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, t);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, fitTexture(gl, img));
   if (mips) gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -544,6 +572,7 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform1f(u.uPrintAsp, L.pw / L.ph);
     gl.uniform3fv(u.uShade, lumNorm(SHADE).map((v) => v * SHADE_DEPTH));
     gl.uniform3fv(u.uSunlit, SUNLIT);
+    gl.uniform1f(u.uLodBias, LOD_BIAS);
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform3fv(u.uWB, WB);
     gl.uniform1f(u.uLinearOut, floatOk && sceneT.ok ? 1 : 0);
