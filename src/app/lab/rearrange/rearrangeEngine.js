@@ -77,7 +77,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // sky meets dark steel, film.js (summer: Pro-Mist diffusion, dye-cloud
 // softness, a soft shoulder that rolls cloud off warm-neutral), a lifted
 // teal black, and grain at 24 fps whose clumps are filtered by the
-// emulsion's MTF.
+// emulsion's MTF. Last, before the lifted black, one grade over the
+// developed print (COBALT), gated by the scene's sky matte so plate and
+// cut-outs take it alike: the upper sky's clear blue pulled down to a deep
+// cobalt, the horizon side left paler; cloud's lit tops onto a warm-neutral
+// shoulder that never clips, its shaded sides skylight blue, and a thin
+// diffusion off the lit tops into the blue round them.
 //
 // Query: ?move=k,dx,dy holds object k (0 platform, 1 lamp, 2 far pole,
 // 3 pull-off insulator, 4 insulator pair) lifted mid-move, dx/dy in photo
@@ -89,7 +94,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // there). ?at=s stops the opening's clock at s seconds (0.2: the white-blue
 // overexposure; 3.4: the demo held up). &sunAz / &sunEl (deg) override the sun.
 // &grade=0 shows the plate's own sky. &flatten, &halation, &grain override
-// the print's (PRINT); 0 turns each off.
+// the print's (PRINT); 0 turns each off. &cobalt scales the last grade and
+// &diffuse its cloud-edge diffusion (0: off).
 
 const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -179,6 +185,37 @@ const PRINT = {
   // grain, after everything (see FINAL_FS)
   grain: 0.17,
   grainSize: 1.15, // x 1/1100 of the frame height
+};
+
+// The last grade, on the developed print (see FINAL_FS): ref 3's sky and
+// cloud, done once over the whole frame, so the plate and the moved
+// cut-outs pass through the same grade and still match. Gated by the
+// scene's sky matte (steel, cable and the platform's own paint never
+// change), and inside it by what the pixel is: clear blue, a cloud's
+// shaded side or its lit top. sRGB, 0..255.
+const COBALT = {
+  // the clear blue, pulled toward the zenith target over the upper part of
+  // the frame (red and green come out much faster than blue) and left
+  // alone toward the horizon side, so the gradient grows stronger: [from,
+  // to] in frame height from the bottom, and a tilt toward the left (the
+  // zenith end of the rolled frame)
+  zenith: [10, 80, 145],
+  mid: [52, 118, 172],
+  span: [0.42, 0.92, 0.08],
+  deep: 0.88,
+  // a cloud's lit top onto a warm-neutral shoulder: [knee luminance (above
+  // the shaded sides), the power it is lifted by] and the peak it rolls
+  // into, warming as it climbs (never quite reached, so the grain still has
+  // room under 250)
+  shoulder: [0.78, 1.5],
+  peak: [250, 246, 238],
+  // its shaded sides toward skylight blue, keeping their luminance
+  shade: [150, 175, 205],
+  shadeAmount: 0.62,
+  // a thin diffusion off the lit tops into the blue round them only:
+  // strength and radius (of the frame height)
+  bloom: 0.6,
+  bloomRadius: 0.005,
 };
 
 const FILM = {
@@ -662,8 +699,74 @@ uniform float uGrain;
 uniform float uGrainPx;
 uniform float uSeed;
 uniform float uOpen;   // the opening's overexposure still to come off (1 at first)
+uniform vec2 uTexel;
+uniform float uCobalt; // the grade's strength (0: off)
+uniform vec3 uZenith;  // sRGB: where the upper sky is pulled
+uniform vec3 uMidSky;  // and the target where that pull starts
+uniform vec4 uDeep;    // from, to (frame height, from the bottom), tilt left, amount
+uniform vec2 uShoulder;
+uniform vec3 uPeak;
+uniform vec3 uShade;
+uniform float uShadeAmt;
+uniform float uBloom;
+uniform float uBloomR; // device px
 out vec4 o;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 toLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+float satOf(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b));
+  return (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-3);
+}
+// a cloud's lit top, as the share of it the bloom spreads
+float litTop(vec3 c) {
+  return smoothstep(0.7, 0.93, dot(c, LUMA)) * (1.0 - smoothstep(0.18, 0.4, satOf(c)));
+}
+// The grade, in the print's own values (sRGB). m is how much of the pixel
+// is sky (the scene's matte): nothing else is touched.
+vec3 cobalt(vec3 f, float m) {
+  float sat = satOf(f);
+  float Y = dot(f, LUMA);
+  // 1. The clear blue, deepened toward the zenith end. What decides clear
+  //    is colour: the open blue is saturated, a cloud is not, so a wisp
+  //    keeps its own pale over the deeper blue instead of being pulled
+  //    into it. Linear light, so the red and green fall off fast and the
+  //    blue only a little.
+  float t = clamp((vUv.y - uDeep.x) / (uDeep.y - uDeep.x) + uDeep.z * (0.5 - vUv.x), 0.0, 1.0);
+  t = t * t * (3.0 - 2.0 * t);
+  float clear = smoothstep(0.44, 0.66, sat) * (1.0 - smoothstep(0.62, 0.8, Y));
+  vec3 L = toLin(f);
+  vec3 tgt = toLin(mix(uMidSky, uZenith, t));
+  L = mix(L, tgt, clear * t * uDeep.w * m);
+  // 2. The cloud's shaded sides (dim, nearly neutral) toward skylight blue,
+  //    at their own luminance, below where the lit top begins.
+  float cloudy = 1.0 - smoothstep(0.26, 0.44, sat);
+  float shadeW = cloudy * smoothstep(0.42, 0.58, Y) * (1.0 - smoothstep(uShoulder.x - 0.08, uShoulder.x + 0.04, Y));
+  vec3 sb = toLin(uShade);
+  vec3 Ls = sb * (dot(L, LUMA) / dot(sb, LUMA));
+  L = mix(L, Ls, shadeW * uShadeAmt * m);
+  // 3. Its lit top lifted onto a warm-neutral shoulder that rolls into the
+  //    peak and never quite reaches it: the thin tops come up to glow beside
+  //    the thick ones, the clipped cores come down off 255, and all of it
+  //    turns from neutral white to warm.
+  vec3 s = toSrgb(L);
+  float Ys = dot(s, LUMA);
+  float P = dot(uPeak, LUMA) * 0.993;
+  float k0 = uShoulder.x;
+  float u = clamp((Ys - k0) / (1.0 - k0), 0.0, 1.0);
+  float Yh = k0 + (P - k0) * (1.0 - pow(1.0 - u, uShoulder.y));
+  // warm-neutral at the knee, the peak's own warmth only as it nears it,
+  // so the lit top shades into its cooler edge instead of sitting on it
+  vec3 hue = mix(vec3(1.0), uPeak / dot(uPeak, LUMA), smoothstep(k0, 1.0, Ys));
+  vec3 warm = hue * Yh;
+  float hiW = (1.0 - smoothstep(0.25, 0.45, sat)) * smoothstep(k0 - 0.04, k0 + 0.1, Ys);
+  return mix(s, warm, hiW * m);
+}
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -679,6 +782,30 @@ void main() {
   // off the print the scene's alpha is 0, on it 0.5 (sky) .. 1
   float cov = clamp(texture(uScene, vUv).a * 4.0, 0.0, 1.0);
   vec3 f = texture(uFilm, vUv).rgb;
+  // the sky's share of the pixel (scene alpha: 1 - sky / 2 on the print),
+  // softened by a pixel so the grade's edge follows the film's own
+  float sa = textureLod(uScene, vUv, 1.0).a;
+  // (its thresholds are the developed print's: through the opening's
+  // overexposure it would posterize the blown sky, so it comes in only as
+  // the print develops out of it)
+  float m = sa > 0.25 ? clamp(2.0 * (1.0 - sa), 0.0, 1.0) * uCobalt : 0.0;
+  m *= pow(1.0 - uOpen, 4.0);
+  if (m > 0.0) {
+    // the diffusion: the lit tops round the pixel (two rings, through the
+    // print's mips) spill into whatever of it is darker, so it shows only on
+    // the blue side of a cloud's edge, as a thin glow, and never on steel
+    float spill = 0.0;
+    float lod = log2(max(uBloomR * 0.5, 1.0));
+    for (int i = 0; i < 12; i++) {
+      float a = float(i) * 0.5235988 + (i % 2 == 0 ? 0.0 : 0.26);
+      float r = uBloomR * (i % 2 == 0 ? 0.6 : 1.3);
+      spill += litTop(textureLod(uFilm, vUv + vec2(cos(a), sin(a)) * r * uTexel, lod).rgb);
+    }
+    spill = max(spill / 12.0 - litTop(f), 0.0);
+    vec3 g = cobalt(f, m);
+    vec3 glow = uPeak * spill * uBloom * m;
+    f = 1.0 - (1.0 - g) * (1.0 - glow);
+  }
   // a toe, not a veil: the black comes up, the sky's midtones barely move
   float yf = clamp(dot(f, LUMA), 0.0, 1.0);
   f += uLift * pow(1.0 - yf, 6.0);
@@ -1083,6 +1210,9 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     devT = target();
     filmT = target();
+    // the last grade's diffusion reads the print through its mip chain
+    gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     wireT = target(floatTarget);
     film.resize(stage.canvas.width, stage.canvas.height);
     dirty = true;
@@ -1805,6 +1935,18 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1f(fin.u.uGrainPx, Math.max(0.75, (stage.canvas.height / 1100) * PRINT.grainSize));
     gl.uniform1f(fin.u.uSeed, seed % 997);
     gl.uniform1f(fin.u.uOpen, open);
+    const c255 = (c) => c.map((v) => v / 255);
+    gl.uniform2f(fin.u.uTexel, 1 / stage.canvas.width, 1 / stage.canvas.height);
+    gl.uniform1f(fin.u.uCobalt, num("cobalt") ?? 1);
+    gl.uniform3fv(fin.u.uZenith, c255(COBALT.zenith));
+    gl.uniform3fv(fin.u.uMidSky, c255(COBALT.mid));
+    gl.uniform4f(fin.u.uDeep, ...COBALT.span, COBALT.deep);
+    gl.uniform2fv(fin.u.uShoulder, COBALT.shoulder);
+    gl.uniform3fv(fin.u.uPeak, c255(COBALT.peak));
+    gl.uniform3fv(fin.u.uShade, c255(COBALT.shade));
+    gl.uniform1f(fin.u.uShadeAmt, COBALT.shadeAmount);
+    gl.uniform1f(fin.u.uBloom, num("diffuse") ?? COBALT.bloom);
+    gl.uniform1f(fin.u.uBloomR, Math.max(2, COBALT.bloomRadius * stage.canvas.height));
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
     gl.activeTexture(gl.TEXTURE0);
@@ -1949,6 +2091,8 @@ export async function createRearrange(host, { embedded = false } = {}) {
     // rate film did
     if (developed || Math.abs(exposure - lastExp) > 1e-4) {
       film.render(devT.tex, { ...FILM, exposure }, filmT.fbo);
+      gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
       lastExp = exposure;
       lastGrain = -1;
       drew = true;
