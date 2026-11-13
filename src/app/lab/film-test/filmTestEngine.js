@@ -4,6 +4,16 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "./film";
 // Film test: one photograph developed through the film kit, shot through a
 // circular polariser you turn by dragging sideways.
 //
+// The frame is a worm's-eye view: standing at the foot of a concrete utility
+// pole, looking up past its crossarms into a towering cumulus. The plate is
+// baked by tools/depth/bakes/film-test/composite.py: Yasuo Ogiuchi's cumulus
+// with its own three wires inpainted out, Liu JiaWei's pole matted off its
+// sky and set in front, the wires that leave the pole's frame continued to
+// the edge, and the whole frame given a mild stereographic swell and a
+// keystone towards a zenith three frame heights above the top edge, so the
+// pole and the cloud's rising axis lean in together and the wires bow out
+// the way a wide lens pointed straight up draws them.
+//
 // The polariser sits in front of the lens, so it acts on the scene light
 // before the film sees it. Clear summer sky is strongly polarised skylight;
 // sunlit cloud is not. Turning the filter by an angle d from the sky's
@@ -27,14 +37,16 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "./film";
 // ?preset=summer|dusk|night, ?motion=0 still grain and no drift, and any
 // numeric film param to override the preset (?halation=0.6&bloom=0.3).
 
-const SRC = "/lab/film-test/cumulus-wires.jpg";
+const SRC = "/lab/film-test/cumulus-pole.jpg";
 
 // Summer, re-tuned for this photograph: a towering cumulus shot straight up
-// past three power lines, its lobes drawn by a soft high sun and a hazy blue.
+// past a utility pole, its lobes drawn by a soft high sun and a hazy blue.
 // Only light past the knee scatters, and the knee is narrow, so the shaded
 // lower lobes keep their mid-greys out of the veil; a steeper mid slope gives
-// them back the separation the haze took. The shoulder rolls off warm-neutral
-// so the brightest tops read as sunlit rather than paper white. Nothing in the
+// them back the separation the haze took. The shoulder rolls off warm, a
+// faint Portra cream on the sunlit tops, so the brightest cloud reads as
+// lit by the sun rather than as paper white, while its skylit shade below
+// stays blue-grey. Nothing in the
 // cloud is clipped, so it does not need to glow past itself.
 const SUMMER = {
   ...FILM_PRESETS.summer,
@@ -43,8 +55,8 @@ const SUMMER = {
   headroom: 0.8,
   bloomThreshold: 0.62,
   bloomKnee: 0.18,
-  highlightTint: [1.04, 1, 0.94],
-  shoulderTint: [1.005, 0.991, 0.962],
+  highlightTint: [1.05, 1, 0.93],
+  shoulderTint: [1.025, 0.996, 0.935],
   whitePoint: 1.0,
 };
 const PRESETS = { ...FILM_PRESETS, summer: SUMMER };
@@ -108,6 +120,11 @@ void main() {
   // cloud's shade, lit by the deep blue overhead, keeps its blue.
   vec3 w = mix(vec3(1.0, 1.06, 0.92), vec3(1.25, 1.12, 0.9), sky);
   c *= max(1.0 - dop * (sky + 0.6 * shade) * swing * w, 0.0);
+  // Looking up from the pole's foot the zenith lies above the top edge and
+  // the horizon below the bottom one, so the clear sky pales towards the
+  // bottom of the frame: a little more of the low, hazy air's white veil.
+  float low = 1.0 - smoothstep(0.0, 0.75, vUv.y);
+  c += sky * low * low * 0.3 * vec3(0.1, 0.115, 0.13);
   outColor = vec4(toSrgb(c), 1.0);
 }`;
 

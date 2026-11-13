@@ -1,6 +1,6 @@
 {
   "title": "Film test",
-  "description": "A test bench for the lab's shared film look, shot through a circular polariser. One photograph of a towering summer cumulus, looking straight up past three power lines, developed with halation, Pro-Mist diffusion, dye-cloud colour bleed, a film curve that lets the cloud glow instead of clip, fine grain and an optical vignette. Drag sideways to turn the polariser: the skylight's polarised share follows cos², so the sky deepens to cobalt and the cloud's skylit shade gains weight, then pales back to haze, half a turn per cycle.",
+  "description": "A test bench for the lab's shared film look, shot through a circular polariser. A worm's-eye frame from the foot of a concrete utility pole, its crossarms and fanned wires leaning in towards the zenith in front of a towering summer cumulus, developed with halation, Pro-Mist diffusion, dye-cloud colour bleed, a film curve that lets the cloud glow instead of clip, fine grain and an optical vignette. Drag sideways to turn the polariser: the skylight's polarised share follows cos², so the sky deepens to cobalt and the cloud's skylit shade gains weight, then pales back to haze, half a turn per cycle.",
   "tags": ["WebGL", "Photography", "Film"],
   "status": "draft",
   "createdAt": "2026-11-06T18:10:00.000Z",
@@ -8,12 +8,14 @@
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.7, 0.5] },
   "photo": {
-    "name": "Yasuo Ogiuchi, cumulus congestus and power lines, 2013 (CC BY 3.0, via Wikimedia Commons)",
+    "name": "Yasuo Ogiuchi, cumulus congestus and power lines, 2013 (CC BY 3.0, via Wikimedia Commons), its wires inpainted out; with Liu JiaWei's utility pole (Unsplash License) matted in front, composited and warped by tools/depth/bakes/film-test/composite.py",
     "url": "https://commons.wikimedia.org/wiki/File:500px_photo_(44011304).jpeg"
   },
   "sources": [
     "https://commons.wikimedia.org/wiki/File:500px_photo_(44011304).jpeg",
     "https://creativecommons.org/licenses/by/3.0/",
+    "https://unsplash.com/photos/a-telephone-pole-with-a-clock-on-it-2MDN2NfHfLY",
+    "https://unsplash.com/license",
     "https://en.wikipedia.org/wiki/Halation",
     "https://www.cinestill.com/",
     "https://gpuopen.com/wp-content/uploads/2016/03/GdcVdrLottes.pdf",
