@@ -41,7 +41,7 @@ const RHO = 1.2;
 const CD = 1.15;
 const CT = 0.04;
 const SUB = 10; // substeps per 1/60 s
-const PHANTOM = 4; // cells simulated past the frame edge
+export const PHANTOM = 4; // cells simulated past the frame edge
 const BEND = 4e-5; // compliance across two cells
 const BEND4 = 4e-4; // and across four
 // A heavier, doubled cotton top does not crease like the sheer dress: its

@@ -1,6 +1,6 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
-import { createCloth, project, PX, ROPE } from "./cloth";
+import { createCloth, project, PHANTOM, PX, ROPE } from "./cloth";
 
 // Sentaku (laundry): a washing line seen from underneath against a cobalt
 // sky, the sun behind a sheer polka-dot dress. Every garment was cut out of
@@ -27,9 +27,21 @@ import { createCloth, project, PX, ROPE } from "./cloth";
 // sink toward rim-lit silhouettes against it, and the exposure breathes back
 // as the dress covers it again.
 //
+// The view: the lens looks further up than the photographer did. The camera
+// pitches toward the zenith about the photograph's own optical centre, a pure
+// rotation, which reprojects every depth exactly (a homography of the frame),
+// so the cut-out cloth keeps its geometry wherever it hangs. With a wider
+// lens, the line drops and the garments hang toward the viewer, their sides
+// converging on the zenith; the sky the photograph never held (above its top
+// edge, and the wedges either side) is its smooth fit carried on. Everything
+// is lit in the photograph's own pixels and only drawn through the
+// homography, so the sun, its halo, the disc's coverage and the cloth's light
+// stay registered. On load the camera tilts up on a spring.
+//
 // Query: ?gust=0..1 holds a steady gust (with ?dir=-1|1 and ?t=seconds of it,
 // default 2.4), simulated deterministically and frozen, for stills.
-// ?still=1 is the photograph with no wind. Numeric FILM keys override the grade.
+// ?still=1 is the photograph with no wind. ?tilt=degrees sets the pitch (0 is
+// the photograph's own view). Numeric FILM keys override the grade.
 
 const ASSET = "/lab/sentaku/";
 const PAPER = [0xf2, 0xf0, 0xeb];
@@ -104,6 +116,51 @@ const MU_MIN = 0.15; // the view cosine's floor: edge-on is dense, not opaque
 // its matte is rounded there, or a flipped tie reads as a paper tab.
 const TIE = [748, 1296, 852, 1492];
 
+// The photograph's lens: the library copy is 2667 x 4000 (a 24 x 36 frame on
+// its side), worked at 1400 px wide, so the 24 mm side is 1400 px and a 26 mm
+// equivalent lens is about 1550 px; its optical centre is the middle of the
+// uncropped frame (the crop keeps the top 3080 of 4000 rows).
+const LENS_F = 1550;
+const LENS_C = [700, 1050];
+const TILT = 26; // degrees the camera pitches up past the photographer's view
+const WIDEN = 1.2; // and the lens widens by this much as it does
+const LENS_OY = 420; // the optical centre's row in the tilted frame
+const TILT_W = 5.2; // the tilt's spring: rad/s, about 1.2 s to settle
+const TILT_Z = 0.82;
+const TILT_AT = 0.35; // s after load before it starts
+
+const mul3 = (a, b) => {
+  const o = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  return o;
+};
+const inv3 = (m) => {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  return [A, c * h - b * i, b * f - c * e, B, a * i - c * g, c * d - a * f, C, b * g - a * h, a * e - b * d].map((v) => v / det);
+};
+const apply3 = (m, u, v) => {
+  const w = m[6] * u + m[7] * v + m[8];
+  return [(m[0] * u + m[1] * v + m[2]) / w, (m[3] * u + m[4] * v + m[5]) / w];
+};
+// The photograph's pixels to the tilted frame's (row-major): back through the
+// lens to a ray, turned by the pitch about the lens's x axis (image y points
+// down, so up is -y), and out through the wider lens about its new centre.
+const viewOf = (deg, widen, oy) => {
+  const t = (deg * Math.PI) / 180;
+  const c = Math.cos(t);
+  const s = Math.sin(t);
+  const f = LENS_F;
+  const fo = f / widen;
+  const [cx, cy] = LENS_C;
+  const Kin = [1 / f, 0, -cx / f, 0, 1 / f, -cy / f, 0, 0, 1];
+  const R = [1, 0, 0, 0, c, s, 0, -s, c];
+  const Kout = [fo, 0, cx, 0, fo, oy, 0, 0, 1];
+  const H = mul3(Kout, mul3(R, Kin));
+  return { H, Hi: inv3(H) };
+};
+
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
 const VERT_FULL = `#version 300 es
@@ -142,7 +199,10 @@ precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uPlate;
+uniform sampler2D uBlur;
 uniform vec2 uSize;
+uniform mat3 uHi;     // the tilted frame's px back to the photograph's
+uniform vec3 uSkyQ[6]; // the sky's quadratic, log linear rgb, per basis term
 uniform vec3 uHalo[${HALO.length / 3}];
 ${SUN_GLSL}
 ${SRGB}
@@ -152,13 +212,45 @@ vec3 haloAt(float r) {
   int i = int(f);
   return mix(uHalo[i], uHalo[min(i + 1, NH)], f - float(i));
 }
+// The sky's smooth fit, carried past the frame. Above the top it deepens on
+// toward the zenith, eased to a hold a fifth of the frame up so it goes deep
+// navy, never black; past the sides and the foot it holds at the edge.
+float ease(float x, float lo, float hi, float k) {
+  if (x < lo) return lo - k * (1.0 - exp((x - lo) / k));
+  if (x > hi) return hi + k * (1.0 - exp(-(x - hi) / k));
+  return x;
+}
+vec3 skyFit(vec2 p) {
+  vec2 n = p / uSize;
+  n.x = ease(n.x, 0.0, 1.0, 0.08);
+  n.y = n.y < 0.0 ? ease(n.y, 0.0, 1.0, 0.2) : min(n.y, 1.0);
+  return exp(uSkyQ[0] + uSkyQ[1] * n.x + uSkyQ[2] * n.y + uSkyQ[3] * n.x * n.x + uSkyQ[4] * n.y * n.y + uSkyQ[5] * n.x * n.y);
+}
+// The plate, and past its edge the fit: matched to the plate's own sky at the
+// nearest edge (as a ratio, faded out over a few hundred px) so there is no
+// seam, with the plate's grain mirrored back out from inside the edge.
+vec3 plateAt(vec2 p, float r) {
+  vec2 lo = vec2(0.5);
+  vec2 hi = uSize - 0.5;
+  if (p.x >= lo.x && p.y >= lo.y && p.x <= hi.x && p.y <= hi.y) return texture(uPlate, p / uSize).rgb;
+  vec2 pc = clamp(p, lo, hi);
+  vec3 at = texture(uBlur, pc / uSize).rgb;
+  vec3 fit = skyFit(pc) + haloAt(distance(pc, uSun));
+  float w = exp(-distance(p, pc) / 240.0);
+  vec3 sky = skyFit(p) * pow(max(at, 1e-4) / max(fit, 1e-4), vec3(w)) + haloAt(r);
+  vec2 pm = clamp(uSize - abs(uSize - abs(p)), lo, hi);
+  vec3 bm = texture(uBlur, pm / uSize).rgb;
+  vec3 grain = texture(uPlate, pm / uSize).rgb - bm;
+  return max(sky + grain * sky / max(bm, 1e-3), 0.0);
+}
 void main() {
-  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
-  vec2 p = uv * uSize;
+  vec2 q = vec2(vUv.x, 1.0 - vUv.y) * uSize;
+  vec3 hp = uHi * vec3(q, 1.0);
+  vec2 p = hp.xy / hp.z;
   float r = distance(p, uSun);
   vec3 h = haloAt(r);
   // the sky with the photograph's grey veil lifted off
-  vec3 c = max(texture(uPlate, uv).rgb - h, 0.0);
+  vec3 c = max(plateAt(p, r) - h, 0.0);
   // the aureole put back: the same falloff, pale cyan, eased off close in so
   // the disc stands out of it; in clear view the lens veil whitens it
   c += h.g * mix(mix(0.45, 0.2, uOpen), 1.0, smoothstep(24.0, 360.0, r)) * mix(vec3(0.5, 1.0, 1.1), vec3(0.8, 0.95, 0.95), uOpen);
@@ -217,6 +309,7 @@ in vec2 aRest;
 in vec3 aShade;
 in vec3 aStrain;
 uniform vec2 uSize;
+uniform mat3 uH; // the photograph's px to the tilted frame's
 out vec2 vRest;
 out vec2 vPos;
 out vec3 vShade;
@@ -226,7 +319,10 @@ void main() {
   vPos = aPos;
   vShade = aShade;
   vStrain = aStrain;
-  gl_Position = vec4(aPos.x / uSize.x * 2.0 - 1.0, 1.0 - aPos.y / uSize.y * 2.0, 0.0, 1.0);
+  // drawn through the homography with its own w, so everything the fragments
+  // read (the photograph, its sky, the sun) is interpolated projectively
+  vec3 h = uH * vec3(aPos, 1.0);
+  gl_Position = vec4(h.x / uSize.x * 2.0 - h.z, h.z - h.y / uSize.y * 2.0, 0.0, h.z);
 }`;
 
 const CLOTH_F = `#version 300 es
@@ -247,11 +343,14 @@ uniform float uRim;  // how strongly this garment's edge catches the sun
 uniform float uEdge; // the thin warm rim on a garment's clean edge, 0 for the rope
 uniform int uPass;   // 0 the cloth, 1 the second layer of a sheer fold, multiplied in
 uniform vec4 uTie;   // a strip whose square-cut matte is rounded, in photograph px
+uniform vec4 uRope;  // the line's curve (a, b, c of y = a x^2 + b x + c), and 1 for the rope
+uniform vec3 uRopeX; // past these the line is read from a clear stretch: left end, right end, the clear stretch's right end
 ${SUN_GLSL}
 ${SRGB}
 const float INSET = 6.0; // the matte softens in the last pixels at the frame
 const float SHEAR = 0.8; // px of drop per px past the edge, for the print only
 float tri(float d, float b) { return b - abs(mod(d, 2.0 * b) - b); }
+float ropeY(float x) { return (uRope.x * x + uRope.y) * x + uRope.z; }
 float idAt(vec2 s) { return texelFetch(uIds, clamp(ivec2(s), ivec2(0), ivec2(uSize) - 1), 0).r * 255.0; }
 float alphaAt(vec2 s) { return abs(idAt(s) - uId) < 0.5 ? texture(uLayers, s / uSize).a : 0.0; }
 // A sheer fabric's light through k times the photograph's thickness: its own
@@ -327,6 +426,14 @@ void main() {
   // print is read from a sheared mirror, so it does not fold into a
   // symmetric blot about the frame line.
   vec2 s = vRest;
+  if (uRope.w > 0.0) {
+    // The tilted lens sees the line run on past both ends of the photograph:
+    // past them it is read from a clear stretch of it, carried along its curve.
+    float nx = s.x;
+    if (s.x < uRopeX.x) nx = uRopeX.x + tri(uRopeX.x - s.x, 48.0);
+    else if (s.x > uRopeX.y) nx = uRopeX.z - tri(s.x - uRopeX.y, 48.0);
+    s = vec2(nx, s.y + ropeY(nx) - ropeY(s.x));
+  }
   float lo = INSET, hi = uSize.x - INSET;
   float d = 0.0;
   if (uBand.x > 0.0 && s.x < lo) { d = lo - s.x; s.x = lo + tri(d, uBand.x); }
@@ -501,6 +608,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
   const rawView = q.get("raw") != null; // the scene before the film, for checking
   const held = holdGust != null || still;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const tiltTo = clamp(num("tilt", TILT), -10, 40);
+  const widenTo = clamp(num("widen", WIDEN), 0.6, 2);
+  const oyTo = num("oy", LENS_OY);
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
 
@@ -587,8 +697,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
   // cloth: one dynamic buffer [pos.xy, rest.xy, shade.xyz] per vertex: the
   // light, how far it has moved, and the view cosine against the rest's
   const ROPE_STEP = 12;
-  const ropeU0 = -48;
-  const ropeN = Math.ceil((IW + 96) / ROPE_STEP) + 1;
+  // the line runs on well past the photograph's ends, for the tilted lens
+  const ropeU0 = -720;
+  const ropeN = Math.ceil((IW + 1440) / ROPE_STEP) + 1;
   const NV = N + ropeN * 2;
   const vdata = new Float32Array(NV * VS);
   for (let k = 0; k < N; k++) {
@@ -793,6 +904,25 @@ export async function createSentaku(host, { embedded = false } = {}) {
   };
   let dirty = true;
 
+  // ---- the view: the tilt, 0 the photograph's own and 1 the tilted lens's
+  let tiltP = held || reduced ? (still ? 0 : 1) : 0;
+  let tiltV = 0;
+  const skyQ = new Float32Array(18);
+  for (let k = 0; k < 6; k++) for (let c = 0; c < 3; c++) skyQ[k * 3 + c] = meta.sky.quad[c][k];
+  // the framing (lens and centre) goes with the angle, so ?tilt=0 is the photograph
+  const viewNow = () => {
+    const k = (tiltP * tiltTo) / TILT;
+    return viewOf(tiltTo * tiltP, 1 + (widenTo - 1) * k, LENS_C[1] + (oyTo - LENS_C[1]) * k);
+  };
+  const stepTilt = (dt, age) => {
+    const n = Math.max(1, Math.ceil(dt * 120));
+    const goal = age > TILT_AT ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      tiltV += (TILT_W * TILT_W * (goal - tiltP) - 2 * TILT_Z * TILT_W * tiltV) * (dt / n);
+      tiltP += tiltV * (dt / n);
+    }
+  };
+
   // ---- per frame: positions, light, draw
   const disp = [0, 0, 0];
   const cu = IW / 2;
@@ -834,13 +964,13 @@ export async function createSentaku(host, { embedded = false } = {}) {
       const k = N + i;
       const u = vdata[k * VS + 2];
       const v = vdata[k * VS + 3];
-      cloth.ropeDisp((u - ROPE.left) / (ROPE.right - ROPE.left), disp);
+      cloth.ropeDisp(clamp((u - ROPE.left) / (ROPE.right - ROPE.left), 0, 1), disp);
       project(u, v, disp[0], disp[1], disp[2], cu, cv, vdata, k * VS);
     }
     void ropeRest;
   };
 
-  const drawScene = () => {
+  const drawScene = (view) => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, scene.fbo);
     gl.viewport(0, 0, scene.w, scene.h);
     gl.disable(gl.DEPTH_TEST);
@@ -850,6 +980,12 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, plateTex);
     gl.uniform1i(plateP.u.uPlate, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, blurTex);
+    gl.uniform1i(plateP.u.uBlur, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniformMatrix3fv(plateP.u.uHi, true, view.Hi);
+    gl.uniform3fv(plateP.u["uSkyQ[0]"], skyQ);
     gl.uniform2f(plateP.u.uSize, IW, IH);
     gl.uniform2f(plateP.u.uSun, sunPx[0], sunPx[1]);
     gl.uniform1f(plateP.u.uGlare, glare);
@@ -862,6 +998,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(clothP.p);
     gl.uniform2f(clothP.u.uSize, IW, IH);
+    gl.uniformMatrix3fv(clothP.u.uH, true, view.H);
+    gl.uniform3f(clothP.u.uRopeX, 12, IW + PHANTOM * meta.cell - 20, 1250);
     gl.uniform2f(clothP.u.uSun, sunPx[0], sunPx[1]);
     gl.uniform1f(clothP.u.uGlare, glare);
     gl.uniform1f(clothP.u.uOpen, open);
@@ -884,6 +1022,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       gl.uniform2f(clothP.u.uBand, r.band[0], r.band[1]);
       gl.uniform1f(clothP.u.uRim, RIM[r.id] ?? 0);
       gl.uniform1f(clothP.u.uEdge, r.id < 6 ? EDGE_GLOW : 0);
+      gl.uniform4f(clothP.u.uRope, meta.rope.poly[0], meta.rope.poly[1], meta.rope.poly[2], r.id === 6 ? 1 : 0);
       if (r.id === 3) gl.uniform4f(clothP.u.uTie, TIE[0], TIE[1], TIE[2], TIE[3]);
       else gl.uniform4f(clothP.u.uTie, 0, 0, 0, 0);
       const draw = () => gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.start * 4);
@@ -927,7 +1066,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
     if (!scene) build();
     writeVerts();
     coverage();
-    drawScene();
+    const view = viewNow();
+    drawScene(view);
     if (!rawView) film.render(scene.tex, { ...film0, exposure: exposure + adapt, grainSeed: tick * 7.31 }, developed.fbo);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
@@ -944,9 +1084,14 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, scene.tex);
     gl.uniform1i(blitP.u.uScene, 1);
     gl.activeTexture(gl.TEXTURE0);
-    gl.uniform2f(blitP.u.uSunUv, sunPx[0] / IW, 1 - sunPx[1] / IH);
+    // the disc where the homography puts it, and how much it magnifies there
+    const [sx, sy] = apply3(view.H, sunPx[0], sunPx[1]);
+    const [ax, ay] = apply3(view.H, sunPx[0] + 1, sunPx[1]);
+    const [bx, by] = apply3(view.H, sunPx[0], sunPx[1] + 1);
+    const mag = Math.sqrt(Math.abs((ax - sx) * (by - sy) - (ay - sy) * (bx - sx)));
+    gl.uniform2f(blitP.u.uSunUv, sx / IW, 1 - sy / IH);
     gl.uniform2f(blitP.u.uRes, rect.w, rect.h);
-    gl.uniform1f(blitP.u.uScale, rect.w / IW);
+    gl.uniform1f(blitP.u.uScale, (rect.w / IW) * mag);
     gl.uniform1f(blitP.u.uBlow, rawView ? 0 : 1);
     gl.uniform1f(blitP.u.uOpen, open);
     gl.bindVertexArray(quadVao);
@@ -994,6 +1139,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       }
     }
     if (!held) stepAdapt(Math.min(dt, 0.1));
+    if (!held && !reduced) stepTilt(Math.min(dt, 0.05), age);
     const reveal = held || reduced ? 1 : expoOut(clamp(age / 2.1, 0, 1));
     const exposure = film0.exposure + 2.5 * (1 - reveal);
     const nextTick = held ? 0 : Math.floor(t * 24);
