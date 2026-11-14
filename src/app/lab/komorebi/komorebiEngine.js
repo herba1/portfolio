@@ -18,17 +18,18 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // and turned so its sun lands on the drawn sun: every cloud keeps its true
 // lighting, sunlit tops towards the sun and skylight-blue undersides, and the
 // edge of the big cumulus beside the sun glows. Offline the clouds were
-// unmixed from their own pale sky (cover and premultiplied light), relit to
-// this sun and skylight, and rolled off below the film's clip; here they lie
-// over the deep Roman sky and behind every needle.
+// separated from their own pale sky as a soft matte (cover and premultiplied
+// light, consistent, so no edge carries a dark unmixing band), relit to this
+// sun and skylight, and rolled off below the film's clip; here they lie over
+// the deep Roman sky and behind every needle. The sky behind them is a clean
+// smooth field (offline, the piazza's own ghost clouds and lens rings taken
+// out of it).
 //
 // The grade, here in the shader: the rebuilt sky takes a Superia cobalt,
-// pale cyan-blue at the horizon deepening overhead. The cumulus are relit
-// as sunlit volumes: a skylight fill under the capture's own light, a
-// warm-neutral key on the sides that face the sun rolling off below the
-// clip, shade and undersides in the colour of the sky round them, a silver
-// lining on thin edges facing the sun, and a forward-scatter glow in the
-// cloud beside it.
+// pale cyan-blue at the horizon deepening overhead. The cumulus keep the
+// capture's own light as their drawing, rolled off below the clip: sunlit
+// tops warm-neutral, shade and undersides in the colour of the sky round
+// them, and a forward-scatter gain on the cloud beside the sun.
 //
 // Wind: every layer is split into a few branches, each a damped spring with
 // its own natural frequency (big near crowns slow and wide, far trees quick
@@ -168,24 +169,23 @@ const SKY_GRADE = {
   depth: [0.92, 0.55], // luminance kept, horizon .. zenith
   knee: 1.1, // circumsolar roll-off: Y / (1 + Y / knee)
 };
-// Cloud: relit as sunlit volumes. The capture's light is kept as the drawing
-// and laid on a skylight fill, so no part of a cumulus sinks to grey; the
-// sides facing the sun (found from the slope of the cloud's own blurred
-// cover) take a warm-neutral key that rolls off softly below the clip; the
-// shade and undersides take the sky's own colour round them; thin edges
-// facing the sun catch a silver lining, and thin cloud close to the sun
-// glows with the light it scatters forward.
+// Cloud: the capture's own light is the drawing. The matte is soft, from
+// the puresky's own cloud-vs-sky separation (tools/depth/bakes/komorebi/
+// softmatte.py), so the lobes, the wisps and the pale fringe where a cloud
+// thins into the sky are the photograph's. Here it gets a touch of local
+// contrast and skylight fill, a gain by the sun for the light scattered
+// forward, a soft roll-off under the clip, and colour: sunlit tops warm,
+// shade and undersides in the sky's own blue.
 const CLOUD_GRADE = {
   key: [1, 0.89, 0.67], // sunlit tops, per unit red
-  sky: 0.22, // the shade's colour: the sky round it, this far towards white
-  fill: 0.22, // skylight under every part of a cloud, scene light
-  gain: 1.3, // the capture's own light on top of it, with a little contrast
-  top: 2.4, // the key's ceiling: rolls off to it from knee, under the clip
-  knee: 1.3,
-  face: 1.0, // stops between a cloud's sun side and its far side
-  detail: 1.45, // local contrast against the cloud's own blur
-  rim: 2.6, // silver lining on a thin edge facing the sun, scene light
-  forward: 1.6, // forward scatter in thin cloud by the sun, scene light
+  sky: 0.1, // the shade's colour: the sky round it, this far towards white
+  fill: 0.05, // skylight under every part of a cloud, scene light
+  gain: 1.3, // the capture's own light
+  top: 2.2, // the ceiling: rolls off to it from knee, under the clip
+  knee: 1.1,
+  detail: 1.2, // local contrast against the cloud's own blur
+  own: 0.6, // share of the capture's own colour kept in a cloud's body
+  forward: 0.35, // gain on cloud by the sun, from the light it scatters forward
 };
 // The lower canopy's shadows sink by c / (c + 0.02): 0 off, 1 full.
 const SILHOUETTE = 0.85;
@@ -231,8 +231,8 @@ uniform vec3 uSkyZen;
 uniform vec3 uSkyGrade;      // depth horizon, depth zenith, knee
 uniform vec3 uCKey;          // sunlit tops
 uniform vec4 uCGrade;        // sky share in the shade, fill, gain, detail
-uniform vec4 uCRoll;         // knee, top, face (stops), unused
-uniform vec2 uCGlow;         // silver-lining rim, forward scatter
+uniform vec4 uCRoll;         // knee, top, unused, unused
+uniform vec2 uCGlow;         // own colour share, forward scatter
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${ASPECT.toFixed(6)};
 
@@ -338,35 +338,11 @@ void main() {
   // Cumulus, in front of the sky and behind every needle.
   vec4 cl = texture(uClouds, uv);
   vec3 cP = exp2(uCLog.x + cl.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
-  // Offline, the capture's backlit shade beside the sun unmixed as sky: it
-  // left holes in the cumulus and a thin, dark veil there, which the glare
-  // turned grey-lavender. A hole the cloud closes round is cloud, and takes
-  // the light of the cloud round it; thin cloud by the sun is lit from
-  // behind, so it is as opaque as the light it scatters forward.
-  {
-    vec4 cw = textureLod(uCloudsBlur, uv, 6.0);
-    vec3 wP = (exp2(uCLog.x + cw.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x)) / max(cw.a, 1e-3);
-    // Closed round: by its wide surround, or on every side of a ring.
-    float wide = 1.0, tight = 1.0;
-    for (int i = 0; i < 8; i++) {
-      vec2 o = vec2(cos(float(i) * 0.7853982), sin(float(i) * 0.7853982) * ASPECT);
-      wide = min(wide, textureLod(uCloudsBlur, uv + 0.045 * o, 4.5).a);
-      tight = min(tight, textureLod(uCloudsBlur, uv + 0.018 * o, 3.0).a);
-    }
-    // By the sun, where the gaps were widest, the cloud's widest surround.
-    float glow = exp(-sd / 0.15);
-    float closed = max(smoothstep(0.45, 0.75, cw.a), smoothstep(0.2, 0.45, max(wide, tight)));
-    closed = max(closed, smoothstep(0.35, 0.6, textureLod(uCloudsBlur, uv, 7.0).a) * glow);
-    float hole = closed * (1.0 - cl.a);
-    float veil = smoothstep(0.02, 0.35, cl.a) * glow * (1.0 - cl.a) * 0.85;
-    cP = cP * (1.0 + veil / max(cl.a, 1e-3)) + hole * wP;
-    cl.a += veil + hole * (1.0 - veil);
-  }
   if (cl.a > 0.0) {
     // The capture's own light, unpremultiplied, with its local contrast
-    // lifted against the blurred surround so the drawing survives the
-    // shoulder. Thin edges carry little cover: their light is noisy and
-    // their surround is mostly sky, so they keep their own drawing.
+    // lifted a little against the blurred surround so the lobes survive the
+    // shoulder. Thin edges carry little cover: their surround is mostly
+    // sky, so they keep their own drawing.
     vec4 cb = textureLod(uCloudsBlur, uv, 4.5);
     vec3 bP = exp2(uCLog.x + cb.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
     float Yc = max(dot(cP, LUMA) / max(cl.a, 1e-3), 1e-4);
@@ -376,32 +352,22 @@ void main() {
     // Close to the sun the light scattered forward fills the cloud, so its
     // dark cores are not deepened there.
     float detail = mix(1.0, mix(uCGrade.w, 1.0, near * near), body);
-    float Ys = Yb * pow(Yc / Yb, detail);
-    // Which way the volume faces: the slope of its blurred cover towards
-    // the sun, at the scale of a cloud's lobes and of the whole cloud. It
-    // thins towards the sun on the side the sun lights.
-    vec2 ts = normalize((uSun - uv) * vec2(1.0, 1.0 / ASPECT) + 1e-6) * vec2(1.0, ASPECT);
-    float lobe = textureLod(uCloudsBlur, uv - 0.014 * ts, 3.5).a - textureLod(uCloudsBlur, uv + 0.014 * ts, 3.5).a;
-    float mass = textureLod(uCloudsBlur, uv - 0.04 * ts, 5.0).a - textureLod(uCloudsBlur, uv + 0.04 * ts, 5.0).a;
-    float face = clamp(1.6 * lobe + 1.0 * mass, -1.0, 1.0);
-    // Skylight fills every part; the capture's light and the sun side's
-    // key go on top; the key rolls off softly to its ceiling, below the clip.
-    float Y = (uCGrade.y + uCGrade.z * pow(Ys, 1.4)) * exp2(uCRoll.z * face * (0.4 + 0.6 * body));
-    // A thin edge facing the sun: the silver lining, a fine line where the
-    // cover falls away towards the sun, strongest close to it.
-    float rimEdge = textureLod(uCloudsBlur, uv - 0.004 * ts, 1.5).a - textureLod(uCloudsBlur, uv + 0.004 * ts, 1.5).a;
-    float rim = smoothstep(0.02, 0.22, rimEdge) * smoothstep(0.04, 0.3, cl.a) * (1.0 - smoothstep(0.55, 0.95, cl.a));
-    rim *= (0.4 + 0.6 * exp(-sd / 0.3)) * smoothstep(0.3, 0.6, cb.a);
-    // Thin cloud by the sun glows with the light it scatters forward.
+    float Y = uCGrade.y + uCGrade.z * Yb * pow(Yc / Yb, detail);
+    // Cloud by the sun glows with the light it scatters forward: a gain on
+    // its own light, so its lobes keep their drawing.
     float fwd = exp(-sd / 0.15) * (1.0 - 0.35 * smoothstep(0.4, 1.0, cl.a));
-    Y += uCGlow.x * rim + uCGlow.y * fwd;
+    Y *= 1.0 + uCGlow.y * fwd;
+    // The sunlit tops roll off softly to a ceiling under the clip.
     if (Y > uCRoll.x) Y = uCRoll.x + (uCRoll.y - uCRoll.x) * (1.0 - exp(-(Y - uCRoll.x) / (uCRoll.y - uCRoll.x)));
     // Colour follows the light: the shade takes the sky round it, the sun
-    // side the warm key, through a clean white between them.
-    // The rim and the forward scatter are the sun's own light.
-    float lit = max(smoothstep(0.5, 1.9, Y), smoothstep(0.0, 0.9, uCGlow.x * rim + uCGlow.y * fwd));
+    // side the warm key, through a clean white between them; the bodies
+    // keep much of the capture's own (offline relit) colour, the thin
+    // edges fade into the sky through its pale skylight blue.
+    float lit = max(smoothstep(0.5, 1.9, Y), smoothstep(0.0, 0.9, 0.5 * uCGlow.y * fwd));
     vec3 shade = mix(skyTint, vec3(1.0), uCGrade.x);
     vec3 tint = mix(shade, uCKey, lit);
+    vec3 own = cP / max(dot(cP, LUMA), 1e-5);
+    tint = mix(tint, own, uCGlow.x * smoothstep(0.3, 0.9, cl.a));
     cP = withLuma(tint, Y) * cl.a;
   }
   col = col * (1.0 - cl.a) + cP * smoothstep(0.0, 2.0 / 255.0, cl.a);
@@ -991,8 +957,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform3f(u.uSkyGrade, SKY_GRADE.depth[0], SKY_GRADE.depth[1], SKY_GRADE.knee);
     gl.uniform3fv(u.uCKey, CLOUD_GRADE.key);
     gl.uniform4f(u.uCGrade, CLOUD_GRADE.sky, CLOUD_GRADE.fill, CLOUD_GRADE.gain, CLOUD_GRADE.detail);
-    gl.uniform4f(u.uCRoll, CLOUD_GRADE.knee, CLOUD_GRADE.top, CLOUD_GRADE.face, 0);
-    gl.uniform2f(u.uCGlow, CLOUD_GRADE.rim, CLOUD_GRADE.forward);
+    gl.uniform4f(u.uCRoll, CLOUD_GRADE.knee, CLOUD_GRADE.top, 0, 0);
+    gl.uniform2f(u.uCGlow, CLOUD_GRADE.own, CLOUD_GRADE.forward);
     gl.uniform2f(u.uCLog, CLOUD_LOG[0], CLOUD_LOG[1]);
     gl.uniform4fv(u.uCrop, L.crop);
     gl.uniform2f(u.uRes, L.pw, L.ph);

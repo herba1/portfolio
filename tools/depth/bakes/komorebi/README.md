@@ -9,8 +9,30 @@ about the sun axis to place the clouds. A roll about the sun axis keeps every
 cloud's lighting true to the drawn sun.
 
     python3 -I rep.py 15      # reproject (src8k.npy = the HDRI as float32 npy)
-    python3 -I sep.py 15      # clear-sky field + raw cover (blue-excess unmixing)
-    python3 -I clouds.py 15 '{"out":".../clouds.webp","sunClear":28,"expo":-0.3,"knee":0.9,"ceil":1.5,"ceilSun":2.5,"sunR":100}'
+    python3 -I skyfield.py sky.orig.bin .../public/lab/komorebi/sky.bin
+    python3 -I softmatte.py 15 '{"out":".../clouds.webp","ref":"clouds.orig.webp","sky":".../sky.bin","q":92}'
+
+`softmatte.py` replaces the old `sep.py` + `clouds.py` pair (kept for the
+record). Those cut the cover with a blue-excess threshold, so the cumulus
+were hard-edged stickers, and wherever the cut fell below the true cover the
+premultiplied light was the pixel minus too much sky: a dark navy band round
+every cloud. Their clear-sky field also followed gaps inside the clouds, so
+round holes were punched through solid cumulus (the engine papered over
+them with a hole/veil fill by the sun, which smeared that cloud grey; the
+fill is gone). Now the clear sky is a smooth field fitted only away from any
+cloud body; the cover is unmixed against it with each cloud's own local
+blue/red (the shade is bluer than the sunlit tops), lifted towards solid as
+`1 - (1 - a)^2.2` (never below the measured cover) and feathered outwards
+only (sigma 2.6 px, ~8 px from 10 to 90%), and the light under it is
+`x - (1 - a) S` for that same cover, so a cloud thins into the sky through
+its own pale fringe. Thin edges take the body's colour at their own
+luminance. Exposure is matched to the previous layer on solid cloud.
+
+`skyfield.py` rebuilds `sky.bin` (the piazza's sky, 210x262 RGB half float)
+as a radial profile round the capture's low sun plus a cubic over the frame,
+fitted robustly: the old field's darker patches and pale ghosts of the
+piazza's own clouds, and the lens rings round its sun, are gone. The engine
+takes only its luminance.
 
 `clouds.webp`: rgb = log2(P + 2^-9) over -9..6, P the cloud light
 premultiplied by its cover (relit: sunlit parts to the drawn sun's colour,
