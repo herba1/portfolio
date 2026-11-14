@@ -62,16 +62,22 @@ const vec4 LATTICE = vec4(752.0, 448.0, 512.0, 1088.0);
 // (PITCH) that is where the zenith stands for this lens, so sky rays through
 // it converge with the walls.
 const float LENS = 1.034;
-// The sky dome: where its tallest cumulus bank stands across the equirect,
-// and its open blue sky's chroma (luma 1).
+// The sky dome: where its tallest cumulus bank stands across the equirect.
 const float SKY_U = 0.24;
-const vec3 SKY_BLUE = vec3(0.72, 1.0, 1.79);
 // The clouds are graded as lit volumes, not shown as the photograph's white:
-// their sunlit crowns a warm paper white, their shadow side the open sky's
-// light. Both are given as the print would show them (display rgb) and taken
-// back through the tone curve, so the shoulder lands exactly there.
-const vec3 CLOUD_LIT = vec3(236.0, 230.0, 220.0) / 255.0;
+// their sunlit crowns a warm white just under paper, their shadow side the
+// open sky's light. Both are given as the print would show them (display
+// rgb) and taken back through the tone curve, so the shoulder lands exactly
+// there. The crowns glow: the film's diffusion and halation take what is
+// over 0.84 in luma, and a cream crown at 225 never reached it.
+const vec3 CLOUD_LIT = vec3(248.0, 245.0, 236.0) / 255.0;
 const vec3 CLOUD_SHADE = vec3(150.0, 175.0, 205.0) / 255.0;
+// The open sky as the print shows it, by the ray's elevation: a clear
+// cerulean just over the wall tops (the frame's lowest sky, 38 degrees up)
+// deepening to cobalt at the top of the frame (72 degrees). The dome's own
+// blue layer only modulates it, a few percent either way.
+const vec3 SKY_LOW = vec3(79.0, 159.0, 214.0) / 255.0;
+const vec3 SKY_HIGH = vec3(23.0, 71.0, 160.0) / 255.0;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
 
@@ -130,29 +136,41 @@ void main(){
   if (abs(wx) < abs(sx.x)) sx.x = wx;
   if (abs(wy) < abs(sy.x)) sy.x = wy;
   // It comes in two layers, split offline: the open sky's blue (an amount
-  // of SKY_BLUE) and what the clouds and the haze round the sun add over it.
+  // of it) and what the clouds and the haze round the sun add over it.
   // They are graded apart, the way a polariser does it: the blue deepens to
-  // cobalt toward the zenith and pales to cyan lower down, while the
-  // clouds keep their light, warmed toward the key. The clouds are read
-  // half a mip soft: a kilometre of air sits between them and the walls,
-  // and at the dome's full resolution their edges were crisper than the
-  // plate's own.
-  vec3 cloud = skyDecode(textureGrad(uSky, st, sx * 1.6, sy * 1.6).rgb, 4.0);
+  // cobalt toward the zenith and pales to cerulean lower down, while the
+  // clouds keep their light, warmed toward the key. The clouds are read a
+  // mip sharp: the derivatives halved, so their sunlit edges stay hard and
+  // the cumulus is not a blurred mip pasted over the canyon.
+  vec3 cloud = skyDecode(textureGrad(uSky, st, sx * 0.5, sy * 0.5).rgb, 4.0);
+  // Low in the dome the frame magnifies it (two pixels to a texel), so no
+  // mip is sharp enough: the edges and lobes are given back by an unsharp
+  // mask against the same layer spread over a few texels (or a few pixels,
+  // where the dome is minified), four taps turned off its grid.
+  vec2 r = max(vec2(length(vec2(sx.x, sy.x)), length(vec2(sx.y, sy.y))) * 2.0, 2.5 / vec2(8192.0, 2048.0));
+  vec3 cloudB = skyDecode(0.25 * (textureGrad(uSky, st + r * vec2(0.92, 0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(-0.38, 0.92), sx, sy).rgb
+                                + textureGrad(uSky, st + r * vec2(-0.92, -0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(0.38, -0.92), sx, sy).rgb), 4.0);
+  cloud = max(cloud + 0.8 * (cloud - cloudB), 0.0);
   float beta = skyDecode(textureGrad(uSkyBlue, st, sx, sy).rrr, 1.0).r;
+  // The blue layer's own variation, against its wide average: kept as a
+  // texture inside the gradient, never allowed to flatten it.
+  float betaSoft = skyDecode(textureLod(uSkyBlue, st, 7.0).rrr, 1.0).r;
+  float mottle = clamp(beta / max(betaSoft, 1e-3), 0.85, 1.15);
   // Paler only with the ray's own elevation: the sky does not know where the
   // walls stand, and paling it toward them drew a lit band along every edge
   // and filled the gap under the balcony with haze.
   float elev = asin(clamp(dot(V, uUp), -1.0, 1.0));
-  // Cobalt over most of the canyon; it pales only in the last stretch above
-  // the wall tops, and to a deeper cyan than haze.
-  float pale = 1.0 - smoothstep(0.35, 1.05, elev);
-  vec3 blue = mix(vec3(0.014, 0.16, 0.66), vec3(0.24, 0.9, 1.85), pale * pale);
+  // From SKY_LOW at the wall tops (38 degrees up) to SKY_HIGH at the top of
+  // the frame (72), eased so the deepening reads across the whole canyon
+  // and does not stall in a flat slab at either end.
+  float deep = smoothstep(0.66, 1.26, elev);
+  vec3 blueP = mix(SKY_LOW, SKY_HIGH, deep * (2.0 - deep) * 0.35 + deep * 0.65);
   // The clouds as lit volumes. The photograph's own white only says how much
   // cloud stands on the ray; how it is lit comes from where that cloud
   // faces. First the mask: the cloud's luminance over the clear sky, thin
   // wisps a partial veil, the body opaque.
   float cl = luma(cloud);
-  float mask = sqrt(smoothstep(0.02, 1.2, cl));
+  float mask = sqrt(smoothstep(0.03, 0.9, cl));
   // Then which way each part faces, from the cloud's own density read soft
   // and a few degrees off along the ray: a part with less cloud between it
   // and the sun is the sunlit face; one with clear sky under it and cloud
@@ -165,8 +183,8 @@ void main(){
   float dDown = 0.6 * density(toward(D, -ZEN, 0.035), 4.5) + 0.4 * density(toward(D, -ZEN, 0.08), 5.5);
   // And the same, finer: the lobes inside the body, each bulge with its
   // own lit face and its own shade under it.
-  float d1 = density(D, 3.0);
-  float fine = clamp((d1 - density(toward(D, DOME_SUN, 0.012), 3.0)) + (density(toward(D, -ZEN, 0.012), 3.0) - density(toward(D, ZEN, 0.012), 3.0)), -2.0, 2.0) / max(d1, 0.6);
+  float d1 = density(D, 2.0);
+  float fine = clamp((d1 - density(toward(D, DOME_SUN, 0.008), 2.0)) + (density(toward(D, -ZEN, 0.008), 2.0) - density(toward(D, ZEN, 0.008), 2.0)), -2.0, 2.0) / max(d1, 0.6);
   float norm = max(d0, 0.6);
   float sunEdge = clamp((d0 - dSun) / norm, -1.0, 1.0);
   float topEdge = clamp((dDown - dUp) / norm, -1.0, 1.0);
@@ -180,20 +198,31 @@ void main(){
   float low = 1.0 - smoothstep(0.05, 0.5, D.z);
   float thick = smoothstep(1.5, 6.0, d0);
   float light = 0.5 + 0.55 * sunEdge + 0.4 * topEdge + 0.6 * fine + 0.45 * model + 0.2 * facing - 0.14 * low * thick - 0.12 * thick;
+  // The sun-side tops are lifted: a face that looks toward the sun with
+  // little cloud between it and the sun is the crown, and it carries more
+  // light than the modelling alone gives it.
+  float sunSide = smoothstep(-0.3, 0.5, facing);
+  light += (0.35 * max(sunEdge, 0.0) + 0.25 * max(topEdge, 0.0)) * sunSide;
   // A soft shoulder into the crown; the belly keeps its slope, so the
-  // photograph's modelling still reads in the shade.
-  light = clamp(light, 0.0, 1.5);
-  light = light < 0.6 ? light : 0.6 + 0.4 * (1.0 - exp(-(light - 0.6) / 0.28));
+  // photograph's modelling still reads in the shade. The shoulder runs all
+  // the way to the crown's white, so the brightest tops land there and do
+  // not stall a step under it.
+  light = clamp(light, 0.0, 2.0);
+  light = light < 0.55 ? light : 0.55 + 0.45 * (1.0 - exp(-(light - 0.55) / 0.3));
   // The crown warms toward the key when the sun is low; the belly takes the
-  // open sky's light. Graded in print values, then taken back to light.
-  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.95, 0.86) + vec3(0.016, 0.0, 0.0), 1.0 - uDay);
+  // open sky's light. Graded in print values, then taken back to light. The
+  // low sun dims the shade side; the lit crown keeps its light, warmer.
+  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.98, 0.945) + vec3(0.008, 0.0, 0.0), 1.0 - uDay);
   float dusk = mix(0.72, 1.0, uDay);
-  vec3 cloudP = tone(untone(min(mix(CLOUD_SHADE, crown, light), vec3(0.94))) * dusk);
+  vec3 cloudP = tone(untone(min(mix(CLOUD_SHADE, crown, light), vec3(0.975))) * mix(dusk, 1.0, light * light));
+  // The open sky dims less than the clouds' shade with a low sun: it is
+  // the zenith's light, not the sun's.
+  vec3 skyP = blueP * pow(mottle, 0.45) * mix(0.93, 1.0, uDay);
   // The clouds stand in front of the blue: where they are dense they hide
   // it, where thin they veil it. The veil is laid in print values: in light,
   // a crown's red, high up the shoulder, swamped the blue's green and turned
   // every thin edge lilac.
-  vec3 skyL = untone(min(mix(tone(beta * blue * dusk), cloudP, mask), vec3(0.995)));
+  vec3 skyL = untone(min(mix(skyP, cloudP, mask), vec3(0.995)));
   // The sun: the dome's own was taken out with its haze offline, so it is
   // drawn here where the key light stands, a half-degree disc and a tight
   // glow, warm, peaking under paper white. It sits in the sky layer, so the
