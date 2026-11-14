@@ -46,7 +46,8 @@ between them:
            ring, the lobes' relief) never meets the card edge.
 
 Writes cloud.webp: RGB the photographed luminance (grey, sRGB), A coverage.
-The engine reads only R and A, and lights it live (afternoonEngine.js
+Run relief.py after it: it writes the lobes' relief into G and B. The engine
+reads R, the relief and A, and lights it live (afternoonEngine.js
 CLOUD_*). Prints the card's size and where the main crown's top lands on it,
 for CLOUD_FOOT.
 """
