@@ -10,7 +10,8 @@
       (the panorama kept as it is), e.g. to re-light the plate from its
       pre-cloud bake (the sky-graded plate bake.py writes) without re-baking.
 
-    Order: bake.py, develop.py (if run on its own), clouds.py, grade.py.
+    Order: bake.py, develop.py (if run on its own), clouds.py, match.py,
+    grade.py.
 
 The plate is not re-lit but re-composed (massing(), below): its own clouds,
 small scattered puffs and thin strips strung along the wires, go back to

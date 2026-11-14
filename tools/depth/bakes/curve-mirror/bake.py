@@ -58,7 +58,8 @@ of the panorama (for lighting the paint), and aux.png for the photo: log depth
 (for the mirror's shadow on the house) and how sunlit each pixel is.
 
 After it, clouds.py re-lights the cumulus in the plate and the panorama as
-sunlit heaps (warm tops, blue bellies), once, then grade.py.
+sunlit heaps (warm tops, blue bellies), once, then match.py (the panorama
+printed to the plate's sun, its own cumulus), then grade.py.
 """
 import json
 import os

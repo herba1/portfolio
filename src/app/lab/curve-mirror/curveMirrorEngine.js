@@ -39,19 +39,26 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //    (shot under cloud) are developed in the bake to the photo's own sunlit
 //    walls (a Lab colour transfer by luminance band, the road's highlights
 //    rolled off warm, the greens taken to the plate's foliage, its tone-mapped
-//    crispness let down), and read a third of a mip softer than their pixel
-//    footprint, the plate's scan MTF; what the glass shows is then graded to
-//    the plate (lifted for the aluminium's loss, black point held, a shoulder
-//    at the plate's sunlit white), since an acrylic mirror returns ~85 % of
-//    it, and goes through the same Pro-Mist and halation as the plate; its
-//    sky is taken to the cobalt round the mirror by reflected elevation,
-//    never a stop under or greyer than the street it stands in;
+//    crispness let down) and printed to its sun (match.py: the contrast of a
+//    lit street, the plate's black, lit greys to the plaster's warm white
+//    and shade to the skylight's blue, the foliage's colour back), and read
+//    a third of a mip softer than their pixel footprint, the plate's scan
+//    MTF; what the glass shows is then graded to the plate (its surfaces
+//    printed a little harder about mid grey against the glass's own veils,
+//    a shoulder at the plate's sunlit white), since an acrylic mirror
+//    returns ~85 % of it, and goes through the same Pro-Mist and halation as
+//    the plate; its sky is taken to the cobalt round the mirror by reflected
+//    elevation, never a stop under or greyer than the street it stands in,
+//    with a sunlit cumulus of its own over the road behind the lens, whose
+//    tops (envc.png) are carried past the plate's 8 bits as the plate's are;
 //  - the face is a second-surface acrylic dome standing proud of the frame
 //    on its own wall: a Schlick sheen of cool sky that climbs toward the rim,
 //    the zenith's broad gloss over the upper bulge, the hood's underside
 //    reflected at its crown and its shadow on it, a dark contact band where
 //    the lip holds it, a little waviness, dust and one thumb smudge, which
-//    scatter the sun when it is in the glass;
+//    scatter the sun when it is in the glass; the sun there is HDR light (a
+//    warm core many times white, a warmer skirt round it) that the
+//    Pro-Mist and the film bloom warm;
 //  - the assembly's shadow falls on the photograph through its point map;
 //  - it is composited with real coverage: a geometry pass classifies every
 //    pixel centre, and wherever that changes from one pixel to the next (its
@@ -144,6 +151,7 @@ uniform sampler2D uEnv;    // sRGB equirect, centred on the mirror
 uniform sampler2D uEnvD;   // log distance code
 uniform sampler2D uAux;    // r: log z code, g: sunlit, b: sky
 uniform sampler2D uGrade;  // the plate's enamels: r yellow, g orange-red, b green (grade.py)
+uniform sampler2D uEnvC;   // the panorama's cumulus matte (match.py)
 uniform vec4 uView;        // photo px: x0, y0 (top), w, h
 uniform vec2 uPhotoSize;
 uniform float uF;
@@ -165,6 +173,12 @@ uniform vec3 uSunTone;     // the sun's shoulder, scene units: knee, ceiling, co
 uniform vec3 uHiTint;      // the film's highlight tint, which the shoulder is judged through
 uniform vec3 uSunW;        // the sun's colour in scene units, so it develops warm-neutral
 uniform vec3 uCloudW;      // a sunlit cumulus top in scene units, so it develops warm-neutral
+uniform float uSunHDR;     // 1: the scene is float, and the sun in the glass is light past white
+uniform vec3 uSunHot;      // the sun's own colour at HDR (scene units, max channel 1)
+uniform float uSunPeak;    // the hottest the sun's image gets, scene units (a soft ceiling)
+uniform vec3 uSunSkirt;    // the colour of its skirt, the haze's scatter round it
+uniform float uSunSkirtK;  // and its strength
+const vec3 CLOUD_TOP = vec3(0.93, 0.885, 0.80);  // clouds.py's TOP
 uniform vec3 uSH[9];
 uniform vec2 uDist;        // log2 range of the distance code
 uniform float uEnvW;
@@ -740,6 +754,30 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   vec3 sk = mix(c * T1 / T0, c + 0.35 * (T1 - T0), cloud);
   c = mix(c, max(sk, 0.0), wSky);
 
+  // The cumulus in the glass. The panorama's heaps (match.py's matte: the
+  // tower built over the road behind the lens, the scraps the cloud plane
+  // carried overhead) and the plate's own, where the glass shows the photo's
+  // sky, are lit in the bake to the same TOP as the plate's, and the plate
+  // carries its tops past its 8 bits (uCloudW). Rolled on the glass's
+  // shoulder below they came out a stop under the cloud beside the mirror,
+  // a grey paper heap: so a cloud's top is carried the plate's way, past the
+  // shoulder, and only the glass's own loss is taken from it.
+  float cldW = max((1.0 - fromPhoto) * textureLod(uEnvC, envUv(dir), 0.0).r, wPhoto * smoothstep(-0.45, -0.25, (c.b - c.r) / max(c.r, 1e-3)));
+  float cTopG = cldW * smoothstep(0.3, 0.8, dot(c, LUMA));
+  vec3 cCloud = c * uCloudW / CLOUD_TOP;
+
+  // The plate's print. A clear-sky street has the sun's contrast: its shade
+  // is lit only by the sky, a few stops under its lit faces. The panorama
+  // carries that (match.py), and the glass's veils (the front face's sheen,
+  // the Pro-Mist round the mirror's bright field) lift its shade again, so
+  // the surfaces in it are printed a little harder than the plate's own,
+  // about mid grey (log slope 1.3), and lifted
+  // less for the aluminium's loss than the sky is (a mirror's street is a
+  // shade under the street, its sky the sky), to land at the plate's black.
+  float surf = (1.0 - wSky) * (1.0 - cTopG);
+  float l0 = max(dot(c, LUMA), 1e-5);
+  c *= mix(1.0, pow(l0 / 0.18, 0.3), surf);
+
   // The plate's grade. The glass returns ~85 % of this, so what it shows
   // has to stand at the plate's own exposure, not a stop under it: lifted
   // only to make up the aluminium's loss (the panorama carries the sun
@@ -747,7 +785,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // rolled on a shoulder toward the plate's sunlit white (the photo's sunlit
   // plaster reaches 0.70 linear at its 98th percentile), so a white wall in
   // the glass lands where the wall beside it does and nothing clips.
-  float lift = mix(exp2(0.2), 1.12, wSky);
+  float lift = mix(exp2(0.2), 1.12, wSky) * mix(1.0, exp2(-0.3), surf);
   float cl = max(dot(c, LUMA), 1e-5);
   float lb = cl * lift;
   // the shoulder is judged on luminance or, for a vivid sign or a flower,
@@ -760,7 +798,8 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // the plate's own slight vibrance, nothing more: the street was given its
   // colour in the bake, and a vibrance here lifted a grey curtain behind a
   // window to a pastel green and pink
-  c = max(mix(vec3(dot(c, LUMA)), c, 1.06), 0.0);
+  c = max(mix(vec3(dot(c, LUMA)), c, 1.06 + 0.14 * surf), 0.0);
+  c = mix(c, cCloud, cTopG);
 
   // The mirror sees its own head. A reflected ray that runs up under the
   // visor (or, from the very rim, back across the frame's face) meets paint,
@@ -870,7 +909,8 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float nh = max(dot(Nn, hv), 0.0);
   const float HA2 = 0.035;
   float lobe = HA2 / (PI * pow(nh * nh * (HA2 - 1.0) + 1.0, 2.0));
-  vec3 sunC = SUNW * uSunE * lit * sunVis * lobe * F * 0.3;
+  float lobeS = uSunE * lit * sunVis * lobe * F * 0.3;
+  vec3 sunC = SUNW * lobeS;
   // its disc, never smaller than a pixel, energy kept, its edge soft; round
   // it an aureole, the light the acrylic's micro-roughness and its weathered
   // haze throw a few disc widths wide (falling as the cube of the angle, as
@@ -889,31 +929,65 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // round the disc, with a long faint skirt, which carries the sun's
   // brightness out across the glass the way a lens sees it
   float fwd = exp(-ang / 0.035) * 10.0 + exp(-ang / 0.12) * 1.5 + exp(-ang / 0.4) * 0.25 + 0.03;
-  sunC += SUNW * (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * sunVis * fwd * 0.12;
-  sunC += SUNW * (2.4 * exp(-ang / 0.02) + 1.0 * exp(-ang / 0.075) + 0.25 * exp(-ang / 0.26)) * lit * lv;
+  float skirtD = (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * sunVis * fwd * 0.12;
+  float skirt = skirtD + (2.4 * exp(-ang / 0.02) + 1.0 * exp(-ang / 0.075) + 0.25 * exp(-ang / 0.26)) * lit * lv;
+  sunC += SUNW * skirt;
 
-  // The shoulder. A soft knee, judged on the brightest channel as the film
-  // will see it: below the knee the sun adds as light does; past it the sum
-  // rolls on an exponential toward a ceiling just under the paper's white, and
-  // as it rolls its colour goes to the sun's own. Only the sun's share is
-  // compressed: the glass's image under it keeps its values. Only the disc's
-  // own centre, a pinpoint, is let through past white.
-  vec3 tot = c + sunC;
-  float mb = max(max(c.r * uHiTint.r, c.g * uHiTint.g), c.b * uHiTint.b);
-  float mt = max(max(tot.r * uHiTint.r, tot.g * uHiTint.g), tot.b * uHiTint.b);
-  float kn = uSunTone.x, kw = uSunTone.y - uSunTone.x;
-  gSunX = 0.0;
-  if (mt > kn && mt > mb + 1e-5) {
-    float roll = 1.0 - exp(-(mt - kn) / kw);
-    float m2 = kn + kw * roll;
-    tot = c + sunC * clamp((m2 - mb) / (mt - mb), 0.0, 1.0);
-    float mn = max(max(tot.r * uHiTint.r, tot.g * uHiTint.g), tot.b * uHiTint.b);
-    tot = mix(tot, SUNW * mn, roll * roll);
-    gSunX = roll;
+  // As light. On a float scene the sun is what it is: past white, by a
+  // long way. Its image (disc, aureole and the glare the face's haze and
+  // dust throw round it) is laid on the glass's image at full strength, in
+  // the sun's own warm colour, under one soft ceiling (uSunPeak) that keeps
+  // the half-float targets and the diffusion's pyramid finite. So the
+  // Pro-Mist and the film's own bloom spread a light many times white, warm
+  // because it is warm (the mist's screen keeps a hot glow's hue rather than
+  // clipping each channel to a grey-white), and the film's red layer
+  // halates round it: a hot specular blowing out soft, not a pale coin
+  // under a milky veil. The skirt, a degree or two out, is under white and
+  // adds as light does; only the core blows.
+  vec3 tot;
+  if (uSunHDR > 0.5) {
+    // the core in the sun's colour; the skirt round it, the light the haze
+    // scatters, a little warmer again (it is that skirt, under white, that
+    // shows the sun's colour: the core itself develops to white)
+    // (tighter than the 8-bit glare: there the shoulder hid how far its
+    // widest term reached; as light, it laid a pale veil over the whole
+    // glass, and a warm glow thinned over cobalt reads grey, so the warm
+    // skirt is drawn close round the core and falls off into the blue)
+    // (and the haze's broad lobe, which as light is a sheen across the whole
+    // face, at under half: at full it was the milky veil)
+    float coreS = max(dot(sunC, vec3(0.3333)) / max(dot(SUNW, vec3(0.3333)), 1e-4) - skirt - 0.6 * lobeS, 0.0);
+    float skirtH = skirtD + (2.0 * exp(-ang / 0.018) + 1.2 * exp(-ang / 0.05) + 0.08 * exp(-ang / 0.2)) * lit * lv;
+    vec3 hot = uSunHot * coreS + uSunSkirt * skirtH * uSunSkirtK;
+    float hm = max(max(hot.r, hot.g), hot.b);
+    hot *= uSunPeak * (1.0 - exp(-hm / uSunPeak)) / max(hm, 1e-6);
+    tot = c + hot;
+    // the halation ring's source: how far past white it went
+    gSunX = 1.0 - exp(-max(hm - 0.6, 0.0) / 1.2);
+  } else {
+    // An 8-bit scene: the sun on a shoulder under the paper's white.
+    // The shoulder. A soft knee, judged on the brightest channel as the film
+    // will see it: below the knee the sun adds as light does; past it the sum
+    // rolls on an exponential toward a ceiling just under the paper's white, and
+    // as it rolls its colour goes to the sun's own. Only the sun's share is
+    // compressed: the glass's image under it keeps its values. Only the disc's
+    // own centre, a pinpoint, is let through past white.
+    tot = c + sunC;
+    float mb = max(max(c.r * uHiTint.r, c.g * uHiTint.g), c.b * uHiTint.b);
+    float mt = max(max(tot.r * uHiTint.r, tot.g * uHiTint.g), tot.b * uHiTint.b);
+    float kn = uSunTone.x, kw = uSunTone.y - uSunTone.x;
+    gSunX = 0.0;
+    if (mt > kn && mt > mb + 1e-5) {
+      float roll = 1.0 - exp(-(mt - kn) / kw);
+      float m2 = kn + kw * roll;
+      tot = c + sunC * clamp((m2 - mb) / (mt - mb), 0.0, 1.0);
+      float mn = max(max(tot.r * uHiTint.r, tot.g * uHiTint.g), tot.b * uHiTint.b);
+      tot = mix(tot, SUNW * mn, roll * roll);
+      gSunX = roll;
+    }
+    float core = smoothstep(rEff * 1.3, rEff * 0.3, ang) * lv * fr;
+    tot = mix(tot, SUNW * uSunTone.z, clamp(core, 0.0, 1.0));
+    gSunX = max(gSunX, core);
   }
-  float core = smoothstep(rEff * 1.3, rEff * 0.3, ang) * lv * fr;
-  tot = mix(tot, SUNW * uSunTone.z, clamp(core, 0.0, 1.0));
-  gSunX = max(gSunX, core);
   return tot * contact;
 }
 
@@ -1041,7 +1115,6 @@ void main() {
   // 1 by its own luminance: the belly as it is (the lift starts above it,
   // so the shade between a heap's towers keeps its stop), the top to
   // uCloudW, which develops to a warm neutral of about 246, R over G over B.
-  const vec3 CLOUD_TOP = vec3(0.93, 0.885, 0.80);  // clouds.py's TOP
   // (a warm-neutral top passes; a board's yellow edge, blue under half its
   // red, does not)
   float cTop = aux.b * smoothstep(0.42, 0.86, dot(col, LUMA)) * smoothstep(-0.45, -0.25, (col.b - col.r) / max(col.r, 1e-3));
@@ -1378,10 +1451,15 @@ void main() {
   vec4 c0 = texelFetch(uIn, ivec2(gl_FragCoord.xy), 0);
   vec3 c = dec(c0.rgb);
   // the glow, screened under the ceiling: it lifts the dark round a highlight
-  // and cannot carry anything past what develops just short of white
+  // and cannot carry anything past what develops just short of white. A
+  // glow past the ceiling (the sun's, at HDR) is rolled on its brightest
+  // channel, not clipped channel by channel: clipped, a warm sun's glow came
+  // out a flat grey-white, the milky veil; rolled, it keeps its hue
   vec3 B = mix(texture(uNear, vUv).rgb, texture(uFar, vUv).rgb, uFarW);
   vec3 a = clamp(c / uCeil, 0.0, 1.0);
-  vec3 b = clamp(uGain * B / uCeil, 0.0, 1.0);
+  vec3 b = max(uGain * B / uCeil, 0.0);
+  float bm = max(max(b.r, b.g), b.b);
+  if (bm > 0.6) b *= (0.6 + 0.4 * (1.0 - exp(-(bm - 0.6) / 0.4))) / bm;
   vec3 o = c + uCeil * b * (1.0 - a);
   outColor = vec4(enc(o), c0.a);
 }`;
@@ -1512,13 +1590,14 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg] = await Promise.all([
+  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg] = await Promise.all([
     fetch(BASE + "scene.json").then((r) => r.json()),
     loadImage(BASE + "photo.webp"),
     loadImage(BASE + "env.webp"),
     loadImage(BASE + "envd.png"),
     loadImage(BASE + "aux.png"),
     loadImage(BASE + "grade.png"),
+    loadImage(BASE + "envc.png"),
   ]);
   const photo = imageTexture(gl, photoImg, { srgb: true, mips: true });
   const envT = imageTexture(gl, envImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
@@ -1527,6 +1606,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const envD = imageTexture(gl, envdImg, { wrapS: gl.REPEAT });
   const aux = imageTexture(gl, auxImg);
   const gradeT = imageTexture(gl, gradeImg);
+  const envC = imageTexture(gl, envcImg, { wrapS: gl.REPEAT });
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -1619,6 +1699,23 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   // and a touch warmer, measured on the render (?aim=45,-30: the tops land
   // at about #F4EEE2, the bellies about a stop under, toward #A9BCD3)
   const CLOUD_W = [0.957, 0.933, 0.886].map((v, i) => (1.07 * [1, 0.985, 0.95][i] * sceneFor(v)) / LOOK.highlightTint[i]);
+  // The sun at HDR (a float scene): a hot afternoon sun's colour as the
+  // print should carry it in its glow, warmer than SUN_W's neutral (that is
+  // what its blown core develops to anyway), worked back through the film's
+  // cool highlight tint; and its ceiling, in scene units, about twenty times
+  // white: enough that the Pro-Mist's spread of a sun a few px across blows a
+  // soft warm disc a few css px wide, not so much that it floods the glass.
+  const SUN_HOT = (() => {
+    const w = [1.0, 0.76, 0.5].map((v, i) => v / LOOK.highlightTint[i]);
+    const m = Math.max(...w);
+    return w.map((v) => v / m);
+  })();
+  const SUN_SKIRT = (() => {
+    const w = [1.0, 0.56, 0.24].map((v, i) => v / LOOK.highlightTint[i]);
+    const m = Math.max(...w);
+    return w.map((v) => v / m);
+  })();
+  const SUN_PEAK = 24;
   // without a float target the scene is stored as the film's sRGB input
   const sunTone = () => (linear ? TONE : TONE.map((v) => linearToSrgb(Math.min(v, 1))));
 
@@ -1928,6 +2025,11 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       gl.uniform3fv(u.uHiTint, LOOK.highlightTint);
       gl.uniform3fv(u.uSunW, SUN_W);
       gl.uniform3fv(u.uCloudW, CLOUD_W);
+      gl.uniform1f(u.uSunHDR, linear ? 1 : 0);
+      gl.uniform3fv(u.uSunHot, SUN_HOT);
+      gl.uniform1f(u.uSunPeak, SUN_PEAK);
+      gl.uniform3fv(u.uSunSkirt, SUN_SKIRT);
+      gl.uniform1f(u.uSunSkirtK, 3.4);
       gl.uniform3fv(u.uSH, shFlat);
       gl.uniform2f(u.uDist, Math.log2(scene.dist[0]), Math.log2(scene.dist[1]));
       gl.uniform1f(u.uEnvW, scene.env[0]);
@@ -1939,6 +2041,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       bindTex(3, aux, u.uAux);
       if (P === sceneP) bindTex(4, geoT.tex, u.uGeo);
       if (P === sceneP) bindTex(5, gradeT, u.uGrade);
+      if (P === sceneP) bindTex(6, envC, u.uEnvC);
       gl.uniform2f(u.uRes, L.rw, L.rh);
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
       gl.viewport(0, 0, L.rw, L.rh);
@@ -1959,7 +2062,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     gl.uniform4fv(o.uSunBox, box);
     gl.uniform1f(o.uSunHalR, Math.min(3.2, Math.max(0.8, 1.0 * kc)));
     gl.uniform1f(o.uSunHal, 1.6);
-    gl.uniform3f(o.uSunHalC, 1.0, 0.8, 0.62);
+    gl.uniform3f(o.uSunHalC, 1.0, 0.74, 0.5);
     bindTex(0, sceneT.tex, o.uIn);
     bindTex(1, photoT.tex, o.uSunX);
     gl.bindFramebuffer(gl.FRAMEBUFFER, opticsT.fbo);
@@ -2170,7 +2273,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       film.destroy();
       filmP.destroy();
       for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT, diffT, diffPT, redT, ringT, ...mq, ...ms]) freeTarget(gl, t);
-      for (const t of [photo, envT, envD, aux, gradeT]) gl.deleteTexture(t);
+      for (const t of [photo, envT, envD, aux, gradeT, envC]) gl.deleteTexture(t);
       for (const pr of [sceneP, geoP, opticsP, blit, mistKeyP, mistDownP, mistBlurP, mistRedP, mistP, mistRingP]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
