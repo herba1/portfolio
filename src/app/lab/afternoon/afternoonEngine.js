@@ -29,7 +29,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Haven's Skidpan, its own luminance and alpha, cloud.webp) rises from behind
 // the right-hand roofs and the pole instead, relit here: a warm-white sunlit
 // flank that turns peach and swings lower as the sun drops, skylight-blue
-// shade holding its billows, a thin warm ring round its sunlit edge. The
+// shade holding its billows, a thin bright rim inside its edge. The
 // buildings are the photograph at the photo's sun.
 //
 // Query: ?sun=0..1 holds the sun (0 = 12:30, 1 = 17:00, the last light; the
@@ -72,15 +72,17 @@ const SKY_CURVE = 1.7;
 const SKY_WARMC = [1.0, 0.92, 0.8];
 const SKY_WARM_AMT = 1.0;
 // The cumulus: a photographed plate (cloud.webp, from tools/depth/bakes/
-// afternoon/cumulus.py: R its own luminance, A its coverage) laid behind the
-// street so it rises from behind the right-hand roofs and the pole. The
-// plate's foot (CLOUD_FOOT, card px) lands at CLOUD_AT (plate px), scaled by
-// CLOUD_SCALE and turned CLOUD_ROT degrees counter-clockwise, so its upright
-// leans in toward the zenith the way the building edges on that side do.
-const CLOUD_SIZE = [2140, 1880];
-const CLOUD_FOOT = [380, 1160];
-const CLOUD_AT = [1440, 1240];
-const CLOUD_SCALE = 1.25;
+// afternoon/cumulus.py: R its own luminance, A its coverage, built as a main
+// tower and a smaller turret in front of its flank) laid behind the street so
+// both rise from behind the right-hand roofs with their crowns whole in the
+// sky and blue between them. The main crown's top (CLOUD_FOOT, card px) lands
+// at CLOUD_AT (plate px), scaled by CLOUD_SCALE and turned CLOUD_ROT degrees
+// counter-clockwise, so the towers lean in toward the zenith the way the
+// building edges on that side do.
+const CLOUD_SIZE = [2862, 2099];
+const CLOUD_FOOT = [2114, 214];
+const CLOUD_AT = [2000, 380];
+const CLOUD_SCALE = 0.71;
 const CLOUD_ROT = 22;
 const S_PHOTO = (T0 - T_START) / T_SPAN;
 const S_OPEN = 0.86;
@@ -438,56 +440,73 @@ void main() {
   float vl = dot(vd, uL);
   vec3 cl3 = normalize(vec3(sdir * sqrt(max(1.0 - vl * vl, 0.0)), -vl));
   float dif = dot(cn, cl3);
-  float tn = clamp((cl.r - 0.5) / 0.45, 0.0, 1.0);
+  float tn = clamp((cl.r - 0.45) / 0.5, 0.0, 1.0);
   // the cauliflower: the plate's fine tone against its lobe-sized blur, kept
   // in both lights (stronger in the shade, where the sky alone models it);
-  // read a hair above the plate's own grain so the lit edge does not crunch
-  float det = textureLod(uCloud, cuv, 0.7).r - textureLod(uCloud, cuv, 4.0).r;
+  // read a little above the plate's own grain so the lit edge does not crunch
+  float det = textureLod(uCloud, cuv, 1.2).r - textureLod(uCloud, cuv, 4.0).r;
   // and the lobes themselves against the body (the shade holds them too)
-  float lobe = textureLod(uCloud, cuv, 3.5).r - textureLod(uCloud, cuv, 6.5).r;
+  float lobe = textureLod(uCloud, cuv, 3.5).r - textureLod(uCloud, cuv, 6.0).r;
   // How deep in the cloud this point stands, seen from the sun: its coverage
   // summed along a short march toward the sun across the card, each step read
   // at a coarser mip (a wider cone). The billows facing the sun take it through
   // a few hundred pixels of the mass; behind them the light is spent.
   vec2 sc = vec2(sdir.x * uCl1.x - sdir.y * uCl1.y, sdir.x * uCl1.y + sdir.y * uCl1.x) * ct;
   float tau = 0.0;
+  // and how far below its tower's top: the coverage straight up the card
+  float tup = 0.0;
   for (int i = 0; i < 6; i++) {
     float fi = float(i);
     float d = 26.0 * (fi + 1.0) * (1.0 + 0.45 * fi);
-    float c = textureLod(uCloud, cuv + sc * d, 2.0 + 0.6 * fi).a;
-    tau += c * (1.0 + 0.4 * fi);
+    tau += textureLod(uCloud, cuv + sc * d, 2.0 + 0.6 * fi).a * (1.0 + 0.4 * fi);
+    tup += textureLod(uCloud, cuv - vec2(0.0, 1.4 * d) * ct, 3.0 + 0.4 * fi).a;
   }
   // sideways light marches through the mass; light from behind us lands on
   // the face we see, light from behind the cloud reaches only its rim
   float side = sqrt(max(1.0 - vl * vl, 0.0));
   float reach = exp(-tau * mix(0.075, 0.3, max(vl, 0.0)) * side);
-  // the underside, nearer the roofs, stands deeper in the cloud's own shade
-  float under = 1.0 - smoothstep(0.2, 0.62, dot(vd, UP));
-  float sunK = smoothstep(0.2, 0.62, reach + 0.9 * dif + 0.35 * (tn - 0.25) + 0.25 * lobe - 0.12 * under);
+  // 0 on the crowns, 1 low in a tower's body, where its own mass and the
+  // towers round it shade it; and the lobes' undersides (faces turned down,
+  // toward the street) see neither the sun nor the open dome
+  float deep = smoothstep(1.2, 5.0, tup);
+  float down = clamp(cn.y * 2.2, 0.0, 1.0);
+  float sunK = smoothstep(0.08, 0.75, reach + 0.85 * dif + 0.6 * (tn - 0.45) + 0.5 * lobe - 0.18 * deep - 0.2 * down);
   // The sunlit side: a warm white (a pale peach once low) that rolls off on a
   // shoulder and is never clipped, the plate's billows held in it and each
   // lobe rounding off as the light goes deeper into it. Set above paper white
   // in print: the film's vignette and diffusion take back about a sixth.
-  float litF = (0.95 + 0.12 * tn + 0.25 * dif) * (0.86 + 0.2 * reach) * (1.0 + 0.8 * det + 1.5 * lobe);
+  float litF = (1.02 + 0.1 * tn + 0.18 * dif) * (0.88 + 0.16 * reach) * (1.0 + 0.6 * det + 1.2 * lobe) * (1.0 - 0.12 * deep);
   // the folds between the sunlit billows are filled by the sky, not greyed
-  vec3 fold = mix(vec3(0.84, 0.93, 1.03), vec3(1.0), smoothstep(0.7, 1.06, litF));
-  vec3 litC = mix(vec3(1.0, 0.985, 0.95), vec3(1.0, 0.9, 0.79), pow(low, 1.3)) * litF * fold;
-  vec3 over = max(litC - 0.92, 0.0);
-  litC = min(litC, 0.92) + 0.2 * (1.0 - exp(-over / 0.2));
-  // The shade: the bright skylight blue of the open dome, not grey; the plate's
-  // own billows and the coverage relief model it.
-  vec3 shadeC = hsv2rgb(vec3(205.0 / 360.0, mix(0.13, 0.16, low) + 0.04 * under, mix(1.1, 1.06, low)))
-    * (0.9 + 0.12 * tn + 0.3 * dif) * clamp(1.0 + 1.1 * det + 2.6 * lobe, 0.72, 1.08) * (1.0 - 0.07 * under);
+  vec3 fold = mix(vec3(0.8, 0.9, 1.02), vec3(1.0), smoothstep(0.72, 1.04, litF));
+  vec3 litC = mix(vec3(1.0, 0.97, 0.9), vec3(1.0, 0.86, 0.72), pow(low, 1.3)) * litF * fold;
+  vec3 over = max(litC - 0.95, 0.0);
+  litC = min(litC, 0.95) + 0.2 * (1.0 - exp(-over / 0.2));
+  // The shade: lit by the open dome, a clear sky blue, never grey. The faces
+  // turned up to the dome and the lobes that bulge out of the shade stand in
+  // its pale blue; the undersides and the body low down, deeper in the mass,
+  // drop to a fuller sky blue. The plate's own billows model it.
+  float mid = textureLod(uCloud, cuv, 2.2).r - textureLod(uCloud, cuv, 5.0).r;
+  float skyK = clamp(0.55 + 1.2 * (tn - 0.45) + 5.0 * lobe + 6.0 * mid - 1.1 * cn.y - 0.45 * deep - 0.3 * down, 0.0, 1.0);
+  vec3 shadeHi = mix(vec3(0.88, 0.95, 1.02), vec3(0.9, 0.93, 1.0), low);
+  vec3 shadeLo = mix(vec3(0.68, 0.83, 0.97), vec3(0.7, 0.8, 0.95), low);
+  vec3 shadeC = mix(shadeLo, shadeHi, skyK) * clamp(1.0 + 2.4 * det + 1.2 * mid, 0.76, 1.14);
   vec3 cloud = min(mix(shadeC, litC, sunK), vec3(1.07));
-  // The same air as the sky: a few percent of the sky's own colour veils the
-  // mass, a little more toward the roofs where there is more air in between.
-  cloud = mix(cloud, clear, 0.05 + 0.03 * under);
-  // A thin warm ring round its sunlit edge, outside it: the light the film's
-  // base throws back round a bright edge, on the clear sky only.
-  float ring = max(textureLod(uCloud, cuv, 1.8).a - cl.a, 0.0);
+  // A thin bright rim just inside the silhouette, where the cloud thins to
+  // its edge and the light comes through it: warm on the side toward the
+  // sun, the dome's pale blue-white on the far side.
   float edgeSun = smoothstep(-0.1, 0.7, dot(normalize(-gp + 1e-6), sdir));
-  vec3 ringC = mix(vec3(1.0, 0.86, 0.7), vec3(1.0, 0.72, 0.5), low);
-  clear = mix(clear, ringC, clamp(ring * edgeSun * 0.45, 0.0, 0.25));
+  float thin = clamp((1.0 - textureLod(uCloud, cuv, 2.2).a) * 3.2, 0.0, 1.0) * smoothstep(0.25, 0.9, cl.a);
+  vec3 rimC = mix(vec3(0.9, 0.95, 1.0), litC * vec3(1.02, 1.0, 0.97), edgeSun);
+  cloud = mix(cloud, max(cloud, rimC), thin * (0.55 + 0.4 * edgeSun));
+  // The same air as the sky: a few percent of the sky's own colour veils the
+  // mass, a little more low in the towers where there is more air in between.
+  cloud = mix(cloud, clear, 0.04 + 0.04 * deep);
+  // Outside the edge the sky only lightens (the film's base throwing back the
+  // light round a bright edge): toward its own pale tint, warm only once the
+  // sun is low, so the edge never sits in a dull grey band.
+  float ring = max(textureLod(uCloud, cuv, 1.8).a - cl.a, 0.0);
+  vec3 ringC = mix(vec3(0.72, 0.85, 1.0), vec3(1.0, 0.84, 0.7), low * low);
+  clear = mix(clear, ringC, clamp(ring * edgeSun * 0.3, 0.0, 0.16));
   float ca = cl.a;
   vec3 skyS = mix(clear, cloud, ca);
   // back through the scan grade below, so the sky lands where it was drawn;
