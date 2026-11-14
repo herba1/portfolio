@@ -994,6 +994,19 @@ if labels is not None:
 #      touches, since it stands in front of whatever lies behind it in the
 #      photograph. It never uses its own depth samples. A thin piece that
 #      touches no thick facade at all is a loose wire in the sky: it goes.
+#   5. a limb of a tower's body (what an opening at FAC_LIMB px takes off it,
+#      joined to the rest by a neck) that reaches into the sky and is held
+#      far more by a nearer tower than by its own body is that tower's: the
+#      truss's sunlit diagonal member, where its lower edge meets the beige
+#      slab's tip, came into the slab's SAM mask with the glare round it, so
+#      it rode on the slab's plane ~15 m behind the truss and, once the
+#      camera swung, hung loose in the sky between the two (and the truss's
+#      cable that ends on it poked off into nothing). Such a limb takes the
+#      plane of the nearer tower's facade it touches most, exactly, before
+#      any thin piece is hung, so the cables and rails on it go with it.
+#      A far tower's own narrow tip seen beside a nearer one (the white grid
+#      tower's end against the dark glass) is held 2-4x more by its neighbour
+#      than by its body; the member ~6x, so FAC_HOLD sits between.
 # FAC (frame px) is each tower pixel's facade id, FAC_PL its plane: d = p0 X +
 # p1 Y + p2 with X, Y in frame px / 1000 from the centre, as the hard layers.
 # Everything below that lays a tower splat (the quadtree's cells, the edge
@@ -1006,6 +1019,10 @@ FAC_BACK = 300  # px: the least piece of a tower's mask taken back from the sky
 FAC_GLIMPSE = 20000  # px: a body under this, framed by nearer structure, is a glimpse
 FAC_TWO = 60000  # px: the least body that may show two facades
 FAC_T = 0.006  # disparity: RANSAC inlier band (a facade's core scatters ~0.002-0.005)
+FAC_LIMB = 31  # px: the opening (an ellipse) whose leftovers of a body are its limbs
+FAC_LIMB_MIN = 400  # px: the least limb that is weighed at all
+FAC_HOLD = 5.0  # a limb is a nearer tower's when that tower holds it this much more than its own body
+FAC_LIMB_SKY = 0.25  # and at least this share of its border is sky (it reaches out into it)
 FAC_PL = {}  # facade id -> plane (3,)
 FAC_OWN = {}  # facade id -> tower label
 FAC = None
@@ -1190,6 +1207,52 @@ def facades(dep, LAB, dsnap, labels):
               f" {int(moved.sum())} of {len(by_)} px moved past a step")
         fid += len(P)
     del yy_, xx_
+    # limbs: a piece of one tower's body held by a nearer tower goes on its plane
+    kl = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (FAC_LIMB, FAC_LIMB))
+    k3, k5 = np.ones((3, 3), np.uint8), np.ones((5, 5), np.uint8)
+    lz = logz(dep)
+    limbs = limb_px = 0
+    for k in sorted(nfac):
+        mk = thick & (LAB == k)
+        y0, y1, x0, x1 = bbox_of(mk, FAC_LIMB, (H_, W_))
+        b = mk[y0:y1, x0:x1].astype(np.uint8)
+        core = cv2.morphologyEx(b, cv2.MORPH_OPEN, kl)
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats(core, connectivity=8)
+        okc = st_[:, cv2.CC_STAT_AREA] >= FAC_BODY
+        okc[0] = False
+        core = cv2.dilate(okc[cc_].astype(np.uint8), k3) > 0
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats(((b > 0) & ~core).astype(np.uint8), connectivity=8)
+        L_, T_, F_ = LAB[y0:y1, x0:x1], thick[y0:y1, x0:x1], fac[y0:y1, x0:x1]
+        for i in range(1, n_):
+            if st_[i, cv2.CC_STAT_AREA] < FAC_LIMB_MIN:
+                continue
+            m = cc_ == i
+            ring = (cv2.dilate(m.astype(np.uint8), k5) > 0) & ~m
+            held_own = int((ring & core).sum())
+            sky_ = int((ring & (L_ < 0)).sum())
+            oth = ring & T_ & (L_ >= 0) & (L_ != k)
+            if not oth.any() or sky_ < FAC_LIMB_SKY * ring.sum():
+                continue
+            lv, lc = np.unique(L_[oth], return_counts=True)
+            j = int(lv[np.argmax(lc)])
+            if lc.max() < FAC_HOLD * max(held_own, 1):
+                continue
+            fv, fcn = np.unique(F_[oth & (L_ == j)], return_counts=True)
+            fj = int(fv[np.argmax(fcn)])
+            my, mx = np.nonzero(m)
+            p = FAC_PL[fj]
+            dj = np.maximum(p[0] * (mx + x0 - W_ / 2) / 1000.0 + p[1] * (my + y0 - H_ / 2) / 1000.0 + p[2], SKY_T + 0.01)
+            # only onto a nearer tower: it stands in front of its own
+            if np.median(logz(dj.astype(np.float32)) - lz[my + y0, mx + x0]) > -DISC_T:
+                continue
+            dep[my + y0, mx + x0] = dj
+            fac[my + y0, mx + x0] = fj
+            limbs += 1
+            limb_px += len(my)
+            print(f"facades: a limb of tower {k} ({len(my)} px at {int(mx.mean()) + x0},{int(my.mean()) + y0}),"
+                  f" held {int(lc.max())} px by tower {j} and {held_own} by its own body: on facade {fj}")
+    print(f"facades: limbs taken onto the nearer tower that holds them {limbs} ({limb_px} px)")
+    del lz
     # thin structure: hung on the thick facade it is attached to
     thin = (LAB >= 0) & ~thick
     n_, cc, st_, _ = cv2.connectedComponentsWithStats(thin.astype(np.uint8), connectivity=8)

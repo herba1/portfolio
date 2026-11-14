@@ -101,6 +101,7 @@ const DOME_IN = [0.048, 0.153, 0.27];
 const DOME_TOP = [0.017, 0.066, 0.2];
 const DOME_LOW = [0.139, 0.303, 0.511];
 const DOME_SKYLIGHT = 0.15; // share of skylight blue on the cloud's shadow side
+const DOME_HUE_MAX = 205; // degrees, before the film: no cloud shadow rotates past this toward violet (domeHue)
 
 // A 64x64 blue-noise tile (void and cluster, Ulichney 1993) for dithering the
 // dome: rank of every texel, as 0..255.
@@ -317,10 +318,34 @@ uniform vec4 uDome;      // radius of the dome grade (rad), its curve power, amo
 uniform vec3 uDomeIn;    // the deep sky's own colour, linear
 uniform vec3 uDomeTop;   // what it becomes at the zenith (cobalt)
 uniform vec3 uDomeLow;   // and toward the frame's edges (the pale cyan low sky)
+uniform float uDomeHue;  // domeHue's bound: (240 - DOME_HUE_MAX) / 60
 uniform sampler2D uBlue; // 64x64 blue noise, R8
 out vec4 outColor;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+// The regrade takes more green than red out of the sky's share (cobalt sits
+// deeper in green than the photo's teal), so where a cloud's shadowed edge is
+// read as more clear sky than it holds, the subtraction overshoots and the
+// grey turns violet, then maroon once the film's halation adds its red. So a
+// cloud's shadow may not rotate past DOME_HUE_MAX. Judged on display values (a
+// square root stands in for the transfer curve), a blue pixel keeps its green
+// at least uDomeHue of the way from red to blue, and a pixel with more red
+// than blue keeps its green at least at its blue (never magenta); green is
+// lifted to the bound and nothing else moves. The film's shadow tint and
+// saturation turn a blue ~15 degrees further, so 205 here lands at ~220 on
+// the screen. The bound holds on cloud and on the haze of sky through its
+// edge (the Pro-Mist then greys those further), and lets go as the colour
+// saturates into clear sky (here the zenith's cobalt is ~0.7), where the
+// film's own blue depth takes the violet out; the warm cloud tops are left
+// as they were.
+vec3 domeHue(vec3 g) {
+  vec3 e = sqrt(max(g, 0.0));
+  float sat = (max(e.r, e.b) - min(e.r, e.b)) / max(max(e.r, e.b), 1e-4);
+  float gMin = e.r >= e.b ? e.b : e.r + (e.b - e.r) * uDomeHue;
+  e.g = mix(max(e.g, gMin), e.g, smoothstep(0.5, 0.66, sat));
+  return e * e;
+}
 
 // The sky graded as a dome round the zenith: deep cobalt straight up opening
 // to a paler cyan toward the horizon, which the frame's edges stand in for.
@@ -359,7 +384,7 @@ vec3 domeGrade(vec3 c, vec3 cb, vec3 dir, float skyMask) {
   float cloud = 1.0 - smoothstep(0.3, 0.5, chroma);
   float band = smoothstep(0.38, 0.52, lp) * (1.0 - smoothstep(0.74, 0.86, lp));
   vec3 skyl = uDomeLow * (l / max(dot(uDomeLow, LUMA), 1e-4));
-  return mix(g, skyl, cloud * band * uDome.w);
+  return domeHue(mix(g, skyl, cloud * band * uDome.w));
 }
 
 // One photo texel against a tower fragment's own surface, at log depth lp.
@@ -1030,6 +1055,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uDomeIn, DOME_IN);
     gl.uniform3fv(u.uDomeTop, DOME_TOP);
     gl.uniform3fv(u.uDomeLow, DOME_LOW);
+    gl.uniform1f(u.uDomeHue, (240 - DOME_HUE_MAX) / 60);
     gl.uniform2f(u.uDr, Math.log(DEPTH_LO), Math.log(DEPTH_HI / DEPTH_LO) / 254);
     gl.uniform2f(u.uTol, DEPTH_TOL[0], DEPTH_TOL[1]);
     // world -> view is R^T: R row major read as column major is exactly R^T.
