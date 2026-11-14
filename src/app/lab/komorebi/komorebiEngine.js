@@ -165,15 +165,27 @@ const FILM = {
   vignette: 0.22,
 };
 // The grade, in linear scene light before the film.
-// Sky: the rebuilt field keeps its own brightness (rolled off round the sun)
-// but takes the chroma of a Superia summer sky, a pale cyan-blue at the
-// horizon deepening to cobalt overhead. Chroma is per unit blue.
+// Sky: a bright summer cyan-cobalt, saturated all the way up. The rebuilt
+// field gives the circumsolar glow low behind the cypresses (rolled off);
+// above it the sky climbs steadily from the zenith down to the treeline
+// (floor: the zenith's luminance, scene light, and the stops it gains by
+// the treeline), so the field's dip a fifth of the way down never reads as
+// a dusky band. Chroma is per unit blue: printed, the zenith lands near
+// hue 206 (rgb ~5, 82, 148), the treeline near hue 200 (~10, 118, 175).
+// The film's corner fall-off is taken back out of the sky, so it holds its
+// light into the corners; the trees keep it.
 const SKY_GRADE = {
-  horizon: [0.12, 0.36, 1],
-  zenith: [0.02, 0.235, 1],
-  depth: [0.92, 0.55], // luminance kept, horizon .. zenith
+  horizon: [0.03, 0.44, 1],
+  zenith: [0.012, 0.315, 1],
+  depth: [0.6, 0.56], // luminance kept, horizon .. zenith
   knee: 1.1, // circumsolar roll-off: Y / (1 + Y / knee)
+  floor: [0.075, 1.0], // zenith luminance, stops gained by the treeline
+  pale: [0.42, 0.8, 1], // round the sun the sky pales to this, never grey
 };
+// Printed, any pale or desaturated blue (sky through a thin cloud edge, the
+// pale sky by the sun under the film's warm bloom) is held to this hue,
+// degrees, so nothing drifts to lavender.
+const SKY_HUE_MAX = 215;
 // Cloud: the capture's own light is the drawing. The matte is soft, from
 // the puresky's own cloud-vs-sky separation (tools/depth/bakes/komorebi/
 // softmatte.py), so the lobes, the wisps and the pale fringe where a cloud
@@ -238,6 +250,9 @@ uniform sampler2D uCloudsBlur; // same texture, mipmapped sampler
 uniform vec3 uSkyHor;
 uniform vec3 uSkyZen;
 uniform vec3 uSkyGrade;      // depth horizon, depth zenith, knee
+uniform vec2 uSkyFloor;      // zenith luminance, stops gained by the treeline
+uniform vec3 uSkyPale;       // the pale sky round the sun
+uniform float uVig;          // the film's vignette, taken back out of the sky
 uniform vec3 uCKey;          // sunlit tops
 uniform vec4 uCGrade;        // sky share in the shade, fill, gain, detail
 uniform vec4 uCRoll;         // knee, top, unused, unused
@@ -318,19 +333,27 @@ void main() {
   vec2 uv = uCrop.xy + p * uCrop.zw;
   float sd = length((uv - uSun) * vec2(1.0, 1.0 / ASPECT));
 
-  // Sky: Superia cobalt, deepening from the horizon (asset bottom) to
-  // overhead (the asset's top is past the zenith).
+  // Sky: summer cyan-cobalt, deepening from the horizon (asset bottom) to
+  // overhead (the asset's top is past the zenith), and luminous all the way.
   vec3 col = texture(uSky, uv).rgb;
   vec3 skyTint;
   {
     float Y = dot(col, LUMA);
     Y = Y / (1.0 + Y / uSkyGrade.z);
     float h = smoothstep(0.98, 0.2, uv.y);
+    Y *= mix(uSkyGrade.x, uSkyGrade.y, h);
+    // Never darker than a steady climb from the zenith to the treeline
+    // (a smooth max, so the circumsolar glow joins it without a seam).
+    float fl = uSkyFloor.x * exp2(uSkyFloor.y * smoothstep(0.0, 0.8, uv.y));
+    Y = pow(pow(Y, 4.0) + pow(fl, 4.0), 0.25);
     vec3 tint = mix(uSkyHor, uSkyZen, h);
-    // round the sun the sky pales a little, as it does
-    tint = mix(tint, vec3(0.5, 0.72, 1.0), 0.6 * exp(-sd / 0.07));
+    // round the sun the sky pales a little, as it does, towards a pale cyan
+    tint = mix(tint, uSkyPale, 0.45 * exp(-sd / 0.07));
     skyTint = tint;
-    col = withLuma(tint, Y * mix(uSkyGrade.x, uSkyGrade.y, h));
+    // The film darkens the print's corners; the sky keeps its light there.
+    vec2 vr = (p - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+    float t2 = dot(vr, vr) / (0.25 * (uRes.x * uRes.x / (uRes.y * uRes.y) + 1.0)) * uVig * uVig;
+    col = withLuma(tint, Y * (1.0 + t2) * (1.0 + t2));
   }
 
   // The sun: a limb-darkened disc of the measured radiance. Smaller than a
@@ -480,8 +503,22 @@ out vec4 outColor;
 uniform sampler2D uTex;
 uniform float uFade;
 uniform vec3 uPaper;
+uniform float uHueMax;       // hue ceiling for blues, in sixths of a turn
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
+  // Blues past the ceiling (the pale veil by the sun, a thin cloud edge
+  // under the warm bloom) are turned back to it at the same value and
+  // chroma, so no pale sky reads lavender; deep blacks and real violets are
+  // left alone.
+  float mx = max(c.r, max(c.g, c.b));
+  float mn = min(c.r, min(c.g, c.b));
+  float d = mx - mn;
+  if (c.b >= mx && d > 1.0 / 255.0) {
+    float h = 4.0 + (c.r - c.g) / d;
+    float w = step(uHueMax, h) * (1.0 - smoothstep(4.5, 5.0, h)) * smoothstep(0.06, 0.2, mx);
+    float hn = mix(h, uHueMax, w);
+    c = hn < 4.0 ? vec3(mn, mn + (4.0 - hn) * d, mx) : vec3(mn + (hn - 4.0) * d, mn, mx);
+  }
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -964,6 +1001,9 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uSkyHor, SKY_GRADE.horizon);
     gl.uniform3fv(u.uSkyZen, SKY_GRADE.zenith);
     gl.uniform3f(u.uSkyGrade, SKY_GRADE.depth[0], SKY_GRADE.depth[1], SKY_GRADE.knee);
+    gl.uniform2fv(u.uSkyFloor, SKY_GRADE.floor);
+    gl.uniform3fv(u.uSkyPale, SKY_GRADE.pale);
+    gl.uniform1f(u.uVig, FILM.vignette);
     gl.uniform3fv(u.uCKey, CLOUD_GRADE.key);
     gl.uniform4f(u.uCGrade, CLOUD_GRADE.sky, CLOUD_GRADE.fill, CLOUD_GRADE.gain, CLOUD_GRADE.detail);
     gl.uniform4f(u.uCRoll, CLOUD_GRADE.knee, CLOUD_GRADE.top, 0, 0);
@@ -1024,6 +1064,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1i(blit.u.uTex, 0);
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
+    gl.uniform1f(blit.u.uHueMax, SKY_HUE_MAX / 60);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
