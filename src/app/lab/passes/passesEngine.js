@@ -83,6 +83,14 @@ const vec3 SKY_LOW = vec3(79.0, 159.0, 214.0) / 255.0;
 const vec3 SKY_HIGH = vec3(23.0, 71.0, 160.0) / 255.0;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
+// The walls' albedo is brought up from the shade the plate was shot in by
+// this much, its contrast spread about WALL_MID.
+const float WALL_GAIN = 20.0;
+const float WALL_MID = 0.6;
+// And the sun on them is opened this much over the tower's: the plate's
+// walls were exposed for shade, so sunlit concrete has to climb to a warm
+// white near the top of the curve, where the sun's colour thins out.
+const float WALL_KEY = 2.3;
 
 vec3 toLin(vec3 c){ return pow(c, vec3(2.2)); }
 vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
@@ -259,12 +267,15 @@ void main(){
   vec3 steelP = texture(uSteel, lb, bias).rgb;
   steelW *= 1.0 - solid * smoothstep(0.04, 0.12, length(steelP - albP));
   vec3 alb = toLin(mix(albP, steelP, steelW));
-  alb = mix(vec3(luma(alb)), alb, mix(0.18, 1.0, tower)) * mix(vec3(1.0, 0.97, 0.93), vec3(1.0), tower);
-  // The walls clip at a pale concrete. The tower's paint rolls off into it
-  // instead: brought up four times, its white members and the half-lit steel
-  // behind them would all clip to the same flat cream, and the lattice would
-  // go to a milky mush with no members in it.
-  vec3 wallAlb = min(alb * 8.0, vec3(0.82));
+  alb = mix(vec3(luma(alb)), alb, mix(0.06, 1.0, tower));
+  // The walls clip at a pale concrete, near white: the warmth on them is the
+  // sun's, not the surface's. Their texture is spread about its middle as it
+  // comes up, since sunlit, high on the curve, the shoulder takes most of it
+  // back: the panel joints, the tie holes and the louvre's slats stay drawn.
+  // The tower's paint rolls off instead: brought up four times, its white
+  // members and the half-lit steel behind them would all clip to the same
+  // flat cream, and the lattice would go to a milky mush with no members in it.
+  vec3 wallAlb = min(WALL_MID * pow(alb * WALL_GAIN / WALL_MID, vec3(1.25)), vec3(0.9));
   vec3 towerAlb = 0.86 * (1.0 - exp(-alb * 3.4 / 0.86));
   alb = mix(wallAlb, towerAlb, tower);
 
@@ -288,14 +299,19 @@ void main(){
   // open sky, cyan, strongest on faces that look up into it, weaker in the
   // creases behind a silhouette. Bounce: a little of the sun off the walls.
   float key = max((ndl + wrap) / (1.0 + wrap), 0.0) * vis;
-  float skyVis = clamp(0.55 + 0.45 * dot(n, uUp), 0.0, 1.0) * (1.0 - 0.35 * smoothstep(0.0, 0.3, -bend));
+  // On the walls even the faces turned down see a share of the sky across
+  // the canyon, and what bounces onto them is the sunlit concrete opposite,
+  // pale and from every side, not the street's warm light from below: the
+  // undersides and the heads of the window reveals go to the same cool slate
+  // as the wall in shade, not a brown-grey.
+  float skyVis = clamp(0.55 + 0.45 * dot(n, uUp), mix(0.35, 0.0, tower), 1.0) * (1.0 - 0.35 * smoothstep(0.0, 0.3, -bend));
   vec3 fill = vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis;
-  vec3 bounce = uSunCol * 0.035 * (0.5 - 0.5 * dot(n, uUp));
+  vec3 bounce = uSunCol * mix(0.02, 0.035 * (0.5 - 0.5 * dot(n, uUp)), tower);
   // Only on faces the sun reaches: with the sun behind the tower the half
   // vector turns round and would light the lattice from the front.
   vec3 h = normalize(L - V + vec3(0.0, 0.0, 1e-4));
   float spec = pow(max(dot(n, h), 0.0), 40.0) * vis * mix(0.03, 0.12, tower) * smoothstep(0.0, 0.2, ndl);
-  vec3 lit = alb * (uSunCol * key + fill + bounce) + uSunCol * spec;
+  vec3 lit = alb * (uSunCol * key * mix(WALL_KEY, 1.0, tower) + fill + bounce) + uSunCol * spec;
 
   // The sky goes over the plate after the tone curve, as a print would be
   // matted: the dome runs to a thousand times paper white at the sun, and
