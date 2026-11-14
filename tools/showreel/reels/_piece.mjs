@@ -13,7 +13,9 @@ export const WORDLESS = [
   '[class*="sound"]', "nextjs-portal",
 ].join(", ") + " { visibility: hidden !important; }";
 
-export function piece({ hide = [], css = "", beats, home = HOME, ...rest }) {
+// hand: false for pieces that play on their own: no pointer at all, since a
+// hand that never touches anything only suggests it should have.
+export function piece({ hide = [], css = "", beats, home = HOME, hand = true, ...rest }) {
   const hidden = hide.length ? `${hide.join(", ")} { visibility: hidden !important; }` : "";
   return {
     formats: ["feed"],
@@ -22,9 +24,9 @@ export function piece({ hide = [], css = "", beats, home = HOME, ...rest }) {
     loop: { fade: 1000 },
     tempo: 0.8,
     travel: 0.8,
-    cursor: { from: home, visible: true },
+    cursor: hand ? { from: home, visible: true } : { visible: false },
     ...rest,
     css: [WORDLESS, hidden, css].join("\n"),
-    beats: [...beats, { move: home, duration: 700, pause: 300 }],
+    beats: hand ? [...beats, { move: home, duration: 700, pause: 300 }] : beats,
   };
 }
