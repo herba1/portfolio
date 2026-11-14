@@ -14,11 +14,18 @@
 #     trunks converge on, with no residual term and nothing kept from the input
 #     field anywhere (an earlier pass kept sunburst.py's sky within 4 deg of the
 #     sun, eased out by 8, and the lumps it carried printed as an off-centre dark
-#     stain): ZEN overhead (prints about rgb(24,90,170) at 0 EV, hue ~213, as a
-#     polariser takes a clear summer sky), opening out as (z / Z_RIM) ** ZPOW in
-#     log radiance to RIM (about rgb(106,167,228), hue ~210) at the frame's
-#     mid-edges; both ends are solved through the piece's own negative + print,
-#     so the hue stays on 210-213 all the way out;
+#     stain): ZEN overhead (prints about rgb(32,104,184) at 0 EV, hue ~212, as a
+#     polariser takes a clear summer sky), opening out in log radiance to RIM
+#     (about rgb(106,167,228), hue ~210) at the frame's mid-edges; both ends are
+#     solved through the piece's own negative + print, so the hue stays on
+#     210-212 all the way out. The opening is a dome, not a cone: (z / Z_RIM) **
+#     ZPOW with ZPOW 2.8, so the deep blue holds broad and level overhead and the
+#     print reaches half-way to the rim only some 45 deg out, then eases into a
+#     soft cap past the rim (Z_CAP, knee CAP_M) instead of stopping on a kink.
+#     (It was ZPOW 1.25 from a darker rgb(24,90,170) core: near-linear in log
+#     light, the print's toe turned it into a tight dark disc a third of the
+#     frame across, a bullseye at the zenith rather than a sky deepening
+#     overhead. redome.py swapped that field for this one on the shipped bake);
 #   - plus the hidden sun's aureole, replacing sunburst.py's: AUR_A x the sky at
 #     the sun falling off over AUR_W (~3 deg, where sunburst.py's core fell off
 #     over 1.6 and printed as a cut-out cyan-white rim hugging the crown), with a
@@ -71,9 +78,10 @@ import relight
 
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 LN = 0.035                                   # the needles' own luminance (resun.py)
-ZEN = np.array([0.0376, 0.1101, 0.1859])     # overhead: prints ~rgb(24,90,170) at 0 EV
+ZEN = np.array([0.0515, 0.1311, 0.2166])     # overhead: prints ~rgb(32,104,184) at 0 EV
 RIM = np.array([0.1716, 0.2793, 0.4513])     # at Z_RIM: prints ~rgb(106,167,228)
-Z_RIM, ZPOW, Z_CAP = 60.0, 1.25, 1.12        # zenith angle of the mid-edge rim (deg), falloff power, cap past it
+Z_RIM, ZPOW = 60.0, 2.8                      # zenith angle of the mid-edge rim (deg); dome power (half-way ~45 deg)
+Z_CAP, CAP_M = 1.1, 4.0                      # soft cap past the rim (share of the rim's opening), its knee
 AUR_A, AUR_W = 17.0, 3.0                     # aureole: x the target sky at the sun, e-fold (deg)
 AUR_B, AUR_W2 = 0.8, 6.0                     # its soft outer edge, in the sky's own blue (so no grey skirt)
 AUR_WHITE, AUR_WK = 0.75, 2.0                 # its colour: up to this far towards white, half-way at AUR_WK x the sky
@@ -111,8 +119,9 @@ def mblur(a, m, s):
     return ndi.gaussian_filter(a * m, s) / np.maximum(ndi.gaussian_filter(m, s), 1e-6)
 
 def sky_field(z):
-    """The open sky with no sun: a function of zenith angle alone."""
-    k = np.minimum((z / Z_RIM) ** ZPOW, Z_CAP)[..., None]
+    """The open sky with no sun: a function of zenith angle alone, a broad dome."""
+    cap = lambda v: v / (1 + (v / Z_CAP) ** CAP_M) ** (1 / CAP_M)
+    k = (cap((np.asarray(z) / Z_RIM) ** ZPOW) / cap(1.0))[..., None]
     return np.exp(np.log(ZEN) + (np.log(RIM) - np.log(ZEN)) * k)
 
 def aureole(T, g):

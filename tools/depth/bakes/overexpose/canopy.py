@@ -23,11 +23,11 @@
 # The optics take the change's own linear blur, so the diffusion and halation no
 # longer carry the canopy's old, lighter light.
 #
-# The top crown, the pine the hidden sun sits behind, is also given its trunk:
-# from the frame's top edge (where its foot is, below us) towards the zenith the
-# trunks converge on, tapering, with a few spurs, ending in the leader a little
-# past the crown's lower edge. And the crown's smeared lower lip (soft, rounded
-# lobes from the rebuild around the sun) is trimmed to a needle-fringed edge.
+# The top crown, the pine the hidden sun sits behind: its smeared lower lip (soft,
+# rounded lobes from the rebuild around the sun) is trimmed to a needle-fringed
+# edge, and the hanging lobe under it removed. (An earlier pass also drew it a
+# leader with whorls of spurs hanging past the lip on the line to the zenith; it
+# read as a fern pasted on below the crown and is gone, see redome.py.)
 #
 # Pipeline: runs last, after polarise.py (pass copies, never the outputs):
 #             python3 canopy.py <scene.webp> <optics.png> [preview_dir]
@@ -115,12 +115,9 @@ def canopy(pix, alpha):
 
 # --- the top crown: a pine seen from below, pointing at the zenith ---------------
 LIP = (300, 120, 880, 480)                   # x0, y0, x1, y1 of the crown's lower lip (px)
-EDGE_PT = (632.0, 320.0)                     # where the leader leaves the crown (px)
+EDGE_PT = (632.0, 320.0)                     # the notch in the lip the old drawn leader hung from (px; redome.py)
 CROWN_PT = (560, 160)                        # a point inside the crown (px)
-LEADER = (-40.0, 118.0, 7.5)                 # from (px along the line to the zenith, behind / past the edge), base width
-WHORLS = ((24.0, 38.0, 3.8, 1), (32.0, 30.0, 3.2, -1), (66.0, 24.0, 2.6, -1), (74.0, 18.0, 2.2, 1), (100.0, 10.0, 1.6, 1))   # (px past the edge, length, width, side)
-SPUR_DEG = 48.0                              # spurs leave the leader this far off its line, towards its tip
-DRIP = (600, 340, 690, 400)                  # the hanging lobe the leader replaces (x0, y0, x1, y1)
+DRIP = (600, 340, 690, 400)                  # the hanging lobe removed under the lip (x0, y0, x1, y1)
 FRINGE_STEP, FRINGE_N, FRINGE_LEN = 10, 7, (5.0, 13.0)   # needle tufts on the lip: spacing (px), needles, length
 SS = 3                                       # supersampling for the drawn coverage
 HOLE_PX = 250                                # gaps in the crown smaller than this are filled
@@ -155,20 +152,8 @@ def needles(ax, ay, ux, uy, n, rng, spread=(30, 65), lens=(4.0, 9.0), width=0.9,
         out.append((ax, ay, ax + dx * L, ay + dy * L, width, 0.5))
     return out
 
-def brush(ax, ay, ux, uy, length, w0, rng, step=2.0, reach=(7.0, 12.0)):
-    """A pine shoot from below: a dark stem in a bottle-brush of needles, densest and
-    longest at its base, thinning to a tuft at the tip."""
-    segs = [(ax, ay, ax + ux * length, ay + uy * length, w0, 1.0)]
-    for s in np.arange(step, length, step):
-        k = s / length
-        segs += needles(ax + ux * s, ay + uy * s, ux, uy, 3, rng, spread=(25, 75),
-                        lens=(reach[0] * (1 - 0.4 * k), reach[1] * (1 - 0.35 * k)), width=1.1)
-    segs += needles(ax + ux * length, ay + uy * length, ux, uy, 9, rng, spread=(0, 40), lens=(5.0, 10.0), width=1.1)
-    return segs
-
 def top_crown(out, alpha8, zen):
-    """Trim the crown's smeared lip to a needled edge, remove its hanging lobe, and
-    give it a leader with whorls of spurs on the line to the zenith."""
+    """Trim the crown's smeared lip to a needled edge and remove its hanging lobe."""
     import polarise
     rng = np.random.default_rng(5)
     x0, y0, x1, y1 = LIP
@@ -218,16 +203,6 @@ def top_crown(out, alpha8, zen):
         ux, uy = nx / nn * 0.6 + tx / tn * 0.4, ny / nn * 0.6 + ty / tn * 0.4
         un = np.hypot(ux, uy); ux, uy = ux / un, uy / un
         segs += needles(bx + x0 - ux * 1.5, by + y0 - uy * 1.5, ux, uy, FRINGE_N, rng, spread=(0, 45), lens=FRINGE_LEN, width=1.0)
-    # the leader, on the line from the zenith through where it leaves the crown, and its whorls
-    ex, ey = EDGE_PT
-    ux, uy = zen[1] - ex, zen[0] - ey; un = np.hypot(ux, uy); ux, uy = ux / un, uy / un
-    a, b, w = LEADER
-    segs.append((ex + ux * a, ey + uy * a, ex, ey, w, w))
-    segs += brush(ex, ey, ux, uy, b, w, rng, reach=(9.0, 15.0))
-    for d, L, w0, sd in WHORLS:
-        ang = np.radians(SPUR_DEG + rng.uniform(-10, 10)) * sd
-        vx, vy = ux * np.cos(ang) - uy * np.sin(ang), ux * np.sin(ang) + uy * np.cos(ang)
-        segs += brush(ex + ux * d, ey + uy * d, vx, vy, L, w0, rng)
     drawn = capsules(out.shape, segs, LIP)
     cov = np.maximum(core.astype(float), drawn)
     cov = np.maximum(cov, ndi.gaussian_filter(core.astype(float), 0.6) * (dt > 0))
