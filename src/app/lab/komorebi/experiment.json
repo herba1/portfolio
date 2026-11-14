@@ -20,7 +20,7 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/piazza_martin_lutero_16k.hdr",
       "author": "Greg Zaal (HDRI), Rico Cilliers (backplates)",
       "licence": "CC0",
-      "note": "16K linear HDRI, reprojected offline to a stereographic view (yaw 36, pitch 64 up, 140 degrees), lens veil and diffraction spikes removed, sky rebuilt, trees split into three depth layers with Depth Anything V2. Sun measured at azimuth 35.9, altitude 24.2; drawn higher, behind the heart of the overhead crown on clear sky, under one tuft of needles on its own spring that a gust swings off the disc. Sky regraded in the shader to a Superia cobalt, pale at the horizon and deepening overhead."
+      "note": "16K linear HDRI, reprojected offline to a stereographic view (yaw 36, pitch 64 up, 140 degrees), lens veil and diffraction spikes removed, sky rebuilt, trees split into three depth layers with Depth Anything V2; the cypresses and far pines low in the frame, round the capture's own sun, rebaked from the HDRI at full resolution with needle-sharp mattes. Sun measured at azimuth 35.9, altitude 24.2; drawn higher, behind the heart of the overhead crown on clear sky, under one tuft of needles on its own spring that a gust swings off the disc. Sky regraded in the shader to a Superia cobalt, pale at the horizon and deepening overhead."
     },
     {
       "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",

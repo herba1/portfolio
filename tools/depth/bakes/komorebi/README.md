@@ -73,3 +73,22 @@ needles are lifted to within 0.25 stop of their neighbours so a gap has no
 ink outline; last, the feathered rim is broken up by the needles' own light.
 
     python3 -I clean.py '{"out":".../public/lab/komorebi/"}'
+
+## lower band, rebaked from the HDRI
+
+The cypresses and far pines low in the frame (asset rows 1300..2100) stood
+round the capture's own low sun (asset ~756, 1848). In the first bake the
+lens veil and spikes there were cut out with the foliage, so that band was a
+blobby matte over an inpainted grey wash and rendered as a soft dark smear.
+`lowband.py` rebakes it from the 16K HDRI at full resolution (2x
+supersampled, ~1 HDRI px per asset px): veil and spikes out, a smooth robust
+clear-sky fit, sky transmittance from blue against a local foliage floor (the
+blown disc and the veil-model ring round it called sky, a dead zone against
+the residue), the far matte as what the kept nearer layers leave to cover,
+mirrored across an occluder's edge behind it (so a sway uncovers real
+needles), and the photograph's own foliage light, the flare-lit needles by
+the sun replaced by the solid silhouette colour with their own texture. It
+blends into the old assets over 110 rows. The engine presses the band to
+black (`SILHOUETTE`, `c / (c + 0.1)`).
+
+    python3 -I lowband.py '{"hdr":"piazza_16k.hdr","out":".../public/lab/komorebi/"}'

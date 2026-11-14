@@ -53,9 +53,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // silhouettes against the glow. The film only diffuses what is past its thresholds;
 // its pyramid has long wings, so the disc goes in heavily filtered.
 //
-// The lower canopy, the cypresses and far pines against the low sky, is
-// pressed into silhouette and the scan's black kept low, so the bloom
-// above sits over a real dark rather than a grey-teal veil.
+// The lower canopy, the cypresses and far pines against the low sky, was
+// rebaked from the HDRI at full resolution (the capture's own sun stood
+// among them, and its flare had cost them their edges), so they keep their
+// real needle-sharp silhouettes; here they are pressed to a true black and
+// the scan's black kept low and neutral, so they frame the glowing sky as
+// the sharp dark under it rather than a grey-teal veil.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..1 a breath of that strength sets off at t = 0.5 s.
@@ -156,6 +159,8 @@ const FILM = {
   // A scan's black, kept low so the lower canopy is a silhouette, not a
   // grey-teal veil.
   toe: 0.022,
+  // ...and neutral, so the silhouettes sink to black, not to a navy.
+  toeColor: [0.92, 1, 1.06],
   grain: 0.34,
   vignette: 0.22,
 };
@@ -187,8 +192,12 @@ const CLOUD_GRADE = {
   own: 0.6, // share of the capture's own colour kept in a cloud's body
   forward: 0.35, // gain on cloud by the sun, from the light it scatters forward
 };
-// The lower canopy's shadows sink by c / (c + 0.02): 0 off, 1 full.
-const SILHOUETTE = 0.85;
+// The lower canopy's shadows sink by c / (c + knee): strength 0 off, 1 full.
+// The cypresses and far pines are rebaked from the HDRI with needle-sharp
+// mattes (tools/depth/bakes/komorebi/lowband.py); pressed this hard they go
+// to a true black against the sky, their sunlit needles keeping a little
+// light, so they are the sharp dark that frames the glow.
+const SILHOUETTE = { strength: 1, knee: 0.1 };
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -222,7 +231,7 @@ uniform vec4 uGlareW;        // core width shut, open; bloom width shut, open
 uniform vec3 uGlint;         // needle-edge glint, rgb peak
 uniform vec3 uEdge;          // x gradient half-span (px), y share on a crown's body, z glint reach (bloom widths)
 uniform vec4 uHalo;          // halation ring: rgb peak, a radius (core widths)
-uniform float uSil;          // how far the lower canopy sinks into silhouette
+uniform vec2 uSil;           // how far the lower canopy sinks into silhouette, knee
 uniform vec4 uTuft;          // xy tuft offset (asset uv), z radius (asset widths), w pinhole
 uniform vec2 uLog;
 uniform sampler2D uCloudsBlur; // same texture, mipmapped sampler
@@ -383,11 +392,11 @@ void main() {
   // The lower canopy, the cypresses and far pines against the low sky, is
   // pressed down into silhouette: its shadows sink towards black, its lit
   // needles keep most of their light.
-  float sil = uSil * smoothstep(0.5, 0.95, uv.y);
+  float sil = uSil.x * smoothstep(0.5, 0.95, uv.y);
   vec3 c0 = canopy(u0);
   vec3 c1 = canopy(u1);
-  c0 *= mix(vec3(1.0), c0 / (c0 + 0.02), sil);
-  c1 *= mix(vec3(1.0), c1 / (c1 + 0.02), sil);
+  c0 *= mix(vec3(1.0), c0 / (c0 + uSil.y), sil);
+  c1 *= mix(vec3(1.0), c1 / (c1 + uSil.y), sil);
   col = mix(col, c0, a0);
   col = mix(col, c1, a1);
   if (a2 > 0.0) {
@@ -975,7 +984,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform4f(u.uHalo, HALO.peak * HALO.color[0], HALO.peak * HALO.color[1], HALO.peak * HALO.color[2], HALO.radius);
     const tx = tuft.x - tuft.sx + tuft.fx;
     const ty = tuft.y - tuft.sy + tuft.fy;
-    gl.uniform1f(u.uSil, SILHOUETTE);
+    gl.uniform2f(u.uSil, SILHOUETTE.strength, SILHOUETTE.knee);
     gl.uniform4f(u.uTuft, tx, ty * ASPECT, TUFT.r, TUFT.pinhole);
     // The film's halation follows the gap too: a red fringe round the open
     // sun, next to none round the pinpoint.
