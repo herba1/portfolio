@@ -86,3 +86,36 @@ def grade_photo(lin, sky, el):
     w = (w * kit.smoothstep(-6, -1, el))[..., None]
     out = lin * (1 - w) + np.clip(g, 0, None) * w
     return out.astype(np.float32)
+
+
+def lay_over(lin, new, sky, shrink=2.5):
+    """Lay a change made over the open sky (new, linear) onto the plate (lin).
+
+    The matte is soft at its edge (segment.py's, at half the plate's size):
+    a pixel at a wire, a pole or an eave is part sky, part that, and read as
+    sky it carried the change in at full strength, a pale rim of the cloud's
+    white (or the sky's blue) round everything in front of it. So the open
+    sky is the matte shrunk by `shrink` px: there the pixel is the new one.
+    Off it, the pixel is unmixed against the local graded sky colour, S (the
+    shrunk sky round it, filled in), and the local foreground, F (the
+    matte's solid side, filled in): its share of sky is how far it stands
+    from F toward S, no more than the matte says, and it takes only that
+    share of what the local sky became, so a wire keeps its dark core and
+    an edge pixel takes no rim."""
+    r = max(int(round(shrink)), 1)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    sky = np.clip(sky, 0, 1).astype(np.float32)
+    pure = cv2.erode((sky > 0.97).astype(np.uint8), k).astype(np.float32)
+    S = kit.pushpull(lin, pure)
+    dS = kit.pushpull(new, pure) - S
+    F = kit.pushpull(lin, (sky < 0.1).astype(np.float32))
+    d = S - F
+    dd = np.sum(d * d, -1)
+    al = np.sum((lin - F) * d, -1) / np.maximum(dd, 1e-8)
+    # (only where the two are far enough apart to tell; else the matte)
+    ok = kit.smoothstep(0.02, 0.06, np.sqrt(dd) / np.maximum(kit.luma(S), 1e-3))
+    al = np.clip(al, 0, 1) * ok + (1 - ok)
+    a = np.minimum(sky, al)
+    out = lin + dS * a[..., None]
+    out = np.where(pure[..., None] > 0, new, out)
+    return out.astype(np.float32)
