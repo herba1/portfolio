@@ -57,6 +57,9 @@ const float ASPECT = 2048.0 / 1536.0;
 // The lattice key's box in the plate, px: x, y, width, height
 // (tools/depth/bakes/passes/lattice.py, BOX).
 const vec4 LATTICE = vec4(752.0, 448.0, 512.0, 1088.0);
+// Where the deck's underside meets the truss, plate px down: above it the
+// tower is the deck and the mast, closed surfaces, and below it open lattice.
+const float DECK_FOOT = 850.0;
 // The plate's lens, 2 tan(fov_x / 2): 55 degrees across. Its verticals meet
 // 0.9 frame heights above the centre; with the camera pitched 55 degrees up
 // (PITCH) that is where the zenith stands for this lens, so sky rays through
@@ -121,7 +124,17 @@ void main(){
   // the same bake, with the haze's share taken out of each pixel: a gap a
   // pixel wide stays a partial key, and the rest of it is paint, not haze.
   float steelW = smoothstep(0.02, 0.15, gap) * (1.0 - smoothstep(0.0, 0.25, sky - gap));
-  sky = max(sky, gap);
+  // The key is choked before it opens anything: a partial value along the
+  // edge of a solid member is the member's antialiasing, not a hole, and let
+  // through it laid a cyan outline round every ring of the deck and every
+  // white member of the mast. Only a real hole, keyed well past half, shows
+  // the dome. Above the truss (the deck, its underside and the mast) the
+  // tower is solid painted steel: where its coarse matte says so, neither key
+  // opens at all, and the pixels they gave up show the steel unmixed.
+  float head = 1.0 - smoothstep(DECK_FOOT - 15.0, DECK_FOOT + 15.0, uv.y * TEX.y);
+  float solid = head * smoothstep(0.6, 0.9, textureLod(uMatte, uv, 2.0).g);
+  float gapK = smoothstep(0.4, 0.8, gap) * (1.0 - solid);
+  sky = max(sky * (1.0 - solid), gapK);
 
   // The camera ray through this pixel, from the plate's lens.
   vec3 V = normalize(vec3((uv.x - 0.5) * LENS, -(uv.y - 0.5) * LENS / ASPECT, -1.0));
@@ -239,7 +252,13 @@ void main(){
   // compression noise would otherwise come up with it. The lattice keeps the
   // full mip, its members are a pixel or two wide.
   float bias = mix(0.6, 0.0, tower);
-  vec3 alb = toLin(mix(texture(uAlbedo, uv, bias).rgb, texture(uSteel, lb, bias).rgb, steelW));
+  // Where the choke closed a gap on the deck or the mast, the steel fills it,
+  // but only as far as it agrees with the paint round it: unmixed from a gap
+  // that was never a hole, a ring's edge comes out as a hot yellow fringe.
+  vec3 albP = texture(uAlbedo, uv, bias).rgb;
+  vec3 steelP = texture(uSteel, lb, bias).rgb;
+  steelW *= 1.0 - solid * smoothstep(0.04, 0.12, length(steelP - albP));
+  vec3 alb = toLin(mix(albP, steelP, steelW));
   alb = mix(vec3(luma(alb)), alb, mix(0.18, 1.0, tower)) * mix(vec3(1.0, 0.97, 0.93), vec3(1.0), tower);
   // The walls clip at a pale concrete. The tower's paint rolls off into it
   // instead: brought up four times, its white members and the half-lit steel
