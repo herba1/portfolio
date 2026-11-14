@@ -14,9 +14,15 @@ and smaller toward the top.
 A cumulus here is a cauliflower, in km, the camera at the origin (x east,
 y ahead, z up):
 
-- A column of lobes up a slightly leaning axis, a broad skirt at the
+- A column of lobes up a slightly leaning axis, a skirt of lobes at the
   bottom, all of it cut flat by the condensation level (a horizontal
-  plane): from below that cut is the flat base.
+  plane): from below that cut is the flat base. The column is a stack of
+  distinct lobes about a radius apart, alternately fuller and leaner and
+  each pushed off the axis the other way from the one below, and every
+  lobe of it and of the skirt carries a ring of side lobes pushed out
+  level, so the flanks step in and out by about a tenth of the mass'
+  width all the way down: billowing sides, never a straight wall with
+  only its top cauliflowered.
 - Each lobe carries billows on its upper and outer face, each billow
   smaller billows, the children biased upward so the domes boil up and the
   base stays flat; joined by a smooth minimum into one signed distance on a
@@ -39,7 +45,13 @@ corner, as in kazeEngine.js) and toward the zenith:
 - skylight: the zenith's pale cyan (hue about 200), from above, dimmed by
   the cloud over the sample, with high floors (inside a cumulus the sky's
   light is scattered round too), so the flanks turned from the sun print a
-  luminous skylight cyan and the base, under the whole tower, the deepest;
+  skylight cyan, and the diffusion is held low enough that they fall to
+  about two thirds of the sunlit tops' value, so each mass reads as a
+  volume turned from the light and not a white cut-out;
+- the base: the flat underside, under the whole tower and facing down,
+  takes no sun, a dimmer and mottled light, and a flat blue-grey rather
+  than the flanks' cyan (about half the tops' value), low near the frame's
+  edge under every mass;
 - a little warm bounce from the summer ground on the undersides;
 - forward scattering (Henyey-Greenstein, g 0.6) where a thin edge stands
   between you and the sun: the silver lining; and the powder (the skin
@@ -50,11 +62,14 @@ corner, as in kazeEngine.js) and toward the zenith:
 - a little air between: the far masses lean toward the sky behind them.
 
 The open sky and the sun's bloom are sky_tower.py's (open_sky). The cloud
-is exposed by its median (WHITE at PCT 50), so the body sits high, as a
-real cumulus's does (luminance p25/p50 about 185/205 on screen), and its
+is exposed by its sunlit tops (WHITE at PCT 90), so the shade below them
+keeps its own value instead of being lifted toward the median, and its
 brightest domes roll off under the clip through a shoulder that whitens as
 it rolls (DESAT), as film does near its white; the engine's grade and the
-film's shoulder carry them the rest of the way.
+film's shoulder carry them the rest of the way. Last, the cloud's whites
+bleed a little into the cobalt round them (sky_tower.py's bleed), as light
+diffuses in the emulsion, so no lit edge meets the blue at a digital cut.
+The bake prints, per mass, the luminance of its body and of its base.
 
   python tools/depth/bakes/kaze/sky_cumulus.py [out.webp]
   SCALE=0.5 PREVIEW=preview.png python ...   (a quick half-size look)
@@ -69,7 +84,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from sky_tower import ASPECT, FOV, FRAME, SUN, VP, W as W0, H as H0, enc, open_sky  # noqa: E402
+from sky_tower import ASPECT, FOV, FRAME, SUN, VP, W as W0, H as H0, bleed, enc, open_sky  # noqa: E402
 
 SCALE = float(os.environ.get("SCALE", 1.0))
 W, H = int(W0 * SCALE), int(H0 * SCALE)
@@ -85,19 +100,28 @@ SUN_C = np.array([1.0, 0.91, 0.74], np.float32)       # warm-neutral
 # turned from the sun print a luminous skylight cyan and never lean lavender.
 SKY_C = np.array([float(c) for c in os.environ.get("SKYC", "0.36,0.62,1.0").split(",")], np.float32)
 GND_C = np.array([0.55, 0.50, 0.40], np.float32)      # bounce off the summer ground
+# The base's colour, at unit luminance: a flat blue-grey, the low sky round
+# the horizon and a little of the ground, far less saturated than the
+# skylight on the flanks
+BASE_C = np.array([0.66, 0.81, 1.0], np.float32)
+BASE_C /= float(BASE_C @ np.array([0.2126, 0.7152, 0.0722], np.float32))
 KS = float(os.environ.get("KS", 4.0))    # sun
 KA = float(os.environ.get("KA", 2.4))   # skylight
-KM = float(os.environ.get("KM", 1.4))   # the deep multiple scattering (diffusion)
+KM = float(os.environ.get("KM", 0.8))   # the deep multiple scattering (diffusion)
 KG = float(os.environ.get("KG", 0.05))   # ground bounce
+MSK = float(os.environ.get("MSK", 0.1))   # how fast the deep diffusion falls off with the sun's depth
+SKYF = float(os.environ.get("SKYF", 0.4))  # the skylight's floor under the cloud over a sample
+BASEK = float(os.environ.get("BASEK", 0.35))  # how far the flat base darkens
+BASEH = float(os.environ.get("BASEH", 0.12))  # km: how deep up the tower the base's shade reaches
 G0 = float(os.environ.get("G0", 0.6))    # forward lobe of the first octave
 OCT = int(os.environ.get("OCT", 4))      # scattering octaves
 POW = float(os.environ.get("POW", 0.5))  # the powder: how dark the sun-averted skin
 SIGMA = float(os.environ.get("SIGMA", 70.0))  # /km at full density
 RAMP = float(os.environ.get("RAMP", 0.014))   # km: the soft skin, where density climbs to full
 FINE = float(os.environ.get("FINE", 0.010))   # km: the fine billows' depth
-WHITE = float(os.environ.get("WHITE", 0.77))
+WHITE = float(os.environ.get("WHITE", 3.3))
 DESAT = float(os.environ.get("DESAT", 0.5))  # how far the shoulder whitens
-PCT = float(os.environ.get("PCT", 50.0))  # the cloud's median is exposed to WHITE (linear)
+PCT = float(os.environ.get("PCT", 90.0))  # the cloud's 90th percentile is exposed to WHITE (linear)
 
 # The masses: azimuth (deg, 0 straight ahead = the frame's bottom centre,
 # east positive, -90 west, the sun's side); horizontal distance of the axis
@@ -107,13 +131,13 @@ TOWERS = [
     # the hero, right: front-lit (the sun is behind it, over your left
     # shoulder), its flat base low on the right edge, its domes climbing
     # toward the zenith
-    dict(az=58, dist=1.6, zb=1.2, zt=4.6, rb=0.5, rt=0.32, lean=0.3, seed=1),
+    dict(az=57, dist=1.55, zb=1.3, zt=4.65, rb=0.5, rt=0.32, lean=0.3, seed=1),
     # low in the middle: side-lit from the left, its domes rising toward
     # the frame's centre
-    dict(az=-6, dist=2.2, zb=1.45, zt=3.6, rb=0.5, rt=0.3, lean=0.25, seed=2),
+    dict(az=-6, dist=2.05, zb=1.6, zt=3.65, rb=0.5, rt=0.3, lean=0.25, seed=2),
     # left, toward the sun: backlit, its shaded face toward you and its
     # edges silvered; its domes stop short of the sun
-    dict(az=-52, dist=1.6, zb=1.3, zt=2.8, rb=0.42, rt=0.28, lean=0.15, seed=3),
+    dict(az=-51, dist=1.68, zb=1.4, zt=2.75, rb=0.42, rt=0.28, lean=0.15, seed=3),
     # behind your head: domes just over the frame's top right
     dict(az=102, dist=2.1, zb=1.5, zt=6.4, rb=0.55, rt=0.35, lean=0.0, seed=4),
 ]
@@ -154,23 +178,65 @@ def tower(T):
         return np.array([ax + toward[0] * T["lean"] * k, ay + toward[1] * T["lean"] * k])
 
     S = []
-    # the skirt: broad lobes round the foot, sunk into the base plane
-    for i in range(8):
-        ang = 2 * np.pi * i / 8 + rng.uniform(-0.3, 0.3)
-        rr = T["rb"] * rng.uniform(0.5, 0.7)
-        off = T["rb"] * rng.uniform(0.45, 0.75)
+    # the skirt: lobes round the foot, sunk into the base plane; more and
+    # smaller than one smooth ring of them, so the foot's flanks step too
+    skirt = []
+    for i in range(11):
+        ang = 2 * np.pi * i / 11 + rng.uniform(-0.25, 0.25)
+        rr = T["rb"] * rng.uniform(0.42, 0.6)
+        off = T["rb"] * rng.uniform(0.5, 0.85)
         c = axis(zb) + off * np.array([np.cos(ang), np.sin(ang)])
-        S.append([c[0], c[1], zb + rr * rng.uniform(-0.15, 0.15), rr, 0])
-    # the column, narrowing to the crown
-    n = max(4, int(hgt / (0.6 * (T["rb"] + T["rt"]) / 2)))
+        S.append([c[0], c[1], zb + rr * rng.uniform(-0.1, 0.2), rr, 0])
+        skirt.append(len(S) - 1)
+    # the column, narrowing to the crown: a stack of distinct lobes, not a
+    # cylinder. Spaced about a radius apart (closely packed spheres draw a
+    # dead-straight flank), each alternately fuller and leaner and pushed
+    # off the axis the other way from the one below, so the silhouette
+    # steps in and out lobe by lobe up both sides
+    n = max(4, int(hgt / (0.95 * (T["rb"] + T["rt"]) / 2)))
+    phi = rng.uniform(0, 2 * np.pi)
+    col = []
     for i in range(n):
         k = (i + 0.5) / n
         z = zb + T["rb"] * 0.6 + (hgt - T["rb"] * 0.6 - T["rt"] * 0.8) * k
-        rr = (T["rb"] * (1 - k) ** 1.2 + T["rt"] * (1 - (1 - k) ** 1.2)) * rng.uniform(0.82, 1.0)
-        c = axis(z) + rr * 0.45 * rng.uniform(-1, 1, 2)
+        rr = T["rb"] * (1 - k) ** 1.2 + T["rt"] * (1 - (1 - k) ** 1.2)
+        rr *= (1.1 if i % 2 == 0 else 0.86) * rng.uniform(0.94, 1.04)
+        phi += np.pi + rng.uniform(-0.7, 0.7)
+        c = axis(z) + rr * rng.uniform(0.16, 0.26) * np.array([np.cos(phi), np.sin(phi)])
         S.append([c[0], c[1], z, rr, 0])
+        col.append(len(S) - 1)
     c = axis(zt)
     S.append([c[0], c[1], zt - T["rt"] * 0.9, T["rt"], 0])
+    # the flanks: round every lobe of the column, a ring of side lobes pushed
+    # out level (not up, like the billows below), each standing proud of its
+    # parent by about a tenth of the mass' width, at its own height, so the
+    # sides of the tower are stacked billows and no stretch of them is a
+    # straight wall
+    for pi in col:
+        px_, py_, pz, pr = S[pi][:4]
+        m = 5
+        a0 = rng.uniform(0, 2 * np.pi)
+        for j in range(m):
+            ang = a0 + 2 * np.pi * j / m + rng.uniform(-0.35, 0.35)
+            d = unit([np.cos(ang), np.sin(ang), rng.uniform(-0.25, 0.5)])
+            r = pr * rng.uniform(0.42, 0.62)
+            c = np.array([px_, py_, pz]) + d * (pr - r * rng.uniform(0.35, 0.65))
+            if c[2] - r * 0.4 < zb:
+                continue
+            S.append([c[0], c[1], c[2], r, 0])
+    # and round the skirt, side lobes pushed out over the base, low: what
+    # sinks under the condensation level is cut off flat by it, so they step
+    # the foot's silhouette and leave the base itself flat
+    for pi in skirt:
+        px_, py_, pz, pr = S[pi][:4]
+        out = np.array([px_, py_]) - axis(zb)
+        ba = np.arctan2(out[1], out[0])
+        for j in range(3):
+            ang = ba + rng.uniform(-1.1, 1.1)
+            d = unit([np.cos(ang), np.sin(ang), rng.uniform(0.05, 0.6)])
+            r = pr * rng.uniform(0.45, 0.62)
+            c = np.array([px_, py_, pz]) + d * (pr - r * rng.uniform(0.35, 0.65))
+            S.append([c[0], c[1], c[2], r, 0])
 
     # the billows, two generations, on the upper and outer faces
     gens = [(10, 0.38, 0.56), (7, 0.36, 0.52), (5, 0.34, 0.5)]
@@ -272,7 +338,9 @@ def build_sdf(S, lo, nx, ny, nz, vox, zb, seed):
         for i in range(S.shape[0]):
             cz = S[i, 2]
             r = S[i, 3]
-            kk = 0.14 * r
+            # the lobes of the column and its flanks join with a tighter
+            # blend than the billows, so a crease stays between them
+            kk = (0.07 if S[i, 4] == 0 else 0.14) * r
             reach = r + FAR
             if abs(z - cz) > reach:
                 continue
@@ -397,9 +465,11 @@ def hg(c, g):
 
 @nb.njit(cache=True, parallel=True)
 def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, seed,
-           sunc, skyc, gndc, P, out, trans):
-    """P: ks, ka, km, kg, g0, octaves, powder, fine depth."""
+           sunc, skyc, gndc, basec, P, out, trans, zhit):
+    """P: ks, ka, km, kg, g0, octaves, powder, fine depth, the diffusion's
+    falloff, the skylight's floor, the base's darkening and its depth."""
     ks, ka, km, kg, g0, noct, powk, fd = P[0], P[1], P[2], P[3], P[4], int(P[5]), P[6], P[7]
+    msk, skyf, bk, bh = P[8], P[9], P[10], P[11]
     Hh, Ww = DX.shape
     for py in nb.prange(Hh):
         for px in range(Ww):
@@ -501,7 +571,7 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                 # falls off as 1 / (1 + tau), not exponentially; it lights the
                 # whole body from within, so the shaded mass is luminous and
                 # not grey clay
-                ms = 1.0 / (1.0 + 0.06 * tau_s)
+                ms = 1.0 / (1.0 + msk * tau_s)
                 # The skylight's modelling: the surface's normal from the
                 # grid, the sky taken more from above than below (so the
                 # flat base, facing down, stays the darkest), and an
@@ -530,18 +600,41 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                 # the sky from above, dimmed by the cloud over the sample;
                 # the floors are high: inside a cumulus the skylight is
                 # itself scattered round many times, so no face goes dark
-                sky = ((0.55 + 0.45 * math.exp(-0.05 * tau_u)) * (0.7 + 0.3 * hn)
+                sky = ((skyf + (1.0 - skyf) * math.exp(-0.05 * tau_u)) * (0.7 + 0.3 * hn)
                        * (0.72 + 0.28 * gz) * (0.6 + 0.4 * ao))
                 gnd = (1 - hn) ** 2
+                # the base: the flat underside, under the whole tower and
+                # facing down, sees neither the sun nor the zenith, only the
+                # low sky round the horizon and the ground: darker, and a
+                # flat blue-grey rather than the flanks' skylight cyan. The
+                # sun's light, which on a thin sunward rim would still reach
+                # it through the skirt, is taken off it first, so a front-lit
+                # tower's base is as much a shade as a backlit one's
+                dwn = min(max(-gz / 0.6, 0.0), 1.0)
+                hb = math.exp(-max(z - zb, 0.0) / bh) * dwn * dwn * (3.0 - 2.0 * dwn)
+                sun *= 1.0 - 0.8 * hb
+                ms *= 1.0 - 0.5 * hb
                 # the diffuse light inside takes the sky's colour as much as
                 # the sun's: it has bounced between cloud and sky
                 er = ks * sun * sunc[0] + ka * sky * skyc[0] + km * ms * (0.5 * sunc[0] + 0.5 * skyc[0]) + kg * gnd * gndc[0]
                 eg = ks * sun * sunc[1] + ka * sky * skyc[1] + km * ms * (0.5 * sunc[1] + 0.5 * skyc[1]) + kg * gnd * gndc[1]
                 eb_ = ks * sun * sunc[2] + ka * sky * skyc[2] + km * ms * (0.5 * sunc[2] + 0.5 * skyc[2]) + kg * gnd * gndc[2]
+                if hb > 1e-3:
+                    yl = 0.2126 * er + 0.7152 * eg + 0.0722 * eb_
+                    # darkest under the thick of the tower, a little
+                    # lighter toward its rim, and mottled, as a real base
+                    # is, not a smooth grey disc
+                    mot = 0.8 + 0.6 * vnoise(x * 7.0, y * 7.0, 0.5, seed + 9) + 0.2 * vnoise(x * 19.0, y * 19.0, 0.5, seed + 11)
+                    k_ = 1.0 - bk * hb * (0.55 + 0.45 * (1.0 - math.exp(-0.015 * tau_u))) * mot
+                    er = (er * (1.0 - 0.75 * hb) + yl * basec[0] * 0.75 * hb) * k_
+                    eg = (eg * (1.0 - 0.75 * hb) + yl * basec[1] * 0.75 * hb) * k_
+                    eb_ = (eb_ * (1.0 - 0.75 * hb) + yl * basec[2] * 0.75 * hb) * k_
                 a = 1 - math.exp(-sg * st)
                 cr += T * a * er
                 cg += T * a * eg
                 cb += T * a * eb_
+                if T > 0.5 and T * (1 - a) <= 0.5:
+                    zhit[py, px] = z
                 T *= 1 - a
                 tv += sg * st
                 t += st
@@ -561,13 +654,15 @@ def main():
     DX, DY, DZ = [np.ascontiguousarray(D[..., i]) for i in range(3)]
     del D
     L = unit(ray_at(*SUN)).astype(np.float64)
-    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE], np.float64)
+    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE, MSK, SKYF, BASEK, BASEH], np.float64)
     skyl = open_sky(U, V).astype(np.float32)
 
     # the masses, far to near (by the axis' distance)
     order = sorted(range(len(TOWERS)), key=lambda i: -TOWERS[i]["dist"])
     rad = np.zeros((H, W, 3), np.float32)   # the cloud's light, premultiplied
     tr = np.ones((H, W), np.float32)        # what of the sky shows through
+    lab = np.full((H, W), -1, np.int8)
+    isb = np.zeros((H, W), bool)
     for ti in order:
         T = TOWERS[ti]
         t0 = time.time()
@@ -578,13 +673,18 @@ def main():
         ts, tu = build_light(sdf, lo, hi2, VOX, LVOX, L, RAMP, SIGMA)
         o = np.zeros((H, W, 3), np.float32)
         tt = np.ones((H, W), np.float32)
+        zh = np.full((H, W), 1e9, np.float32)
         render(DX, DY, DZ, sdf, ts, tu, lo, hi2, VOX, LVOX, L, T["zb"], T["zt"], RAMP, SIGMA,
-               SEED + T["seed"] * 31, SUN_C, SKY_C, GND_C, PRM, o, tt)
+               SEED + T["seed"] * 31, SUN_C, SKY_C, GND_C, BASE_C, PRM, o, tt, zh)
         # a little air: the mass leans toward the sky behind it with distance
         dist = np.hypot(T["dist"], (T["zb"] + T["zt"]) / 2)
         haze = 1 - np.exp(-dist / 30.0)
         o = o * (1 - haze) + skyl * (1 - tt)[..., None] * haze * 0.8
         rad = o + tt[..., None] * rad
+        # for the measurements: which mass each solid pixel shows, and
+        # whether it is that mass's base
+        lab[tt < 0.05] = ti
+        isb[tt < 0.05] = zh[tt < 0.05] < T["zb"] + 0.06
         tr = tt * tr
         print(f"tower {ti}: {len(S)} spheres, grid {nx}x{ny}x{nz}, {time.time() - t0:.1f}s", flush=True)
 
@@ -610,6 +710,8 @@ def main():
     w = DESAT * np.where(m < K, 0.0, 1 - np.exp(-(m - K) / (TOP - K)))[..., None]
     rad = rad * (1 - w) + (rad @ LUM)[..., None] * w
     acc = rad + tr[..., None] * skyl
+    # and the cloud's whites bleed a little into the cobalt round them
+    acc = bleed(acc, rad, tr, W)
     s8 = enc(acc)
     rng = np.random.default_rng(3)
     s8 = s8 + (rng.random(s8.shape, np.float32) - 0.5) / 255
@@ -620,6 +722,16 @@ def main():
     sh = img[solid][Yc < np.percentile(Yc, 20)].mean(0)
     print("cloud Y 10/25/50/75/90/99", np.percentile(Yc, [10, 25, 50, 75, 90, 99]).round().tolist(),
           "shade rgb", sh.round().tolist(), flush=True)
+    Yi = img.astype(np.float32) @ LUM
+    for ti in range(len(TOWERS)):
+        m = lab == ti
+        if m.sum() < 100:
+            continue
+        mb = m & isb
+        bs = f" base Y {np.median(Yi[mb]):.0f} rgb {img[mb].mean(0).round().tolist()} ({mb.mean() * 100:.1f}% of frame)" if mb.sum() > 50 else " base not in view"
+        print(f"  mass {ti}: Y 10/50/95 {np.percentile(Yi[m & ~isb], [10, 50, 95]).round().tolist()}" + bs, flush=True)
+    if os.environ.get("BASEMAP"):
+        Image.fromarray(((lab >= 0) * 80 + isb * 175).astype(np.uint8)).save(os.environ["BASEMAP"])
     if out_path:
         Image.fromarray(img).save(out_path, quality=90, method=6)
     else:

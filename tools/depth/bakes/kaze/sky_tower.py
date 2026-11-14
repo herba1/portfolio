@@ -2,8 +2,9 @@
 
 (Superseded for the cloud: sky_cumulus.py now writes public/lab/kaze/sky.webp,
 a towering cumulus field rendered as a volume through the lens, over this
-script's open sky and sun bloom, open_sky() below. This script still runs on
-its own and lays the print out as described here.)
+script's open sky and sun bloom, open_sky() below, and with its film
+diffusion round the cloud's whites, bleed() below. This script still runs on
+its own and lays the print out as described here, bleed and all.)
 
 sky_hdri.py prints the Skidpan cumulus as a pinhole camera saw it, pitched
 just above the horizon: a wide bank of cloud lying across the lower half of
@@ -134,6 +135,30 @@ def open_sky(U, V):
     return skyl
 
 
+def bleed(img, cloud, sky_share, width, k1=None, k2=None):
+    """The film's diffusion round the cloud's whites (linear, in place of
+    img): what of the bright cloud lies above a threshold is spread at two
+    widths, a tight one of a few pixels and a wide one of a few dozen, and
+    laid back over the open blue round it, so the cobalt pales and greys a
+    little against every lit edge, as the light bleeds in the emulsion,
+    rather than meeting the white at a clean digital cut. Over the cloud
+    itself only a third of it, so the shaded flanks and bases keep their
+    value, and none on the brightest domes. cloud: the cloud's own light (premultiplied); sky_share: how
+    much of each pixel is open sky; width: the image's width in px."""
+    k1 = float(os.environ.get("BLEED1", 0.09)) if k1 is None else k1
+    k2 = float(os.environ.get("BLEED2", 0.07)) if k2 is None else k2
+    y = cloud @ LUM
+    src = cloud * smooth(0.3, 0.8, y)[..., None]
+    b1 = cv2.GaussianBlur(src, (0, 0), 0.004 * width)
+    b2 = cv2.GaussianBlur(src, (0, 0), 0.016 * width)
+    # (and none over the brightest domes, already at the shoulder: the
+    # print's white is not pushed into the clip)
+    top = smooth(0.4, 0.75, img @ LUM)
+    wgt = (sky_share + 0.33 * (1 - sky_share) * (1 - top))[..., None]
+    # a touch warm: the white it comes from is the sun's
+    return img + wgt * (k1 * b1 + k2 * b2) * np.array([1.0, 0.98, 0.94], np.float32)
+
+
 def place(pc, F, a, U, V, pw, ph):
     """One flank of the tower: the print's cloud round pc["foot"] (print
     uv), turned by pc["turn"] deg (counter-clockwise on screen), scaled by
@@ -196,9 +221,14 @@ def main():
     # the cloud over it, the far (high) turrets first and the near ones in
     # front of them
     outl = skyl
+    cov = np.zeros(skyl.shape[:2], np.float32)
+    cl = np.zeros_like(skyl)
     for Fw, aw in layers:
         am = aw[..., None]
         outl = Fw * am + outl * (1 - am)
+        cl = Fw * am + cl * (1 - am)
+        cov = aw + cov * (1 - aw)
+    outl = bleed(outl, cl, 1 - cov, W)
     s8 = enc(outl)
     # dither, so the smooth gradient does not band in 8 bits
     rng = np.random.default_rng(3)
