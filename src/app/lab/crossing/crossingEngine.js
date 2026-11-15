@@ -73,10 +73,11 @@ const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 // What the film sees round the window. The page's paper is bright enough to
 // fire the film's halation, and its red-orange halo laid over the blue sky
 // at the card's edges read as a magenta fringe in the corners. The film gets
-// a neutral grey there instead (below the halation threshold, no hue), so the
-// only thing it brings into the edges is a little neutral veil; the page
-// itself still shows the real paper (FINAL_FS).
-const SURROUND = [0.78, 0.78, 0.78];
+// a neutral grey there instead, below the soft knee's foot (0.6 sRGB is 0.32
+// linear, the knee starts at FILM.halationThreshold / 2 = 0.36), so it fires
+// neither the halation nor the bloom and brings no hue into the edges; the
+// page itself still shows the real paper (FINAL_FS).
+const SURROUND = [0.6, 0.6, 0.6];
 const PHOTO = [2048, 1356];
 const MATTE = [512, 339];
 // From layers.json (bake.py): each plane's crop rect in photo uv. Cards
@@ -200,12 +201,34 @@ const cocFor = (P, z, s, focusZ) => {
 const LIGHT = normalize([0.18, 0.28, 1]); // toward the sun: up, right (the eave's shadow on the wall), toward us
 const HAZE = [0.86, 0.93, 0.95];
 
+// The film (../_kit/film, summer). Its tone curve is the highlight ceiling:
+// whitePoint is the scene value it lands on paper white, so at the kit's 1.3
+// the brightest a card can be (1.0) developed to about 0.92, a lit crown at
+// #f4f1ea to 229, and the light just stopped there. At 1.05 the curve's own
+// soft shoulder (Lottes, contrast 1.16) starts to bend at about 0.8 and rolls
+// on smoothly: the crown develops to about 242, a card's pure white to 250,
+// and nothing that is not pushed past it by the bloom reaches 255. headroom
+// is the extra energy the near-whites carry into the scattered light only
+// (bloom, halation), so the crown glows a little past what it shows.
+// Halation and bloom key off one soft knee at 0.72 linear (a quadratic knee
+// from 0.36 to 1.08, the kit's), well under the crown, so the cloud and the
+// pale sky over the roofs bleed into everything round them. The kit's own
+// halation is the wide (1-3% of the frame) red glow; the thin ring at the
+// dark edges is RING below.
 const FILM = {
   exposure: 0,
-  headroom: 0.9,
-  halation: 0.22,
-  halationThreshold: 0.92,
-  bloom: 0.16,
+  headroom: 0.97,
+  whitePoint: 1.05,
+  shoulder: 0.95,
+  halation: 0.08,
+  halationThreshold: 0.72,
+  halationLocal: 1,
+  bloom: 0.34,
+  bloomThreshold: 0.72,
+  // The kit's cool highlight tint (blue x1.05) pushed the lit crown blue-grey
+  // and the pale low sky's blue into 255 once the ceiling came up; nearly
+  // neutral, the crown rolls off warm-white and the sky keeps its hue.
+  highlightTint: [0.99, 1, 1.01],
   softness: 0.45,
   contrast: 1.16,
   saturation: 1.12,
@@ -213,6 +236,30 @@ const FILM = {
   grain: 0.3,
   vignette: 0,
 };
+// The thin halation ring: in an emulsion without an anti-halation layer, the
+// light that went through to the base and bounced back exposes the red layer
+// a hair round every bright thing, so a dark edge cut against the sky (the
+// crossbuck, the pole, the eave, the wires, the lamp hoods) takes a thin warm
+// line, 2-4 css px, instead of meeting the blue clean. Real halation is linear
+// in the light, so every bright pixel sends some (floor), and the light past
+// FILM.halationThreshold's soft knee sends all of it: the cloud and the pale
+// low sky ring hard, the deep cobalt only a little. Only covered pixels send
+// (the cards, never the surround), so the window's own cut never rings. It is
+// added in linear light before the film, which then softens and develops it
+// with everything else.
+const RING = {
+  radius: 3.2, // css px
+  floor: 0.6, // the share of all the light that halates, below the knee
+  amount: 4,
+  // The ring's ceiling (linear): a dark edge saturates toward it, so a wire
+  // over the lit crown takes a warm line, not an orange one, and an edge on
+  // the deep cobalt still rings nearly as clearly.
+  max: 0.14,
+  color: [1, 0.42, 0.14], // linear: red-orange, the red layer with some green, never pink on the blue
+};
+// Query overrides for the ring, as for the film: ?ringAmount=, ?ringRadius=,
+// ?ringFloor=, ?ringMax=.
+const RING_Q = { ringAmount: "amount", ringRadius: "radius", ringFloor: "floor", ringMax: "max" };
 
 const PLANE_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -386,6 +433,70 @@ layout(location=0) in vec2 aPos;
 out vec2 vUv;
 void main() { vUv = aPos; gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0); }`;
 
+// The thin halation ring (RING), in linear light, written back as sRGB for
+// the film with the coverage carried through.
+const RING_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene;
+uniform vec2 uTexel;   // one device px in uv
+uniform float uR;      // the ring's reach, device px
+uniform float uThr;    // the soft knee's centre (linear luma)
+uniform float uFloor;
+uniform float uAmt;
+uniform float uMax;
+uniform vec3 uColor;
+out vec4 o;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 dec(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 enc(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+// The light a pixel sends into the base: all of it past the knee, a floor's
+// share below.
+float send(vec3 s) {
+  float l = dot(dec(s), LUMA);
+  float k = uThr * 0.5;
+  float x = clamp(l - uThr + k, 0.0, 2.0 * k);
+  float past = max(x * x / (4.0 * k + 1e-5), l - uThr);
+  float share = mix(uFloor, 1.0, clamp(past / max(l, 1e-4), 0.0, 1.0));
+  return l * share;
+}
+void main() {
+  vec4 c = texture(uScene, vUv);
+  // A pixel's own light counts whole even on the window's soft cut, so the
+  // cut never rings; its neighbours count by coverage, so the surround sends
+  // nothing.
+  float self = send(c.rgb);
+  // Three rings of taps, turned against each other, falling off outward: a
+  // short, soft spread with no visible tap pattern under the grain.
+  float sum = 0.0;
+  float wsum = 0.0;
+  for (int r = 1; r <= 3; r++) {
+    float rr = float(r) / 3.0;
+    float w = 1.0 - 0.55 * rr;
+    for (int i = 0; i < 8; i++) {
+      float a = (float(i) + 0.5 * float(r)) * 0.78539816;
+      vec2 d = vec2(cos(a), sin(a)) * rr * uR * uTexel;
+      vec4 n = texture(uScene, vUv + d);
+      sum += send(n.rgb) * n.a * w;
+      wsum += w;
+    }
+  }
+  // What reaches this pixel from round it, past what it sends itself: the
+  // bright side of an edge keeps its own colour, the dark side takes the ring.
+  float halo = max(sum / wsum - self, 0.0) * uAmt;
+  halo /= 1.0 + halo / uMax;
+  vec3 lin = dec(c.rgb);
+  float y = dot(lin, LUMA);
+  halo *= 1.0 - 0.6 * smoothstep(0.15, 0.7, y);
+  o = vec4(enc(lin + uColor * halo), c.a);
+}`;
+
 // Paper where there is no card; the developed card where there is.
 const FINAL_FS = `#version 300 es
 precision highp float;
@@ -528,6 +639,8 @@ export async function createCrossing(host, { embedded = false } = {}) {
   const held = qSplit != null;
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) if (num(key) != null) film0[key] = num(key);
+  const ring0 = { ...RING };
+  for (const [key, to] of Object.entries(RING_Q)) if (num(key) != null) ring0[to] = num(key);
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   host.style.background = `rgb(${PAPER.map((c) => Math.round(c * 255)).join(",")})`;
@@ -586,6 +699,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
 
   const plane = compile(gl, PLANE_VS, PLANE_FS);
   const fin = compile(gl, QUAD_VS, FINAL_FS);
+  const ringP = compile(gl, QUAD_VS, RING_FS);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -610,15 +724,17 @@ export async function createCrossing(host, { embedded = false } = {}) {
     return { tex, fbo };
   };
   let sceneT = null;
+  let ringT = null;
   let filmT = null;
   let dirty = true;
   const build = () => {
-    for (const t of [sceneT, filmT]) {
+    for (const t of [sceneT, ringT, filmT]) {
       if (!t) continue;
       gl.deleteTexture(t.tex);
       gl.deleteFramebuffer(t.fbo);
     }
     sceneT = target();
+    ringT = target();
     filmT = target();
     film.resize(stage.canvas.width, stage.canvas.height);
     dirty = true;
@@ -932,6 +1048,28 @@ export async function createCrossing(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
 
+  // The thin halation ring, once per drawn scene (not per grain tick).
+  const drawRing = () => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, ringT.fbo);
+    gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(ringP.p);
+    gl.bindVertexArray(vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    const u = ringP.u;
+    gl.uniform1i(u.uScene, 0);
+    gl.uniform2f(u.uTexel, 1 / stage.canvas.width, 1 / stage.canvas.height);
+    gl.uniform1f(u.uR, ring0.radius * stage.dpr);
+    gl.uniform1f(u.uThr, film0.halationThreshold);
+    gl.uniform1f(u.uFloor, ring0.floor);
+    gl.uniform1f(u.uAmt, ring0.amount);
+    gl.uniform1f(u.uMax, ring0.max);
+    gl.uniform3f(u.uColor, ring0.color[0], ring0.color[1], ring0.color[2]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+  };
+
   const present = () => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
@@ -1035,6 +1173,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const key = `${s.toFixed(5)}|${yawDeg.toFixed(4)}|${pitchDeg.toFixed(4)}|${focusZ.toFixed(2)}`;
     if (key !== lastKey || dirty) {
       drawScene(s, yawDeg, pitchDeg, focusZ);
+      drawRing();
       lastKey = key;
       dirty = false;
       lastGrain = -1;
@@ -1042,7 +1181,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     // Film at 24 fps: the grain moves at the rate film did.
     const tick = reduced || held ? 0 : Math.floor(t * 24);
     if (tick !== lastGrain || exposure > 1e-3) {
-      film.render(sceneT.tex, { ...film0, exposure, grainSeed: tick * 7.31 }, filmT.fbo);
+      film.render(ringT.tex, { ...film0, exposure, grainSeed: tick * 7.31 }, filmT.fbo);
       present();
       lastGrain = tick;
     }
@@ -1061,7 +1200,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     destroy() {
       window.removeEventListener("deviceorientation", onOrient);
       film.destroy();
-      for (const t of [sceneT, filmT]) {
+      for (const t of [sceneT, ringT, filmT]) {
         if (!t) continue;
         gl.deleteTexture(t.tex);
         gl.deleteFramebuffer(t.fbo);
@@ -1072,6 +1211,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.deleteVertexArray(vao);
       gl.deleteProgram(plane.p);
       gl.deleteProgram(fin.p);
+      gl.deleteProgram(ringP.p);
       stage.destroy();
     },
   };
