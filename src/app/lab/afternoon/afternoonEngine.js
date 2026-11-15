@@ -28,8 +28,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // glow). The photo's one small wisp is retired; a photographed cumulus (Poly
 // Haven's Skidpan, its own luminance and alpha, cloud.webp) rises from behind
 // the right-hand roofs and the pole instead, relit here: a warm-white sunlit
-// flank that turns peach and swings lower as the sun drops, skylight-blue
-// shade holding its billows, a thin bright rim inside its edge. The
+// flank that turns peach and swings lower as the sun drops, a luminous
+// skylight-blue shade (multiple scattering) holding its billows, a thin
+// bright rim inside its edge, and its own light spread wide and low into the
+// sky round it (a 1/16-res glow fed to the film with the frame). The
 // buildings are the photograph at the photo's sun.
 //
 // Query: ?sun=0..1 holds the sun (0 = 12:30, 1 = 17:00, the last light; the
@@ -88,6 +90,8 @@ const CLOUD_SCALE = 0.71;
 const CLOUD_ROT = 22;
 // how steep the cloud's relief (cloud.webp G, B) is lit
 const CLOUD_RELIEF = 1.0;
+// the share of the cumulus's light the air and the lens spread round it
+const CLOUD_GLOW = 0.08;
 const S_PHOTO = (T0 - T_START) / T_SPAN;
 const S_OPEN = 0.86;
 
@@ -304,6 +308,9 @@ uniform vec3 uLo;
 uniform vec3 uHi;
 uniform float uDebug;
 uniform vec4 uOcc[${CAPS.length * 2}];
+uniform sampler2D uGlow; // the cumulus's own light, blurred wide (1/16 res)
+uniform float uGlowK;    // how much of it the air and the lens spread
+uniform float uGlowSrc;  // 1: draw only the cumulus's light, as the glow's source
 ${COMMON}
 vec3 s2l(vec3 c) { c = max(c, 0.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 vec3 l2s(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -505,11 +512,23 @@ void main() {
   vec3 shadeHi = mix(vec3(0.84, 0.9, 0.99), vec3(0.86, 0.88, 0.97), low);
   vec3 shadeLo = mix(vec3(0.61, 0.71, 0.88), vec3(0.62, 0.68, 0.83), low);
   vec3 shadeC = mix(shadeLo, shadeHi, skyK);
+  // Multiple scattering. A cumulus is mostly light that has bounced inside
+  // it many times: the sun that went into the lit billows comes back out of
+  // the shaded ones too, and the dome's light fills them from every side, so
+  // a shaded flank is not a dark wall but a luminous skylight-blue white only
+  // a little below the sunlit side. Most where the sun has a short way in
+  // (near the lit billows), a little less deep in a tower and on the
+  // undersides; the photograph's billows are drawn into it below as before.
+  float ms = clamp(0.7 + 0.3 * reach - 0.25 * deep - 0.15 * down, 0.0, 1.0);
+  vec3 msC = mix(vec3(0.885, 0.93, 0.965), vec3(0.86, 0.9, 0.95), low) * (0.86 + 0.16 * ms);
+  shadeC = mix(shadeC, msC, 0.8 * (1.0 - 0.5 * skyK));
   // and the photograph's own billows drawn into both, lit side and shade
   // alike, as the crowns carry theirs: each billow's tone over the lobe round
-  // it (lighter in the crowns, whose tone already draws them)
+  // it (lighter in the crowns, whose tone already draws them; a little
+  // firmer in the shade, so the luminous body keeps its billows)
   float fine = textureLod(uCloud, cuv, 1.0).r - textureLod(uCloud, cuv, 4.0).r;
-  vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + (0.55 * fine + 0.35 * mid) * (0.4 + 0.6 * deep)), vec3(1.07));
+  float draw = (0.4 + 0.6 * deep) * (1.0 + 0.4 * (1.0 - sunK));
+  vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + (0.55 * fine + 0.35 * mid) * draw), vec3(1.07));
   // Where the cloud thins to its edge the sun comes through it, so a sunlit
   // billow's top ends in a bright fringe. That is only true where the sun
   // stands: the edge has to face it (squared, so it fades fast as the edge
@@ -549,7 +568,39 @@ void main() {
   // Back through the photo's own scan grade (lifted black; rolled white),
   // unclamped above white so the film's shoulder gets the highlights.
   vec3 s = uLo + (uHi - uLo) * l2s(col);
-  outColor = vec4(s2l(s) + max(s - 1.0, 0.0) * 2.4, 1.0);
+  vec3 o = s2l(s) + max(s - 1.0, 0.0) * 2.4;
+  // The cumulus in the same air: its own light (where it is seen, alpha
+  // times lit value) scatters in the air and the lens a few dozen pixels
+  // round it, a soft white-blue bleed into the cobalt beside the sunlit
+  // billows. Drawn first at low res as the glow's source, blurred wide, and
+  // laid on here, mostly outside the cloud so the crown keeps its shoulder;
+  // the film's own diffusion and halation then develop it with the rest.
+  float cov = ca * mt.r;
+  if (uGlowSrc > 0.5) {
+    outColor = vec4(o * cov, 1.0);
+    return;
+  }
+  o += uGlowK * texture(uGlow, vUv).rgb * vec3(0.9, 0.96, 1.04) * (1.0 - 0.75 * cov);
+  outColor = vec4(o, 1.0);
+}`;
+
+// The glow: a wide, separable gaussian at 1/16 res (sigma about 2.2 texels a
+// pass, run twice).
+const GBLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+void main() {
+  vec3 acc = vec3(0.0);
+  float ws = 0.0;
+  for (int i = -6; i <= 6; i++) {
+    float w = exp(-float(i * i) / 9.7);
+    acc += texture(uSrc, vUv + uDir * float(i)).rgb * w;
+    ws += w;
+  }
+  outColor = vec4(acc / ws, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -710,11 +761,12 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     blur: program(gl, VERT, BLUR),
     shade: program(gl, VERT, SHADE),
     blit: program(gl, VERT, BLIT),
+    gblur: program(gl, VERT, GBLUR),
   };
   const film = createFilm(gl, { width: 2, height: 2 });
 
   const L = { x: 0, y: 0, w: 1, h: 1 };
-  const T = { scene: null, film: null, vis: null, visB: null };
+  const T = { scene: null, film: null, vis: null, visB: null, gsrc: null, g1: null, g2: null };
   let scale = 1;
   let lastBox = null;
   let visDirty = true;
@@ -752,6 +804,16 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     T.film = target(gl, L.rw, L.rh, false);
     T.vis = target(gl, L.vw, L.vh, false);
     T.visB = target(gl, L.vw, L.vh, false);
+    // the cumulus glow: its source at 1/8, blurred at 1/16
+    const glowT = (w, h) => {
+      const t = target(gl, Math.max(2, w), Math.max(2, h), floatOk);
+      if (t.ok) return t;
+      freeTarget(gl, t);
+      return target(gl, Math.max(2, w), Math.max(2, h), false);
+    };
+    T.gsrc = glowT(Math.round(L.rw / 8), Math.round(L.rh / 8));
+    T.g1 = glowT(Math.round(L.rw / 16), Math.round(L.rh / 16));
+    T.g2 = glowT(Math.round(L.rw / 16), Math.round(L.rh / 16));
     film.resize(L.rw, L.rh);
     visDirty = true;
     dirty = true;
@@ -896,6 +958,30 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uLo, GRADE_LO);
     gl.uniform3fv(u.uHi, GRADE_HI);
     gl.uniform1f(u.uDebug, debugLight ? 1 : 0);
+    // 2a. The cumulus's own light at 1/8 res, the glow's source; then blurred
+    // wide at 1/16 (twice each way).
+    bindTex(6, T.g2.tex, u.uGlow);
+    gl.uniform1f(u.uGlowK, 0);
+    gl.uniform1f(u.uGlowSrc, 1);
+    to(T.gsrc);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.useProgram(P.gblur.p);
+    gl.uniform1i(P.gblur.u.uSrc, 7);
+    gl.activeTexture(gl.TEXTURE7);
+    const gb = (src, dst, dx, dy) => {
+      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      gl.uniform2f(P.gblur.u.uDir, dx / T.g1.w, dy / T.g1.h);
+      to(dst);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    gb(T.gsrc, T.g1, 1, 0);
+    gb(T.g1, T.g2, 0, 1);
+    gb(T.g2, T.g1, 1, 0);
+    gb(T.g1, T.g2, 0, 1);
+    gl.useProgram(P.shade.p);
+    bindTex(6, T.g2.tex, u.uGlow);
+    gl.uniform1f(u.uGlowK, debugLight ? 0 : CLOUD_GLOW);
+    gl.uniform1f(u.uGlowSrc, 0);
     to(T.scene);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
