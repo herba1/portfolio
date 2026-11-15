@@ -6,6 +6,7 @@
 #     && python3 polarise.py <copy of scene.webp> <copy of optics.png>  (dense radial cobalt sky around the zenith)
 #     && python3 canopy.py <copy of scene.webp> <copy of optics.png>    (near-black, crisp canopy; the top crown's lip trimmed)
 #     && python3 redome.py <copy of scene.webp> <copy of optics.png>    (once, on the shipped bake: the broad-dome sky field, the drawn leader out)
+#     && python3 crown.py <copy of scene.webp> <copy of optics.png> <donor.webp>  (once: the top crown re-keyed from real needles, radial aureole)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image
