@@ -50,8 +50,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import fill  # noqa: E402
 kit = fill.kit
 
-src, srcaux, dst, dstaux = sys.argv[1:5]
-maskout = sys.argv[5] if len(sys.argv) > 5 else ''
+TURNED = len(sys.argv) > 1 and sys.argv[1] == '--turned'
+args = sys.argv[2:] if TURNED else sys.argv[1:]
+src, srcaux, dst, dstaux = args[:4]
+maskout = args[4] if len(args) > 4 else ''
 img = np.asarray(Image.open(src).convert('RGB')).astype(np.float32) / 255
 aux = np.asarray(Image.open(srcaux).convert('RGB')).astype(np.float32) / 255
 H, W = img.shape[:2]
@@ -62,6 +64,55 @@ def poly(pts):
     m = np.zeros((H, W), np.uint8)
     cv2.fillPoly(m, [np.array(pts, np.int32)], 1)
     return m > 0
+
+
+def sky_aux(aux, a):
+    """The aux with the fill's alpha a set to sky: sky channel up to 1, the
+    glass channels out."""
+    aux2 = aux.copy()
+    aux2[..., 0] = np.maximum(aux[..., 0], a)
+    aux2[..., 1] *= 1 - a
+    aux2[..., 2] *= 1 - a
+    return aux2
+
+
+def save(img, aux):
+    enc = np.clip(np.round(img * 255), 0, 255).astype(np.uint8)
+    Image.fromarray(enc).save(dst, quality=92, subsampling=0, optimize=True)
+    Image.fromarray(np.clip(np.round(aux * 255), 0, 255).astype(np.uint8)).save(dstaux, optimize=True)
+
+
+# ------------------------------------------------------------------ the turned plate
+# python3 -I clean.py --turned plate.jpg aux.png out_plate.jpg out_aux.png [mask.png]
+# runs on the published plate (turn.py's 120, 84, 50, after skyfix.py), so
+# its coordinates are the published plate's. view.py's window brings in a
+# fragment the old plate's frame edge never held:
+#  - top left: a distant slatted glass tower seen past the pointed tower's
+#    shoulder, between the near glass block and the tree branches. The
+#    print's left edge crosses it about two thirds of the way to its top, so
+#    its base and the cluster it rises from are cropped off and a pale grey
+#    strip hangs in the sky (print 2560 scale about 745-800, 270-330).
+#    It stands in the aureole sky behind thin branches, so it is filled like
+#    the lamp arm, with LaMa inside the cloud. The hole is the tower and its
+#    fins (aux sky < 0.95 inside a hand-drawn box round the strip), grown
+#    10 px for the soft halo; the box runs past the print's left edge (about
+#    x 350-380 on these rows) so the cut stays out of frame, and stops short
+#    of the branches above and the near block below.
+if TURNED:
+    tower = poly([(280, 540), (333, 537), (367, 573), (413, 617), (463, 673), (460, 700),
+                  (437, 727), (413, 713), (367, 680), (323, 647), (290, 617), (273, 593)])
+    hole = kit.dilate(tower & (aux[..., 0] < 0.95), 10) & kit.dilate(tower, 4)
+    print('hole', round(hole.mean() * 100, 3), '% of the plate')
+    if maskout:
+        Image.fromarray((hole * 255).astype(np.uint8)).save(maskout)
+        if os.environ.get('MASK_ONLY'):
+            sys.exit()
+    lama = fill.Lama(threads=4)
+    img = fill.fill(img, hole, 'lama', lama=lama, grain=True, feather=8)
+    print('lama calls', lama.calls, 'secs', round(lama.secs, 1))
+    a = cv2.GaussianBlur(hole.astype(np.float32), (0, 0), 3)
+    save(img, sky_aux(aux, np.maximum(a, hole)))
+    sys.exit()
 
 
 # ------------------------------------------------------------------ the hole
@@ -190,14 +241,6 @@ def bot_src(a, r):
 print('bottom')
 img = transplant(img, bot, 30, polar(bot_src), 14)
 
-enc = np.clip(np.round(img * 255), 0, 255).astype(np.uint8)
-Image.fromarray(enc).save(dst, quality=92, subsampling=0, optimize=True)
-
 # ------------------------------------------------------------------ aux: the fill is sky
 a = cv2.GaussianBlur(hole.astype(np.float32), (0, 0), 3)
-a = np.maximum(a, hole)
-aux2 = aux.copy()
-aux2[..., 0] = np.maximum(aux[..., 0], a)
-aux2[..., 1] *= 1 - a
-aux2[..., 2] *= 1 - a
-Image.fromarray(np.clip(np.round(aux2 * 255), 0, 255).astype(np.uint8)).save(dstaux, optimize=True)
+save(img, sky_aux(aux, np.maximum(a, hole)))
