@@ -17,6 +17,9 @@
 #                (once: the camera re-aimed at the cumulus, yaw 150 / pitch +76 -> yaw 178 / pitch +66; the bake carried over by
 #                 ray, the revealed low sky filled, pines and cumulus solved again from the HDR through the new camera.
 #                 deepen.py now holds the new aim; every pass above ran at the old one, reaim.OLD)
+#     && python3 swap.py <copy of scene.webp> <copy of trees.webp> <stone_pines_8k.hdr>
+#                (the source swapped to Poly Haven's Stone Pines, nearly straight up: yaw 15 / pitch +83 / field 118 / roll +10;
+#                 open sky laid fresh as the dome, pines and cumulus solved from the new HDR; this is the shipped bake)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image

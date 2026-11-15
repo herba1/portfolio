@@ -39,8 +39,9 @@ from scipy import ndimage as ndi
 import wormseye_lib as wlib
 import bake_wormseye as bw
 
-YAW, PITCH, FOV, ROLL, SIZE = 222.0, 59.0, 90.0, -2.0, 1536    # the worm's-eye crop, re-aimed at the cumulus bank by reaim.py
-U, V = 0.7867, 0.0048                                             # the hidden sun (resun.py's direction) in that frame
+YAW, PITCH, FOV, ROLL, SIZE = 15.0, 83.0, 118.0, 10.0, 1536     # the worm's-eye crop: Stone Pines, nearly straight up (swap.py)
+U, V = 0.6043, -0.1626                                                # the hidden sun (the HDR's own, behind a crown) in that frame: past the top edge
+# (Tree Lined Driveway, before swap.py: yaw 222, pitch +59, field 90, roll -2, the hidden sun at U, V = 0.7867, 0.0048)
 # (every pass up to cumulus.py ran at yaw 150, pitch +76, field 116, the hidden sun at U, V = 0.3906, 0.1706;
 #  the first re-aim moved it to yaw 178, pitch +66 (U, V = 0.4973, 0.0625), reaim.OLD keeps that.
 #  Re-running an earlier pass needs those values back.)
