@@ -195,6 +195,13 @@ const float LOBE = 0.6;
 const float FEATHER = 4.0;
 // deep cobalt straight up (linear light, before the film)
 const vec3 ZENITH = vec3(0.0006, 0.053, 0.29);
+// Aureole round the hidden sun: per-channel lift of the sky's own colour at
+// its peak, the lobe's width (ds^2, plate widths), and the tight warm core.
+const vec3 AURE_GAIN = vec3(0.55, 2.2, 1.15);
+const float AURE_W = 0.008;
+const float AURE_CORE = 0.0007;
+const vec3 AURE_WHITE = vec3(0.92, 0.9, 0.84);
+const float AURE_CORE_MIX = 0.3;
 
 // The camera pitched up by uCam.x. Every layer goes through one and the same
 // map, so all of them converge on one zenith and nothing tears between them:
@@ -507,8 +514,21 @@ void main() {
   // aureole round the hidden sun, only where there is sky
   float ds = length(pS - uSunPx) / PLATE.x;
   float hide = clamp(occ - thin, 0.0, 1.0);
-  // (tight: a broad veil only greys the blue)
-  col += vec3(1.0, 0.93, 0.82) * uAure * (0.09 * exp(-ds * ds / 0.006) + 0.01 * exp(-ds / 0.15)) * (1.0 - hide + thin * 0.8);
+  // The glow is the sky's own light turned up, not a veil laid over it: an
+  // added warm constant lifts red out of the cobalt's near-black red channel
+  // and greys it to lavender. So it scales the sky's colour in linear light
+  // (hue and saturation hold), green a little faster than blue so the lift
+  // leans to the pale cyan of a clear zenith near the sun, red barely at all.
+  // One lobe, no skirt. Only in the tight core does it roll to warm white,
+  // mixed in a gamma-like space so the path runs through cyan, not grey-mauve.
+  float seen = uAure * (1.0 - hide + thin * 0.8);
+  float g = seen * exp(-ds * ds / AURE_W);
+  // Sky carries the lift; a sunlit lobe edge already near white takes less of
+  // it, so the glow lights the fringe without clipping the cloud's tops.
+  col += skyN * AURE_GAIN * g * (1.0 - smoothstep(0.3, 0.8, dot(col, LUMA)));
+  float gc = seen * exp(-ds * ds / AURE_CORE);
+  vec3 e = mix(sqrt(max(col, 0.0)), sqrt(AURE_WHITE), gc * AURE_CORE_MIX);
+  col = e * e;
 
   // --- wires, masts, gantry: per-pixel disparity, springs ---
   vec2 pWp = layerAt(P, false);
