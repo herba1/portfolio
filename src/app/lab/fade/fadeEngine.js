@@ -125,7 +125,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // ?debug=cloud shows the sky's split (R cloud, G its lit term); ?debug=render
 // shows what chalks (R render, G shade, B dose); ?sky=0
 // shows the sky as shot; ?sun=0..144 holds the sweep's light at that sun of
-// the path; ?debug=sun shows that light; ?debug=recv shows the years each
+// the path (with ?years, the clock caught mid-drag: the walls in that sun at
+// the clock's years, those in its shade lagging); ?debug=sun shows that
+// light; ?debug=recv shows the years each
 // pixel has received against the clock's (darker lags) while it sweeps.
 
 const BASE = "/lab/fade/";
@@ -298,9 +300,10 @@ const FILM_TOE_COLOR = [0.75, 1, 1.2];
 // shadow line climbs and falls down the low storeys through each day and
 // lies deeper through the winter, the shutter leaves and lanterns cast their
 // own shapes, and the top floors stand in the sun almost all the way across.
-// The light is shown at a low amplitude (warm where the sun is, the lane's
-// cool sky light where it is not) and goes back to the photograph when the
-// clock rests. The years a pixel has received follow the clock faster where
+// The light is shown strongly, with a hard shadow line (warm where the sun
+// is, the lane's cool sky light two stops under it where it is not), so a
+// still of it reads as sunlight crossing the walls, and goes back to the
+// photograph when the clock rests. The years a pixel has received follow the clock faster where
 // the sun stands on it (K_LIT, a few tenths of a second) than in its shade
 // (K_DARK), so the fade builds up behind the light as it passes; going back,
 // and once the clock rests (K_SETTLE), every pixel takes the clock's years and
@@ -321,8 +324,20 @@ const SLAB_SPAN = 16;
 const SLOT_SPAN = 24;
 const LANE = 6;
 const SWEEP_START = 66;
-const SUN_TINT = [1.2, 1.12, 1.0];
-const SHADE_TINT = [0.58, 0.64, 0.78];
+// The sweep's light, as a factor on the photograph (whose own sun is high):
+// a warm stop-and-a-bit above it where this sun stands, the cool of the
+// lane's sky two stops under it in its shade, so the band reads in a still
+// as sunlight crossing the walls and not as a grade.
+const SUN_TINT = [1.42, 1.27, 1.04];
+const SHADE_TINT = [0.3, 0.32, 0.4];
+// the far wall's shadow edge: the penumbra of the eave line, in metres of
+// slot (the sun's disc, half a degree, across a lane's width is a few cm)
+const SLOT_EDGE = 0.06;
+// A still with a sun held (?years=N&sun=K) is the clock caught mid-drag:
+// the walls this sun stands on are at the clock's years, those in its shade
+// have only got this share of them, so the faded band sits against the
+// still-saturated paint along the shadow line.
+const STILL_SHADE_SHARE = 0.32;
 const K_LIT = 9;
 const K_DARK = 0.25;
 const K_SETTLE = 5;
@@ -731,6 +746,7 @@ uniform vec3 uSunTint;
 uniform vec3 uShadeTint;
 uniform sampler2D uRecv;
 uniform float uUseRecv;
+uniform float uStillShade;
 ${NOISE}
 ${DETAIL_PACK}
 vec3 toSrgb(vec3 c) {
@@ -905,9 +921,20 @@ void main() {
   // the light of the one sun the sweep stands at (0 in its shade, its beam's
   // cosine on the wall where it falls), and the years this pixel has received:
   // while the clock moves, a wall ages as the light passes over it
+  // (the sweep is at half the plate: its visibility, read as a tent over
+  // four bilinear taps a plate px apart, rounds the march's staircase and
+  // drops its lone texels, then is squared back up to a hard edge, so the
+  // shadow line is drawn, not smeared or stepped)
   vec4 sw = texture(uSweep, uv);
-  float sunlit = clamp(sw.r / max(sw.a, 1e-3) * 2.4 * sqrt(uSunGain), 0.0, 1.0);
+  vec2 hp = 1.0 / uPlateSize;
+  vec2 vt = texture(uSweep, uv + vec2(hp.x, hp.y)).ga + texture(uSweep, uv + vec2(-hp.x, hp.y)).ga
+    + texture(uSweep, uv + vec2(hp.x, -hp.y)).ga + texture(uSweep, uv - hp).ga;
+  float vis = smoothstep(0.3, 0.7, (vt.x + sw.g) / max(vt.y + sw.a, 1e-3));
+  // (the photograph's own sun already holds each face's cosine: any face
+  // this sun reaches more than a few degrees off grazing reads as sunlit)
+  float sunlit = vis * clamp(sw.r / max(sw.g, 1e-3) * 6.0 * sqrt(uSunGain), 0.0, 1.0);
   float yrs = uYears;
+  if (uStillShade > 0.0) yrs = uYears * mix(uStillShade, 1.0, sunlit);
   if (uUseRecv > 0.5) {
     vec2 rv = texture(uRecv, uv).rg;
     yrs = (rv.x + rv.y / 255.0) * 32.0;
@@ -1063,8 +1090,8 @@ void main() {
   dt = uDetailClip * tanh(dt / uDetailClip);
   outLin *= exp(uDetailGain * c * dt);
   // the sweep's light over every surface: warm where the sun stands on it,
-  // the cool of the lane's sky where it does not, at a low amplitude that
-  // goes back to the photograph when the clock rests
+  // the cool of the lane's sky where it does not, across a hard line, and
+  // all of it goes back to the photograph when the clock rests
   if (uSweepAmp > 0.001) {
     vec3 lit = mix(uShadeTint, uSunTint, sunlit);
     outLin *= mix(vec3(1.0), lit, uSweepAmp * smoothstep(0.1, 0.6, sw.a));
@@ -1184,6 +1211,7 @@ uniform float uLane;
 const float ZMAX = ${GEO_ZMAX.toFixed(1)};
 const float SPAN = ${SLAB_SPAN.toFixed(1)};
 const float SLOT = ${SLOT_SPAN.toFixed(1)};
+const float EDGE = ${SLOT_EDGE.toFixed(3)};
 ivec2 gSize;
 float depthAt(ivec2 p) {
   vec4 g = texelFetch(uGeo, p, 0);
@@ -1256,7 +1284,7 @@ void main() {
   float lh = length(nh);
   if (vis > 0.0 && slot > 0.0 && lh > 0.5) {
     float sn = dot(uSun, nh / lh);
-    if (sn > 0.02) vis *= smoothstep(-0.5, 0.5, uLane * dot(uSun, uUp) / sn - slot);
+    if (sn > 0.02) vis *= smoothstep(-EDGE, EDGE, uLane * dot(uSun, uUp) / sn - slot);
   }
   outColor = vec4(cosi * vis, vis, 0.0, 1.0);
 }`;
@@ -1278,7 +1306,7 @@ void main() {
   vec2 rv = texelFetch(uPrev, p, 0).rg;
   float r = rv.x + rv.y / 255.0;
   vec4 sw = texelFetch(uSweep, p, 0);
-  float lit = clamp(sw.r * 2.4 * sqrt(uSunGain), 0.0, 1.0);
+  float lit = clamp(sw.r * 6.0 * sqrt(uSunGain), 0.0, 1.0);
   // x: the lit rate, y: the shaded, z: going back
   float k = uTarget < r ? uRates.z : uRates.y + uRates.x * lit;
   r += (uTarget - r) * (1.0 - exp(-uDt * k));
@@ -1783,6 +1811,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uSunTint, SUN_TINT);
     gl.uniform3fv(u.uShadeTint, SHADE_TINT);
     gl.uniform1f(u.uUseRecv, useRecv ? 1 : 0);
+    gl.uniform1f(u.uStillShade, held && sunQ != null ? STILL_SHADE_SHARE : 0);
     gl.uniform1f(u.uDebug, debugQ === "recv" ? 8 : debugQ === "sun" ? 7 : debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
