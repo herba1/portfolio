@@ -300,10 +300,13 @@ const FILM_TOE_COLOR = [0.75, 1, 1.2];
 // shadow line climbs and falls down the low storeys through each day and
 // lies deeper through the winter, the shutter leaves and lanterns cast their
 // own shapes, and the top floors stand in the sun almost all the way across.
-// The light is shown strongly, with a hard shadow line (warm where the sun
-// is, the lane's cool sky light two stops under it where it is not), so a
-// still of it reads as sunlight crossing the walls, and goes back to the
-// photograph when the clock rests. The years a pixel has received follow the clock faster where
+// The light is light on the faded paint, not a grade over it: the faded
+// albedo times the lane's sky plus this sun (near neutral, about a stop
+// over the sky where it stands square on a wall), its shadow lines drawn
+// with the penumbra the sun's disc throws from what casts them, so a still
+// reads as sunlight crossing the walls, and the paint under it keeps its own
+// hue and grain: a bleached band is paler and rosier than the shade beside
+// it, not just brighter. It goes back to the photograph when the clock rests. The years a pixel has received follow the clock faster where
 // the sun stands on it (K_LIT, a few tenths of a second) than in its shade
 // (K_DARK), so the fade builds up behind the light as it passes; going back,
 // and once the clock rests (K_SETTLE), every pixel takes the clock's years and
@@ -324,14 +327,26 @@ const SLAB_SPAN = 16;
 const SLOT_SPAN = 24;
 const LANE = 6;
 const SWEEP_START = 66;
-// The sweep's light, as a factor on the photograph (whose own sun is high):
-// a warm stop-and-a-bit above it where this sun stands, the cool of the
-// lane's sky two stops under it in its shade, so the band reads in a still
-// as sunlight crossing the walls and not as a grade.
-const SUN_TINT = [1.42, 1.27, 1.04];
-const SHADE_TINT = [0.3, 0.32, 0.4];
-// the far wall's shadow edge: the penumbra of the eave line, in metres of
-// slot (the sun's disc, half a degree, across a lane's width is a few cm)
+// The sweep's light is light, not a grade: it multiplies the faded albedo,
+// rendered = albedo x (sky + SWEEP_SUN x visibility x N.L x beam). The
+// photograph's own illumination S (light.webp G) is split into the lane's
+// sky, SWEEP_SKY of it, which every surface keeps, and the photo's own high
+// sun, which the sweep's sun replaces. The sun is near neutral (no warm cast
+// of its own, so a lit wall shows its own paint, not a white balance), about
+// a stop over the sky where it stands square on a wall: a lit pink floor
+// lands on its own dusty rose at about the photograph's exposure, with the
+// render's texture intact, and its shade a stop under, still salmon.
+const SWEEP_SKY = 0.45;
+const SWEEP_SUN = 1.5;
+const SWEEP_SUN_COLOR = [1.0, 0.995, 0.975];
+// the sweep's light on the bare stone, which does not fade: held to a share
+// of its contrast, so the light means something only where it leaves a mark
+const SWEEP_STONE = 0.35;
+// the sun's disc, 0.53 deg: the penumbra a blocker throws is this times the
+// run to it, so an eave's line is crisp under the eave and softens further out
+const SUN_DISC = 0.00925;
+// the far wall's slot is stored in 7-bit steps: its eave line is never
+// drawn finer than a third of one (in metres of slot)
 const SLOT_EDGE = 0.06;
 // A still with a sun held (?years=N&sun=K) is the clock caught mid-drag:
 // the walls this sun stands on are at the clock's years, those in its shade
@@ -742,8 +757,8 @@ uniform sampler2D uDose;
 uniform sampler2D uSweep;
 uniform float uSweepAmp;
 uniform float uSunGain;
-uniform vec3 uSunTint;
-uniform vec3 uShadeTint;
+uniform vec3 uSunColor;
+uniform vec3 uSweepLight;
 uniform sampler2D uRecv;
 uniform float uUseRecv;
 uniform float uStillShade;
@@ -921,18 +936,14 @@ void main() {
   // the light of the one sun the sweep stands at (0 in its shade, its beam's
   // cosine on the wall where it falls), and the years this pixel has received:
   // while the clock moves, a wall ages as the light passes over it
-  // (the sweep is at half the plate: its visibility, read as a tent over
-  // four bilinear taps a plate px apart, rounds the march's staircase and
-  // drops its lone texels, then is squared back up to a hard edge, so the
-  // shadow line is drawn, not smeared or stepped)
+  // (the sweep's visibility and cosine, brought up to the plate by the
+  // geometry-guided filter with the sun disc's penumbra: SOFT)
   vec4 sw = texture(uSweep, uv);
-  vec2 hp = 1.0 / uPlateSize;
-  vec2 vt = texture(uSweep, uv + vec2(hp.x, hp.y)).ga + texture(uSweep, uv + vec2(-hp.x, hp.y)).ga
-    + texture(uSweep, uv + vec2(hp.x, -hp.y)).ga + texture(uSweep, uv - hp).ga;
-  float vis = smoothstep(0.3, 0.7, (vt.x + sw.g) / max(vt.y + sw.a, 1e-3));
-  // (the photograph's own sun already holds each face's cosine: any face
-  // this sun reaches more than a few degrees off grazing reads as sunlit)
-  float sunlit = vis * clamp(sw.r / max(sw.g, 1e-3) * 6.0 * sqrt(uSunGain), 0.0, 1.0);
+  float vis = sw.r;
+  float cosi = sw.g;
+  // a face this sun reaches more than a few degrees off grazing counts as
+  // in it, for the years it receives
+  float sunlit = vis * clamp(cosi * 6.0 * sqrt(uSunGain), 0.0, 1.0);
   float yrs = uYears;
   if (uStillShade > 0.0) yrs = uYears * mix(uStillShade, 1.0, sunlit);
   if (uUseRecv > 0.5) {
@@ -945,7 +956,9 @@ void main() {
     return;
   }
   if (uDebug > 6.5) {
-    outColor = vec4(toSrgb(vec3(sunlit * sw.a + 0.08 * sw.a)), 1.0);
+    // R the light the sweep's sun brings (vis x N.L x beam), G the penumbra's
+    // width, B the surface
+    outColor = vec4(toSrgb(vec3(vis * cosi * uSunGain, sw.b, 0.0) * sw.a + vec3(0.0, 0.0, 0.08 * sw.a)), 1.0);
     return;
   }
   if (uDebug > 5.5) {
@@ -1089,12 +1102,17 @@ void main() {
   dt = min(dt - log(shade), max(dt, 0.0));
   dt = uDetailClip * tanh(dt / uDetailClip);
   outLin *= exp(uDetailGain * c * dt);
-  // the sweep's light over every surface: warm where the sun stands on it,
-  // the cool of the lane's sky where it does not, across a hard line, and
-  // all of it goes back to the photograph when the clock rests
+  // the sweep's light, on the albedo: outLin is S x the faded albedo, so
+  // this is albedo x (the lane's sky + the sweep's sun x visibility x N.L),
+  // the photograph's own sun taken out. Where the sun stands the wall shows
+  // its own paint at about the photograph's exposure, its texture and hue
+  // intact; in its shade a stop under. All of it goes back to the
+  // photograph when the clock rests.
   if (uSweepAmp > 0.001) {
-    vec3 lit = mix(uShadeTint, uSunTint, sunlit);
-    outLin *= mix(vec3(1.0), lit, uSweepAmp * smoothstep(0.1, 0.6, sw.a));
+    vec3 illum = uSweepLight.x + uSunColor * (uSweepLight.y * vis * cosi * uSunGain / max(S, 0.1));
+    illum = min(illum, vec3(2.5));
+    float stone = clamp(max(m.a - m.b / 0.85, 0.0) / 0.35, 0.0, 1.0);
+    outLin *= mix(vec3(1.0), illum, uSweepAmp * smoothstep(0.1, 0.6, sw.a) * mix(1.0, uSweepLight.z, stone));
   }
   // the sky is inert to the clock (A = 0), so its grade is the same every year
   // what stands in the sky outside the matte (the bars, the cables) keeps its
@@ -1212,6 +1230,7 @@ const float ZMAX = ${GEO_ZMAX.toFixed(1)};
 const float SPAN = ${SLAB_SPAN.toFixed(1)};
 const float SLOT = ${SLOT_SPAN.toFixed(1)};
 const float EDGE = ${SLOT_EDGE.toFixed(3)};
+const float DISC = ${SUN_DISC.toFixed(5)};
 ivec2 gSize;
 float depthAt(ivec2 p) {
   vec4 g = texelFetch(uGeo, p, 0);
@@ -1251,6 +1270,8 @@ void main() {
   }
   vec3 O = P + n * 0.03;
   float vis = 1.0;
+  // how far along the ray the blocker stands (0: none), for the penumbra
+  float tb = 0.0;
   float qz;
   for (int i = 1; i <= 28; i++) {
     float t = 0.02 * pow(3000.0, float(i) / 28.0);
@@ -1261,6 +1282,7 @@ void main() {
     float behind = qz - ds;
     if (behind > 0.05 + 0.004 * qz && behind < 8.0 + 0.01 * qz) {
       vis = 0.0;
+      tb = t;
       break;
     }
   }
@@ -1269,12 +1291,16 @@ void main() {
   if (vis > 0.0 && own.b > 0.5 / 255.0 && own.b < 1.5 / 255.0) {
     float hit = 0.0;
     for (int i = 0; i < 32; i++) {
-      ivec2 q = project(O + uSun * (0.02 + 2.98 * float(i) / 31.0), qz);
+      float t = 0.02 + 2.98 * float(i) / 31.0;
+      ivec2 q = project(O + uSun * t, qz);
       if (q.x < 0) continue;
       vec4 sl = texelFetch(uSlab, q, 0);
       if (sl.b < 1.5 / 255.0) continue;
       float zs = depthAt(q);
-      if (qz > zs + (sl.r - 0.5) * SPAN && qz < zs + (sl.g - 0.5) * SPAN) hit = max(hit, sl.b);
+      if (qz > zs + (sl.r - 0.5) * SPAN && qz < zs + (sl.g - 0.5) * SPAN && sl.b > hit) {
+        hit = sl.b;
+        tb = t;
+      }
     }
     vis *= 1.0 - hit;
   }
@@ -1284,9 +1310,211 @@ void main() {
   float lh = length(nh);
   if (vis > 0.0 && slot > 0.0 && lh > 0.5) {
     float sn = dot(uSun, nh / lh);
-    if (sn > 0.02) vis *= smoothstep(-EDGE, EDGE, uLane * dot(uSun, uUp) / sn - slot);
+    // the far wall's eave, drawn here with its own penumbra: the sun's disc
+    // across the ray's run to it, stretched up the wall by the sun's height
+    // (and never finer than the slot's own 7-bit step)
+    if (sn > 0.02) {
+      float su = dot(uSun, uUp);
+      float run = uLane / sn;
+      float edge = max(0.5 * DISC * run / max(sqrt(max(1.0 - su * su, 0.0)), 0.2), EDGE);
+      vis *= smoothstep(-edge, edge, run * su - slot);
+    }
   }
-  outColor = vec4(cosi * vis, vis, 0.0, 1.0);
+  // R the beam's cosine (whether or not it arrives), G the visibility, B the
+  // blocker's distance (sqrt of its share of the depth range), A the surface
+  outColor = vec4(cosi, vis, sqrt(clamp(tb / ZMAX, 0.0, 1.0)), 1.0);
+}`;
+
+// The sweep's visibility brought up to the plate, once per sun: a joint
+// bilateral filter guided by the bake's geometry. The march is at half the
+// plate and binary, so read as it is its shadow lines step and its slabs
+// read as cut paper. Here each plate px takes, of the four half-res texels
+// around it, the one whose plate colour it shares (the full-res guide: a
+// frame, a sill, the wall's own edge), and from that texel's depth and
+// normal its own plane; the visibility is then averaged over the texels
+// that lie on that plane and face its way (a step in depth, a turn of the
+// wall, the sky, all stay out), under a Gaussian as wide as the penumbra
+// the sun's disc (0.53 deg) throws from the blocker the ray hit: found by
+// a search of the shaded texels around it (PCSS), the disc across that run,
+// stretched by the obliquity of the beam on the wall, in half-res px at
+// this depth. So the eave's line is crisp where it falls just under the
+// eave and softens a hand's width where it falls from a roof across the
+// lane, and a shutter leaf's tan edge stays sharp against its wall.
+// Out: R the visibility, G the beam's cosine (the same filter: no normal's
+// staircase), B the penumbra's sigma (for ?debug), A the surface.
+const SOFT = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSweep;
+uniform sampler2D uGeo;
+uniform sampler2D uPlate;
+uniform vec3 uK;
+const float ZMAX = ${GEO_ZMAX.toFixed(1)};
+const float DISC = ${SUN_DISC.toFixed(5)};
+ivec2 gSize;
+float depthAt(ivec2 p) {
+  vec4 g = texelFetch(uGeo, p, 0);
+  return (g.r * 65280.0 + g.g * 255.0) / 65535.0 * ZMAX;
+}
+float a7(float a) { return clamp((a * 255.0 - 128.0) / 127.0, 0.0, 1.0); }
+vec3 octa(vec2 e) {
+  e = e * 2.0 - 1.0;
+  vec3 v = vec3(e, 1.0 - abs(e.x) - abs(e.y));
+  if (v.z < 0.0) v.xy = (1.0 - abs(v.yx)) * (step(0.0, v.xy) * 2.0 - 1.0);
+  return normalize(v);
+}
+vec3 pointAt(ivec2 p, float z) {
+  vec2 xy = vec2(p);
+  return vec3((xy.x - uK.y) / uK.x * z, -(xy.y - uK.z) / uK.x * z, -z);
+}
+// the plane a texel lies on and the way it faces; 0 for the sky
+vec3 rP;
+vec3 rN;
+float rZ;
+float onPlane(ivec2 q, out float zq) {
+  q = clamp(q, ivec2(0), gSize - 1);
+  vec4 g = texelFetch(uGeo, q, 0);
+  zq = (g.r * 65280.0 + g.g * 255.0) / 65535.0 * ZMAX;
+  if (zq <= 0.0) return 0.0;
+  vec3 nq = octa(vec2(g.b, a7(g.a)));
+  float off = abs(dot(pointAt(q, zq) - rP, rN));
+  float tol = 0.06 + 0.012 * rZ;
+  return exp(-off * off / (tol * tol)) * smoothstep(0.75, 0.93, dot(nq, rN));
+}
+void main() {
+  gSize = textureSize(uSweep, 0);
+  vec2 fc = gl_FragCoord.xy;
+  vec2 c = fc * 0.5 - 0.5;
+  ivec2 b = ivec2(floor(c));
+  vec2 f = c - vec2(b);
+  // most of the plate is all lit or all shaded for a penumbra around: a few
+  // reads say so (the 3x3 about it and two rings out to the widest penumbra
+  // at its depth), and there the bilinear read is the answer
+  vec4 sb = texture(uSweep, (c + 0.5) / vec2(gSize));
+  float zb = depthAt(clamp(b, ivec2(0), gSize - 1));
+  float rs = zb > 0.0 ? clamp(DISC * 25.0 * uK.x / zb, 1.5, 12.0) : 1.5;
+  float vMin = 1.0;
+  float vMax = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      float v = texelFetch(uSweep, clamp(b + ivec2(i, j), ivec2(0), gSize - 1), 0).g;
+      vMin = min(vMin, v);
+      vMax = max(vMax, v);
+    }
+  }
+  for (int i = 0; i < 12; i++) {
+    float a = float(i) * 0.5236 + (i % 2 == 0 ? 0.0 : 0.2618);
+    float r = i % 2 == 0 ? rs : 0.55 * rs;
+    float v = texelFetch(uSweep, clamp(b + ivec2(floor(vec2(cos(a), sin(a)) * r + 0.5)), ivec2(0), gSize - 1), 0).g;
+    vMin = min(vMin, v);
+    vMax = max(vMax, v);
+  }
+  if (vMax - vMin < 0.02) {
+    outColor = vec4(sb.a > 0.0 ? sb.g / sb.a : 0.0, sb.a > 0.0 ? max(sb.r, 0.0) / sb.a : 0.0, 0.6 / 8.0, sb.a);
+    return;
+  }
+  // the reference texel: of the four around, the one whose plate colour this
+  // px shares most, by its bilinear weight
+  vec3 c0 = texelFetch(uPlate, ivec2(fc), 0).rgb;
+  vec2 ps = vec2(textureSize(uPlate, 0));
+  ivec2 ref = b;
+  float best = -1.0;
+  float surf = 0.0;
+  float swt = 0.0;
+  for (int j = 0; j < 4; j++) {
+    ivec2 o = ivec2(j & 1, j >> 1);
+    ivec2 q = clamp(b + o, ivec2(0), gSize - 1);
+    float bw = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y) + 0.02;
+    vec3 dc = textureLod(uPlate, (2.0 * vec2(q) + 1.0) / ps, 1.0).rgb - c0;
+    float w = bw * exp(-dot(dc, dc) / (2.0 * 0.07 * 0.07));
+    float sa = texelFetch(uSweep, q, 0).a;
+    surf += w * sa;
+    swt += w;
+    if (sa > 0.5 && w > best) {
+      best = w;
+      ref = q;
+    }
+  }
+  surf /= max(swt, 1e-6);
+  vec4 s0 = texelFetch(uSweep, ref, 0);
+  if (best < 0.0) {
+    outColor = vec4(0.0, 0.0, 0.0, surf);
+    return;
+  }
+  rZ = depthAt(ref);
+  vec4 g0 = texelFetch(uGeo, ref, 0);
+  rN = octa(vec2(g0.b, a7(g0.a)));
+  rP = pointAt(ref, rZ);
+  // the blocker search: a disc as wide as the widest penumbra (a roof 25 m
+  // off) at this depth, the shaded texels on this plane averaging the runs
+  // to what shades them
+  float cosR = max(s0.r, 0.0);
+  rs = clamp(DISC * 25.0 * uK.x / rZ, 1.5, 12.0);
+  float bSum = 0.0;
+  float bN = 0.0;
+  vMin = s0.g;
+  vMax = s0.g;
+  float zq;
+  for (int i = 0; i < 20; i++) {
+    float r = rs * sqrt((float(i) + 0.5) / 20.0);
+    float a = float(i) * 2.39996;
+    ivec2 q = ref + ivec2(floor(vec2(cos(a), sin(a)) * r + 0.5));
+    float w = onPlane(q, zq);
+    if (w < 0.3) continue;
+    vec4 s = texelFetch(uSweep, clamp(q, ivec2(0), gSize - 1), 0);
+    vMin = min(vMin, s.g);
+    vMax = max(vMax, s.g);
+    if (s.g < 0.5 && s.b > 0.0) {
+      bSum += s.b * s.b * ZMAX;
+      bN += 1.0;
+    }
+  }
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      float v = texelFetch(uSweep, clamp(ref + ivec2(i, j), ivec2(0), gSize - 1), 0).g;
+      vMin = min(vMin, v);
+      vMax = max(vMax, v);
+    }
+  }
+  // the penumbra, as a Gaussian's sigma in half-res texels: the disc across
+  // the run to the blocker, over the beam's obliquity on this wall
+  float run = bN > 0.0 ? bSum / bN : 0.0;
+  float wid = DISC * run / max(cosR, 0.25) * uK.x / rZ;
+  float sigma = clamp(wid / 2.5, 0.6, 8.0);
+  if (vMax - vMin < 0.02) {
+    // all lit or all shaded around: only the beam's cosine is smoothed, over
+    // the four texels about the px on its plane
+    float cs = 0.0;
+    float cw = 0.0;
+    for (int j = 0; j < 4; j++) {
+      ivec2 o = ivec2(j & 1, j >> 1);
+      float w = onPlane(b + o, zq) * ((o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y) + 1e-3);
+      cs += w * max(texelFetch(uSweep, clamp(b + o, ivec2(0), gSize - 1), 0).r, 0.0);
+      cw += w;
+    }
+    outColor = vec4(s0.g, cw > 1e-4 ? cs / cw : cosR, sigma / 8.0, surf);
+    return;
+  }
+  // the filter: a Vogel disc of texels out to 2.5 sigma about the px's own
+  // place (not the reference texel's), on the reference plane
+  float rf = 2.5 * sigma;
+  vec2 sum = vec2(0.0);
+  float wsum = 0.0;
+  for (int i = 0; i < 32; i++) {
+    float r = rf * sqrt((float(i) + 0.5) / 32.0);
+    float a = float(i) * 2.39996;
+    vec2 pos = c + vec2(cos(a), sin(a)) * r;
+    ivec2 q = ivec2(floor(pos + 0.5));
+    float w = onPlane(q, zq);
+    if (w < 1e-3) continue;
+    vec2 d = vec2(q) - c;
+    w *= exp(-dot(d, d) / (2.0 * sigma * sigma));
+    vec4 s = texelFetch(uSweep, clamp(q, ivec2(0), gSize - 1), 0);
+    sum += w * vec2(s.g, max(s.r, 0.0));
+    wsum += w;
+  }
+  vec2 o = wsum > 1e-4 ? sum / wsum : vec2(s0.g, cosR);
+  outColor = vec4(o.x, o.y, sigma / 8.0, surf);
 }`;
 
 // And the years each pixel has received: they follow the clock's, faster
@@ -1306,7 +1534,7 @@ void main() {
   vec2 rv = texelFetch(uPrev, p, 0).rg;
   float r = rv.x + rv.y / 255.0;
   vec4 sw = texelFetch(uSweep, p, 0);
-  float lit = clamp(sw.r * 6.0 * sqrt(uSunGain), 0.0, 1.0);
+  float lit = clamp(sw.r * sw.g * 6.0 * sqrt(uSunGain), 0.0, 1.0);
   // x: the lit rate, y: the shaded, z: going back
   float k = uTarget < r ? uRates.z : uRates.y + uRates.x * lit;
   r += (uTarget - r) * (1.0 - exp(-uDt * k));
@@ -1468,6 +1696,7 @@ export async function createFade(host, { embedded = false } = {}) {
     detail: program(gl, VERT, DETAIL),
     jbu: program(gl, VERT, JBU),
     sun: program(gl, VERT, SUN),
+    soft: program(gl, VERT, SOFT),
     recv: program(gl, VERT, RECV),
   };
 
@@ -1609,6 +1838,12 @@ export async function createFade(host, { embedded = false } = {}) {
   const SW = PW / 2;
   const SH = PH / 2;
   const sweepT = target(gl, SW, SH);
+  // and its visibility at the plate's, filtered (SOFT)
+  const softT = plateTarget(false);
+  const softFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, softFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, softT, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   const recvT = [target(gl, SW, SH), target(gl, SW, SH)];
   let recvI = 0;
 
@@ -1738,6 +1973,13 @@ export async function createFade(host, { embedded = false } = {}) {
       gl.uniform3fv(u.uK, GEO_K);
       gl.uniform1f(u.uLane, LANE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      const v = P.soft.u;
+      fullPass(P.soft, { fbo: softFbo, w: PW, h: PH });
+      bindTex(0, sweepT.tex, v.uSweep);
+      bindTex(1, geo, v.uGeo);
+      bindTex(2, plate, v.uPlate);
+      gl.uniform3fv(v.uK, GEO_K);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
     if (useRecv) {
       const u = P.recv.u;
@@ -1804,12 +2046,12 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uPaleCap, PALE_CAP);
     gl.uniform1f(u.uPaleChroma, PALE_CHROMA);
     gl.uniform1f(u.uPaleChalk, PALE_CHALK);
-    bindTex(9, sweepT.tex, u.uSweep);
+    bindTex(9, softT, u.uSweep);
     bindTex(10, recvT[recvI].tex, u.uRecv);
     gl.uniform1f(u.uSweepAmp, amp);
     gl.uniform1f(u.uSunGain, sunGain);
-    gl.uniform3fv(u.uSunTint, SUN_TINT);
-    gl.uniform3fv(u.uShadeTint, SHADE_TINT);
+    gl.uniform3fv(u.uSunColor, SWEEP_SUN_COLOR);
+    gl.uniform3f(u.uSweepLight, SWEEP_SKY, SWEEP_SUN, SWEEP_STONE);
     gl.uniform1f(u.uUseRecv, useRecv ? 1 : 0);
     gl.uniform1f(u.uStillShade, held && sunQ != null ? STILL_SHADE_SHARE : 0);
     gl.uniform1f(u.uDebug, debugQ === "recv" ? 8 : debugQ === "sun" ? 7 : debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
@@ -1978,6 +2220,8 @@ export async function createFade(host, { embedded = false } = {}) {
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
       [sweepT, ...recvT].forEach((t) => freeTarget(gl, t));
+      gl.deleteTexture(softT);
+      gl.deleteFramebuffer(softFbo);
       [plate, mat, light, doseTex, renderMask, geo, slab, skyPlate, skyEdge, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
