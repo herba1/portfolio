@@ -50,6 +50,14 @@ const ASSET = "/lab/focal-length/";
 const TM = 95; // degrees from the zenith covered by the outer cap
 const RI = 0.5; // the inner inset covers rho <= 0.5 (47.5 degrees: the whole frame at 20 mm)
 const ENC = 2.0; // the caps store scene light / 2, sRGB-encoded
+// Cloud micro-contrast grows with the focal length. The inset's clouds are
+// developed for the long end (cloud_glow.py: the detail layer at 2x over a
+// cloud-only base on a slow shoulder, so the cells and crevices read when a
+// cloud fills the frame); its alpha holds the wide end's development (detail
+// at 1x, the old shoulder) as a log2 luminance ratio, 127 codes per A_STOPS
+// stops round 128, taken in full at 10 mm and not at all at 24 mm, where the
+// clouds are drawn three times larger.
+const A_STOPS = 1.5;
 const HALF_DIAG = 21.633; // mm, full frame
 const ROLL = (32 * Math.PI) / 180; // the capture's azimuth about the zenith
 const CRISP_RHO = 0.68; // the crisp mask starts this far out (the tree tops)
@@ -77,6 +85,7 @@ uniform float uF;       // px, the lens constant for this k
 uniform float uK;       // 1 rectilinear .. 2 stereographic
 uniform vec3 uRot;      // small tilts about screen x and y, then the roll about the zenith
 uniform float uGain;
+uniform float uWide;    // 1 at 10 mm .. 0 at 24 mm: how much of the wide develop
 const float TM = ${((TM * Math.PI) / 180).toFixed(6)};
 const float RI = ${RI.toFixed(4)};
 
@@ -99,7 +108,8 @@ void main() {
   float rho = thz / TM;
   vec2 dir = h > 1e-7 ? w.xz / h : vec2(0.0);
   vec4 o = texture(uOuter, 0.5 + 0.5 * rho * dir);
-  vec3 i = texture(uInner, 0.5 + 0.5 * (rho / RI) * dir).rgb;
+  vec4 iv = texture(uInner, 0.5 + 0.5 * (rho / RI) * dir);
+  vec3 i = iv.rgb * exp2((iv.a * 255.0 - 128.0) * (${(A_STOPS / 127).toFixed(6)} * uWide));
   float wi = 1.0 - smoothstep(RI * 0.84, RI * 0.97, rho);
   // alpha carries the crisp mask: 255 - 128 m
   float crisp = clamp((1.0 - o.a) * 2.0, 0.0, 1.0) * (1.0 - wi);
@@ -506,6 +516,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     gl.uniform1f(scene.u.uK, k);
     gl.uniform3f(scene.u.uRot, rot[0], rot[1], rot[2]);
     gl.uniform1f(scene.u.uGain, ENC * enc);
+    gl.uniform1f(scene.u.uWide, clamp((MM_LONG - mm) / (MM_LONG - MM_WIDE), 0, 1));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };

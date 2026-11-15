@@ -49,18 +49,44 @@
 # where they cross-fade. The outer plate's alpha (the crisp tree mask) is
 # carried through untouched.
 #
+#  5. focal    at 20 to 24 mm the inset fills the frame and those clouds
+#               still read as blurred grey bodies under flat cream tops: the
+#               detail at 0.37 deg is too fine to model a cumulus, the guided
+#               filter's small eps kept its mid-scale cells in the base, and
+#               the tanh shoulder piled the tops into one level. So the inset
+#               is developed for the long end: the base is a matte-weighted
+#               guided filter (every box mean over the cloud alone, so the
+#               sky never enters it and eps can open to baseEpsLong, radius
+#               baseDegLong), so the cells of a degree or so land in the
+#               detail, which goes back at detailLong (2.0); the base rides a
+#               rational shoulder (kDLong 190 toward aDLong 252, keeping a
+#               third of its slope a stop past the knee) and peaks ease from
+#               dTopLong 240, so the lit tops shade instead of plateauing; the
+#               key is widened to cWidthLong (1.3 stop) so warm tops grade
+#               into the blue body. The inset is developed once more as at
+#               the wide end (detailWide 1.0, the old shoulder and filter);
+#               its luminance ratio to the long one, log2, softened aBlur px
+#               and stored in the inset's alpha at 127 codes per aStops round
+#               128, is what the engine takes in full at 10 mm and not at all
+#               at 24 mm. The outer cap, seen only from 10 to 16 mm and at the
+#               20 mm corners, is developed once at detailOuter (1.1), the
+#               wide end's filter and shoulder and the widened key.
+#
 # python3 -I cloud_glow.py outer_in.webp inner_in.webp outdir '{params}' [debug.png]
 # as published: the defaults. Measured on the developed frames: at 20 mm the
 # cloud-pixel G histogram has no spike past 240 (the old 244-246 band held
 # 6x its neighbours; now 240-247 sits within 2x of 235), the lit tops
 # average (248, 243, 236), cloud p90 luma at 10 mm 229, nothing at 255 but
-# the caption and the dither's odd pixel.
+# the caption and the dither's odd pixel. With step 5, at 20 mm: the frame
+# share at or above 250 is 0.11% (was 0.6%), above 245 0.6% (was 2.2%), cloud
+# G p90 229 (was 235); the 10 mm frame's clouds measure as before.
 # Inputs are crown_cap.py's plates (the ones published before this pass):
 # running it on its own output would lift the clouds twice.
 import sys, json, numpy as np, cv2
 from PIL import Image
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
-P = dict(q=93, stops=0.6, cKey=65, cWidth=0.8, cHue=208.0, cSat=0.36, topPlate='#fff1d9',
+P = dict(q=93, stops=0.6, cKey=65, cWidth=0.8, cWidthLong=1.3, detailWide=1.0, detailLong=2.0,
+         detailOuter=1.1, baseDegLong=1.0, baseEpsLong=0.25, kDLong=190.0, aDLong=252.0, dTopLong=240.0, dMaxLong=251.0, aStops=1.5, aBlur=1.5, cHue=208.0, cSat=0.36, topPlate='#fff1d9',
          cS0=0.5, cS1=0.36, hiKnee=0.625, hiCeil=1.0, tqMax=0.985,
          kD=200.0, aD=250.0, dTop=245.0, dMax=251.0, dCap=254.6, baseDeg=0.37, baseEps=0.09, detail=1.2,
          hiA=205.0, hiB=238.0, warmD=[1.024, 1.0, 0.972], innerDeg=47.5, thLo=84.0, thHi=90.0,
@@ -213,15 +239,32 @@ e0 = float(np.interp(P['kD'], dgY, eg))
 s0 = float(np.interp(e0, eg, np.gradient(dgY, eg)))   # screen levels per stop at the knee
 A = P['aD'] - P['kD']
 slope = np.gradient(dgY, eg)
-def tone_curve(B):
+def tone_curve(B, P=P):
+    e0 = float(np.interp(P['kD'], dgY, eg))
+    s0 = float(np.interp(e0, eg, slope)); A = P['aD'] - P['kD']
     lo = np.interp(B, eg, dgY)
-    hi = P['kD'] + A * np.tanh((B - e0) * s0 / A)
+    u = np.maximum(B - e0, 0) * s0 / A
+    # tanh (the wide end) nears aD within about A / s0 stops; the rational
+    # shoulder (the long end) keeps a third of its slope a stop further on,
+    # so the large-scale light across the lit tops is not piled into one level
+    hi = P['kD'] + A * (u / (1 + u) if P.get('rational') else np.tanh(u))
     return np.where(B < e0, lo, hi).astype(np.float32)
 def guided(L, r, eps):
     k = (2 * r + 1,) * 2
     m = cv2.blur(L, k); v = cv2.blur(L * L, k) - m * m
     a = v / (v + eps); b = m - a * m
     return (cv2.blur(a, k) * L + cv2.blur(b, k)).astype(np.float32)
+def guided_w(L, W, r, eps):
+    # the same filter with every box mean taken over the cloud alone
+    # (weighted by its matte), so the clear sky never enters a cloud's base:
+    # its outline needs no small eps to stay out of the detail, and the eps
+    # can let the mid-scale cells (a degree or so) through into the detail
+    k = (2 * r + 1,) * 2
+    bw = lambda a: cv2.blur(a * W, k)
+    n = np.maximum(cv2.blur(W, k), 1e-4)
+    m = bw(L) / n; v = np.maximum(bw(L * L) / n - m * m, 0)
+    a = v / (v + eps); b = m - a * m
+    return (bw(a) / n * L + bw(b) / n).astype(np.float32)
 print(f'knee: screen {P["kD"]} at plate {2 ** e0:.3f} ({s0:.1f} levels/stop), asymptote {P["aD"]}; '
       f'+0.75/1.5/3 stops -> {tone_curve(np.array([e0 + .75, e0 + 1.5, e0 + 3.0])).round(1)}')
 
@@ -242,14 +285,17 @@ def inv(T, c):
     # screen level -> plate light, per channel, on the grey ramp
     return np.interp(np.minimum(T, P['dCap']), dg[:, c], pg).astype(np.float32)
 
-def glow(X, cw, ppd):
+def glow(X, cw, ppd, Q=None):
+    P = {**globals()['P'], **(Q or {})}
     L = np.log2(np.maximum((unshoulder(X) * G) @ LUMA, 1e-4)).astype(np.float32)
-    B = guided(L, max(2, int(round(P['baseDeg'] * ppd))), np.float32(P['baseEps']))
+    rb = max(2, int(round(P['baseDeg'] * ppd)))
+    B = guided_w(L, cw, rb, np.float32(P['baseEps'])) if P.get('weighted') else guided(L, rb, np.float32(P['baseEps']))
     on = cw > 1e-3
     L, B, Xs, w = L[on], B[on], X[on], cw[on]
     # the screen level each cloud pixel is developed to: base through the
     # shoulder, detail on at the knee's slope (the film's own below it)
-    d = tone_curve(B) + P['detail'] * np.interp(np.minimum(B, e0), eg, slope) * (L - B)
+    e0 = float(np.interp(P['kD'], dgY, eg))
+    d = tone_curve(B, P) + P['detail'] * np.interp(np.minimum(B, e0), eg, slope) * (L - B)
     # past dTop, the odd detail peak eases into the cap, never clips
     t0, sw = P['dTop'], P['dMax'] - P['dTop']
     d = np.where(d > t0, t0 + sw * np.tanh((d - t0) / sw), d).astype(np.float32)
@@ -273,10 +319,22 @@ def glow(X, cw, ppd):
     out[on] = Xs + (tgt - Xs) * w[:, None]
     return out
 
-On = glow(O, cwO, ppdO)
+On = glow(O, cwO, ppdO, dict(detail=P['detailOuter'], cWidth=P['cWidthLong']))
 On *= (thO < 95 * 1.004)[..., None]
 cwI = cloud_w(I, mI, thI)
-In = glow(I, cwI, ppdI)
+In = glow(I, cwI, ppdI, dict(detail=P['detailLong'], cWidth=P['cWidthLong'], baseDeg=P['baseDegLong'],
+                                baseEps=P['baseEpsLong'], weighted=True, kD=P['kDLong'], aD=P['aDLong'],
+                                dTop=P['dTopLong'], dMax=P['dMaxLong'], rational=True))
+# the wide end's development, as a luminance ratio to the long end's: the
+# engine scales the inset by ratio ** (1 - t), t = 0 at 10 mm, 1 at 24 mm
+Iw = glow(I, cwI, ppdI, dict(detail=P['detailWide'], cWidth=P['cWidthLong']))
+lr = np.log2(np.maximum(Iw @ LUMA, 1e-6) / np.maximum(In @ LUMA, 1e-6)) * (cwI > 1e-3); del Iw
+# the ratio is only taken in full where the inset is drawn at a third of its
+# size or less, so it is stored softened (aBlur px) and coarse (aStops), which
+# keeps the alpha to well under a megabyte
+lr = cv2.GaussianBlur(lr.astype(np.float32), (0, 0), P['aBlur']) * (cwI > 1e-3)
+print('wide/long log2 ratio pct 0.1/1/50/99/99.9', np.percentile(lr[cwI > 0.5], [0.1, 1, 50, 99, 99.9]).round(3))
+aI = np.clip(np.round(128 + lr * (127 / P['aStops'])), 1, 255).astype(np.uint8); del lr
 
 def enc(X, seed):
     v = l2s(X)
@@ -285,9 +343,10 @@ def enc(X, seed):
 oo = o8.copy(); oo[..., :3] = enc(On, 2)
 Image.fromarray(oo, 'RGBA').save(f'{outdir}/outer.webp', 'WEBP', quality=P['q'], method=6, exact=True, alpha_quality=100)
 ii = enc(In, 1)
-Image.fromarray(ii).save(f'{outdir}/inner.webp', 'WEBP', quality=P['q'], method=6)
+Image.fromarray(np.dstack([ii, aI]), 'RGBA').save(f'{outdir}/inner.webp', 'WEBP', quality=P['q'], method=6, exact=True, alpha_quality=100)
 for n, u in (('outer', oo[..., :3]), ('inner', ii)):
     print(n, 'max', int(u.max()), 'px at 255', int((u.max(-1) == 255).sum()))
 if DBG:
     np.save(DBG.replace('.png', '_cw.npy'), cwO.astype(np.float16))
+    np.save(DBG.replace('.png', '_cwI.npy'), cwI.astype(np.float16))
     Image.fromarray((np.stack([cwO, mO, cwO * 0], -1) * 255).astype(np.uint8)).resize((1024, 1024), Image.BILINEAR).save(DBG)
