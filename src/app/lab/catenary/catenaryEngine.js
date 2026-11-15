@@ -92,17 +92,21 @@ const FILM = {
   // the print (PRINT_CURVE) then lays it down luminous, cores ~240-246.
   bloom: 0.2,
   softness: 0.4,
-  halation: 0.32,
+  // The kit's own halation is off. It reads the whole frame's light and has
+  // no way to be kept off the cumulus's silhouette, so its sunlit rim threw a
+  // lilac-white ring round the whole cloud. The piece's own pass, HALO, is
+  // the halation here: the warm fringe where steel and wires cross the
+  // cloud, its source stopped short of the cloud's silhouette (PLATE).
+  halation: 0,
   whitePoint: 1.1,
   contrast: 1.25,
   blueDepth: 0.85,
   saturation: 1.06,
   grain: 0.38,
   vignette: 0.2,
-  // Low enough that the sunlit cloud (scene luma ~0.75-0.85) feeds the halo,
-  // high enough that the polarised sky (~0.2) does not: a thin warm ring
-  // where the steel and the wires cross bright cloud. (The piece's own,
-  // thin halation pass, HALO, has its own threshold: HAL_THRESHOLD.)
+  // Kept for ?halation= trials only (the kit's halation is off above). The
+  // piece's own, thin halation pass, HALO, has its own threshold:
+  // HAL_THRESHOLD.
   halationThreshold: 0.6,
   // The summer preset cools its highlights; the plate lifts the cloud tops to
   // warm-neutral itself, so the print leaves them as they come.
@@ -360,6 +364,27 @@ void main() {
   vec2 uv = hq.xy / hq.z / uImg;
   vec3 c = texture(uPlate, uv).rgb;
   vec3 key = texture(uKey, uv).rgb;
+  // The cumulus's silhouette, read off its matte on two rings round the
+  // pixel, about 10 and 28 plate px out (a key px is two plate px). Its
+  // spread on the near ring (most less least) is 1 in a band either side of
+  // a sharp edge and small across the soft fades of its base, so it marks
+  // the silhouette only; the mean on the far ring rises from a half at the
+  // edge to 1 a lobe's width in. The relief, the halation's source (scene
+  // alpha, see HALO) and the bake's diffusion (key B, sky.py) all stop short
+  // of the silhouette with them: a bright rim there bloomed into a white
+  // ring round the whole cloud with a dark cobalt band just outside it.
+  vec2 kt = 1.0 / vec2(textureSize(uKey, 0));
+  float gMin = key.g, gMax = key.g, gFar = 0.0;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982 + 0.3926991;
+    vec2 d = vec2(cos(a), sin(a));
+    float g1 = texture(uKey, uv + d * 5.0 * kt).g;
+    gMin = min(gMin, g1);
+    gMax = max(gMax, g1);
+    gFar += texture(uKey, uv + d * 14.0 * kt).g;
+  }
+  float rim = smoothstep(0.3, 0.7, gMax - gMin);
+  float inner = smoothstep(0.6, 1.0, gFar / 8.0);
 
   // Polariser. The mask reads the plate a mip up (about 2 image px, under a
   // device px here) so the film grain in thin cloud does not speckle it.
@@ -467,7 +492,9 @@ void main() {
     }
   }
   yB = pow(yB / 16.0, 1.0 / 2.2);
-  float cloudM = mass * smoothstep(0.05, 0.35, s);
+  // Never at the silhouette: an unsharp mask there is an overshoot either
+  // side of the edge, a bright line inside it and a dark band outside.
+  float cloudM = mass * smoothstep(0.05, 0.35, s) * inner;
   float dg = clamp(yF - yB, -0.12, 0.12) * uEdge.z * cloudM;
   float yFr = yF * pow(ratio, 1.0 / 2.2);
   // The lobes rise into the cores only as far as the shoulder allows: no
@@ -556,7 +583,10 @@ void main() {
   // mask, so the bloom still slips over its edge).
   vec3 lifted = 1.0 - (1.0 - c) * (1.0 - veil);
   c = mix(lifted, min(lifted, c * uMist.z), onSteel);
-  outColor = vec4(c, 1.0);
+  // Alpha carries what may feed the halation (HALO_SRC): all of it but the
+  // cloud's silhouette band. The wires and insulators blend over it with
+  // their own alpha kept off it (blendFuncSeparate), so it survives them.
+  outColor = vec4(c, 1.0 - rim);
 }`;
 
 // One strip per wire. Positions arrive in device px (top-left origin); the
@@ -710,8 +740,12 @@ uniform sampler2D uScene;
 uniform vec2 uThr;   // threshold, cap
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 void main() {
-  float y = dot(max(texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb, 0.0), LUMA);
-  outColor = vec4(min(y, uThr.y) * smoothstep(uThr.x - 0.05, uThr.x + 0.1, y), 0.0, 0.0, 1.0);
+  vec4 sc = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0);
+  float y = dot(max(sc.rgb, 0.0), LUMA);
+  // The scene's alpha is 0 on the cumulus's silhouette band (PLATE): its
+  // sunlit rim against the sky is no source, so no warm-white ring is laid
+  // round the cloud; the cloud behind the steel still throws its fringe.
+  outColor = vec4(min(y, uThr.y) * smoothstep(uThr.x - 0.05, uThr.x + 0.1, y) * clamp(sc.a, 0.0, 1.0), 0.0, 0.0, 1.0);
 }`;
 
 // Gaussian at two radii, separable. Narrow: a tap per px out to 3 sigma.

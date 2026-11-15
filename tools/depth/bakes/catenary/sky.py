@@ -36,6 +36,10 @@
 #     Where the source's pole and its soft, veiled base were, lines drawn
 #     around the tower (CUTS) give the cloud back to sky on its own light,
 #     so it ends on lobes and nothing is carried on by reflection.
+#     Above a cut near 1/40 of the frame's width its texture is not the
+#     magnified photograph's: the crown's own band at its native resolution
+#     is quilted in (the detail, below), crisp on the sunlit turrets, soft
+#     on the skylit body, and the plate is dithered once on its way to 8 bits.
 #  4. The new sky goes in behind the steel by difference: each pixel adds
 #     (1 - steel) times the change of background under it, against the old
 #     background filled in under the steel, so a mast edge that was mixed
@@ -271,8 +275,16 @@ if n > 2:
 # width (sky to full cloud), so the thin edge is a linear-light mix of the
 # cloud's own white and this sky, light all the way out, with no contour.
 # Only just: a wider feather (it was 0.015) spread the edge into a pale
-# glow band outside a soft cut-out; a crown in sun stands sharp.
-FEATHER = 0.004
+# glow band outside a soft cut-out; a crown in sun stands sharp. Sharper
+# still now: the colour-line opacity is itself the source's edge magnified
+# about 1.5 times, a ramp of five or six plate px, so it is tightened
+# (EDGE_RAMP of it, from sky to cloud) and feathered over FEATHER only, a
+# lobe's outline about two px wide, as the crown's billows inside it now
+# are. The form term below still reads the old, softer matte (AF_SOFT) for
+# the rounding of the silhouette, so the shading is what it was.
+FEATHER = 0.0012
+AF_SOFT = 0.004
+EDGE_RAMP = (0.22, 0.78)
 Sm = cv2.remap(sl, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 Km = cv2.remap(ssky, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 dense = smooth(0.6, 0.95, cv2.erode(am, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))))
@@ -280,7 +292,8 @@ col = np.clip(fill(Sm, dense.astype(np.float32)), 0, None)
 dc = col - Km
 a2 = np.clip(((Sm - Km) * dc).sum(-1) / np.maximum((dc * dc).sum(-1), 1e-4), 0, 1)
 a2 *= cv2.dilate(am, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
-af = cv2.GaussianBlur(a2.astype(np.float32), (0, 0), FEATHER * W / 4)
+af_soft = cv2.GaussianBlur(a2.astype(np.float32), (0, 0), AF_SOFT * W / 4)
+af = cv2.GaussianBlur(smooth(*EDGE_RAMP, cv2.GaussianBlur(a2.astype(np.float32), (0, 0), 0.8)), (0, 0), FEATHER * W / 4)
 
 # The form. As photographed and developed, the cloud's body under the tower
 # came out one flat pale wash (behind the truss, a 16 px patch varies about
@@ -328,7 +341,7 @@ def hsv_rgb(h, s, v):
 h2 = (W // 2, H // 2)
 ylin = np.clip(GAIN * col @ LUMA, 0, 1).astype(np.float32)
 Ys = cv2.resize(lin_to_srgb(ylin), h2, interpolation=cv2.INTER_AREA)
-As = cv2.resize(af, h2, interpolation=cv2.INTER_AREA)
+As = cv2.resize(af_soft, h2, interpolation=cv2.INTER_AREA)
 
 
 def grad(h, d):
@@ -374,6 +387,179 @@ if os.environ.get("DEBUG"):
     cv2.imwrite(WORK + "/form-sunlit.png", (np.clip(sunlit, 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(WORK + "/form-ndl.png", (np.clip(ndl * 0.5 + 0.5, 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(WORK + "/form-od.png", (np.clip(np.exp(-FORM_DEPTH * od), 0, 1) * 255).astype(np.uint8))
+
+# The detail. Everything above is soft: the crown was published at 2048 px,
+# this copy of it is 2400, and it is staged at SCALE again, so the plate
+# shows it magnified about 1.5 times, its finest structure blurred, and the
+# form term only reshades that. At 1:1 the cumulus was low-frequency mush
+# with no billow edge anywhere. So the cloud is split in two at LP (a
+# gaussian sigma in plate px, a cut near 1/40 of the frame's width): below
+# it, the shape and the shading built above stay as they are; above it, the
+# plate's own band is thrown away and the crown's is laid in at its native
+# resolution, 1 published source px to 1 plate px, never magnified.
+#
+# It is quilted from patches of the crown (PATCH px, every STEP px), cut
+# from its dense part only (no sky, no wire, no veiled base) and turned by
+# up to TURN degrees, so each can follow the flow of the light where it
+# goes. Which patch goes where is decided against a guide: the crown's own
+# band where the plate shows it, magnified and soft, so the patch that goes
+# in is one whose lobes sit where the guide's lobes sit, its rim lit on the
+# side the guide's is (and the sun is), only sharp; and of those, one that
+# agrees with what is laid beside it. Each goes down over its neighbour
+# along the cheapest seam through their overlap (Efros and Freeman),
+# feathered by a px, so no patch edge and no averaged band shows. The match
+# is searched at half resolution.
+#
+# The band is log luminance, so it scales each pixel's light (colour and
+# shading kept from the low band). It is weighted by the low band's light:
+# the sunlit turrets take all of DETAIL (crisp, bright cauliflower edges,
+# the crown's billows being low in contrast as shot), the skylit lower body
+# DETAIL_FLOOR of it, so it stays soft.
+LP = 14.0
+NATIVE = 2048 / sW  # published source px per px of this copy
+PATCH, STEP = 64, 48
+TURN = (-30, 0, 30)
+DETAIL = 2.4
+FINE = 0.5
+DETAIL_FLOOR = 0.15
+DETAIL_LIT = (0.7, 0.9)  # low-band light (sRGB) over which it comes in
+
+
+def lumlog(c):
+    return np.log(np.maximum(c @ LUMA, 1e-3)).astype(np.float32)
+
+
+def half(x):
+    return cv2.resize(gauss(x, 1.0), (x.shape[1] // 2, x.shape[0] // 2), interpolation=cv2.INTER_AREA)
+
+
+nW, nH = round(sW * NATIVE), round(sH * NATIVE)
+Ln = lumlog(cv2.resize(sl, (nW, nH), interpolation=cv2.INTER_AREA))
+hpN = Ln - gauss(Ln, LP)
+# The guide: the same band, where the plate shows it, magnified.
+gm = cv2.remap(Ln, sx * NATIVE, sy_ * NATIVE, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+guide = gm - gauss(gm, LP)
+# The dense crown, right of the source's pole, above its veiled base, clear
+# of its inpainted wires.
+okN = (cv2.resize(a, (nW, nH), interpolation=cv2.INTER_AREA) > 0.97).astype(np.float32)
+okN *= cv2.resize(wire.astype(np.float32), (nW, nH), interpolation=cv2.INTER_AREA) < 0.01
+X0n, X1n, Y0n, Y1n = int((SRC_X0 + 40) * NATIVE), nW, int(40 * NATIVE), int(920 * NATIVE)
+bandC, okC = hpN[Y0n:Y1n, X0n:X1n], okN[Y0n:Y1n, X0n:X1n]
+# Only the patches that carry billows: the flat, veiled stretches of the
+# crown never go in. The guide is read at that contrast too, so where the
+# plate's crown was flat as shot (its flank, its body) the quilt still lays
+# billows down, following what faint structure the guide has.
+enC = np.sqrt(gauss(bandC * bandC, PATCH / 3))
+EN_MIN = float(np.percentile(enC[okC > 0.99], 45))
+en_t = float(np.percentile(enC[okC > 0.99], 75))
+guide *= np.clip(en_t / (np.sqrt(gauss(guide * guide, PATCH / 3)) + 1e-4), 1, 4) * smooth(0.0, 0.5, af)
+cH, cW = bandC.shape
+hp2 = PATCH // 2
+bank = []
+for deg in TURN:
+    M = cv2.getRotationMatrix2D((cW / 2, cH / 2), deg, 1.0)
+    b = cv2.warpAffine(bandC, M, (cW, cH), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    o = cv2.warpAffine(okC, M, (cW, cH), flags=cv2.INTER_LINEAR, borderValue=0) > 0.99
+    o &= cv2.warpAffine(enC, M, (cW, cH), flags=cv2.INTER_LINEAR, borderValue=0) > EN_MIN
+    bh = half(b)
+    # top-left corners (half res) whose whole patch is dense crown
+    bad = cv2.boxFilter((~o).astype(np.float32), -1, (PATCH, PATCH), normalize=False, anchor=(0, 0), borderType=cv2.BORDER_CONSTANT)
+    valid = (bad < 0.5)[: cH - PATCH + 1 : 2, : cW - PATCH + 1 : 2]
+    valid = valid[: bh.shape[0] - hp2 + 1, : bh.shape[1] - hp2 + 1]
+    pen = 2e-5 * abs(deg) / 30
+    bank.append((b, bh, bh * bh, valid, pen))
+
+reachT = cv2.dilate((af > 0.01).astype(np.uint8), np.ones((PATCH + 1, PATCH + 1), np.uint8))
+taper = PATCH - STEP
+gH = half(guide)
+
+
+def seam(E):
+    # The cheapest top-to-bottom path through an error strip (rows x cols):
+    # the column per row where the new patch takes over.
+    C = E.copy()
+    for r in range(1, len(C)):
+        q = C[r - 1]
+        C[r] += np.minimum(np.minimum(np.r_[np.inf, q[:-1]], q), np.r_[q[1:], np.inf])
+    path = np.zeros(len(C), int)
+    path[-1] = int(np.argmin(C[-1]))
+    for r in range(len(C) - 2, -1, -1):
+        j = path[r + 1]
+        lo_ = max(j - 1, 0)
+        path[r] = lo_ + int(np.argmin(C[r, lo_ : j + 2]))
+    return path
+
+
+canvas = np.zeros((H + 2 * PATCH, W + 2 * PATCH), np.float32)
+filled = np.zeros_like(canvas)
+gpad = np.zeros((canvas.shape[0] // 2, canvas.shape[1] // 2), np.float32)
+gpad[PATCH // 2 : PATCH // 2 + gH.shape[0], PATCH // 2 : PATCH // 2 + gH.shape[1]] = gH
+cols = np.arange(PATCH)
+n_laid = 0
+for y0 in range(0, H + taper, STEP):
+    for x0 in range(0, W + taper, STEP):
+        if not reachT[y0 : y0 + PATCH, x0 : x0 + PATCH].any():
+            continue
+        win_ = (slice(y0 + PATCH - taper, y0 + 2 * PATCH - taper), slice(x0 + PATCH - taper, x0 + 2 * PATCH - taper))
+        prev, ov = canvas[win_], filled[win_]
+        hy, hx = win_[0].start // 2, win_[1].start // 2
+        g_t = gpad[hy : hy + hp2, hx : hx + hp2]
+        p_h = cv2.resize(prev, (hp2, hp2), interpolation=cv2.INTER_AREA)
+        o_h = cv2.resize(ov, (hp2, hp2), interpolation=cv2.INTER_AREA)
+        po = p_h * o_h
+        n_o = float(o_h.sum())
+        best, bestE = None, np.inf
+        for b, bh, bh2, valid, pen in bank:
+            e = cv2.matchTemplate(bh, g_t, cv2.TM_SQDIFF) / (hp2 * hp2)
+            if n_o > 1:
+                # masked SSD with what is laid: sum o (b - p)^2
+                e += (cv2.matchTemplate(bh2, o_h, cv2.TM_CCORR) - 2 * cv2.matchTemplate(bh, po, cv2.TM_CCORR) + float((po * p_h).sum())) / n_o
+            e = np.where(valid, e + pen, np.inf)
+            j = int(np.argmin(e))
+            if e.flat[j] < bestE:
+                yy, xx = divmod(j, e.shape[1])
+                best, bestE = b[2 * yy : 2 * yy + PATCH, 2 * xx : 2 * xx + PATCH], float(e.flat[j])
+        if best is None or best.shape != (PATCH, PATCH):
+            continue
+        err = (best - prev) ** 2 * ov
+        take = np.ones((PATCH, PATCH), np.float32)
+        if ov[:, :taper].any():
+            take *= cols[None, :] >= seam(err[:, :taper])[:, None]
+        if ov[:taper].any():
+            take *= cols[:, None] >= seam(err[:taper].T.copy())[None, :]
+        take = np.maximum(take, 1 - ov)
+        take = np.maximum(gauss(take, 1.0) * ov, 1 - ov)
+        canvas[win_] = prev * (1 - take) + best * take
+        filled[win_] = 1
+        n_laid += 1
+sl_ = (slice(PATCH - taper, PATCH - taper + H), slice(PATCH - taper, PATCH - taper + W))
+D = canvas[sl_] * smooth(0.0, 1.0, gauss(filled[sl_], 4))
+# Its finest octave (under ~2 px) is mostly the published JPEG's own noise:
+# it goes in at FINE, so the lobes carry the edge, not a cotton fuzz.
+D_lobe = gauss(D, 1.2)
+D = D_lobe + FINE * (D - D_lobe)
+lowT = gauss(lumlog(col), LP)
+ylow = lin_to_srgb(np.exp(lowT))
+wt = DETAIL * (DETAIL_FLOOR + (1 - DETAIL_FLOOR) * smooth(*DETAIL_LIT, ylow))
+col_low = np.stack([gauss(np.ascontiguousarray(col[..., c]), LP) for c in range(3)], -1)
+col = col_low * np.exp(wt * D)[..., None]
+# A crevice between two lit billows is lit by the sky, not the sun: where
+# the band takes light away it also takes the low band's warm paper toward
+# skylight blue (CREVICE of the way, at a 0.15 log drop), so the folds read
+# as shade, not as grey dirt.
+CREVICE = 0.0
+yk_ = col @ LUMA
+sk_ = shade / float(shade @ LUMA)
+col = col + (sk_ * yk_[..., None] - col) * (CREVICE * smooth(0.0, 0.15, -wt * D))[..., None]
+# The tops roll off under white: nothing the detail lifts reaches 255.
+yc_ = col @ LUMA
+KNEE = 0.78
+ys_ = np.where(yc_ > KNEE, KNEE + (0.9 - KNEE) * np.tanh((yc_ - KNEE) / (0.9 - KNEE)), yc_)
+col *= (ys_ / np.maximum(yc_, 1e-4))[..., None]
+if os.environ.get("DEBUG"):
+    print("detail: source hp std", round(float(hpN[okN > 0].std()), 4), "laid std", round(float(D[af > 0.5].std()), 4),
+          "guide std", round(float(guide[af > 0.5].std()), 4), "patches", n_laid)
+    cv2.imwrite(WORK + "/detail.png", (np.clip(0.5 + D * 2, 0, 1) * 255).astype(np.uint8))
 newbg = sky * (1 - af[..., None]) + col * af[..., None]
 ng = lin_to_srgb(newbg) + grain[..., None] * (1 - 0.6 * af[..., None])
 newbg = srgb_to_lin(np.clip(ng, 0, 1))
@@ -381,7 +567,12 @@ newbg = srgb_to_lin(np.clip(ng, 0, 1))
 # ---------------------------------------------------------------- composite
 out = lin + (1 - fg[..., None]) * (newbg - oldbg)
 out = np.clip(out, 0, 1)
-s8 = np.clip(lin_to_srgb(out) * 255 + 0.5, 0, 255).astype(np.uint8)
+# Baked in float (16 bits and more) to here, and dithered once, on the way
+# out to 8 bits: a triangular dither of one level, so the cloud's long, slow
+# ramps go down as fine noise, not as flat, posterised steps.
+rng_q = np.random.default_rng(23)
+tpdf = (rng_q.random((H, W, 1), np.float32) - rng_q.random((H, W, 1), np.float32))
+s8 = np.clip(np.floor(lin_to_srgb(out) * 255 + 0.5 + tpdf), 0, 255).astype(np.uint8)
 cv2.imwrite(PUB + "/plate.webp", s8[:, :, ::-1], [cv2.IMWRITE_WEBP_QUALITY, 92])
 if os.environ.get("DEBUG"):
     cv2.imwrite(WORK + "/fg.png", (fg * 255).astype(np.uint8))
@@ -399,13 +590,18 @@ s = key[..., 0] * np.clip(f_new / np.maximum(f_old, 1e-3), 0, 1)
 mx, mn = p2.max(2), p2.min(2)
 chroma = (mx - mn) / np.maximum(mx, 1e-4)
 cloud = smooth(0.62, 0.9, y2) * (1 - smooth(0.25, 0.45, chroma)) * (1 - s)
+# The diffusion's source stops short of the cloud's silhouette, as the
+# engine's relief and halation do (the matte's spread over 5 key px either
+# way): its sunlit rim bloomed into a white ring round the cloud.
+mK = cv2.resize(af, (KW, KH), interpolation=cv2.INTER_AREA)
+ring = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+cloud *= 1 - smooth(0.3, 0.7, cv2.dilate(mK, ring) - cv2.erode(mK, ring))
 wide_l = cv2.GaussianBlur(cloud, (0, 0), 0.014 * KW)
 # G is the cloud's feathered matte (it was the thin cloud light, which the
 # engine never read): the shader keeps the polariser and the sky's vibrance
 # off the cloud with it, so the skylit hollows stay pale skylight blue and
 # never deepen to the cobalt of open sky.
-matte = cv2.resize(af, (KW, KH), interpolation=cv2.INTER_AREA)
-k8 = np.clip(np.stack([s, matte, wide_l], -1) * 255 + 0.5, 0, 255).astype(np.uint8)
+k8 = np.clip(np.stack([s, mK, wide_l], -1) * 255 + 0.5, 0, 255).astype(np.uint8)
 cv2.imwrite(PUB + "/key.webp", k8[:, :, ::-1], [cv2.IMWRITE_WEBP_QUALITY, 90])
 
 top = np.percentile(lin_to_srgb(out @ LUMA)[af > 0.5] * 255, [50, 99, 99.9]) if (af > 0.5).any() else []
