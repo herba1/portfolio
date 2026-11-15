@@ -109,12 +109,12 @@ export const FILM = {
   needleBloomCap: 0.85,
   needleHalCap: 0.6,
   needleCapEV: 2,
-  // The pines are their own layer (rekey.py): ink on a hard matte, laid over the
-  // sky after the Pro-Mist and the halation, so no glow washes blue into the
-  // foliage and the sky shows only through real gaps between the branches. At
-  // 0 EV the ink takes inkVeil of the veil and inkHal of the halation; both ease
-  // up to the full amounts by needleCapEV, where the overexposure is meant to
-  // lift and soften the shadows.
+  // The pines are their own layer (foliage.py): the needles' own radiance on the
+  // photograph's own sub-pixel coverage, laid over the sky after the Pro-Mist and
+  // the halation, so no glow washes blue into the foliage and the sky shows only
+  // through real gaps and thin sprays. At 0 EV the ink takes inkVeil of the veil
+  // and inkHal of the halation; both ease up to the full amounts by needleCapEV,
+  // where the overexposure is meant to lift and soften the shadows.
   inkVeil: 0,
   inkHal: 0.1,
   bloom: 0.08,
@@ -193,19 +193,21 @@ void main(){
   // Halation: light bounced off the base comes back through the red layer,
   // landing just outside bright areas (a ring, not a fill).
   L += uHalColor * max(Yb - dot(L, LUMA), 0.0) * uHal * (1.0 - uNeedleCap.y * needle);
-  // The pines, composited over the diffused sky (rekey.py): solid ink, the sky only
-  // in their real gaps, the edge a 1 px ramp from the matte.
+  // The pines (foliage.py): the needles' own radiance on the photograph's own
+  // sub-pixel coverage, composited over the diffused sky.
   vec4 tr = texture(uTrees, uv);
   vec3 ink = dec(tr.rgb);
   ink = mix(ink, D, uBloom * uInk.x);
   ink += uHalColor * max(Yb - dot(ink, LUMA), 0.0) * uHal * uInk.y;
-  L = mix(L, ink, tr.a);
-  Ys = mix(Ys, dot(ink, LUMA), tr.a);
   // The printer holds all but the cloud back (after the optics, so the hold does not
-  // read as a dark gap for the halation to fill).
+  // read as a dark gap for the halation to fill). The sky seen through a spray and
+  // the needles over it are held each by their own light before they mix, or the
+  // sky in a part-covered pixel escapes the hold and rings every twig in pale haze.
   float open = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0); // 1 - the bake's cloud share
-  open *= mix(uHoldNeedle, 1.0, smoothstep(uHoldY.x, uHoldY.y, log2(max(Ys, 1e-6))));
-  L *= exp2(-uHold * open);
+  float holdSky = open * mix(uHoldNeedle, 1.0, smoothstep(uHoldY.x, uHoldY.y, log2(max(Ys, 1e-6))));
+  float holdInk = open * mix(uHoldNeedle, 1.0, smoothstep(uHoldY.x, uHoldY.y, log2(max(dot(ink, LUMA), 1e-6))));
+  L = mix(L * exp2(-uHold * holdSky), ink * exp2(-uHold * holdInk), tr.a);
+  open = mix(holdSky, holdInk, tr.a);
 
   // Negative: each layer on its own H&D curve.
   vec3 H = XT * L * uExp;

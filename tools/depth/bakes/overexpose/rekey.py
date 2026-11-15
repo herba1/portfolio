@@ -1,3 +1,6 @@
+# Superseded by foliage.py, which re-keys the pines from the HDRI's own radiance
+# (its threshold matte and flat ink printed as jagged stencils). Kept for the record.
+#
 # The pines re-keyed as ink over the sky (runs last, after clouds.py).
 #
 # canopy.py left each pine as a soft per-pixel mix of needle and sky, baked into
