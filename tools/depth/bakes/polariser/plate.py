@@ -6,7 +6,11 @@
 #      so the apartment block walls the top, the pointed tower and glass block
 #      the left, and the mast, drum and far quay the foot; the open sky and the
 #      dark band sit inside those three walls)
-#   -> hero.py turned/plate.jpg turned/aux.png 120 84 50 (engine HERO)
+#   -> hero.py turned/plate.jpg turned/aux.png 120 84 50 (HERO for the old crop)
+#   -> skyfix.py turned/plate.jpg turned/aux.png out_aux.png (sky the new
+#      window brings in: the aureole wedge top left, the far-quay haze)
+#   -> view.py turned/plate.jpg out_aux.png (the print's zenith-centred general
+#      perspective window; engine VIEW and HERO)
 # aux_old.png for reproj.py: git show 39c5ed8:public/lab/polariser/aux.png > aux_old.png
 # HDRI: Poly Haven docklands_01 at 16k, its native maximum (the 8k gave the
 # plate only about 11 px/deg at the frame centre, so facades and window grids

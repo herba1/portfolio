@@ -33,8 +33,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // crane, lamp arms) are filled with the plate's own sky
 // (tools/depth/bakes/polariser/clean.py), so the mast is the print's only
 // strong warm colour.
-// Each pixel's view direction is rebuilt from the camera through the same
-// projection, so γ is exact.
+// The print is not that stereographic crop: a 140° stereographic field bowed
+// every roofline into a circle round the frame. Each print pixel is instead a
+// direction in a general perspective projection centred on the zenith
+// (VIEW below, tools/depth/bakes/polariser/view.py), looked up in the plate
+// through the plate's own projection. Centred on the zenith, every vertical
+// edge lands as a straight line through the vanishing point, so the towers
+// converge straight; the window is shifted off the axis toward the block and
+// the tower, where the height is. γ comes from that direction, so it is exact.
 //
 // Query: ?pol=0..1 holds the filter angle (0..180°); ?still=1 skips the
 // reveal; ?grain=0 for static grain.
@@ -44,16 +50,24 @@ const AUX = "/lab/polariser/aux.png";
 
 // Camera of the plate (plate.py renders at 17, 89, 119; turn.py re-aims it):
 // stereographic, so a plane point p = 2 d⊥ / (1 + d·f), with the plate's
-// horizontal edge at hfov / 2 from the axis. The 4:5 print crops 92% of it,
-// a 140° horizontal field on the page.
+// horizontal edge at hfov / 2 from the axis.
 const CAM = { yaw: 120, pitch: 84, roll: 50, hfov: 149.09834806856665, aspect: 4800 / 3840 };
-// The print crops this share of the plate.
-const CROP = 0.92;
-// Mip bias on the plate and aux lookups. The print minifies the plate 1.6 to
-// 3.3x, and plain trilinear filtering would blend in the next mip down, which
-// is coarser than the print, so the towers would come out upscaled and soft.
-// Biasing a level finer keeps every blended level at or above the print's own
-// resolution; the mips are box-prefiltered, so the window grids do not alias.
+// The print's projection (view.py): about the zenith, r = (k + 1) sin θ /
+// (k + cos θ), k = 0 rectilinear .. 1 stereographic. k = 0.5 straightens most
+// of the bow out of the block's edges and the quay while the corners still
+// reach 90° out, and it magnifies the rim, where the towers stand, against the
+// open sky in the middle. The 4:5 window is HALF plane units half-wide,
+// centred SHIFT from the image of the plate's axis (toward the apartment block
+// and the pointed tower) and turned TURN degrees about the zenith, so the
+// block's face spans the top and the vanishing point sits right of and below
+// the centre: the towers rush toward it from the top and the left.
+const VIEW = { k: 0.5, half: 1.8, shift: [-0.17, 0.15], turn: -8 };
+// Mip bias on the plate and aux lookups. The print minifies the plate over
+// most of the frame, and plain trilinear filtering would blend in the next
+// mip down, which is coarser than the print, so the towers would come out
+// upscaled and soft. Biasing a level finer keeps every blended level at or
+// above the print's own resolution; the mips are box-prefiltered, so the
+// window grids do not alias.
 const LOD_BIAS = -0.7;
 const SUN = { lon: 38.12255859375, lat: 28.762207031249996 };
 const GLASS_A = [-0.85284216, 0, 0.5221688];
@@ -61,9 +75,9 @@ const GLASS_B = [-0.54538212, 0, -0.83818754];
 // Plate encoding: v = (x / (1 + x))^(1/2.2), x = L * K.
 const K = 0.6;
 // The filter angle that deepens this frame most (mean sky transmission is
-// lowest there, tools/depth/bakes/polariser/hero.py); the hero still and the
-// end of the reveal.
-const HERO = 0.257;
+// lowest there, tools/depth/bakes/polariser/view.py, through the print's own
+// projection); the hero still and the end of the reveal.
+const HERO = 0.193;
 // Effective maximum degree of polarisation. A clean Rayleigh sky reaches about
 // 0.75, but a March cumulus sky is multiply scattered off bright cloud and a
 // real circular polariser does not extinguish fully, so the band 90° from the
@@ -102,6 +116,15 @@ const SHADE = [0.8, 1.0, 1.2];
 const SHADE_DEPTH = 0.9;
 const SUNLIT = [1.0, 0.965, 0.9];
 const VIGNETTE = 0.28;
+// Burning in round the sun. The sun sits behind the cumulus between the
+// apartment block and the pointed tower, and the solar aureole lifts the sky
+// floor there sevenfold (0.35 to 2.7 plate units within 5°, view.py's
+// survey), so the clouds round it sat on the print's shoulder as a flat grey-
+// cream haze. A printer gives that corner extra exposure under the enlarger:
+// BURN stops at the sun, falling off as exp(-γ / BURN_DEG), less on the towers
+// than on the sky so their silhouettes do not go to soot.
+const BURN = 1.7;
+const BURN_DEG = 13;
 
 const rad = (d) => (d * Math.PI) / 180;
 const lumNorm = (c) => {
@@ -109,6 +132,12 @@ const lumNorm = (c) => {
   return c.map((v) => v / y);
 };
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const unit = (a) => {
+  const l = Math.hypot(a[0], a[1], a[2]);
+  return a.map((v) => v / l);
+};
 
 function cameraBasis({ yaw, pitch, roll = 0 }) {
   const y = rad(yaw);
@@ -122,6 +151,23 @@ function cameraBasis({ yaw, pitch, roll = 0 }) {
   const r = r0.map((v, i) => c * v + s * u0[i]);
   const u = u0.map((v, i) => -s * r0[i] + c * v);
   return { f, r, u };
+}
+
+// The print plane's basis, tangent to the sphere at the zenith: the plate's
+// right and up laid flat, turned VIEW.turn about the zenith; and the window's
+// centre on that plane (y up).
+function viewFrame(cam) {
+  const Z = [0, 1, 0];
+  const r0 = unit(cam.r.map((v, i) => v - dot(cam.r, Z) * Z[i]));
+  let u0 = cross(Z, r0);
+  if (dot(u0, cam.u) < 0) u0 = u0.map((v) => -v);
+  const c = Math.cos(rad(VIEW.turn));
+  const s = Math.sin(rad(VIEW.turn));
+  const r = r0.map((v, i) => c * v + s * u0[i]);
+  const u = u0.map((v, i) => -s * r0[i] + c * v);
+  const g = (VIEW.k + 1) / (VIEW.k + dot(cam.f, Z));
+  const centre = [dot(cam.f, r) * g + VIEW.shift[0], dot(cam.f, u) * g + VIEW.shift[1]];
+  return { r, u, centre };
 }
 
 const VERT = `#version 300 es
@@ -139,10 +185,13 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uPlate;
 uniform sampler2D uAux;
-uniform vec4 uCrop;      // plate uv = (x, 1 - y) * crop.xy + crop.zw
-uniform vec3 uF, uR, uU; // camera basis
+uniform vec4 uWin;       // print plane point = (x, y) * win.xy + win.zw (y up)
+uniform vec3 uVR, uVU;   // print plane basis, tangent to the zenith
+uniform float uVK;       // general perspective: 0 rectilinear .. 1 stereographic
+uniform vec3 uF, uR, uU; // plate camera basis
 uniform float uX;        // 2 tan(hfov / 4): stereographic half-width
 uniform float uAsp;      // plate h / w
+uniform float uPlateW;   // plate width, px
 uniform vec3 uSun;
 uniform vec3 uNA, uNB;   // glass face normals
 uniform float uPhi;      // filter transmission axis, image angle, y down
@@ -151,8 +200,7 @@ uniform float uExpo;
 uniform float uLinearOut;
 uniform vec3 uSkyDye;
 uniform float uSkyGrey;
-uniform float uHaloLod; // mip level about half HALO_PX print px wide
-uniform vec2 uHaloStep; // HALO_PX print px in plate uv
+uniform float uHaloPx;   // halation ring radius, print px
 uniform float uHalo;
 uniform vec3 uHaloTint;
 uniform vec3 uWB;
@@ -162,6 +210,7 @@ uniform float uPrintAsp; // print w / h
 uniform vec3 uShade;     // cloud split tone: skylight-lit shadow, sunlit top
 uniform vec3 uSunlit;
 uniform float uLodBias;
+uniform vec2 uBurn;      // stops at the sun, falloff in radians
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // Negative to print. Print density is a sigmoid in log exposure, so the
@@ -184,13 +233,28 @@ vec3 decode(vec3 v) {
   vec3 y = pow(v, vec3(2.2));
   return y / max(1.0 - y, 0.004) * ${(1 / K).toFixed(6)};
 }
-// Stereographic projection of a direction to the image plane (y down).
+const vec3 ZEN = vec3(0.0, 1.0, 0.0);
+// The print's projection of a direction to its plane (y down): general
+// perspective about the zenith, r = (k + 1) sin θ / (k + cos θ).
 vec2 project(vec3 d) {
   d = normalize(d);
-  return 2.0 * vec2(dot(d, uR), -dot(d, uU)) / (1.0 + dot(d, uF));
+  return (uVK + 1.0) / (uVK + dot(d, ZEN)) * vec2(dot(d, uVR), -dot(d, uVU));
+}
+// And back: a print plane point (y up) to its direction.
+vec3 unproject(vec2 q) {
+  float r = length(q);
+  float k1 = uVK + 1.0;
+  float th = atan(r, k1) + asin(r * uVK / sqrt(k1 * k1 + r * r));
+  vec2 t = q / max(r, 1e-6);
+  return cos(th) * ZEN + sin(th) * (t.x * uVR + t.y * uVU);
+}
+// Plate uv of a direction, through the plate's stereographic projection.
+vec2 plateUv(vec3 d) {
+  vec2 p = 2.0 * vec2(dot(d, uR), -dot(d, uU)) / (1.0 + dot(d, uF));
+  return vec2(p.x / uX, p.y / (uX * uAsp)) * 0.5 + 0.5;
 }
 // Image angle (y down) of a direction e tangent to the sphere at d, through
-// the plate's own projection, so sky and glass E-vectors land true.
+// the print's own projection, so sky and glass E-vectors land true.
 float imageAngle(vec3 d, vec3 e) {
   vec2 v = project(d + e * 0.02) - project(d);
   return atan(v.y, v.x);
@@ -210,23 +274,26 @@ vec2 glass(vec3 d, vec3 n) {
 }
 
 void main() {
-  vec2 puv = vec2(vUv.x, 1.0 - vUv.y) * uCrop.xy + uCrop.zw;
-  vec3 C = decode(texture(uPlate, puv, uLodBias).rgb);
+  vec3 d = unproject((vUv * 2.0 - 1.0) * uWin.xy + uWin.zw);
+  vec2 puv = plateUv(d);
+  vec3 enc = texture(uPlate, puv, uLodBias).rgb;
+  vec3 C = decode(enc);
   vec3 aux = texture(uAux, puv, uLodBias).rgb;
-  // Inverse stereographic: p on the plane, back to the unit sphere.
-  vec2 s = puv * 2.0 - 1.0;
-  vec2 p = vec2(s.x, -s.y * uAsp) * uX;
-  float r2 = dot(p, p);
-  vec3 d = normalize(4.0 * (p.x * uR + p.y * uU) + (4.0 - r2) * uF);
+  float cg = dot(d, uSun);
+  float gam = acos(clamp(cg, -1.0, 1.0));
 
   // Sky: the clear-blue (Rayleigh) part of the pixel, unmixed from the
   // neutral (Mie, cloud) part by chroma, carries the polarisation.
-  float cg = dot(d, uSun);
   float P = uPmax * (1.0 - cg * cg) / (1.0 + cg * cg);
   float psi = imageAngle(d, normalize(cross(uSun, d)));
   // The Rayleigh part is re-dyed toward the cobalt a Fuji negative gives a
   // clear sky; cloud and everything neutral keep their own colour.
-  float A = clamp((0.85 * C.b - C.r) / 0.56, 0.0, C.b) * aux.r;
+  // Near paper white the plate's encoding is too flat to unmix: a few code
+  // values of difference decode to a tenfold chroma, so the aureole's
+  // near-clipped sky round the sun would dye electric cyan once burned in.
+  // It is glare and cloud there, not clear Rayleigh sky.
+  float clipped = smoothstep(0.88, 0.96, max(enc.r, max(enc.g, enc.b)));
+  float A = clamp((0.85 * C.b - C.r) / 0.56, 0.0, C.b) * aux.r * (1.0 - clipped);
   vec3 dyed = A * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
   dyed = mix(dyed, vec3(dot(dyed, LUMA)), uSkyGrey);
   vec3 Cout = C - A * vec3(0.29, 0.58, 1.0) + dyed;
@@ -238,21 +305,27 @@ void main() {
   // as well as the bright sky onto the tower edges.
   // Eight taps on a ring HALO_PX print px out, each a mip about half that
   // wide, and a ring at twice the radius: a smooth surround, no mip blocks.
+  // The print magnifies the plate unevenly, so the ring is laid out through
+  // the local plate-per-print-pixel derivatives.
+  vec2 jx = dFdx(puv) * uHaloPx;
+  vec2 jy = dFdy(puv) * uHaloPx;
+  float haloLod = max(0.0, log2(max(1.0, max(length(jx), length(jy)) * uPlateW * 0.5)));
   vec3 near = vec3(0.0);
   vec3 wide = vec3(0.0);
   for (int i = 0; i < 8; i++) {
     float t = float(i) * 0.785398 + 0.39;
-    vec2 o = vec2(cos(t), sin(t)) * uHaloStep;
-    near += decode(textureLod(uPlate, puv + o, uHaloLod).rgb);
-    wide += decode(textureLod(uPlate, puv + 2.0 * o, uHaloLod + 1.0).rgb);
+    vec2 o = cos(t) * jx + sin(t) * jy;
+    near += decode(textureLod(uPlate, puv + o, haloLod).rgb);
+    wide += decode(textureLod(uPlate, puv + 2.0 * o, haloLod + 1.0).rgb);
   }
   near *= 0.125;
   wide *= 0.125;
   vec3 sur = 0.6 * near + 0.4 * wide;
   float spill = max(sur.r - C.r, 0.0);
-  // Mostly on the dark side of the edge (the towers), a little over it onto
-  // the sky, where the ring shows as a warm seam.
-  float halo = min(spill, 3.0) * (1.0 - 0.7 * aux.r);
+  // Only on the dark side of the edge (the towers). Spilled onto the sky it
+  // read the bright cumulus as a surround and laid a warm veil over the blue
+  // between the cloud lobes, which greyed the cloud edges into a smear.
+  float halo = min(spill, 0.8) * (1.0 - aux.r);
   // The red mast is the one strongly red source in the frame: its own red
   // excess spreads out over the sky round it as a warm glow.
   // Only off the red itself, so the hull's own texture does not speckle.
@@ -269,6 +342,8 @@ void main() {
   Cout += C * refl * aux.b * gb.x * cos(2.0 * (uPhi - gb.y));
 
   Cout = max(Cout, 0.0) * uExpo * uWB;
+  // Burned in round the sun.
+  Cout *= exp2(-uBurn.x * exp(-gam / uBurn.y) * (0.45 + 0.55 * aux.r));
   // The lens's cos^4 falloff reaches the emulsion before the print curve, so
   // it compresses in the cloud tops the way it does on a real print.
   vec2 rv = (vUv - 0.5) * vec2(uPrintAsp, 1.0);
@@ -452,6 +527,7 @@ export async function createPolariser(host, { embedded = false } = {}) {
   const film = createFilm(gl, { width: 2, height: 2 });
 
   const cam = cameraBasis(CAM);
+  const view = viewFrame(cam);
   const sun = [Math.cos(rad(SUN.lat)) * Math.sin(rad(SUN.lon)), Math.sin(rad(SUN.lat)), Math.cos(rad(SUN.lat)) * Math.cos(rad(SUN.lon))];
 
   // The hairline index: the filter's axis as a diameter of a small ring,
@@ -581,24 +657,15 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
 
-    // Crop: cover-fit the print aspect into the 4:5 plate at 92%, a 140°
-    // stereographic field across the print, with room left to breathe.
+    // Window: cover-fit the print aspect into the 4:5 window on the print
+    // plane (every other aspect is a crop of it), breathing a few thousandths
+    // of its width.
     const pa = L.pw / L.ph;
-    const plateA = 1 / CAM.aspect;
-    const m = CROP;
-    let sx;
-    let sy;
-    if (pa >= plateA) {
-      sx = m;
-      sy = (m * plateA) / pa;
-    } else {
-      sy = m;
-      sx = (m * pa) / plateA;
-    }
-    const cxp = 0.5;
+    let hx = VIEW.half;
+    let hy = VIEW.half * 1.25;
+    if (pa >= 0.8) hy = hx / pa;
+    else hx = hy * pa;
     const b = reduce || still ? [0, 0] : [Math.sin(time * ((2 * Math.PI) / 11)) * 0.0028, Math.sin(time * ((2 * Math.PI) / 13.7) + 1.1) * 0.0022];
-    const ox = clamp(cxp - sx / 2 + b[0], 0, 1 - sx);
-    const oy = clamp(0.5 - sy / 2 + b[1], 0, 1 - sy);
 
     const u = scene.u;
     gl.useProgram(scene.p);
@@ -608,7 +675,11 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, aux);
     gl.uniform1i(u.uAux, 1);
-    gl.uniform4f(u.uCrop, sx, sy, ox, oy);
+    gl.uniform4f(u.uWin, hx, hy, view.centre[0] + b[0] * 2 * hx, view.centre[1] - b[1] * 2 * hy);
+    gl.uniform3fv(u.uVR, view.r);
+    gl.uniform3fv(u.uVU, view.u);
+    gl.uniform1f(u.uVK, VIEW.k);
+    gl.uniform1f(u.uPlateW, plateImg.naturalWidth);
     gl.uniform3fv(u.uF, cam.f);
     gl.uniform3fv(u.uR, cam.r);
     gl.uniform3fv(u.uU, cam.u);
@@ -626,12 +697,10 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uShade, lumNorm(SHADE).map((v) => v * SHADE_DEPTH));
     gl.uniform3fv(u.uSunlit, SUNLIT);
     gl.uniform1f(u.uLodBias, LOD_BIAS);
+    gl.uniform2f(u.uBurn, BURN, rad(BURN_DEG));
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform1f(u.uSkyGrey, SKY_GREY);
-    // Plate px per print px, then the mip a HALO_PX-wide box sits on.
-    const perPx = (sx * plateImg.naturalWidth) / L.pw;
-    gl.uniform1f(u.uHaloLod, Math.max(0, Math.log2(Math.max(1, perPx * HALO_PX * 0.5))));
-    gl.uniform2f(u.uHaloStep, (sx / L.pw) * HALO_PX, (sy / L.ph) * HALO_PX);
+    gl.uniform1f(u.uHaloPx, HALO_PX);
     gl.uniform1f(u.uHalo, HALO);
     gl.uniform3fv(u.uHaloTint, HALO_TINT);
     gl.uniform3fv(u.uWB, WB);
@@ -648,7 +717,10 @@ export async function createPolariser(host, { embedded = false } = {}) {
         // so the film's own curve is the identity: Lottes with contrast 1,
         // shoulder 1 and white at 1 is y = x. The film adds only what happens
         // in the emulsion and the scan: softness, Pro-Mist, halation, grain.
-        // Pro-Mist is halved: on display light it would veil cloud with sky.
+        // Pro-Mist and halation only take the highlights past a threshold, and
+        // the halation judges saturation from its surround: spread from every
+        // pixel, they veiled the bright cumulus near the sun into a flat grey
+        // haze and fringed the tower edges orange.
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         headroom: 0,
         exposure: 0,
@@ -658,10 +730,12 @@ export async function createPolariser(host, { embedded = false } = {}) {
         blueDepth: 0.25,
         highlightTint: [1, 0.99, 0.97],
         saturation: 1.05,
-        halation: 0.32,
-        halationThreshold: 0.62,
-        bloom: 0.1,
-        softness: 0.6,
+        halation: 0.2,
+        halationThreshold: 0.8,
+        halationLocal: 1,
+        bloom: 0.06,
+        bloomThreshold: 0.75,
+        softness: 0.4,
         toe: 0.04,
         grain: 0.32,
         vignette: 0,

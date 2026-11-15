@@ -12,7 +12,7 @@
     "url": "https://polyhaven.com/a/docklands_01"
   },
   "sources": [
-    "https://polyhaven.com/a/docklands_01 (Savva Zakharov, CC0): the 16k HDRI rendered to a stereographic worm's-eye plate, then turned to 84° up so the towers wall three sides, 140° horizontal field on a 4:5 print",
+    "https://polyhaven.com/a/docklands_01 (Savva Zakharov, CC0): the 16k HDRI rendered to a stereographic worm's-eye plate, turned to 84° up, then reprojected per pixel to a zenith-centred general perspective (halfway between rectilinear and stereographic) with a shift toward the apartment block and the pointed tower, so the towers converge straight to the vanishing point",
     "https://en.wikipedia.org/wiki/Polarizing_filter_(photography)",
     "https://en.wikipedia.org/wiki/Rayleigh_sky_model",
     "https://en.wikipedia.org/wiki/Fresnel_equations",
