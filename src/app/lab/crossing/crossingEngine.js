@@ -21,6 +21,10 @@ import { createFilm } from "../_kit/film";
 // base in the sky: it grows up out of the horizon, its foot (the HDRI's lower
 // rows of cumulus) running on down behind the roofs and the town.
 //
+// The closed photograph is the stack itself, not a plate laid over it: at
+// rest the cards are drawn flat and composite back to the picture, wires,
+// cumulus and all, so opening it only separates what was already there.
+//
 // Every plane k sits at its own distance z_k from the camera and is scaled by
 // z_k / f, so from the lens axis the stack projects back onto the photo
 // exactly however far apart the planes are. Dragging (or tilting a phone)
@@ -97,14 +101,14 @@ const PLANES = [
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
   // each wire on as a horizontal shadow band with a hard lower edge.
-  // Each wire is one whole catenary (wires.py): on the left and below it
-  // runs on under the old house far past the frame and ends there, behind
-  // the house's own overscan, so those sides are ends, not margin to keep
-  // covered (they would only narrow the swing)
-  // The flat photograph (photo.webp) carries no wires, so flat they must not
-  // show either where the turned lens looks past its edge: they come in with
-  // the split (flat: false), as they do inside the photo.
-  { file: "p2", rect: [-0.2998, 0.03466, 1.22021, 1.19027], o: 0.2, hold: false, ends: [true, false, false, true], flat: false }, // wires
+  // Each wire is one whole catenary (wires.py, catenary.py): a heavy black
+  // feeder, medium cables, bare steel and a hairline messenger, each hanging
+  // in its own sag and thinning and taking the sky's colour as it runs off
+  // under the eave. On the left and below it runs on under the old house far
+  // past the frame and ends there, behind the house's own overscan, so those
+  // sides are ends, not margin to keep covered (they would only narrow the
+  // swing). They are in the closed photograph too: it is this stack.
+  { file: "p2", rect: [-0.2998, 0.03466, 1.22021, 1.19027], o: 0.2, hold: false, ends: [true, false, false, true] }, // wires
   // the mechanism box is cut by the right edge and ends a few px past
   // it (bake.py): that side is a cut-out end, not overscan to keep covered.
   // Its orange and red band were regraded to a muted ochre and a dull brick
@@ -269,7 +273,6 @@ uniform mat3 uLens;
 uniform vec2 uWinHalf;           // the window's half extent, css px
 uniform float uLensMag;          // print px per screen px near the centre
 uniform int uOpen;               // 1: the card runs on past its crop (the sky)
-uniform float uFeather;          // > 0: fade out over this share of the crop at its edge
 out vec4 o;
 
 vec4 tap(vec2 uv, float lod) {
@@ -366,11 +369,6 @@ void main() {
       shade *= mix(vec3(1.0), vec3(0.74, 0.76, 0.79), m);
     }
     c.rgb *= mix(vec3(1.0), shade, uShadow);
-  }
-  if (uFeather > 0.0) {
-    vec2 t = (vUv - uCrop.xy) / (uCrop.zw - uCrop.xy);
-    vec2 e = min(t, 1.0 - t) * vec2(1.0, uTexSize.y / uTexSize.x);
-    c *= smoothstep(0.0, uFeather, min(e.x, e.y));
   }
   // The air between the cards: farther planes take a little sky haze.
   c.rgb = mix(c.rgb, uHazeColor * c.a, uHaze);
@@ -532,8 +530,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   if (!gl) throw new Error("no webgl2");
   stage.canvas.style.cursor = "grab";
 
-  const [photoBm, matteBm, ...planeBms] = await Promise.all([
-    loadBitmap(`${ASSET}photo.webp`, false),
+  const [matteBm, ...planeBms] = await Promise.all([
     loadBitmap(`${ASSET}mattes.png`, false),
     ...PLANES.map((P) => loadBitmap(`${ASSET}${P.file}.webp`, true)),
   ]);
@@ -569,7 +566,6 @@ export async function createCrossing(host, { embedded = false } = {}) {
   // its roofs and trees, not up in the empty top of its rect.
   const reach = planeBms.map((bm, k) => edgeReach(bm, PLANES[k].rect));
   const planeTex = planeBms.map(upload);
-  const photoTex = upload(photoBm);
 
   const mattes = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, mattes);
@@ -843,12 +839,14 @@ export async function createCrossing(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, mattes);
     gl.activeTexture(gl.TEXTURE0);
-    const opened = clamp(s / 0.05, 0, 1);
     const shadow = (num("shadow") ?? 1.0) * Math.min(1, s * 1.6);
     const frontZ = G.zs[N - 1];
-    // Flat, the stack still lies under the photograph: the turned lens looks
-    // past the photo's top and its upper corners, onto the sky that runs on
-    // and the overscanned cards, which there carry the photo on.
+    // Flat, the stack is the photograph: every card at the window's depth,
+    // no defocus, no shadow, no haze, so from the lens axis the cards
+    // composite back to exactly the plate, wires and all. Opening only
+    // separates what was already there. The turned lens looks past the
+    // photo's top and its upper corners onto the sky that runs on and the
+    // overscanned cards.
     for (let k = 0; k < N; k++) {
       const P = PLANES[k];
       const z = G.zs[k];
@@ -866,29 +864,11 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.uniform1i(U.uK, k);
       gl.uniform1f(U.uShadow, shadow * (P.shade ?? 1));
       gl.uniform1f(U.uHaze, clamp(((z - frontZ) / G.printW) * 0.09 * s, 0, 0.14) * (P.haze ?? 1));
-      gl.uniform1f(U.uOpacity, P.flat === false ? opened : 1);
+      gl.uniform1f(U.uOpacity, 1);
       gl.bindTexture(gl.TEXTURE_2D, planeTex[k].t);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     gl.uniform1i(U.uOpen, 0);
-    // At rest the photograph itself lies on top, so flat is exact; it gives
-    // way to the planes in the first few percent of the split. Its own edge
-    // fades over a few px into the cards that carry it on.
-    if (opened < 1) {
-      gl.uniform1f(U.uFeather, 0.012);
-      gl.uniform4f(U.uRect, 0, 0, 1, 1);
-      gl.uniform4f(U.uCrop, 0, 0, 1, 1);
-      gl.uniform2f(U.uTexSize, photoTex.size[0], photoTex.size[1]);
-      gl.uniform3f(U.uPlane, (G.printW / 2) * (G.pivot / G.f), (G.printH / 2) * (G.pivot / G.f), G.pivot);
-      gl.uniform1f(U.uCoc, 0);
-      gl.uniform1i(U.uK, N - 1);
-      gl.uniform1f(U.uShadow, 0);
-      gl.uniform1f(U.uHaze, 0);
-      gl.uniform1f(U.uOpacity, 1 - opened);
-      gl.bindTexture(gl.TEXTURE_2D, photoTex.t);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      gl.uniform1f(U.uFeather, 0);
-    }
     // The front mat: the page's own paper with the window cut out of it,
     // locked to the screen (the window is the image plane). It only takes
     // coverage away, so the page shows through it untouched (FINAL_FS). The
@@ -1039,7 +1019,6 @@ export async function createCrossing(host, { embedded = false } = {}) {
         gl.deleteFramebuffer(t.fbo);
       }
       for (const t of planeTex) gl.deleteTexture(t.t);
-      gl.deleteTexture(photoTex.t);
       gl.deleteTexture(mattes);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
