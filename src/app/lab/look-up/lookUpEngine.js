@@ -115,7 +115,7 @@ void main() {
 // than polariser ink (low saturation, a little blue depth), cloud and sunlit
 // stone rolled into a warm print shoulder (PRINT, in the scene pass), a thin
 // red halation ring where the bright cloud meets the blue, a Pro-Mist bleed
-// of the highlights only, and grain coarse enough to see at DPR 2.
+// of the highlights only, and a fine monochrome grain (GRAIN, below).
 const FILM = {
   input: "linear",
   headroom: 0,
@@ -139,10 +139,69 @@ const FILM = {
   toe: 0.026,
   toeColor: [1.0, 1, 0.97],
   shadowTint: [1, 1, 0.99],
-  grain: 0.55,
-  grainSize: 1.7,
+  // Read by this piece's own grain pass (GRAIN); the kit's grain is off.
+  grain: 0.3,
+  grainSize: 1.1,
   vignette: 0.22,
 };
+
+// Grain, after the film kit, on the developed frame. One value on all three
+// channels: silver grain in luminance only, so the open blue stays a clean
+// dithered cobalt instead of red chroma speckle (the kit's dye term lands
+// hardest on the near-empty red of a deep blue sky). Strongest in the mids,
+// fainter in the highlights and the toe, and eased right back where the
+// frame is both blue and smooth, where any noise reads as a sensor's.
+// Clumps ~1/1100 of the frame tall times grainSize, so DPR 2 matches DPR 1.
+const GRAIN = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uDev;
+uniform vec2 uRes;
+uniform float uGrain;
+uniform float uGrainPx;
+uniform float uSeed;
+uniform float uSkyEase; // share of the grain kept in smooth open blue
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash12(i), b = hash12(i + vec2(1, 0)), c = hash12(i + vec2(0, 1)), d = hash12(i + vec2(1, 1));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float lumaAt(vec2 px) {
+  return dot(texture(uDev, px / uRes).rgb, LUMA);
+}
+
+void main() {
+  vec2 px = gl_FragCoord.xy;
+  vec3 c = texture(uDev, px / uRes).rgb;
+  float ly = dot(c, LUMA);
+
+  // Local contrast over a few px: cloud edges, tower facades and window
+  // grids keep their tooth; only the flat blue between them is eased.
+  float o = 3.0 * uGrainPx;
+  float lc = max(max(abs(lumaAt(px + vec2(o, 0.0)) - ly), abs(lumaAt(px - vec2(o, 0.0)) - ly)),
+                 max(abs(lumaAt(px + vec2(0.0, o)) - ly), abs(lumaAt(px - vec2(0.0, o)) - ly)));
+  float flat_ = 1.0 - smoothstep(0.012, 0.05, lc);
+  float blue = smoothstep(0.2, 0.42, c.b - c.r) * smoothstep(0.02, 0.1, c.b - c.g);
+  float ease = mix(1.0, uSkyEase, flat_ * blue);
+
+  // Two octaves of clumped value noise plus a little per-pixel tooth, so the
+  // grain is crisp at DPR 2 without being a hash's flat hiss.
+  vec2 gp = px / uGrainPx + uSeed * vec2(17.13, 31.71);
+  float g = vnoise(gp) * 0.55 + vnoise(gp * 2.13 + 7.7) * 0.3 + hash12(px + uSeed * 3.7) * 0.15 - 0.5;
+  float amp = uGrain * 0.36 * (0.2 + 0.8 * smoothstep(0.0, 0.3, ly) * (1.0 - smoothstep(0.45, 0.9, ly))) * ease;
+  outColor = vec4(clamp(c + g * amp, 0.0, 1.0), 1.0);
+}`;
+const SKY_EASE = 0.6;
 
 // Print shoulder (scene light): from where it starts to where it is full,
 // and how far toward cream it goes.
@@ -250,6 +309,7 @@ export async function createLookUp(host, { embedded = false } = {}) {
 
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const scene = compile(gl, VERT, SCENE);
+  const grainP = compile(gl, VERT, GRAIN);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -265,11 +325,26 @@ export async function createLookUp(host, { embedded = false } = {}) {
   let tex = null;
   let fbo = null;
   let enc = 1;
+  // ...and is developed (grain off) into an 8-bit target the grain pass
+  // reads, so the grain can tick at 24 fps without re-running the pyramid.
+  let dev = null;
+  let devFbo = null;
   const build = () => {
     const w = stage.canvas.width;
     const h = stage.canvas.height;
     if (tex) gl.deleteTexture(tex);
     if (fbo) gl.deleteFramebuffer(fbo);
+    if (dev) gl.deleteTexture(dev);
+    if (devFbo) gl.deleteFramebuffer(devFbo);
+    dev = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, dev);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    devFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, devFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dev, 0);
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     let ok = false;
@@ -312,6 +387,7 @@ export async function createLookUp(host, { embedded = false } = {}) {
   let exposureFrom = held ? 0 : 2.5; // stops over, settling to 0
   let lastKey = "";
   let lastGrain = -1;
+  let developed = false;
   let breathe = 0; // 0..1, fades in when idle
 
   const fovOf = (s) => FOV0 + (FOV1 - FOV0) * Math.pow(clamp(s, 0, 1), 1.35);
@@ -380,6 +456,26 @@ export async function createLookUp(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
 
+  const renderGrain = (seed) => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.useProgram(grainP.p);
+    gl.bindVertexArray(vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, dev);
+    gl.uniform1i(grainP.u.uDev, 0);
+    gl.uniform2f(grainP.u.uRes, w, h);
+    gl.uniform1f(grainP.u.uGrain, Math.max(0, film0.grain));
+    gl.uniform1f(grainP.u.uGrainPx, Math.max(0.75, (h / 1100) * film0.grainSize));
+    gl.uniform1f(grainP.u.uSeed, seed % 997);
+    gl.uniform1f(grainP.u.uSkyEase, SKY_EASE);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+  };
+
   const frame = (dt, t) => {
     const now = performance.now();
     const p = stage.pointer;
@@ -432,12 +528,17 @@ export async function createLookUp(host, { embedded = false } = {}) {
       renderScene(s, pitchDeg, yawDeg);
       lastKey = key;
       dirty = false;
+      developed = false;
+    }
+    if (!developed || exposure > 1e-3) {
+      film.render(tex, { ...film0, exposure: exposure + (enc < 1 ? Math.log2(ENC) : 0), grain: 0 }, devFbo);
+      developed = true;
       lastGrain = -1;
     }
     // Film at 24 fps: the grain moves at the rate film did.
     const tick = reduced || held ? 0 : Math.floor(t * 24);
-    if (tick !== lastGrain || exposure > 1e-3) {
-      film.render(tex, { ...film0, exposure: exposure + (enc < 1 ? Math.log2(ENC) : 0), grainSeed: tick * 7.31 });
+    if (tick !== lastGrain) {
+      renderGrain(tick * 7.31);
       lastGrain = tick;
     }
   };
@@ -458,10 +559,13 @@ export async function createLookUp(host, { embedded = false } = {}) {
       film.destroy();
       if (tex) gl.deleteTexture(tex);
       if (fbo) gl.deleteFramebuffer(fbo);
+      if (dev) gl.deleteTexture(dev);
+      if (devFbo) gl.deleteFramebuffer(devFbo);
       gl.deleteTexture(cube);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(scene.p);
+      gl.deleteProgram(grainP.p);
       stage.destroy();
     },
   };
