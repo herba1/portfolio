@@ -95,29 +95,55 @@ export const CARD = {
   wireSegments: 768,
   anisotropy: 8,
   diffusion: 0.5,
+  // the plate's tone (card_tone.py): how much of (tone - mid) goes back onto
+  // the steel, in display values, and the cool tint it carries; below the
+  // mean it darkens by exp(shade * toneDeep) instead, so it never crushes,
+  // and above it the light it adds stops at toneCap, so a sleeve's sheen
+  // never turns sky-pale
+  toneGain: 5.2,
+  toneTint: [0.62, 0.84, 1],
+  toneDeep: 3.2,
+  toneCap: 0.08,
+  // atmosphere: the steel pales towards `hazeColor` with distance from the
+  // post's foot (photo uv, x weighted by hazeAspect), from hazeRange[0] to [1]
+  hazeFrom: [0.15, 1.02],
+  hazeAspect: 0.6,
+  hazeRange: [0.35, 1.05],
+  haze: 0.12,
+  hazeColor: [0.17, 0.34, 0.56],
 };
 
 // The film finish laid over the resolved splats, in display (sRGB) values.
-// The silhouette's paint-flat navy is lifted towards an exposed cyan-navy,
-// the cloud bleeds a thin warm halation into the dark edges beside it, and a
-// luminance-only grain held at 24 fps sits over everything. Nothing passes
-// `cap` (250 / 255), so the highlights never clip.
+// The silhouette keeps the plate's own tone (CARD.tone) and is lifted towards
+// an exposed cyan-navy; the sky veils every dark edge a little (wrap: light
+// scattered in the lens, so a thin member over the sky reads lighter than the
+// post's core, and erode: the sky's own colour eating a pixel or two into the
+// steel), and the cloud bleeds a thin warm halation into the dark pixels within
+// `haloReach` css px of it. A luminance-only grain held at 24 fps sits over
+// everything. Nothing passes `cap` (250 / 255), so the highlights never clip.
 export const FILM = {
   lift: [0.042, 0.106, 0.171],
   toe: [0.13, 0.3],
-  haloThreshold: 0.8,
-  haloKnee: 0.12,
+  haloThreshold: 0.7,
+  haloKnee: 0.15,
   haloScale: 4,
-  haloSigma: 2.2,
+  haloSigma: 2.8,
   haloTint: [1, 0.478, 0.227],
-  haloGain: 0.4,
-  haloDark: [0.12, 0.42],
+  haloGain: 0.7,
+  haloCap: 0.4,
+  haloDark: [0.2, 0.62],
+  // css px: how far from a bright cloud a dark pixel still takes halation
+  haloReach: 3,
+  // css px: how far the sky reaches into a dark edge, and how much of it
+  erodeReach: 1.25,
+  erode: 0.16,
+  wrap: 0.1,
   shoulder: 0.92,
   cap: 250 / 255,
-  grain: 0.025,
+  grain: 0.018,
   grainFloor: 0.3,
   grainFps: 24,
-  grainCell: 0.75,
+  grainCell: 0.6,
 };
 
 export const RGBD = {

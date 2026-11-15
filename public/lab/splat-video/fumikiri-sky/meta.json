@@ -1,7 +1,7 @@
 {
   "format": "splat4d",
   "version": 1,
-  "exportId": "1794564474",
+  "exportId": "1794564486",
   "count": 251940,
   "staticCount": 198599,
   "dynamicCount": 53341,
@@ -468,6 +468,10 @@
       ],
       "wires": 5,
       "droppers": 2
+    },
+    "tone": {
+      "image": "card-tone.webp",
+      "mid": 0.4217
     }
   },
   "source": {

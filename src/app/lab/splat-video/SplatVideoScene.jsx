@@ -321,7 +321,7 @@ function SplatField({ clip, engineRef }) {
     const runtime = createSplatRuntime(clip);
     const resolve = createResolvePass();
     const scratch = createScratch(clip.meta);
-    const card = clip.cardImage && clip.meta.card ? createCardLayer(clip.meta.card, clip.cardImage, clip.meta.camera.remap, gl) : null;
+    const card = clip.cardImage && clip.meta.card ? createCardLayer(clip.meta.card, clip.cardImage, clip.meta.camera.remap, gl, clip.cardTone) : null;
     placeSource(group, scratch);
     bindRemap(runtime.material, clip.meta.camera.remap, scratch.remap);
     // With a remap the film pass paints the sky behind the splats, so they

@@ -313,7 +313,10 @@ function readCard(card, fail) {
   if (!(u0 >= 0 && v0 >= 0 && u1 <= 1 && v1 <= 1 && u1 > u0 && v1 > v0)) fail("has an invalid card rect.");
   // card_finish.py: the top edge carries no border ramp, so the player cuts it hard
   const finish = card.finish && typeof card.finish === "object" ? { topRamp: card.finish.topRamp !== false } : null;
-  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice(), finish, extend: readCardExtend(card.extend, finite) };
+  // card_tone.py: the plate's own shadow tone, on the card's texel grid
+  const toneImage = optionalAsset(card.tone?.image, fail, "card tone image");
+  const tone = toneImage && Number.isFinite(card.tone.mid) ? { image: toneImage, mid: card.tone.mid } : null;
+  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice(), finish, tone, extend: readCardExtend(card.extend, finite) };
 }
 
 // How the card carries on past the photo's edges (card_extend.py): straight
@@ -357,15 +360,15 @@ function readCardExtend(extend, finite) {
   };
 }
 
-async function fetchCard(folder, version, clip, card, signal) {
-  if (!card) return null;
-  const response = await fetch(`${folder}/${card.image}${version}`, { signal });
-  if (!response.ok) throw new Splat4dError(`${card.image} for “${clip}” answered ${response.status}.`, { clip });
+async function fetchCardImage(folder, version, clip, name, signal) {
+  if (!name) return null;
+  const response = await fetch(`${folder}/${name}${version}`, { signal });
+  if (!response.ok) throw new Splat4dError(`${name} for “${clip}” answered ${response.status}.`, { clip });
   const blob = await response.blob();
   try {
     return await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
   } catch {
-    throw new Splat4dError(`${card.image} for “${clip}” is not an image this browser can read.`, { clip });
+    throw new Splat4dError(`${name} for “${clip}” is not an image this browser can read.`, { clip });
   }
 }
 
@@ -475,8 +478,9 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
   if (onProgress) onProgress(0, total);
 
   const version = versionQuery(meta);
-  const [cardImage] = await Promise.all([
-    fetchCard(folder, version, clip, meta.card, signal),
+  const [cardImage, cardTone] = await Promise.all([
+    fetchCardImage(folder, version, clip, meta.card?.image, signal),
+    fetchCardImage(folder, version, clip, meta.card?.tone?.image, signal),
     streamInto({
       url: `${folder}/base.bin${version}`,
       name: "base.bin",
@@ -514,6 +518,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     staticPoints,
     dynamicPoints,
     cardImage,
+    cardTone,
     layout: { width: TEXTURE_WIDTH, baseRows, staticRows, dynamicRows, layerTexels },
   };
 }

@@ -30,6 +30,21 @@ import { CARD } from "./splatVideoParams";
 // bracket posts that meet the row just under the band are carried up into the
 // bottom chord.
 
+const HAZE_GLSL = `
+uniform vec2 uHazeFrom;
+uniform float uHazeAspect;
+uniform vec2 uHazeRange;
+uniform float uHaze;
+uniform vec3 uHazeColor;
+
+// Atmosphere between the post's foot and the far end of the arc: the steel
+// pales a little towards the sky with distance up and along the photo.
+vec3 hazeAt(vec3 rgb, vec2 photo) {
+  float d = length((photo - uHazeFrom) * vec2(uHazeAspect, 1.0));
+  return mix(rgb, uHazeColor, uHaze * smoothstep(uHazeRange.x, uHazeRange.y, d));
+}
+`;
+
 const CARD_VERTEX = `
 precision highp float;
 
@@ -67,6 +82,13 @@ const CARD_FRAGMENT = `
 precision highp float;
 
 uniform sampler2D uCard;
+uniform sampler2D uTone;
+uniform float uToneOn;
+uniform float uToneMid;
+uniform float uToneGain;
+uniform vec3 uToneTint;
+uniform float uToneDeep;
+uniform float uToneCap;
 uniform vec4 uCardRect;
 uniform vec2 uTopFade;
 uniform float uNearBand;
@@ -92,7 +114,7 @@ uniform vec3 uTrussChords;
 uniform float uTrussSliver;
 uniform vec2 uExtrude;
 uniform float uTopCut;
-
+${HAZE_GLSL}
 in vec2 vPhoto;
 in float vSourceY;
 
@@ -139,11 +161,20 @@ float topCut(vec2 photo) {
 
 // The image with its film diffusion: the centre tap and four taps half a
 // device pixel out, so the edge softens by under a pixel and never by more.
+// The card's colour is one graded material; the plate's own shadow tone
+// (card_tone.py) goes back on top of it around the same mean, so the stripes
+// on the crossbuck, the lamp hoods and the plates on the head still print.
 vec4 image(vec2 photo, vec2 gx, vec2 gy) {
   vec2 uv = texUv(photo);
   vec2 dx = gx * uDiffusion;
   vec2 dy = gy * uDiffusion;
   vec4 c = textureGrad(uCard, uv, gx, gy);
+  if (uToneOn > 0.5) {
+    // above the mean the tone adds light; below it, it takes a share away,
+    // so the blackest hoods deepen without ever crushing to black
+    float shade = min(uToneGain * (textureGrad(uTone, uv, gx, gy).r - uToneMid), uToneCap);
+    c.rgb = shade > 0.0 ? c.rgb + shade * uToneTint : c.rgb * exp(shade * uToneDeep);
+  }
   float a = 0.5 * c.a;
   a += 0.125 * textureGrad(uCard, uv + dx, gx, gy).a;
   a += 0.125 * textureGrad(uCard, uv - dx, gx, gy).a;
@@ -233,7 +264,7 @@ void main() {
     }
   }
   if (c.a < 0.5 / 255.0) discard;
-  fragColor = vec4(c.rgb * c.a, c.a);
+  fragColor = vec4(hazeAt(c.rgb, vPhoto) * c.a, c.a);
 }
 `;
 
@@ -260,6 +291,7 @@ uniform float uHalf[WIRES_MAX];
 uniform vec4 uSleeve[WIRES_MAX];
 uniform float uReach;
 uniform float uOverlap;
+uniform vec2 uTan;
 
 in float aWire;
 in float aSide;
@@ -267,6 +299,7 @@ in float aSide;
 out float vAcross;
 out float vHalf;
 out float vAlive;
+out vec2 vPhoto;
 
 vec3 project(vec3 point) {
   vec4 view = modelViewMatrix * vec4(point, 1.0);
@@ -300,6 +333,7 @@ void main() {
   vAcross = aSide * reach;
   vHalf = halfPx;
   vAlive = step(0.15, min(here.z, ahead.z));
+  vPhoto = (point.xy / max(point.z, 1e-4) / uTan + 1.0) * 0.5;
   gl_Position = vec4(pixel / (0.5 * uViewport), 0.0, 1.0);
 }
 `;
@@ -308,10 +342,11 @@ const WIRE_FRAGMENT = `
 precision highp float;
 
 uniform vec3 uWireColor;
-
+${HAZE_GLSL}
 in float vAcross;
 in float vHalf;
 in float vAlive;
+in vec2 vPhoto;
 
 out vec4 fragColor;
 
@@ -322,7 +357,7 @@ void main() {
   float width = max(vHalf, 0.5);
   float a = clamp(width - abs(vAcross) + 0.5, 0.0, 1.0) * min(1.0, vHalf / 0.5);
   if (a < 0.5 / 255.0) discard;
-  fragColor = vec4(uWireColor * a, a);
+  fragColor = vec4(hazeAt(uWireColor, vPhoto) * a, a);
 }
 `;
 
@@ -365,7 +400,32 @@ const PREMULTIPLIED_OVER = {
   blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
 };
 
-function createWireMesh(extend) {
+function hazeUniforms() {
+  return {
+    uHazeFrom: { value: new THREE.Vector2(...CARD.hazeFrom) },
+    uHazeAspect: { value: CARD.hazeAspect },
+    uHazeRange: { value: new THREE.Vector2(...CARD.hazeRange) },
+    uHaze: { value: CARD.haze },
+    uHazeColor: { value: new THREE.Vector3(...CARD.hazeColor) },
+  };
+}
+
+function cardTexture(image, gl) {
+  const texture = new THREE.Texture(image);
+  texture.flipY = false;
+  texture.premultiplyAlpha = false;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.anisotropy = Math.min(CARD.anisotropy, gl.capabilities.getMaxAnisotropy());
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createWireMesh(extend, tan) {
   const count = extend.wires.length;
   const pad = (list, fill) => [...list, ...Array.from({ length: CARD.wiresMax - list.length }, fill)];
   const material = new THREE.ShaderMaterial({
@@ -385,6 +445,8 @@ function createWireMesh(extend) {
       uReach: { value: CARD.wireReach },
       uOverlap: { value: CARD.wireOverlap },
       uWireColor: { value: new THREE.Vector3(...extend.wireColor) },
+      uTan: { value: new THREE.Vector2(...tan) },
+      ...hazeUniforms(),
     },
     transparent: true,
     side: THREE.DoubleSide,
@@ -415,18 +477,11 @@ function cardGeometry(columns, rows, clearRows = 0, clearTo = 0) {
   return geometry;
 }
 
-export function createCardLayer(card, image, remap, gl) {
-  const texture = new THREE.Texture(image);
-  texture.flipY = false;
-  texture.premultiplyAlpha = false;
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.generateMipmaps = true;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.anisotropy = Math.min(CARD.anisotropy, gl.capabilities.getMaxAnisotropy());
-  texture.needsUpdate = true;
+// `toneImage` is the plate's shadow tone on the card's texel grid
+// (meta.card.tone), or null for a card that is its graded colour alone.
+export function createCardLayer(card, image, remap, gl, toneImage = null) {
+  const texture = cardTexture(image, gl);
+  const tone = toneImage && card.tone ? cardTexture(toneImage, gl) : null;
 
   // Only the worm's-eye remap shows past the photo, so only it extends.
   const extend = remap ? card.extend : null;
@@ -444,6 +499,14 @@ export function createCardLayer(card, image, remap, gl) {
     fragmentShader: CARD_FRAGMENT,
     uniforms: {
       uCard: { value: texture },
+      uTone: { value: tone ?? texture },
+      uToneOn: { value: tone ? 1 : 0 },
+      uToneMid: { value: card.tone?.mid ?? 0 },
+      uToneGain: { value: CARD.toneGain },
+      uToneTint: { value: new THREE.Vector3(...CARD.toneTint) },
+      uToneDeep: { value: CARD.toneDeep },
+      uToneCap: { value: CARD.toneCap },
+      ...hazeUniforms(),
       uViewport: { value: new THREE.Vector2(1, 1) },
       uStereo: { value: remap ? 2 * Math.tan((remap.vfovDeg * Math.PI) / 720) : 0 },
       uStereoShift: { value: 0 },
@@ -487,7 +550,7 @@ export function createCardLayer(card, image, remap, gl) {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.matrixAutoUpdate = false;
-  const wires = extend && extend.wires.length > 0 ? createWireMesh(extend) : null;
+  const wires = extend && extend.wires.length > 0 ? createWireMesh(extend, card.tan) : null;
   const scene = new THREE.Scene();
   scene.add(mesh);
   if (wires) scene.add(wires);
@@ -517,6 +580,7 @@ export function createCardLayer(card, image, remap, gl) {
       geometry.dispose();
       material.dispose();
       texture.dispose();
+      if (tone) tone.dispose();
       if (wires) {
         wires.geometry.dispose();
         wires.material.dispose();
