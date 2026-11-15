@@ -93,12 +93,15 @@ const SKY_DYE = [0.03 * 2, 0.37 * 2, 2];
 // base fog greys it. A share of the dyed blue's luminance comes back as grey,
 // lifting the band toward a soft grey-cobalt instead of a poster blue.
 const SKY_GREY = 0.15;
-// Halation: a thin warm ring on the dark side of every edge against bright
+// Halation: a thin warm bleed on the dark side of an edge against bright
 // sky (the mast, the tower outlines), the light that went through the
 // emulsion and came back off the base. It is measured in print pixels, so it
-// stays thin whatever the screen.
-const HALO = 1.2;
-const HALO_PX = 4;
+// stays thin whatever the screen. Kept low: at 1.2 it traced every tower
+// edge in a 3-4 px orange line that read as a drawn contour, not a glow.
+// The ring sits 2 print px out (and 4 for the wide ring), so the bleed hugs
+// the edge and falls off within a few pixels instead of filling a band.
+const HALO = 0.6;
+const HALO_PX = 2;
 const HALO_TINT = [1.0, 0.42, 0.16];
 const WB = [1.1, 0.97, 0.97];
 // The print: 0.9 stops over the plate's old exposure, then a log-logistic
@@ -730,8 +733,8 @@ export async function createPolariser(host, { embedded = false } = {}) {
         blueDepth: 0.25,
         highlightTint: [1, 0.99, 0.97],
         saturation: 1.05,
-        halation: 0.2,
-        halationThreshold: 0.8,
+        halation: 0.1,
+        halationThreshold: 0.9,
         halationLocal: 1,
         bloom: 0.06,
         bloomThreshold: 0.75,
