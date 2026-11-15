@@ -1,6 +1,6 @@
 {
   "title": "Overexpose",
-  "description": "A summer sky through a pine, developed live on colour negative film. Drag up to overexpose it by as much as three stops. A phone sensor would clip the clouds to flat white; the negative's long shoulder and the print paper's toe fold the light in instead, so the cobalt thins to powder blue, the shadows open into pastel, and the cumulus keep their shape all the way up. Halation and diffusion grow as the shadows they land on lift out of the toe.",
+  "description": "A summer sky through a pine, developed live on colour negative film. It opens on the normal print, deep cobalt behind dark pines; drag up to overexpose it by as much as three stops. The light is multiplied before the film sees it, and each layer of the negative climbs its own long soft shoulder, so where a phone sensor would clip the clouds to flat white the cobalt thins to a pale white-blue, the cumulus compress towards cream and keep their edges, and the shadows open. The diffusion and halation grow with the light over the shoulder.",
   "tags": ["WebGL", "Film", "Light", "Photography"],
   "status": "draft",
   "createdAt": "2026-11-06T19:00:00.000Z",

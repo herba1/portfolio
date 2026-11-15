@@ -2,16 +2,22 @@ import { createStage, clamp } from "../_kit/stage";
 
 // Overexpose. One linear HDR frame (a worm's-eye stereographic view of a Poly
 // Haven HDRI, looking up through the pines; log-encoded so the radiance is
-// real) developed live through a colour negative: per-layer H&D curves with a
-// long shoulder, a fixed printer light, then a print paper curve. Drag up and the exposure rises to +3 stops.
-// Because the negative's shoulder and the paper's toe compress instead of
-// clipping, the frame goes airy and pastel, the cobalt thins to powder blue
-// and the cumulus keep their shape; nothing reaches 255.
+// real) developed live through a colour negative. Exposure is scene-referred:
+// the sky, cloud and needle radiance is multiplied by 2^EV before anything
+// else touches it, and only then meets the film. Each layer of the negative
+// has its own characteristic curve in log exposure (a toe, a straight section
+// up to about grey, then a long soft logarithmic shoulder, the blue record's
+// placed so that on the print blue is the last channel to reach the paper's
+// warm white), then a fixed printer light and the print paper's S-curve. Drag
+// up and the exposure rises to +3 stops: the cobalt thins to a pale white-blue,
+// the cumulus climb the shoulder towards cream and keep their edges, the
+// shadows open, and nothing reaches 255.
 //
-// The optics (Pro-Mist diffusion and base-reflection halation) are linear in
-// exposure, so they are baked once, offline, from the same radiance and
-// shipped beside it. They get stronger as you overexpose only because the
-// curve lifts the shadows they land on out of the toe, as on real film.
+// The optics (Pro-Mist diffusion and base-reflection halation) are blurs of the
+// same radiance, baked once offline and shipped beside it. They are scaled by
+// the same 2^EV, and each also has a part driven by the highlight energy
+// above a knee, so the veil and the red halation ring grow faster than the
+// exposure as the clouds and sky climb into the shoulder.
 //
 // The grade is written inside this piece rather than through _kit/film.js:
 // film.js develops with one display curve for all channels, and this piece is
@@ -26,13 +32,22 @@ const STOP = 0.225; // fraction of the print's height that is one stop of drag
 
 export const FILM = {
   exposure: 0,
-  norm: 1.0, // scene radiance to film exposure at 0 EV (metered for the sky)
-  negGamma: [0.6, 0.62, 0.66], // density per log10 H, red / green / blue layers
-  negShoulder: [2.1, 2.3, 2.4], // density each layer saturates towards
-  negToe: -4.5, // stops below grey where the toe sits
-  shoulderP: 1.4, // shoulder knee; lower is longer
+  norm: 0.92, // scene radiance to film exposure at 0 EV (metered for the sky)
+  // The negative, per layer (red / green / blue records): density rises at
+  // negGamma per log10 H from a soft toe negToe stops under grey, straight up to
+  // shoulderX stops over grey, and past it the log exposure is bent onto a long
+  // soft shoulder, x -> xs + w ln(1 + (x - xs) / w), so the slope halves w
+  // stops in and never reaches zero: four stops over the knee still separate.
+  // The blue record bends first, so on the print blue is the last channel to
+  // reach the paper white and a bright neutral drifts warm-neutral (cream),
+  // never flat white; green close behind it, so the lifted sky keeps its hue
+  // instead of sliding to cyan as its blue compresses.
+  negGamma: [0.445, 0.46, 0.49],
+  negToe: -4.5,
+  shoulderX: [0.6, 0.15, 0.0],
+  shoulderW: 2.35,
   printComp: 0.15, // how much of the overexposure the printer light takes back
-  paperGamma: 3.6,
+  paperGamma: 3.35,
   paperDmin: [0.042, 0.044, 0.052], // paper white, a touch warm: never 255
   paperDmax: [1.9, 1.8, 1.75], // the scanned black, lifted and cyan
   // The paper's dense end, past the midtones and the sky: the canopy (canopy.py)
@@ -43,55 +58,23 @@ export const FILM = {
   shadowExt: [0.36, 0.29, 0.34],
   shadowX: [1.6, 1.5],
   printGrey: 0.25,
+  // Scan: summer sky leans cobalt (blueHue, and blueDepth more saturation on
+  // blue). As the print's brightest channel climbs from blueFade[0] to
+  // blueFade[1] the lean eases to blueHueHi and blueFadeK of the extra depth
+  // goes, so a lifted sky thins to a white-blue at its own hue (~210) instead
+  // of being pumped back to a saturated cyan.
   saturation: 1.15,
-  blueDepth: 1.5,
-  blueHue: [0.84, 0.92, 1.0],
+  blueDepth: 1.55,
+  blueHue: [0.76, 0.85, 1.0],
+  blueHueHi: [0.9, 0.9, 1.0],
+  blueFade: [0.4, 0.8],
+  blueFadeK: 0.65,
   hiDesat: 0.45,
-  // The sky through the print's shoulder. On the paper the blue channel reaches
-  // the base white first, then green climbs after it, and a print-chroma blue
-  // measure collapses with it: overexposed sky slid from cobalt to a milky grey
-  // cyan (hue ~185, saturation ~0.05 at +3). The scan reads "sky" from the
-  // scene's own blue-over-red ratio instead, which no exposure changes, and for
-  // it keeps the blue compensation (stronger as it lifts), keeps most of the
-  // saturation the highlight bleach would take, and holds the blue a touch
-  // under the paper white. So overexposure lifts the sky's luminance at hue
-  // ~205: powder blue at +3, with the clouds still the brightest thing on it.
   skyQ: [0.6, 1.5], // log2 blue/red of the scene where sky starts and is full
-  skyHiKeep: 0.5, // share of the highlight desaturation the sky is spared
-  skyHiHue: 1.5, // extra blue compensation on lifted sky
-  skyCap: 0.05, // how far under the paper white the sky's blue stays
-  // Holding the sky back. Cumulus are several times brighter than the blue
-  // around them, but once both ride the paper's shoulder they print at the
-  // same height (the sky's blue at the cap, ~236, the clouds 230-238) and part
-  // only by being less blue: milky paper cut-outs on a flat powder wash. So, as
-  // a printer burns in a sky, everything but the cloud is held back before the
-  // negative by skyHold of every stop of overexposure (about -0.9 EV at +1.67),
-  // keyed on the bake's cloud mask (scene.webp's alpha, relight.py), so a
-  // cloud's blue-lit underside is not mistaken for sky and a crown's edge is
-  // held with the sky behind it, never left as a pale outline. The same key
-  // spares the hidden sun's glow (sunburst.py), falling off over ~9 deg, so it
-  // is the glow that carries the overexposure: it climbs the shoulder, spreads
-  // and swallows the crown's edge while the sky around it stays held.
-  // The scan's extra blue depth eases off on the held sky
-  // (to skyHoldDepth by skyHoldFull), or it would pour the held light straight
-  // back into the blue channel and pin it at the cap again. So the sky's
-  // brightest channel stays near 200-215, still deepening towards the zenith,
-  // while the clouds keep climbing the shoulder above it. 0 EV is untouched.
-  skyHold: 0.55,
-  skyHoldDepth: 1.1,
-  // The dark needles take skyHoldNeedle of it, so the shadows still open up. The
-  // hand-over from needle to sky is spread over skyHoldY (log2 scene luminance,
-  // ~5.7 stops): squeezed into the 1.7 stops between 0.03 and 0.1 it held a
-  // needle's lit side back almost as far as its shadow sat above it, so at +3
-  // the canopy's midtones collapsed onto one level and posterized into flat
-  // grey-green and lilac blobs. Spread out, each stop of needle still prints
-  // at least 0.7 stop apart at +3. Since canopy.py took the needles about 1.3
-  // stops down, so they print near-black at 0 EV, the darkest of them are not
-  // held at all (0.3 before), or at +3 they stayed mid-green instead of opening.
-  skyHoldNeedle: 0,
-  skyHoldY: [-9.0, -3.3],
-  skyHoldFull: 1.67,
-
+  // The paper white is approached per channel on a soft knee (from paperKnee of
+  // it), never by scaling all three down together, so the brightest cloud
+  // still has a channel with gradation in it and the sky's red keeps climbing.
+  paperKnee: 0.85,
   hiWarm: 0.025,
   // The cumulus' sunlit tops roll off warm-neutral on the shoulder (towards
   // #fff6ea), not the scan's grey-white: on the bake's cloud share (alpha) and
@@ -120,6 +103,16 @@ export const FILM = {
   bloom: 0.08,
   halation: 0.15,
   halationColor: [1.0, 0.3, 0.08],
+  // Highlight energy: the part of the exposed light above a soft knee (in
+  // scene radiance after 2^EV; the cumulus' tops sit near 1.5 at 0 EV) spreads
+  // further. bloomHi of the diffused light's excess is added as veil, halHi of
+  // the halation source's excess over the pixel's own lands as the red ring.
+  // At 0 EV almost nothing is over the knee; at +3 the banks are 8x over it.
+  bloomHi: 0.05,
+  bloomKnee: 1.5,
+  inkHi: 0.4, // the crowns' share of that highlight veil, so they stay dense
+  halHi: 0.035,
+  halKnee: 2.0,
   grain: 0.03,
   grainSeed: 0,
 };
@@ -143,17 +136,19 @@ uniform sampler2D uScene;   // linear radiance (or log-encoded when uLogIn)
 uniform sampler2D uOptics;  // left half: diffusion, right half: halation source
 uniform sampler2D uTrees;   // the pines: rgb log radiance of the ink, alpha its matte
 uniform vec2 uInk;          // the ink's share of the veil and of the halation
+uniform float uInkHi;       // and of the highlight veil
 uniform float uLogIn;
 uniform vec4 uRect;         // square in device px: x, y, size, size
-uniform float uExp;         // norm * 2^ev
-uniform vec3 uGamma; uniform vec3 uShoulder; uniform float uToe; uniform float uShP;
+uniform float uExp;         // norm * 2^ev: scene radiance to film exposure
+uniform vec3 uGamma; uniform vec3 uKnee; uniform float uKneeW; uniform float uToe;
 uniform vec3 uGref;         // negative density of the printer-light grey
 uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax; uniform vec3 uShExt; uniform vec2 uShX;
 uniform vec2 uNeedleY; uniform vec2 uNeedleCap; // luminance key; bloom and halation caps, already scaled by exposure
 uniform float uLod;         // mip level the print is minified to
-uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm; uniform float uCloudWarm; uniform vec3 uCloudWarmHue;
-uniform vec2 uSkyQ; uniform float uHold; uniform float uHoldNeedle; uniform vec2 uHoldY; uniform float uHoldDepth; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
+uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform vec3 uBlueHueHi; uniform vec3 uBlueFade; uniform float uHiDesat; uniform float uHiWarm; uniform float uCloudWarm; uniform vec3 uCloudWarmHue;
+uniform vec2 uSkyQ; uniform float uPaperKnee;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
+uniform vec2 uBloomHi; uniform vec2 uHalHi; // amount, knee (scene radiance after 2^EV)
 uniform float uGrain; uniform float uSeed; uniform float uGrainPx;
 out vec4 o;
 
@@ -161,11 +156,17 @@ const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const mat3 XT = mat3(0.92, 0.04, 0.01,  0.07, 0.90, 0.07,  0.01, 0.06, 0.92); // layer cross-talk (columns)
 
 vec3 dec(vec3 c){ return exp2(c * ${(HI - LO).toFixed(4)} + ${LO.toFixed(4)}); }
-vec3 softplus(vec3 x){ const float k = 1.2; return log(1.0 + exp(-abs(x * k))) / k + max(x, 0.0); }
+vec3 softplus(vec3 x, float k){ return log(1.0 + exp(-abs(x * k))) / k + max(x, 0.0); }
+// Each layer's characteristic curve: toe, straight section, and past uKnee a
+// long soft shoulder that bends the log exposure, xs + w ln(1 + (x - xs) / w).
 vec3 negD(vec3 stops){
-  vec3 lin = uGamma * 0.30103 * softplus(stops - uToe);
-  return lin / pow(1.0 + pow(lin / uShoulder, vec3(uShP)), vec3(1.0 / uShP));
+  vec3 u = softplus(stops - uKnee, 2.0);
+  vec3 x = stops - u + uKneeW * log(1.0 + u / uKneeW);
+  return uGamma * 0.30103 * softplus(x - uToe, 1.2);
 }
+// The exposed light above a soft knee: what spreads further as it overexposes.
+vec3 hiE(vec3 x, float k){ return softplus((x - k) / k, 2.0) * k; }
+float hiE(float x, float k){ return hiE(vec3(x), k).x; }
 float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p){
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -185,35 +186,36 @@ void main(){
   float needle = 1.0 - smoothstep(log2(uNeedleY.x), log2(uNeedleY.y), log2(max(dot(L0, LUMA), 1e-6)));
   float cloud0 = smoothstep(0.0, 0.25, 1.0 - clamp((sc0.a * 255.0 - 3.0) / 252.0, 0.0, 1.0));
   sc = mix(sc, sc0, max(needle, cloud0) * step(0.01, uLod));
-  vec3 L = uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb;
-  float Ys = dot(L, LUMA);
+  // Exposure is a multiply on the scene's linear radiance, before anything else:
+  // the sky, the cloud, the needles and the optics' blurs of them alike.
+  vec3 L = (uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb) * uExp;
   float hx = clamp(uv.x, 0.002, 0.998) * 0.5;
-  vec3 D = dec(texture(uOptics, vec2(hx, uv.y)).rgb);
-  float Yb = dec(texture(uOptics, vec2(hx + 0.5, uv.y)).rgb).g;
+  vec3 D = dec(texture(uOptics, vec2(hx, uv.y)).rgb) * uExp;
+  float Yb = dec(texture(uOptics, vec2(hx + 0.5, uv.y)).rgb).g * uExp;
+  // Highlight energy of the spread light, over the knee.
+  vec3 Dhi = hiE(D, uBloomHi.y) * uBloomHi.x;
+  float Ybhi = hiE(Yb, uHalHi.y);
 
-  // Pro-Mist: a fixed share of all light lands spread out.
-  L = mix(L, D, uBloom * (1.0 - uNeedleCap.x * needle));
+  // Pro-Mist: a fixed share of all light lands spread out, and the highlight
+  // energy over the knee spreads on top of it.
+  float wv = 1.0 - uNeedleCap.x * needle;
+  L = mix(L, D, uBloom * wv) + Dhi * wv;
   // Halation: light bounced off the base comes back through the red layer,
-  // landing just outside bright areas (a ring, not a fill).
-  L += uHalColor * max(Yb - dot(L, LUMA), 0.0) * uHal * (1.0 - uNeedleCap.y * needle);
+  // landing just outside bright areas (a ring, not a fill); its highlight part
+  // grows with the energy over the knee.
+  float Yl = dot(L, LUMA);
+  L += uHalColor * (max(Yb - Yl, 0.0) * uHal + max(Ybhi - hiE(Yl, uHalHi.y), 0.0) * uHalHi.x) * (1.0 - uNeedleCap.y * needle);
   // The pines (foliage.py): the needles' own radiance on the photograph's own
   // sub-pixel coverage, composited over the diffused sky.
   vec4 tr = texture(uTrees, uv);
-  vec3 ink = dec(tr.rgb);
-  ink = mix(ink, D, uBloom * uInk.x);
-  ink += uHalColor * max(Yb - dot(ink, LUMA), 0.0) * uHal * uInk.y;
-  // The printer holds all but the cloud back (after the optics, so the hold does not
-  // read as a dark gap for the halation to fill). The sky seen through a spray and
-  // the needles over it are held each by their own light before they mix, or the
-  // sky in a part-covered pixel escapes the hold and rings every twig in pale haze.
-  float open = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0); // 1 - the bake's cloud share
-  float holdSky = open * mix(uHoldNeedle, 1.0, smoothstep(uHoldY.x, uHoldY.y, log2(max(Ys, 1e-6))));
-  float holdInk = open * mix(uHoldNeedle, 1.0, smoothstep(uHoldY.x, uHoldY.y, log2(max(dot(ink, LUMA), 1e-6))));
-  L = mix(L * exp2(-uHold * holdSky), ink * exp2(-uHold * holdInk), tr.a);
-  open = mix(holdSky, holdInk, tr.a);
+  vec3 ink = dec(tr.rgb) * uExp;
+  ink = mix(ink, D, uBloom * uInk.x) + Dhi * uInk.x * uInkHi;
+  float Yi = dot(ink, LUMA);
+  ink += uHalColor * (max(Yb - Yi, 0.0) * uHal + max(Ybhi - hiE(Yi, uHalHi.y), 0.0) * uHalHi.x) * uInk.y;
+  L = mix(L, ink, tr.a);
 
-  // Negative: each layer on its own H&D curve.
-  vec3 H = XT * L * uExp;
+  // Negative: each layer on its own characteristic curve.
+  vec3 H = XT * L;
   vec3 d = negD(log2(max(H, 1e-6) / 0.18));
   // Print: fixed printer light, then the paper's own S-curve.
   vec3 lp = -(d - uGref);
@@ -227,23 +229,31 @@ void main(){
   // Scan: summer sky leans cobalt, colour sits in the midtones and bleaches
   // (a little warm) in the highlights. Saturation is a power on the channel
   // ratios, so no channel is ever pushed through zero.
-  // (and bright: a blue-black needle shadow is not sky)
-  float sky = smoothstep(uSkyQ.x, uSkyQ.y, log2(max(L.b, 1e-6) / max(L.r, 1e-6))) * smoothstep(0.02, 0.07, dot(L, LUMA));
+  // Sky is read from the scene's own blue-over-red ratio, which no exposure
+  // changes (and bright: a blue-black needle shadow is not sky).
+  vec3 Ls = L / uExp;
+  float sky = smoothstep(uSkyQ.x, uSkyQ.y, log2(max(Ls.b, 1e-6) / max(Ls.r, 1e-6))) * smoothstep(0.02, 0.07, dot(Ls, LUMA));
   float blue = max(clamp((c.b - c.r) / (c.b + 1e-4), 0.0, 1.0), sky);
-  float hi0 = clamp((dot(c, LUMA) - 0.45) / 0.4, 0.0, 1.0);
-  c *= 1.0 + (uBlueHue - 1.0) * blue * blue * (1.0 + uSkyHiHue * hi0 * sky);
+  // the cobalt lean eases as the print's brightest channel climbs: the red
+  // comes back first, so a lifted sky whitens at its own hue, not towards cyan
+  float hiB = smoothstep(uBlueFade.x, uBlueFade.y, max(c.r, max(c.g, c.b)));
+  c *= 1.0 + (mix(uBlueHue, uBlueHueHi, hiB) - 1.0) * blue * blue;
+  float blueS = blue * (1.0 - uBlueFade.z * hiB);
   float y = dot(c, LUMA);
   float hi = clamp((y - 0.45) / 0.4, 0.0, 1.0);
-  float s = uSat * (1.0 - uHiDesat * hi * (1.0 - uSkyHiKeep * sky)) * (1.0 + (mix(uBlueSat, uHoldDepth, open) - 1.0) * blue);
+  float s = uSat * (1.0 - uHiDesat * hi) * (1.0 + (uBlueSat - 1.0) * blueS);
   vec3 r = max(c, 1e-5) / max(y, 1e-5);
   c = y * pow(r, vec3(s));
   c *= y / max(dot(c, LUMA), 1e-6);
-  // Never past the paper's own white: a channel that would print brighter than
-  // the base gives up luminance with the others, so the hue holds.
   float cloud = 1.0 - clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0);
   c *= 1.0 + uCloudWarm * hi * cloud * (1.0 - sky) * uCloudWarmHue;
-  vec3 white = pow(vec3(10.0), -uDmin) * (1.0 - uSkyCap * sky);
-  c /= max(1.0, max(c.r / white.r, max(c.g / white.g, c.b / white.b)));
+  // Never past the paper's own white: each channel eases onto it from uPaperKnee
+  // of the way up, so a highlight keeps gradation in whatever channel is lowest.
+  vec3 white = pow(vec3(10.0), -uDmin);
+  vec3 t = c / white;
+  float kn = uPaperKnee;
+  t = mix(t, kn + (1.0 - kn) * (1.0 - exp(-(t - kn) / (1.0 - kn))), step(kn, t));
+  c = t * white;
   c *= 1.0 + uHiWarm * hi * vec3(1.0, 0.3, -0.6);
   vec3 outc = srgb(c);
 
@@ -303,11 +313,11 @@ function upload(gl, img, mips) {
 }
 
 // The negative's density at a given exposure (stops from grey), per layer.
+const softplus = (x, k) => Math.log1p(Math.exp(-Math.abs(x * k))) / k + Math.max(x, 0);
 function negD(stops, c, F) {
-  const x = stops - F.negToe;
-  const sp = Math.log1p(Math.exp(-Math.abs(x * 1.2))) / 1.2 + Math.max(x, 0);
-  const lin = F.negGamma[c] * 0.30103 * sp;
-  return lin / (1 + (lin / F.negShoulder[c]) ** F.shoulderP) ** (1 / F.shoulderP);
+  const u = softplus(stops - F.shoulderX[c], 2);
+  const x = stops - u + F.shoulderW * Math.log1p(u / F.shoulderW);
+  return F.negGamma[c] * 0.30103 * softplus(x - F.negToe, 1.2);
 }
 
 const smoothstep = (a, b, x) => {
@@ -429,8 +439,9 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   };
 
   // Exposure: the value shown, its velocity, and where it is heading.
-  const ev = { v: fixed ?? (reduced ? 0 : MAX_EV), vel: 0, target: fixed ?? 0, mode: "spring" };
-  let reveal = fixed == null && !reduced ? { t: 0, from: MAX_EV, to: 0, dur: 2.0 } : null;
+  // The hero is the normal exposure: the first frame is the deep cobalt print.
+  const ev = { v: fixed ?? 0, vel: 0, target: fixed ?? 0, mode: "spring" };
+  let reveal = fixed == null && !reduced ? { t: 0, delay: 0.7, rise: 0.9, fall: 1.6, peak: 4 / 3 } : null;
   let drag = null;
   let dirty = true;
   let grainT = 0;
@@ -523,9 +534,9 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     const e = ev.v;
     gl.uniform1f(u.uExp, F.norm * 2 ** e);
     gl.uniform3fv(u.uGamma, F.negGamma);
-    gl.uniform3fv(u.uShoulder, F.negShoulder);
+    gl.uniform3fv(u.uKnee, F.shoulderX);
+    gl.uniform1f(u.uKneeW, F.shoulderW);
     gl.uniform1f(u.uToe, F.negToe);
-    gl.uniform1f(u.uShP, F.shoulderP);
     // The printer light is set for a normal negative and only partly follows
     // the overexposure, which is what leaves the print light and airy.
     gl.uniform3f(u.uGref, negD(e * F.printComp, 0, F), negD(e * F.printComp, 1, F), negD(e * F.printComp, 2, F));
@@ -543,21 +554,20 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSat, F.saturation);
     gl.uniform1f(u.uBlueSat, F.blueDepth);
     gl.uniform3fv(u.uBlueHue, F.blueHue);
+    gl.uniform3fv(u.uBlueHueHi, F.blueHueHi);
+    gl.uniform3f(u.uBlueFade, F.blueFade[0], F.blueFade[1], F.blueFadeK);
     gl.uniform1f(u.uHiDesat, F.hiDesat);
     gl.uniform1f(u.uHiWarm, F.hiWarm);
     gl.uniform1f(u.uCloudWarm, F.cloudWarm);
     gl.uniform3fv(u.uCloudWarmHue, F.cloudWarmHue);
     gl.uniform2fv(u.uSkyQ, F.skyQ);
-    gl.uniform1f(u.uSkyHiKeep, F.skyHiKeep);
-    gl.uniform1f(u.uSkyHiHue, F.skyHiHue);
-    gl.uniform1f(u.uSkyCap, F.skyCap);
-    gl.uniform1f(u.uHold, F.skyHold * Math.max(e, 0));
-    gl.uniform1f(u.uHoldNeedle, F.skyHoldNeedle);
-    gl.uniform2fv(u.uHoldY, F.skyHoldY);
-    gl.uniform1f(u.uHoldDepth, F.blueDepth + (F.skyHoldDepth - F.blueDepth) * clamp(e / F.skyHoldFull, 0, 1));
+    gl.uniform1f(u.uPaperKnee, F.paperKnee);
     gl.uniform1f(u.uBloom, F.bloom);
     gl.uniform1f(u.uHal, F.halation);
     gl.uniform3fv(u.uHalColor, F.halationColor);
+    gl.uniform2f(u.uBloomHi, F.bloomHi, F.bloomKnee);
+    gl.uniform1f(u.uInkHi, F.inkHi);
+    gl.uniform2f(u.uHalHi, F.halHi, F.halKnee);
     gl.uniform1f(u.uGrain, F.grain);
     gl.uniform1f(u.uSeed, seed);
     // Grain clumps sized to the print, about 1/1000 of its side.
@@ -567,17 +577,17 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     canvas.setAttribute("aria-valuetext", `${e >= 0 ? "+" : "−"}${Math.abs(Math.round(e * 3) / 3).toFixed(1)} stops`);
   };
 
-  const easeOutExpo = (t) => (t >= 1 ? 1 : 1 - 2 ** (-10 * t));
+  const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
   stage.onFrame((dt) => {
     if (reveal) {
-      // Opens overexposed, white-blue, and the sky deepens into cobalt as the
-      // eye adjusts.
+      // Opens on the normal print, then shows the gesture once: the frame
+      // blooms up the shoulder by a stop and a third and settles back.
       reveal.t += dt;
-      const k = easeOutExpo(Math.min(1, reveal.t / reveal.dur));
-      ev.v = reveal.from + (reveal.to - reveal.from) * k;
+      const t = reveal.t - reveal.delay;
+      ev.v = t <= 0 ? 0 : t < reveal.rise ? reveal.peak * easeInOut(t / reveal.rise) : reveal.peak * (1 - easeInOut(Math.min(1, (t - reveal.rise) / reveal.fall)));
       ev.vel = 0;
-      if (reveal.t >= reveal.dur) reveal = null;
+      if (t >= reveal.rise + reveal.fall) reveal = null;
       dirty = true;
     } else if (!drag) {
       // Spring to the target: damping ratio 0.85, settles in about half a second.
