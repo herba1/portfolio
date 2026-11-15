@@ -107,10 +107,11 @@ const LIFT = 0.045; // held: the card comes this share of its distance toward th
 // stood, lift as LIFT), so it grows and the sky and cumulus it stood in
 // front of are there; it holds, then is let go and springs home.
 const OPEN = { stops: 3.6, hold: 0.2, develop: 2.2 };
-const DEMO = { at: 2.6, du: -0.02, dv: -0.24, lift: 0.08, hold: 1.2 };
+const DEMO = { at: 2.6, du: 0.15, dv: -0.12, lift: 0.08, hold: 1.2 };
 // where a cropped view (a phone held upright) centres: on the near mast,
 // so the platform, the lamp and the girder's root stay in it
 const FOCUS = [0.3, 0.5];
+const MAST_R = 62; // the near mast's half width at the platform's clamps, photo px
 const S_MIN = 0.42; // smallest and largest size relative to where it was
 const S_MAX = 1.75;
 const SKYLIGHT = [0.4, 0.46, 0.6]; // what is left in a shadow on a clear day: the blue sky
@@ -1276,7 +1277,11 @@ export async function createRearrange(host, { embedded = false } = {}) {
     if (!o) return { ...w, o };
     const A3 = onCard(o, ...w.a);
     const B30 = onCard(o, ...w.b);
-    return { ...w, o, A3, B30, L0: len3(sub3(B30, A3)), dA: SKYD + 1 / A3[2] + o.meta.bias };
+    // its bow in the photo (a cable fastened slack, drawn as a curve off
+    // its chord: meta "bow", photo px at the middle, to the chord's left),
+    // as a share of the chord on screen
+    const bow = (w.bow ?? 0) / Math.max(Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]), 1);
+    return { ...w, o, A3, B30, L0: len3(sub3(B30, A3)), dA: SKYD + 1 / A3[2] + o.meta.bias, bow };
   });
   // a cable's points (photo px) and disparity at each, as its object is now
   const sagPts = new Float32Array(SEG * 3);
@@ -1322,11 +1327,17 @@ export async function createRearrange(host, { embedded = false } = {}) {
       h = lo;
     }
     const dB = cardD(w.o, ...mapPoint(w.o, t, w.b));
+    // the bow keeps its share of the chord while the cable is slack, and
+    // is drawn out of it as the cable is pulled half as long again, taut
+    const pa = proj(w.A3);
+    const pb = proj(B3);
+    const bow = w.bow * clamp((1.5 * w.L0 - len3(C)) / (0.5 * w.L0), 0, 1);
     for (let i = 0; i < SEG; i++) {
       const s = i / (SEG - 1);
       const P = proj(at(s, h));
-      sagPts[i * 3] = P[0];
-      sagPts[i * 3 + 1] = P[1];
+      const g = 4 * s * (1 - s) * bow;
+      sagPts[i * 3] = P[0] + (pa[1] - pb[1]) * g;
+      sagPts[i * 3 + 1] = P[1] + (pb[0] - pa[0]) * g;
       sagPts[i * 3 + 2] = w.dA + (dB - w.dA) * s;
     }
   };
@@ -1457,13 +1468,20 @@ export async function createRearrange(host, { embedded = false } = {}) {
     // how far out from the mast the deck's fitting stands, at rest and now
     const h0 = (b[0] - a[0]) * my - (b[1] - a[1]) * mx;
     const h1 = (b1[0] - a[0]) * my - (b1[1] - a[1]) * mx;
-    // a deck pushed in onto the mast stops taking its frame in
-    const k = Math.max(h1 / h0, 0.3);
-    const c = [b1[0] - (b[0] - a[0]) * k, b1[1] - (b[1] - a[1]) * k];
-    // kept on the mast's line
-    const off = (c[0] - a[0]) * my - (c[1] - a[1]) * mx;
-    c[0] -= off * my;
-    c[1] += off * mx;
+    // The member's rise along the mast goes with the deck's reach out
+    // from it, so it keeps its angle; a deck pushed in onto the mast stops
+    // taking its frame in, and one carried across to the mast's other side
+    // is braced from there, the member at its own angle mirrored (the
+    // clamp still below the fitting it holds up, never swung up over it).
+    // Across, the band clamp is met on the mast's face, not at the edge it
+    // stood on (the member passes in front of the mast to reach it).
+    const across = MAST_R * clamp((0.3 - h1 / h0) / 0.6, 0, 1);
+    const h = h1 + across;
+    const k = h / h0;
+    const rise = k >= 0.3 ? k : Math.max(-k, 0.3);
+    const par = (b[0] - a[0]) * mx + (b[1] - a[1]) * my;
+    // the clamp: down the mast from the fitting by that rise, on the mast
+    const c = [b1[0] - mx * par * rise - my * h, b1[1] - my * par * rise + mx * h];
     return [c, Math.max(Math.hypot(b1[0] - c[0], b1[1] - c[1]), 1e-3)];
   };
   // how much nearer (larger) the card's point (u, v) is under translation t
