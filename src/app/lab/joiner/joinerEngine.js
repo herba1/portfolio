@@ -27,7 +27,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // polariser deepening the open blue, blacks barely lifted), then its sky is
 // graded to a June print: the cumulus on a warm shoulder just under paper
 // white with skylight-blue shade, and a clear sky that deepens to cobalt
-// towards the zenith (see SKY_GRADE). Last comes the finish (see FINISH):
+// towards the zenith (see SKY_GRADE), and in the same pass its structures are
+// given that sky's sun: the overcast haze taken off, the walls and glass
+// printed down to crisp dark silhouettes, the sunlit faces warmed (see
+// STRUCT_GRADE). Last comes the finish (see FINISH):
 // a thin red-orange halation ring where bright sky meets a structure, a
 // little scan softness and the print's own grain, so the film survives the
 // grade.
@@ -36,8 +39,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Query: ?prints=N&seed=S lays down a pre-built joiner of N prints;
 // ?t=seconds freezes the newest print that long into its fall; ?sweep=seconds
 // holds a long-press sweep; ?ev= and any film parameter override the film;
-// ?grade=0..1 and the other SKY_GRADE keys override the sky grade, and the
-// FINISH keys (?grainAmp=, ?halation=, ?mtf= ...) the finish.
+// ?grade=0..1 and the other SKY_GRADE keys override the sky grade, the
+// STRUCT_GRADE keys (?structGrade=0 shows the walls as the plate has them)
+// the structures grade, and the FINISH keys (?grainAmp=, ?halation=, ?mtf= ...) the finish.
 
 const ASSET = "/lab/joiner/";
 const THMAX = (120 * Math.PI) / 180; // disk rim, from the zenith
@@ -223,11 +227,13 @@ void main() {
     m = a;
     float blue = smoothstep(0.4, 0.85, (col.b - col.r) / (col.b + 1e-4));
     col *= mix(vec3(1.0), POL, blue * a);
-    key = m * smoothstep(0.01, 0.06, d.z);
+    key = m;
   }
   col *= uGain;
   if (uSrgb > 0.5) col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
-  // the sky matte rides along in alpha for the sky grade after the film
+  // the sky matte rides along in alpha for the grades after the film (the
+  // sky grade fades itself out at the horizon; the structures grade needs
+  // the matte itself there)
   outColor = vec4(col, key);
 }`;
 
@@ -295,6 +301,50 @@ const CLOUD_SHADE = srgbHex("#8FB4D8"); // skylight: shade under an open blue sk
 const SKY_ZENITH = srgbHex("#0C55AC");
 const SKY_RIM = srgbHex("#4499D6");
 const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at the zenith
+
+// The structures grade, in the same pass, wherever the matte says structure.
+// The Docklands plate was shot under a broken overcast, so its walls are a
+// flat, hazy grey that belongs to another day than the sunny cumulus over
+// them. They are given the deck's sun:
+//   - haze: the overcast's veil (a pale grey-blue lift on every channel) is
+//     taken off before anything else, so the darks can go dark;
+//   - contrast and toe: log luminance steepened about a sunlit facade (a
+//     slope of 1.3), the walls printed half a stop under (exposed for the
+//     sunny sky they stand in, as a real worm's-eye frame would be), and
+//     the glass and the shadow sides pulled down on to a deep blue-black
+//     (about 0.06 on the print) that they never fall through, so the
+//     facades and poles read as crisp, dark silhouettes converging on the
+//     sky;
+//   - light: the faces bright enough to be in the sun take a slight warm
+//     key, the colour of the 52 degree sun that warms the cumulus tops, and
+//     the glass takes on the cobalt it would be reflecting; the shade keeps
+//     the skylight blue-black. What is pale and cool is no face but the
+//     plate's own overcast low among the far roofs, where the matte could
+//     not find the sky, and it goes to the pale blue of the sky's rim;
+//   - edge: the plate's rim against the old sky (its anti-aliased edge still
+//     holds the overcast) is choked to the wall's own tone just inside it,
+//     so a roofline cuts cleanly against the blue and only the finish's
+//     thin halation ring is left there.
+// One warm accent: the Docklands red crane on the quay stays; the red and
+// yellow chevrons of the van at the far kerb are muted to a neutral grey so
+// they stop competing with it across the cobalt.
+const STRUCT_GRADE = {
+  structGrade: 1, // overall strength
+  structSlope: 1.3, // log contrast about the pivot
+  structPivot: 0.85, // pivot (linear print value) the contrast turns about: a sunlit facade
+  structHaze: 0.03, // overcast veil taken off (linear print value)
+  structEv: -0.5, // stops the walls are printed under: exposed for the sunny sky they stand against, not for themselves
+  structFloor: 0.06, // deep blue-black the shadows and glass are pulled on to (print value, sRGB)
+  structWarm: 0.45, // strength of the warm key on the sunlit faces
+  structGlass: 0.55, // cobalt mixed into the glass
+  structEdge: 1, // strength of the rim choke
+  mute: 0.95, // how far the van's chevrons are muted
+};
+const STRUCT_DEEP = srgbHex("#0B111D"); // the blue-black of the shade
+const STRUCT_WARM = [1.09, 0.99, 0.88]; // the sun's key on a lit face, linear, about unit luminance
+const STRUCT_VEIL = [0.94, 1, 1.08]; // the overcast veil's colour, linear
+// the van's chevrons, in plate uv (4096 px plate: x 618..741, y 1265..1430)
+const MUTE_AT = [671 / 4096, 1356 / 4096, 0.024, 0.034]; // centre, inner and outer radius
 const vec3 = (v) => `vec3(${v.map((x) => x.toFixed(4)).join(", ")})`;
 
 const GRADE = `#version 300 es
@@ -318,7 +368,17 @@ uniform vec3 uSun;       // towards the sun, disk frame
 uniform vec3 uLight;     // stops of sun on the lit side, of shade on the far side, relief gain
 uniform float uFeather;  // cloud matte feather radius (print uv)
 uniform float uSeed;
+uniform vec4 uStruct;    // strength, slope, pivot (log2), haze
+uniform vec4 uStructKey; // floor (linear), warm, glass, edge
+uniform float uMute;     // how far the van's chevrons are muted
+uniform float uPlatePx;  // one plate pixel, print uv
+uniform float uStructEv; // stops the walls sit under the sky they stand in
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float THMAX = ${THMAX.toFixed(6)};
+const vec3 DEEP = ${vec3(STRUCT_DEEP)};
+const vec3 WARM = ${vec3(STRUCT_WARM)};
+const vec3 VEIL = ${vec3(STRUCT_VEIL)};
+const vec4 MUTE = vec4(${MUTE_AT.map((v) => v.toFixed(5)).join(", ")});
 const vec3 HI = ${vec3(CLOUD_HI)};
 const vec3 SHADE = ${vec3(CLOUD_SHADE)};
 const vec3 ZEN = ${vec3(SKY_ZENITH)};
@@ -340,16 +400,133 @@ vec3 rawLin(vec2 p) {
 // how blue the scene light is, open sky against cloud, as a hard key
 float clearKey(vec3 c) { return smoothstep(0.28, 0.62, (c.b - c.r) / (c.b + 1e-4)); }
 
+vec2 diskUv(vec3 d) {
+  float th = acos(clamp(d.z, -1.0, 1.0));
+  float l = length(d.xy);
+  vec2 dir = l > 1e-6 ? d.xy / l : vec2(1.0, 0.0);
+  return 0.5 + 0.5 * (th / THMAX) * dir;
+}
+
+// The structures, given the deck's sun (see STRUCT_GRADE). lin is the
+// developed print, linear; d the direction the pixel looks along.
+vec3 structGrade(vec3 lin, vec3 d) {
+  // the rim choke: next to the sky the plate's edge still holds the old
+  // overcast, a pale fringe several plate pixels deep. Its light is capped
+  // at the wall's own, read past the fringe (taps the matte calls
+  // structure, eight and ten plate pixels in, a geometric mean so a bright
+  // ledge cannot hold the fringe up). A lamp post has no inside that far
+  // from the sky, so it is left as it is.
+  float dist = 99.0;
+  float yin = 0.0;
+  float win = 0.0;
+  float yloc = 0.0;
+  float wloc = 0.0;
+  for (int j = 1; j <= 7; j++) {
+    float r = 1.4 * float(j) * uPlatePx;
+    for (int i = 0; i < 8; i++) {
+      float an = float(i) * 0.785398 + float(j) * 0.39;
+      vec2 q = vUv + vec2(cos(an), sin(an)) * r;
+      float aq = texture(uRaw, q).a;
+      if (aq > 0.3) dist = min(dist, float(j));
+      if (j >= 2 && j <= 4) {
+        float wq = 1.0 - smoothstep(0.02, 0.3, aq);
+        yloc += wq * log2(dot(toLin(texture(uDev, q).rgb), LUMA) + 1e-4);
+        wloc += wq;
+      }
+      if (j >= 6) {
+        float wq = 1.0 - smoothstep(0.02, 0.1, aq);
+        yin += wq * log2(dot(toLin(texture(uDev, q).rgb), LUMA) + 1e-4);
+        win += wq;
+      }
+    }
+  }
+  float Y0 = dot(lin, LUMA) + 1e-5;
+  // the van's chevrons are muted (one warm accent in the frame, and it is
+  // the crane); the crane's own paint, the most saturated red on the quay,
+  // is kept out of the walls' darkening so that accent stays a lit red
+  float mu = (1.0 - smoothstep(MUTE.z, MUTE.w, length(diskUv(d) - MUTE.xy))) * uMute;
+  float paint = smoothstep(0.72, 0.84, (lin.r - max(lin.g, lin.b)) / (lin.r + 1e-5)) * (1.0 - mu);
+  float edge = (1.0 - smoothstep(2.0, 6.0, dist)) * smoothstep(1.0, 4.0, win) * uStructKey.w;
+  float choke = mix(1.0, min(1.0, 1.1 * exp2(yin / max(win, 1e-4)) / Y0), edge);
+  vec3 c = lin * choke;
+  // The curve is steep, so it reads a grain-free luminance (a little blur
+  // of the print) and the film's grain rides back on as a ratio instead of
+  // being stretched into a mottle on the walls.
+  vec2 tx = 1.5 / vec2(textureSize(uDev, 0));
+  float Yb = 0.5 * Y0 + 0.125 * (dot(toLin(texture(uDev, vUv + vec2(tx.x, 0.0)).rgb), LUMA)
+    + dot(toLin(texture(uDev, vUv - vec2(tx.x, 0.0)).rgb), LUMA)
+    + dot(toLin(texture(uDev, vUv + vec2(0.0, tx.y)).rgb), LUMA)
+    + dot(toLin(texture(uDev, vUv - vec2(0.0, tx.y)).rgb), LUMA));
+  float grain = clamp((Y0 + 0.004) / (Yb + 0.004), 0.75, 1.33);
+
+  // the overcast veil off
+  c = max(c - uStruct.w * VEIL, 0.0) / (1.0 - uStruct.w);
+  vec3 ch = c / (dot(c, LUMA) + 1e-5);
+  float Yc = max(Yb * choke - uStruct.w, 0.0) / (1.0 - uStruct.w) + 1e-5;
+  // glass: the cool, cyan-grey panes that reflected the overcast (bright
+  // specular sheets of cloud keep their light)
+  float glass = smoothstep(0.06, 0.22, (c.b - c.r) / (c.b + 1e-4)) * (1.0 - smoothstep(0.25, 0.6, Yc));
+  // contrast in log about a sunlit facade, with a little clarity (the fine
+  // relief against the wall three to six plate pixels round, so mullions,
+  // ledges and window reveals stay drawn as the facade goes down), glass a
+  // little further down, the walls printed under for the sky they stand
+  // in; then a soft shoulder so nothing new clips, and the toe: the darks
+  // land on the floor and never pass through it
+  float Lc = log2(Yc);
+  float rel = wloc > 2.0 ? clamp(log2(Yb * choke) - yloc / wloc, -2.0, 2.0) : 0.0;
+  float Lo = uStruct.z + uStruct.y * (Lc - uStruct.z) + 0.3 * rel - 0.7 * glass * uStructKey.z + uStructEv * (1.0 - paint);
+  float Yo = exp2(Lo);
+  Yo = Yo / pow(1.0 + pow(Yo / 0.95, 3.0), 1.0 / 3.0);
+  float fl = uStructKey.x;
+  Yo = sqrt(Yo * Yo + fl * fl);
+  // colour: shade to the blue-black, glass to the cobalt it reflects, the
+  // sunlit faces warm
+  vec3 deep = DEEP / dot(DEEP, LUMA);
+  vec3 zen = toLin(ZEN);
+  zen /= dot(zen, LUMA);
+  float shade = 1.0 - smoothstep(fl * 2.0, 0.07, Yo);
+  ch = mix(ch, deep, 0.8 * shade * (1.0 - paint));
+  ch = mix(ch, mix(vec3(1.0), zen, 0.35), glass * uStructKey.z * (1.0 - 0.6 * shade));
+  // a sunlit face loses the overcast's grey-green cast before it takes the
+  // sun's colour. Pale and cool is not a face: it is the plate's own hazy
+  // overcast low on the horizon, where the matte could not find the sky
+  // among the far roofs, and it goes to the pale blue of the sky's rim
+  // instead of to a warm wall.
+  float cool = smoothstep(0.02, 0.12, (c.b - c.r) / (c.b + 1e-4));
+  float haze = cool * smoothstep(0.25, 0.55, Yc) * (1.0 - paint);
+  vec3 rim = toLin(RIM);
+  ch = mix(ch, rim / dot(rim, LUMA), 0.6 * haze);
+  float lit = smoothstep(0.06, 0.3, Yo) * (1.0 - glass) * (1.0 - cool);
+  ch = mix(ch, vec3(1.0), 0.55 * lit * (1.0 - paint));
+  ch *= mix(vec3(1.0), WARM, lit * uStructKey.y);
+  c = Yo * ch * grain;
+  float Ym = dot(c, LUMA);
+  float hot = smoothstep(0.05, 0.3, (max(c.r, c.g) - c.b) / (max(c.r, c.g) + 1e-4));
+  c = mix(c, Ym * vec3(0.98, 1.0, 1.02) * 0.85, mu * hot);
+  return mix(lin, c, uStruct.x);
+}
+
 void main() {
   vec4 dev = texture(uDev, vUv);
   vec4 raw = texture(uRaw, vUv);
+  vec3 lin0 = toLin(dev.rgb);
 
   // The sky matte, as the view swapped it in: its rims were already cleaned
   // of the old sky there, so it is used as it is (dilating it would grade a
-  // pale lamp post or ledge as sky).
+  // pale lamp post or ledge as sky). It is cut tighter than the view's
+  // feather: what the matte only half calls sky goes to the structure, whose
+  // rim choke then darkens it, so a roofline cuts cleanly into the blue.
   float m = raw.a;
-  m = smoothstep(0.0, 0.6, m) * uSky.y;
-  if (m < 0.002) { outColor = dev; return; }
+  vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;
+  vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
+  float st = 1.0 - smoothstep(0.1, 0.55, m);
+  vec3 linS = st > 0.002 ? mix(lin0, structGrade(lin0, d), st) : lin0;
+  vec2 dith = vec2(hash12(gl_FragCoord.xy + uSeed), hash12(gl_FragCoord.yx + 5.3 + uSeed));
+  m = smoothstep(0.1, 0.55, m) * smoothstep(0.01, 0.06, d.z) * uSky.y;
+  if (m < 0.002) {
+    outColor = vec4(clamp(toSrgb(linS) + (dith.x + dith.y - 1.0) / 255.0, 0.0, 1.0), 1.0);
+    return;
+  }
 
   // The cloud-to-sky matte, feathered. The deck's blue-against-white key
   // carries a little compressed chroma and the shear warp bends it, so it is
@@ -429,8 +606,6 @@ void main() {
   float rel = L - Lm; // stops above (+) or below (-) its neighbourhood
 
   // The sun, in this print's frame: the way towards it across the image.
-  vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;
-  vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
   vec3 ts = uSun - d * dot(uSun, d);
   vec2 su = vec2(dot(ts, uR), -dot(ts, uD));
   su /= max(length(su), 1e-5);
@@ -515,8 +690,8 @@ void main() {
   // horizon, where a real sky pales anyway (the deck has no fill round the
   // structures to outline, so it keeps most of it).
   m *= mix(1.0, 0.75, smoothstep(1.0, 1.45, th));
-  vec3 outc = toSrgb(mix(lin, g, m));
-  outc += (hash12(gl_FragCoord.xy + uSeed) + hash12(gl_FragCoord.yx + 5.3 + uSeed) - 1.0) / 255.0;
+  vec3 outc = toSrgb(mix(linS, g, m));
+  outc += (dith.x + dith.y - 1.0) / 255.0;
   outColor = vec4(clamp(outc, 0.0, 1.0), 1.0);
 }`;
 
@@ -827,6 +1002,11 @@ export async function createJoiner(host, { embedded = false } = {}) {
   for (const key of Object.keys(SKY_GRADE)) {
     const v = q.get(key);
     if (v != null && v !== "" && Number.isFinite(+v)) grade0[key] = +v;
+  }
+  const struct0 = { ...STRUCT_GRADE };
+  for (const key of Object.keys(STRUCT_GRADE)) {
+    const v = q.get(key);
+    if (v != null && v !== "" && Number.isFinite(+v)) struct0[key] = +v;
   }
   const fin0 = { ...FINISH };
   for (const key of Object.keys(FINISH)) {
@@ -1187,6 +1367,11 @@ export async function createJoiner(host, { embedded = false } = {}) {
     // feather radius, plate pixels to print uv (the print spans 2 uHalf / F radians)
     gl.uniform1f(g.uFeather, (grade0.feather * PLATE_RAD * F) / (img / f));
     gl.uniform1f(g.uSeed, p.grain);
+    gl.uniform4f(g.uStruct, struct0.structGrade, struct0.structSlope, Math.log2(struct0.structPivot), struct0.structHaze);
+    gl.uniform4f(g.uStructKey, struct0.structFloor ** 2.2, struct0.structWarm, struct0.structGlass, struct0.structEdge);
+    gl.uniform1f(g.uMute, struct0.mute);
+    gl.uniform1f(g.uPlatePx, (PLATE_RAD * F) / (img / f));
+    gl.uniform1f(g.uStructEv, struct0.structEv);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // the finish (halation, scan softness, grain), into the print
