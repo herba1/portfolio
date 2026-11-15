@@ -438,7 +438,12 @@ def relight(lin, sky, ray, right, up, sun, ppd, aspect=None, keep=None, white=No
 # the height field (a floret's crisp shade on the one under it, and the
 # light the body carries by scattering), the tower's round and its far side,
 # the folds in their neighbours' shade, the base a darker blue-grey belly;
-# the photograph's own puff texture quilted over it as a detail layer; the
+# the photograph's own puff texture quilted over it as a detail layer; all of
+# that then carried, as billows only (over its own local mean), on the
+# massing's form light (_form): the whole body read as a few big domes, a
+# warm-neutral key on each tower's upper left and the skylight's blue on its
+# right flank, in the folds between and over its lower third, so it reads as
+# one lit volume with one shade side, not a textured fill; the
 # edge crisp and lumpy where it is sunlit, soft, thin and skylight-blue in
 # the lee; and laid over the sky through a shrunk matte, unmixed at every
 # wire and eave (sky_grade.lay_over).
@@ -487,6 +492,20 @@ EDGE_W = (0.25, 0.6)  # the edge's light (sun_l) from lee to sunlit
 THIN_PX = 10.0  # px of thickness over which the lee edge's vapour is thin
 LEE_VEIL = 1.18  # the thin vapour of the lee edge: the sky behind it, lifted by the light it scatters
 SHRINK = 2.5  # px the open-sky matte is shrunk before the cloud is laid over it
+# the form light: the massing as a few big domes, lit as one body (see _form)
+F_SCALE = 0.125  # the form's height field is the matte's distance field blurred at this share of the massing's width
+F_DOME = 1.0  # a dome's radius, of that blur: the limb turns away over this far in from the edge
+F_EDGE = 0.25  # the distance field's smoothing for that turn, of the form's scale
+F_TURRET = (1.0, 0.3)  # the towers' big lobes as their own domes on the form: their slope's share, and their blur, of the form's scale
+F_LZ = 0.45  # the sun's share on a face turned to the viewer, at least (a cloud scatters forward)
+F_TILT = 1.7  # the sun's turn across the image (its x) for the form, of the true one: the house's shade says left
+F_WRAP = 0.45  # the light's wrap round the form (scattering)
+F_LIT = (0.36, 0.92)  # the form's turn to the sun (wrapped): in shade under here, in full sun over here
+F_GAP = (10.0, 60.0, 0.6, 1.2)  # a fold between domes: px under the domes round it from, full by, the sun it loses there, and how wide a fold is, of the form's scale
+F_LOW = (0.62, 0.9, 0.8)  # the lower part of the massing (share of its height, top 0): from, full by, and the sun it loses
+F_KEY = np.array([0.845, 0.80, 0.715], np.float32)  # the sunlit face: a warm neutral, R over G over B (sRGB ~237, 231, 220; its billows to ~242)
+F_SHADE = np.array([0.255, 0.345, 0.52], np.float32)  # the shade side: the skylight's blue, ~1.2 stop under (sRGB ~138, 158, 190), the film lifting it to about a stop
+F_DETAIL = (24.0, 0.62, 1.3)  # the billows over the form: px (sigma) they are taken over, and the ratio's floor and ceiling
 
 
 def _clear(lin, sky, s):
@@ -661,6 +680,66 @@ def _sun_path(h, ux, uy, kz, s):
     return cv2.GaussianBlur(od * step, (0, 0), 1.5 * s)
 
 
+def _form(body, h0, lx, ly, lz, s):
+    """The massing's form light: how much of the sun each pixel's face takes,
+    0..1, read off the whole body at the scale of its towers, not its
+    billows. Lit off the billows alone (their normals, the sun marched
+    through them), the light was the same on every flank of the tower: a
+    gentle fall from top to base under one even texture, a textured fill,
+    not a lit volume. So: the matte's distance field, rolled off into a dome
+    (F_DOME) and blurred at F_SCALE of the massing's width, with the towers'
+    big lobes on it as their own domes (F_TURRET), is the form's height
+    field; its normal against the sun (turned a little more across the image,
+    F_TILT, the left of the frame being where the house's shade says it
+    is), wrapped (F_WRAP) and keyed (F_LIT), is each dome's lit face, upper
+    left, and its shade side, lower right; a fold between the domes (the
+    height under its neighbourhood's) and the massing's lower part (F_LOW)
+    lose the sun to their neighbours and to the body over them."""
+    H, W = body.shape
+    cols = np.nonzero(body.any(0))[0]
+    rows = np.nonzero(body.any(1))[0]
+    sig = max(F_SCALE * float(cols[-1] - cols[0] + 1), 8.0 * s)
+    dt = cv2.distanceTransform((body > 0).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
+    # the dome: its turn away from the viewer by how near the pixel stands to
+    # the body's edge (the distance field, smoothed, against the dome's
+    # radius: a sphere's profile, so the limb turns fully away), toward the
+    # outward way of the distance field blurred at the form's scale (a bulge
+    # of the outline smaller than that is a billow, not a face)
+    R = F_DOME * sig
+    d = _nblur(dt, F_EDGE * sig, body)
+    hm = cv2.GaussianBlur(dt, (0, 0), sig)
+    gy, gx = np.gradient(hm)
+    gl = np.maximum(np.hypot(gx, gy), 1e-6)
+    m = 1 - np.clip(d / R, 0, 1)
+    ox, oy = -gx / gl * m, gy / gl * m  # (+y up)
+    # and the towers' big lobes, each a dome of its own on the form
+    ht = cv2.GaussianBlur(np.maximum(h0, 0) * body, (0, 0), F_TURRET[1] * sig)
+    ty, tx = np.gradient(ht)
+    n = np.stack([ox - F_TURRET[0] * tx, oy + F_TURRET[0] * ty, np.sqrt(np.maximum(1 - m * m, 0))], -1)
+    n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-6)
+    hm = hm + F_TURRET[0] * ht
+    L = np.array([lx * F_TILT, ly, max(lz, F_LZ)], np.float32)
+    L /= np.linalg.norm(L)
+    ndl = n @ L
+    lit = kit.smoothstep(F_LIT[0], F_LIT[1], np.clip((ndl + F_WRAP) / (1 + F_WRAP), 0, 1))
+    # the folds between the domes, in their neighbours' shade
+    # (the lobes' heights, over the body alone, closed at the form's scale:
+    # a valley between two domes fills, the body's own falling edge does not)
+    hl = _nblur(np.maximum(h0, 0) * body, F_TURRET[1] * sig, body) * body
+    r = max(round(F_GAP[3] * sig), 1)
+    cav = cv2.morphologyEx(hl, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) - hl
+    cav = cv2.GaussianBlur(cav, (0, 0), 0.3 * sig)
+    lit = lit * (1 - F_GAP[2] * kit.smoothstep(F_GAP[0] * s, F_GAP[1] * s, cav))
+    # and the lower part, under the body
+    y0 = float(rows[0])
+    y1 = max(t["tiers"][0][0] for t in TOWERS) * s
+    yy = np.broadcast_to(((np.arange(H, dtype=np.float32) - y0) / max(y1 - y0, 1.0))[:, None], (H, W))
+    lit = lit * (1 - F_LOW[2] * kit.smoothstep(F_LOW[0], F_LOW[1], yy))
+    inner = cv2.erode(body, np.ones((3, 3), np.uint8))
+    lit = lit * inner + kit.pushpull(lit, inner) * (1 - inner)
+    return np.clip(lit, 0, 1).astype(np.float32), hm
+
+
 def massing(lin, sky, right, up, sun, ppd):
     """The plate's clouds cleared and the towering cumulus built in their
     place. lin: linear RGB; sky: the 0..1 open-sky matte; right, up: per-pixel
@@ -752,6 +831,18 @@ def massing(lin, sky, right, up, sun, ppd):
     tex = tex * kit.smoothstep(0.0, 6.0 * s, dt)
     C = C * np.exp(TEX_K * tex * (0.45 + 0.55 * sun_l))[..., None]
 
+    # 4b. the form: the massing lit as a few big domes, a warm-neutral key on
+    # each tower's upper left, the skylight's blue on its right flank, in the
+    # folds between and over its lower part; the billows (the light above,
+    # over its own F_DETAIL px mean) ride on it
+    form, hm = _form(body, h0, lx, ly, lz, s)
+    Cm = F_SHADE[None, None] + (F_KEY - F_SHADE)[None, None] * form[..., None]
+    bm = np.maximum(body, cv2.GaussianBlur(body, (0, 0), 2.0 * s))
+    Cb = cv2.GaussianBlur(C * bm[..., None], (0, 0), F_DETAIL[0] * s) / np.maximum(cv2.GaussianBlur(bm, (0, 0), F_DETAIL[0] * s), 1e-3)[..., None]
+    C = Cm * np.clip(C / np.maximum(Cb, 1e-4), F_DETAIL[1], F_DETAIL[2])
+    # (the edges' light, below, is the form's as much as the billows')
+    sun_l = 0.4 * sun_l + 0.6 * form
+
     # 5. the edge. Sunlit (a floret turned to the sun, at the upper left):
     # crisp, a px of feather, its lumps standing on the cobalt. In shade
     # (the lee side, the lower right): eroded, soft, thinned, and the thin
@@ -787,7 +878,7 @@ def massing(lin, sky, right, up, sun, ppd):
     out = sky_grade.lay_over(lin, new, sky, SHRINK * s)
     out = np.clip(out, 0, None).astype(np.float32)
     if os.environ.get("CLOUDS_DEBUG"):  # a directory: each of the light's maps, as a png
-        for nm, x in (("big", lam_big), ("far", far), ("lit", sun_l), ("tr", tr), ("lam", lam), ("ao", ao), ("wsun", w_sun), ("op", op), ("tex", 0.5 + 2 * tex)):
+        for nm, x in (("form", form), ("hm", hm / max(float(hm.max()), 1e-3)), ("big", lam_big), ("far", far), ("lit", sun_l), ("tr", tr), ("lam", lam), ("ao", ao), ("wsun", w_sun), ("op", op), ("tex", 0.5 + 2 * tex)):
             cv2.imwrite(os.path.join(os.environ["CLOUDS_DEBUG"], nm + ".png"), np.clip(x * 255, 0, 255).astype(np.uint8))
     return out, {"a": op * np.clip(sky, 0, 1), "h": h / max(float(h.max()), 1e-3), "lit": sun_l, "tr": tr, "rm": wc, "base": base,
                  "tex": np.clip(0.5 + 2.0 * tex, 0, 1), "w_sun": w_sun, "lam": lam, "ao": ao, "Lw": float(kit.luma(TOP[None, None])[0, 0])}
