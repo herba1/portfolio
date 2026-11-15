@@ -44,13 +44,15 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // concrete is in its own shade against a bright sky, a neutral-warm mid grey
 // with one narrow sunlit sliver, the firm dark anchor in front of the cloud.
 //
-// Behind the pole stands a real towering cumulus, its crown rising behind and
-// above the pole head with clear cobalt over it (cloud.py: Poly Haven's
-// Skidpan HDRI, CC0, placed under this camera so its verticals converge with
-// the pole's), laid into the same regrade through the same matte (sky.png B
-// its coverage, cloud.webp its colour): its sunlit tops warm-neutral and
-// rolled off below white, its shade a grey-blue in the skylight that keeps
-// the billows' own relief, deepening up the sky with the cobalt. Each removal
+// Behind the pole stands a real towering cumulus, its sunlit upper tower
+// rising out of the bottom of the frame behind the shaft, crown just under
+// the pole head, clear cobalt over it (cloud.py: Poly Haven's Skidpan HDRI,
+// CC0, cut at its own resolution and placed under this camera so its
+// verticals converge with the pole's), laid into the same regrade through
+// the same matte (sky.png B its soft coverage, cloud.webp its unmixed
+// colour): its sunlit tops warm-neutral and rolled off below white, its
+// shade pockets skylight blue, keeping the billows' own relief, deepening up
+// the sky with the cobalt. Each removal
 // uncovers more of it; at the end it is the subject of the clean sky.
 //
 // Query: ?year=0..1 holds the years (elements caught mid-motion, as a still);
@@ -205,9 +207,10 @@ vec3 cloudGrade(vec3 c, float zen) {
   L = clamp(L, 0.5, 0.975);
   // how much of the sun this face sees: its colour only, wide and soft
   float top = smoothstep(0.56, 0.86, v);
-  // skylight: a grey-blue (hue ~206), deeper and a touch bluer up the sky,
-  // its saturation falling as a billow catches more light; never pale cyan
-  float ss = mix(0.22, 0.12, smoothstep(0.6, 0.85, L)) * mix(0.95, 1.1, zen);
+  // skylight: a clear blue (hue ~206) in the shade pockets, deeper and a
+  // touch bluer up the sky, its saturation falling as a billow catches more
+  // light; never pale cyan, never a dead grey
+  float ss = mix(0.3, 0.13, smoothstep(0.6, 0.88, L)) * mix(0.95, 1.1, zen);
   vec3 shadeC = hsv2rgb(vec3((205.0 + 3.0 * zen) / 360.0, ss, L * mix(1.0, 0.97, zen)));
   vec3 sunC = SUN * L;
   return mix(shadeC, sunC, top);

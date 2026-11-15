@@ -3,13 +3,14 @@
 #   python3 -I cloud.py <skidpan_16k.hdr> <public/lab/denchuka> [preview.jpg [matte.jpg]]
 #
 # (skidpan_16k.hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/skidpan_16k.hdr;
-# CLOUD_DEBUG=<jpg> also writes the HDRI window with what the base is cut above)
+# CLOUD_DEBUG=<jpg> also writes the HDRI window with its tree line and the frame's
+# outline on it)
 #
 # The scan's sky has no cloud worth the name: a few wisps and a grey fragment cut
 # off at the top right. This puts a real, photographed towering cumulus behind
-# the pole as the frame's subject: its crown rises behind and above the pole
-# head, inside the frame, with clear cobalt over it, its anvil shelf runs out
-# to the left and its body fills the lower right behind the shaft, so each
+# the pole as the clean sky's subject: its sunlit upper tower rises out of the
+# bottom of the frame behind the shaft, crown just under the pole head, with
+# clear cobalt over it, its anvil shelf running out to the left, so each
 # removal (the wires, then the hardware, then the pole) uncovers more of it and
 # the clean sky at the end has a subject.
 #
@@ -21,37 +22,36 @@
 # Placed under the photograph's own camera (f and the zenith's vanishing point
 # from elements.json, export.py): the cloud stands in a vertical plane through
 # the zenith, so its verticals converge on the same vanishing point as the
-# pole's, and the camera's roll tilts it with the pole. The HDRI's tower stands
-# 3..28 degrees up; here it is nearer (2.8 times the size up it, 2.3 across:
-# a tower, a little more towering than the HDRI's) and higher, its crown at
-# plate (1420, 170). At ~55 degrees up its true vertical leans well left in the
-# frame (toward the zenith's vanishing point), which lays the tower's right
-# flank up and out of the top right corner: it is turned back LEAN degrees, so
-# the right flank falls away inside the frame and the crown is the tower's top.
-# Its lower flank stands behind a tree in the HDRI, so under a line just above
-# the tree the HDRI is read mirrored up about it: the body runs on, in its own
-# shade, out of the bottom of the frame, with no flat base.
+# pole's, and the camera's roll tilts it with the pole. It is cut from the 16k
+# HDRI at its own resolution: 1.5 times its angles, which makes one HDRI pixel
+# one plate pixel, so its billows are as sharp as the photograph's wires and
+# the two read as one exposure. (A bigger tower, blown up from the HDRI, went
+# soft and pasted-in.) At that size the HDRI's tower, 27.6 deg up at its
+# crown, has only ~12 deg of cloud over the tree in front of its flank, so
+# it is set low in the frame, crown at plate (1300, 1010) just under the pole
+# head, turned LEAN degrees about its crown so its lower edge runs with the
+# frame's: the HDRI's tree line, and the lower body under it, stay below the
+# bottom of the frame. The only cloud on screen is the sunlit upper tower,
+# rising out of the bottom of the frame behind the shaft, with clear cobalt
+# over it.
 #
 # Matte: the sky in the HDRI is a saturated blue, the cloud near neutral, so
 # the cloud's coverage is how far a pixel's blue excess q = (B - R) / (B + R)
 # has fallen from the clear sky's (fitted smoothly round it) toward the
-# cloud's. Its shade side, lit by the sky, is a little blue itself, so the
-# body is made solid inside its silhouette, and the edge gets a sub-pixel
-# feather, wider on the shaded underside than on the sunlit crowns, then
-# eroded 1.5 px and tightened, so its ramp sits on cloud: no pale fringe of
-# the HDRI's sky round the tower, only the film's warm halation past it. The
-# cloud's own colour is unmixed from the sky behind it
-# (pixel = a x cloud + (1 - a) x sky), filled outward from its edge by a
-# membrane, so the edge never carries the HDRI's sky into the plate's; its
-# last few px, and the dark streaks along its underside, take the cloud's
-# colour from further in.
+# cloud's: a soft alpha, at the HDRI's own resolution, never eroded or
+# tightened. The cloud's own colour is unmixed from the sky behind it
+# (pixel = a x cloud + (1 - a) x sky) and the comp lays that over the
+# regraded cobalt at coverage a, so where a crown thins into the blue it is
+# cloud thinning into cobalt, with no pale band of the HDRI's sky between
+# them. Its shade side, lit by the sky, is a little blue itself, so the body
+# is made solid inside its silhouette.
 #
-# Tone: linear radiance over the tower's brightest tops, through a soft shoulder
-# (sunlit crowns at ~0.99, rolling off, never clipped; the shaded body well
-# down, its billows and the self-shadow between them lifted), into display
-# values the live grade (denchukaEngine.js cloudGrade) then stretches and
-# tints: the body a grey-blue in the skylight with its own volume, the crowns
-# warm-neutral, so the tower glows against the cobalt.
+# Tone: linear radiance, each turret set against its neighbours and each
+# billow's own light and shade lifted (most in the shade side, where the
+# HDRI's are faint), then laid over a floor into display values the live
+# grade (denchukaEngine.js cloudGrade) stretches and tints: the shade
+# pockets skylight blue, the sunlit flanks and crowns warm-neutral, lit from
+# the right as the pole is.
 #
 # Writes cloud.webp (RGB: the cloud's colour, opaque) and the B channel of
 # sky.png (the cloud's coverage). Run after export.py, which writes sky.png R, G.
@@ -70,13 +70,18 @@ preview = sys.argv[3] if len(sys.argv) > 3 else None
 # ---------------------------------------------------------------- placement
 # HDRI: the tower's crown (its highest turret) is at u = U_CROWN, EL_CROWN deg
 U_CROWN, EL_CROWN = 0.163, 27.6
-# ... and it lands at plate (AX, AY), magnified MAG times (angles)
-AX, AY = 1420.0, 170.0
-MAG = 2.8
-# ... and across, MAGB times
-MAGB = 2.3
+# ... and it lands at plate (AX, AY), magnified MAG times (angles) up it and
+# MAGB across. At 1.5 one HDRI pixel (16k: 45.5 px a degree) is one plate
+# pixel (f 1760: 30.7 px a degree): the tower is cut at the HDRI's own
+# resolution, its billows as sharp as the photograph's wires, never a
+# resampled blow-up of them.
+AX, AY = 1300.0, 1010.0
+MAG = 1.5
+MAGB = 1.5
 # turned LEAN degrees about the crown off the true vertical through it
-LEAN = 15.0
+LEAN = 4.0
+if os.environ.get("CLOUD_PLACE"):  # exploration: "AX,AY,MAG,MAGB,LEAN"
+    AX, AY, MAG, MAGB, LEAN = map(float, os.environ["CLOUD_PLACE"].split(","))
 # the cloud stands in the vertical plane through the zenith and this plate
 # point (in the HDRI: the vertical through the crown)
 FX, FY = AX, AY
@@ -141,7 +146,9 @@ x0, x1 = int(np.floor(uu.min())) - 4, int(np.ceil(uu.max())) + 4
 y0, y1 = max(0, int(np.floor(vv.min())) - 4), min(EH, int(np.ceil(vv.max())) + 400)
 win = hdr[y0:y1, x0:x1, ::-1].astype(np.float32).copy()  # RGB
 del hdr
-print(f"window {x1 - x0}x{y1 - y0} px of the {EW}x{EH} HDRI")
+scale = np.hypot(np.gradient(uu, axis=1), np.gradient(vv, axis=1))
+print(f"window {x1 - x0}x{y1 - y0} px of the {EW}x{EH} HDRI; HDRI px per plate px "
+      f"{np.median(scale):.2f} (p5 {np.percentile(scale, 5):.2f}, p95 {np.percentile(scale, 95):.2f})")
 # Power lines cross the HDRI's sky and the foot of the cloud: thin, darker than
 # what is either side of them (a black-hat in log luminance over a 9 px
 # closing), long and nearly level. Found in the window and filled with a
@@ -154,14 +161,14 @@ line = cv2.morphologyEx(line, cv2.MORPH_OPEN, np.ones((1, 41), np.uint8))
 line = cv2.dilate(line, np.ones((5, 9), np.uint8)) > 0
 print(f"power lines: {line.mean() * 100:.2f}% of the window")
 win = push_pull(win, (~line).astype(np.float32)) * line[..., None] + win * (~line)[..., None]
-# The base. Under the tower, in the HDRI, stand trees, a lamp post and a fence:
-# in each of its columns, the highest thing that is neither sky nor cloud (dark,
-# and not blue), its envelope smoothed across the columns. The tallest tree
-# reaches ~15 deg, halfway up the tower, so the cloud is given a flat base, as
-# a cumulus has (its condensation level), at BASE deg or just above the
-# envelope, whichever is higher: an edge broken up by the cloud's own texture,
-# and shaded toward it (a cumulus's base is in its own shadow).
-BASE, BASE_SHADE = 15.6, 7.0
+# The ground. Under the tower, in the HDRI, stand trees, a lamp post and a
+# fence: in each of its columns, the highest thing that is neither sky nor
+# cloud (dark, and not blue), its envelope smoothed across the columns. The
+# tallest tree reaches ~16 deg, halfway up the tower. Nothing at or under it
+# is used: the tower is placed so that its foot, and the HDRI's tree line with
+# it, is below the bottom of the frame, and the only cloud on screen is its
+# sunlit upper tower. (Should the envelope come into the frame, the cloud is
+# cut off just above it.)
 wq = (win[..., 2] - win[..., 0]) / np.maximum(win[..., 2] + win[..., 0], 1e-6)
 wY = win @ np.array([0.2126, 0.7152, 0.0722], np.float32)
 rowY = np.median(wY[: max(8, (vv.min() - y0).astype(int) + 8)], axis=0)  # the sky high above, per column
@@ -173,27 +180,25 @@ k = max(3, int(win.shape[1] * 0.02))
 top = cv2.erode(top[None], np.ones((1, 2 * k + 1), np.float32))[0]
 top = cv2.GaussianBlur(top[None], (0, 0), 1.5 * k, borderType=cv2.BORDER_REPLICATE)[0]
 topEl = 90 - (top + y0 + 0.5) / EH * 180  # elevation of that envelope, deg
+fx = np.clip(uu - x0, 0, win.shape[1] - 1).astype(np.int32)
+footEl = topEl[fx]
 if os.environ.get("CLOUD_DEBUG"):
     t = np.clip(win / np.percentile(win, 99.5), 0, 1) ** (1 / 2.2)
     t[ground] = t[ground] * 0.5 + np.array([0.5, 0, 0], np.float32)
     for xx in range(0, win.shape[1], 2):
         t[min(int(top[xx]), win.shape[0] - 1), xx] = (0, 1, 0)
+    # the frame's outline, in yellow
+    edge = np.zeros((H, W), bool)
+    edge[:3], edge[-3:], edge[:, :3], edge[:, -3:] = True, True, True, True
+    px = np.clip((uu[edge] - x0).astype(int), 0, win.shape[1] - 1)
+    py = np.clip((vv[edge] - y0).astype(int), 0, win.shape[0] - 1)
+    t[py, px] = (1, 1, 0)
     cv2.imwrite(os.environ["CLOUD_DEBUG"], (t[:, :, ::-1] * 255).astype(np.uint8)[::3, ::3])
-fx = np.clip(uu - x0, 0, win.shape[1] - 1).astype(np.int32)
-footEl = topEl[fx]
-
-# Below the base, the HDRI has trees, not cloud. A towering cumulus seen from
-# under it has no visible base in this corner of the frame: its body runs on
-# down out of the frame, in its own shade. So under the base (just above the
-# tree envelope) the HDRI is read mirrored up about that line: the billows
-# above it carry on below it, continuous across it, and the shade (below)
-# hides that they repeat.
-E0 = np.maximum(BASE, footEl + 0.6) + 0.8
-els_ = np.where(el < E0, 2 * E0 - el, el)
-vv = (0.5 - np.radians(els_) / np.pi) * EH - 0.5
 img = cv2.remap(win, (uu - x0).astype(np.float32), (vv - y0).astype(np.float32), cv2.INTER_LANCZOS4,
                 borderMode=cv2.BORDER_REFLECT)
 img = np.maximum(img, 1e-5)
+below = el < footEl + 0.3
+print(f"tree line in frame: {below.mean() * 100:.2f}% of the frame")
 
 
 # ---------------------------------------------------------------- matte
@@ -201,7 +206,7 @@ R_, G_, B_ = img[..., 0], img[..., 1], img[..., 2]
 q = (B_ - R_) / (B_ + R_)
 Y = 0.2126 * R_ + 0.7152 * G_ + 0.0722 * B_
 # clear sky: blue enough, and smooth
-clear = q > 0.30
+clear = (q > 0.30) & ~below
 # fit the clear sky's q and colour with a low-order surface in the plate
 def fit(v, m, deg=3):
     sx, sy = xs[m][::7] / W, ys[m][::7] / H
@@ -212,115 +217,116 @@ def fit(v, m, deg=3):
     return sum(ci * X ** i * Yy ** j for ci, (i, j) in zip(c, [(i, j) for i in range(deg + 1) for j in range(deg + 1 - i)]))
 qs = fit(q, clear)
 sky = np.stack([fit(img[..., k], clear) for k in range(3)], -1)
-QC = 0.03  # the cloud's own blue excess (its shade sides, lit by the sky, are a little blue)
+skyY = sky @ [0.2126, 0.7152, 0.0722]
+# The coverage, soft: how far a pixel's blue excess has fallen from the clear
+# sky's (fitted round it) toward the cloud's own (QC: its shade sides, lit by
+# the sky, are a little blue), as a fraction, at the HDRI's own resolution. No
+# erosion and no tightening: where a crown thins into the blue, its coverage
+# thins with it, and its colour (unmixed below) is the cloud's, not the
+# HDRI's sky, so over the cobalt the edge is cloud fading into cobalt, with no
+# pale band of a third colour between them.
+QC = 0.03
 a = np.clip((qs - q) / np.maximum(qs - QC, 0.05), 0, 1)
 # and brighter than the sky behind it, or it is not cloud (the HDRI's sky
 # deepens away from the horizon; a darker, less blue pixel there is haze)
-a *= np.clip((Y / (sky @ [0.2126, 0.7152, 0.0722]) - 0.95) / 0.35, 0, 1)
-a = cv2.GaussianBlur(a.astype(np.float32), (0, 0), 0.7)
-a = np.clip((a - 0.04) / 0.9, 0, 1)
+a *= np.clip((Y / skyY - 0.97) / 0.25, 0, 1)
+a = cv2.GaussianBlur(a.astype(np.float32), (0, 0), 0.6)
+a = np.clip((a - 0.03) / 0.95, 0, 1)
 # the anvil's far tail, streaming off to the left of the tower, thins out
 # into the blue (as an anvil's cirrus does) between TAIL0 and TAIL1 deg
 TAIL0, TAIL1 = -19.0, -29.0
 tail = np.clip((np.degrees(az) - TAIL1) / (TAIL0 - TAIL1), 0, 1)
 tail = tail * tail * (3 - 2 * tail)
 # The tower is opaque. Its shade side, lit by the sky, is a little blue, so the
-# blue-excess matte reads it as part clear (a ~0.6-0.9, noisy): the sky showed
-# through the body, and the body's colour, untrusted, went to the membrane, a
-# flat grey-blue haze with no billows. The body is solid: the matte's
-# silhouette (closed, its holes filled), drawn in from the edge so the edge
-# keeps its own soft fringe.
+# blue-excess matte reads it as part clear (a ~0.6-0.9, noisy): the body is
+# made solid inside its silhouette (closed, its holes filled), drawn well in
+# from the edge so the edge keeps the soft coverage above.
 ell = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-sil = cv2.morphologyEx((a > 0.4).astype(np.uint8), cv2.MORPH_CLOSE, ell(12))
-outside = sil.copy()
-cv2.floodFill(outside, np.zeros((H + 2, W + 2), np.uint8), (0, 0), 2)
-sil = (outside != 2).astype(np.uint8)
-body = cv2.GaussianBlur(cv2.erode(sil, ell(7)).astype(np.float32), (0, 0), 3)
+sil = cv2.morphologyEx((a > 0.4).astype(np.uint8), cv2.MORPH_CLOSE, ell(8))
+# (a hole is sky that reaches no edge of the frame: the gap between two
+# turrets that runs out of the frame's side is sky, not a hole)
+n, lab, _, _ = cv2.connectedComponentsWithStats(1 - sil, connectivity=4)
+edge = np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
+sil = (~np.isin(lab, edge) | (sil > 0)).astype(np.uint8)
+# and only the tower: the HDRI's small wisps and fragments round it, apart
+# from it, would be a second vocabulary of cloud in the sky
+n, lab, st, _ = cv2.connectedComponentsWithStats(sil, connectivity=8)
+keep = [i for i in range(1, n) if st[i, cv2.CC_STAT_AREA] > 20000]
+tower = cv2.dilate(np.isin(lab, keep).astype(np.uint8), ell(6)).astype(np.float32)
+a = a * cv2.GaussianBlur(tower, (0, 0), 2)
+sil = sil * np.isin(lab, keep)
+body = cv2.GaussianBlur(cv2.erode(sil, ell(6)).astype(np.float32), (0, 0), 2)
 a = np.maximum(a, body)
-# Its edge, a sub-pixel feather (as the sky matte's): wider where the edge is
-# the shaded underside (soft, the cloud thinning into the light under it) than
-# on the sunlit crowns (crisp, as a cumulus's turrets are).
+# the tree line, should it come into the frame: the cloud stops above it
+a = a * np.clip((el - footEl - 0.3) / 0.5, 0, 1)
+a = np.clip(a * tail, 0, 1).astype(np.float32)
 Ys = cv2.GaussianBlur(Y.astype(np.float32), (0, 0), 6) / np.percentile(Y[a > 0.9], 99.5)
 soft = 1 - np.clip((Ys - 0.45) / 0.3, 0, 1)
-a = a + (cv2.GaussianBlur(a, (0, 0), 1.6) - a) * (0.35 + 0.65 * soft)
-a = np.clip(a * tail, 0, 1)
-# Then the edge is drawn in by ERODE px. Its outermost pixel or two is where
-# the HDRI's own sky is mixed into the cloud (and where the plate's grade and
-# the film would draw a pale fringe of it round the tower against the
-# cobalt): eroded, the matte's ramp sits on cloud, and the only light past the
-# edge is the film's warm halation ring.
-ERODE = 1.5
-cross = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-for _ in range(int(ERODE)):
-    a = cv2.erode(a, cross)
-if ERODE % 1:
-    a = a + (cv2.erode(a, cross) - a) * (ERODE % 1)
-# and its ramp tightened about its half line (magnified MAG times, the HDRI's
-# own soft edge spans ~5 px here, a pale band of cloud over cobalt)
-a = np.clip((a - 0.5) * 1.8 + 0.5, 0, 1).astype(np.float32)
-# Under the base line (mirrored, above), and up the lower body, the tower is in
-# its own shadow, lit only by the sky: shaded, never faded out.
-under = np.clip((E0 + BASE_SHADE - el) / (BASE_SHADE + 3.0), 0, 1)
 
 # the cloud's own colour, unmixed against the sky behind it
+# (pixel = a x cloud + (1 - a) x sky): the comp lays it over the regraded
+# cobalt at coverage a, so none of the HDRI's sky comes with it
 am = np.maximum(a, 1e-3)[..., None]
 C = (img - (1 - a[..., None]) * sky) / am
 C = np.clip(C, 0, None)
-# the colour is trusted only well inside the cloud; its edge (where the
-# unmixing amplifies any error in the fitted sky into a dark rim) takes the
-# colour of the cloud just inside it
-w = np.clip((a - 0.6) / 0.3, 0, 1).astype(np.float32)
-# (the rim itself is a few px of darker, bluer pixels where the cloud thins:
-# kept out, so the edge never draws a dark line round the cloud)
-w = cv2.erode(w, ell(5))
+# the colour is trusted only where the cloud is most of the pixel; thinner
+# than that (where the unmixing amplifies any error in the fitted sky), it
+# takes the colour of the cloud just inside it
+w = np.clip((a - 0.45) / 0.3, 0, 1).astype(np.float32)
+w = cv2.erode(w, ell(1))
 C = np.where((w > 0)[..., None], C, 0)
 Cf = push_pull(C.astype(np.float32), w)
 C = C * w[..., None] + Cf * (1 - w[..., None])
-# and the last few px inside the edge (where the unmixing still darkens the
-# rim, drawing a grey line round the tower) take the colour from further in
-w2 = np.clip((cv2.distanceTransform((a > 0.5).astype(np.uint8), cv2.DIST_L2, 5) - 3.0) / 4.0, 0, 1).astype(np.float32)
-C = C * w2[..., None] + push_pull(C.astype(np.float32), w2) * (1 - w2[..., None])
-# Along the underside's edge the HDRI's cloud thins over its sky and over the
-# tree tops and wires below it: streaks darker than the cloud round them,
-# which the grade would draw as soot on the tower's flank. Within ~40 px of
-# the edge nothing is let fall far below its neighbourhood.
-band = np.clip(1 - (cv2.distanceTransform((a > 0.5).astype(np.uint8), cv2.DIST_L2, 5) - 40) / 20, 0, 1)[..., None]
-Cb = cv2.GaussianBlur(C.astype(np.float32), (0, 0), 16)
+# Along a shaded underside's edge (the anvil shelf's) the HDRI's cloud thins
+# over its sky: streaks darker than the cloud round them, which the grade
+# would draw as soot. Within ~16 px of such an edge nothing is let fall far
+# below its neighbourhood. (Not on the sunlit crowns: their folds are their
+# relief.)
+band = np.clip(1 - (cv2.distanceTransform((a > 0.5).astype(np.uint8), cv2.DIST_L2, 5) - 16) / 10, 0, 1)
+band = (band * soft)[..., None]
+Cb = cv2.GaussianBlur(C.astype(np.float32), (0, 0), 10)
 C = C + (np.maximum(C, Cb) - C) * band
-C = C * (1 - 0.3 * under ** 1.5)[..., None]
 # Specks: a bird (or the like) caught in the HDRI against the tower, dark
 # against everything round it and small. Filled with a membrane of the cloud
 # round it, so it never shows as a dot on the clean sky's subject.
 lC = np.log(np.maximum(C @ np.array([0.2126, 0.7152, 0.0722]), 1e-4)).astype(np.float32)
-dark = ((lC < cv2.GaussianBlur(lC, (0, 0), 12) - 0.18) & (a > 0.3)).astype(np.uint8)
+dark = ((lC < cv2.GaussianBlur(lC, (0, 0), 8) - 0.25) & (a > 0.3)).astype(np.uint8)
 n, lab, st, _ = cv2.connectedComponentsWithStats(dark, connectivity=8)
-speck = np.isin(lab, [i for i in range(1, n) if st[i, cv2.CC_STAT_AREA] < 6000])
-speck = cv2.dilate(speck.astype(np.uint8), ell(4)) > 0
+speck = np.isin(lab, [i for i in range(1, n) if st[i, cv2.CC_STAT_AREA] < 400])
+speck = cv2.dilate(speck.astype(np.uint8), ell(3)) > 0
 print(f"specks: {n - 1} dark spots, {speck.sum()} px filled")
 C = np.where(speck[..., None], push_pull(C.astype(np.float32), (~speck).astype(np.float32)), C)
 
 # ---------------------------------------------------------------- tone
+RELIEF_FOLD, RELIEF_BILLOW = 1.2, 1.5
 CY = C @ np.array([0.2126, 0.7152, 0.0722])
 ref = np.percentile(CY[a > 0.9], 99.5)
 x = CY / ref
-# The shade side's billows are faint in the HDRI (low contrast, in skylight):
-# their local contrast is lifted there (not on the sunlit crowns, already
-# crisp), so the body keeps its texture instead of going to a flat mass.
+# Relief. Cut at its own resolution the tower has its cauliflower drawing,
+# but in radiance it is low in contrast (the HDRI's sun is ~75 degrees round,
+# the tower is lit half from the side) and the soft shoulder below would
+# flatten its sunlit half to one white. So each turret is set against the
+# ones round it (lb - lB: the folds where one shades the next) and each
+# billow keeps its own light and shade (ls - lb), everywhere, a little more in
+# the shade side, where the HDRI's billows are faintest. (Not along the anvil
+# shelf's underside, where it would bring the streaks back.)
 lx = np.log(np.maximum(x, 1e-4)).astype(np.float32)
-lb = cv2.GaussianBlur(lx, (0, 0), 14)
-inshade = 1 - np.clip((np.exp(lb) - 0.35) / 0.4, 0, 1)
-# and the broader self-shadow between the billows (the folds where one
-# turret shades the next) deepened with it, so the shade side has volume
+ls = cv2.GaussianBlur(lx, (0, 0), 0.7)  # its drawing, not the HDRI's noise
+lb = cv2.GaussianBlur(lx, (0, 0), 10)
 lB = cv2.GaussianBlur(lx, (0, 0), 48)
-# (not along the edge, where it would bring the streaks back)
+inshade = 1 - np.clip((np.exp(lb) - 0.35) / 0.4, 0, 1)
 inshade = inshade * (1 - 0.8 * band[..., 0])
-x = np.exp(lx + (lx - lb) * 1.25 * inshade + (lb - lB) * 0.6 * inshade)
-# soft shoulder: the sunlit crowns at ~0.99 and rolling off, never clipped;
-# the shade well down (~0.6 of the tops), so the tower has its volume
-SH = 0.995
-KS = 2.4
-GX = 0.72
-disp = SH * (1 - np.exp(-KS * np.maximum(x, 0) ** GX)) / (1 - np.exp(-KS))
+x = np.exp(lB + (lb - lB) * (RELIEF_FOLD + 1.2 * inshade) + (ls - lb) * (RELIEF_BILLOW + 2.5 * inshade))
+x = x / np.percentile(x[a > 0.5], 99.97)  # the brightest crown at 1
+print("relief x: " + "  ".join(f"p{p} {np.percentile(x[a > 0.9], p):.3f}" for p in (1, 5, 10, 25, 50, 75, 95)))
+# Over a floor: the live grade (cloudGrade) holds everything under 0.5 at 0.5
+# and stretches the shade under ~0.58 hard, so the bake keeps the deepest
+# shade just above FLOOR and spreads the rest, nearly linearly, up to the
+# brightest crown at SH (nothing clipped: the relief's own maximum is 1), so
+# the turrets' relief lands in the sunlit run, where the grade draws it.
+SH, FLOOR = 0.995, 0.5
+GX = 1.15
+disp = FLOOR + (SH - FLOOR) * np.clip(x, 0, 1) ** GX
 chroma = C / np.maximum(CY, 1e-6)[..., None]
 # keep the HDRI's own tint, a little softened (the live grade sets the tint)
 chroma = 1 + (chroma - 1) * 0.6
