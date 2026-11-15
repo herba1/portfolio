@@ -382,16 +382,34 @@ void main(){
   // like cobwebs. Over the tower they come from a coarse mip, so the light
   // turns with its faces, and each member, round, wraps the light further.
   // The walls' come from their own bake (tools/depth/bakes/passes/facades.py),
-  // each face flattened to one plane: MoGe's wander inside a face, a tenth of
-  // a radian, is the whole key when the sun stands edge-on to the walls, and
-  // it lit the left building's louvre face in soft white blots, cloud shapes
-  // that read as the dome seen through the concrete. The folds between faces
-  // (a soffit, a reveal, the louvre's corner) are kept.
+  // each face fitted with one smooth field: MoGe's wander inside a face, a
+  // tenth of a radian, is the whole key when the sun stands edge-on to the
+  // walls, and it lit the facades in soft blots, cloud shapes that read as
+  // the dome seen through the concrete. The folds between faces (a soffit,
+  // a reveal, the louvre's corner) are kept. Every wall pixel takes the bake
+  // whole: a share of MoGe's own normal kept wherever the depth was not
+  // quite flat (most of a facade, at the depth's resolution) carried its
+  // wander back into the key. MoGe comes back only inside a real fold.
   float bend = (dp.b - 0.5) * 2.0;
   float plane = 1.0 - smoothstep(0.03, 0.08, abs(bend));
-  vec3 n = texture(uNormal, uv).rgb * 2.0 - 1.0;
-  n = mix(n, texture(uFacade, uv).rgb * 2.0 - 1.0, (1.0 - tower) * mix(0.6, 1.0, plane));
-  n = normalize(mix(n, textureLod(uNormal, uv, 4.5).rgb * 2.0 - 1.0, tower * 0.9));
+  float fold = smoothstep(0.08, 0.2, abs(bend)) * (1.0 - tower);
+  vec3 nM = texture(uNormal, uv).rgb * 2.0 - 1.0;
+  vec3 nF = texture(uFacade, uv).rgb * 2.0 - 1.0;
+  // Edge-on, what is left of the bake's own wander is still the whole key:
+  // as the sun comes within ten degrees of a face, the face's normal is
+  // read sixteen times coarser, so the key runs as one smooth gradient
+  // across it. Not at a corner or a reveal, where the coarse read and the
+  // sharp one part: those keep their step.
+  vec3 nF4 = textureLod(uFacade, uv, 4.0).rgb * 2.0 - 1.0;
+  float edge = length(nF - nF4);
+  float graze = (1.0 - smoothstep(0.1, 0.2, abs(dot(normalize(nF4), uSun)))) * (1.0 - smoothstep(0.015, 0.04, edge));
+  nF = mix(nF, nF4, graze);
+  // A fold is where the depth steps and the bake turns with it: the depth's
+  // bend alone runs wide of a fixture, and kept MoGe in a ring round it.
+  fold *= smoothstep(0.03, 0.1, edge);
+  vec3 nWall = mix(nF, nM, 0.4 * fold);
+  vec3 nTower = mix(nM, textureLod(uNormal, uv, 4.5).rgb * 2.0 - 1.0, 0.9);
+  vec3 n = normalize(mix(nWall, nTower, tower));
   float wrap = mix(0.08, 0.4, tower);
 
   // No cast shadows: the depth map only holds what the camera saw, so a
@@ -710,7 +728,7 @@ export async function createPasses(host) {
   tex(lattice, 5, "uLattice", true);
   tex(steel, 7, "uSteel", true);
   tex(wall, 9, "uWall", true);
-  tex(facade, 12, "uFacade", false);
+  tex(facade, 12, "uFacade", true);
 
   // The sky dome's two layers: azimuth repeats, and anisotropic filtering
   // where the GPU has it, since the equirect stretches across toward the
