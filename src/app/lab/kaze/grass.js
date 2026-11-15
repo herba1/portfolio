@@ -374,8 +374,10 @@ export function buildGrass() {
   put(150, "mid", 0.15, 0.45, 0.9, 0.1, 1.0, 1.4);
   // a low fringe along the bottom edge, the mass the rest rises out of
   put(420, "mat", 0.06, 0.3, 1.1, 0.0, 0.6, 1.2);
-  // one that crosses the sun, in from the left edge, for the halation (its
-  // azimuth is the sun's, seen from the zenith)
+  // one that once crossed the sun, in from the left edge (its azimuth is the
+  // sun's, seen from the zenith). It read as a stray line through the open
+  // sun corner, so it is built into a builder that is never drawn: it still
+  // draws its numbers from R, and the rest of the field stays where it was
   items.push({ kind: "sun", D: 0.34, phi: -79, L: 0.9 });
   items.sort((p, q) => q.D - p.D);
   for (const it of items) {
@@ -392,7 +394,7 @@ export function buildGrass() {
     const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep * 0.3), lin(0x7a7434), dry).map((c) => c * vary);
     // mostly a droop outward, along its own line; a third of them across it
     const across = R() < 0.35;
-    blade(rest, R, {
+    blade(it.kind === "sun" ? builder(cam) : rest, R, {
       root,
       az: (it.phi + (R() - 0.5) * 3) * DEG,
       lean: 0.01 + 0.07 * R(),

@@ -37,8 +37,10 @@ for the new lens:
 - The open sky is drawn new, by each pixel's true angle from the zenith
   through the lens: pale cyan (hue ~200) at the bottom corners to deep cobalt
   (hue ~216 here, ~210 once the film has it) overhead.
-- The sun, top left, is the same tight warm white diffusion bloom as the
-  print's, laid in by distance from it, the cobalt saturated nearly up to it.
+- The sun, top left, is a smooth radial bloom laid in as light by distance
+  from it: a pale cyan-white core held under the clip, a halo, and a wide
+  skirt that pales the top left quarter into the cobalt, with no disc edge
+  and no grey ring.
 
   python tools/depth/bakes/kaze/sky_tower.py [print.webp] [out.webp]
 """
@@ -74,9 +76,13 @@ HUE_LO, HUE_HI = 200.0, float(os.environ.get("HUE_HI", 216))
 SAT_LO, SAT_HI = 0.40, 0.74
 VAL_LO, VAL_HI = 0.88, 0.47
 THETA_LO = float(os.environ.get("THETA_LO", 58))  # deg from the zenith where the gradient is palest
-BLOOM = float(os.environ.get("BLOOM", 190))  # px: the sun's diffusion, its e-folding distance
+BLOOM = float(os.environ.get("BLOOM", 210))  # px: the sun's diffusion, its halo's e-folding distance
+# the bloom's light (linear): the core a pale cyan-white, the halo and the
+# wide skirt the paler, cyan side of the sky round the sun
+SUN_CORE = np.array([0.93, 0.98, 1.0], np.float32)
+SUN_HALO = np.array([0.62, 0.84, 1.0], np.float32)
+SUN_SKIRT = np.array([0.42, 0.7, 1.0], np.float32)
 LUM = np.array([0.2126, 0.7152, 0.0722], np.float32)
-WARM_DOME = np.array([1.044, 0.997, 0.899], np.float32)
 
 
 def enc(c):
@@ -117,21 +123,22 @@ def open_sky(U, V):
     hue = HUE_LO + (HUE_HI - HUE_LO) * g
     sa = SAT_LO + (SAT_HI - SAT_LO) * g
     va = VAL_LO + (VAL_HI - VAL_LO) * g
-    # the sun's bloom, by distance from it (px): value up ahead of
-    # saturation's fall, so it rolls from cobalt through light blue to warm
-    # white with no grey ring
-    d = np.hypot((U - SUN[0]) * W, (V - SUN[1]) * H)
-    bloom = np.exp(-d / BLOOM)
-    bv = bloom ** 0.8
-    bs = bloom ** 1.44
-    sa = sa * (1 - bs) + 0.06 * bs
-    va = va * (1 - bv) + 0.97 * bv
     hsv = np.stack([hue, sa, va], -1).astype(np.float32)
-    sky = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-    wb = (bs * 0.85)[..., None]
-    warm = np.clip(enc(dec(sky @ LUM)[..., None] * WARM_DOME), 0, 1)
-    sky = sky * (1 - wb) + warm * wb
-    skyl = dec(sky)
+    skyl = dec(cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB))
+    # the sun's bloom, by distance from it (px), added as light (linear), not
+    # mixed in as a colour: a gaussian core, overexposed to a pale cyan-white
+    # and held just under the clip, an exponential halo, and a wide
+    # Lorentzian skirt that pales the whole top left quarter, so the cobalt
+    # runs smoothly up into the light. Each term is smooth and the sum only
+    # ever adds a near-white to the blue, so no grey ring forms (mixing the
+    # saturation down ahead of the value printed one) and there is no disc
+    # edge anywhere; the engine lays the hot core over it in float.
+    d = np.hypot((U - SUN[0]) * W, (V - SUN[1]) * H)
+    core = np.exp(-0.5 * (d / (0.4 * BLOOM)) ** 2)
+    halo = np.exp(-d / BLOOM)
+    skirt = 1 / (1 + (d / (3.6 * BLOOM)) ** 2)
+    skyl = (skyl + (0.3 * core)[..., None] * SUN_CORE + (0.5 * halo)[..., None] * SUN_HALO
+            + (0.16 * skirt)[..., None] * SUN_SKIRT)
     return skyl
 
 

@@ -175,16 +175,16 @@ void main() {
   // modelling, not a veil.
   float dome = smoothstep(0.5, 0.85, Yh) * (1.0 - blue);
   sky *= 1.0 + DOME * dome * dome;
-  // The sun, in the frame's top left corner: a small hot core and a smooth
-  // exponential roll-off, three widths summed, warm white (the print's own
-  // #F5F0E1 rather than an orange), added over the sky with no edge
-  // anywhere for a ring to form on. Tight: the bake lays only a narrow
-  // diffusion into the sky round it (sky_tower.py, BLOOM), and the lobes
-  // here are a third of the old reach, so the cobalt runs saturated almost
-  // up to the sun instead of a milky veil over the corner. The shoulder
-  // below carries the core the rest of the way, under the clip.
-  vec3 sunC = vec3(1.0, 0.94, 0.8);
-  sky += sunC * (0.34 * exp(-r / 0.006) + 0.18 * exp(-r / 0.018) + 0.05 * exp(-r / 0.055));
+  // The sun, in the frame's top left corner, the open corner of the frame:
+  // the bake lays a wide, smooth bloom into the sky round it (sky_tower.py,
+  // open_sky), and here, in float, the overexposure over it: a small
+  // gaussian rounding the peak (an exponential's cusp alone, at a few
+  // pixels, printed a small hard disc) under two exponential lobes, so the
+  // light climbs steadily into the core with no plateau edge, pale
+  // cyan-white, added over the sky with nothing for a ring to form on. The shoulder below rolls the
+  // core off smoothly toward the film's white instead of clipping it.
+  vec3 sunC = vec3(0.94, 0.98, 1.0);
+  sky += sunC * (0.3 * exp(-0.5 * (r * r) / (0.014 * 0.014)) + 0.3 * exp(-r / 0.03) + 0.06 * exp(-r / 0.12));
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:

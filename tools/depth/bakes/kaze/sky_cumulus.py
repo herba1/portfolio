@@ -1,4 +1,4 @@
-"""Kaze sky, looking straight up: a field of towering cumulus seen from below.
+"""Kaze sky, looking straight up: one towering cumulus seen from below.
 
 sky_tower.py stood the HDRI print's cumulus bank up as a tower by turning a
 flat photograph, and it stayed that: a flat cut-out laid behind the grass,
@@ -67,8 +67,14 @@ corner, as in kazeEngine.js) and toward the zenith:
   instead of cutting against it;
 - a little air between: the far masses lean toward the sky behind them.
 
+The frame has one subject: the hero tower on the right, glowing behind the
+dark hero culm, with a small far cloud low in the middle under it and
+nothing toward the sun, so the top left quarter is an open corner where the
+sun's bloom runs clean into the cobalt (TOWERS).
+
 The open sky and the sun's bloom are sky_tower.py's (open_sky). The cloud
-is exposed by its sunlit tops (WHITE at PCT 90), so the shade below them
+is exposed by its sunlit tops (GAIN, pinned to what WHITE at PCT 90
+measured over the old four-mass field), so the shade below them
 keeps its own value instead of being lifted toward the median, and its
 brightest domes roll off under the clip through a long shoulder (KNEE to
 TOP, rational, so the sunlit faces keep their lobe-by-lobe steps rather
@@ -136,6 +142,7 @@ FRK = float(os.environ.get("FRK", 1.2))       # and how much of it
 WHITE = float(os.environ.get("WHITE", 3.0))
 DESAT = float(os.environ.get("DESAT", 0.5))  # how far the shoulder whitens
 PCT = float(os.environ.get("PCT", 90.0))  # the cloud's 90th percentile is exposed to WHITE (linear)
+GAIN = float(os.environ.get("GAIN", 1.353))  # unless the exposure is pinned (0: by PCT)
 
 # The masses: azimuth (deg, 0 straight ahead = the frame's bottom centre,
 # east positive, -90 west, the sun's side); horizontal distance of the axis
@@ -144,17 +151,16 @@ PCT = float(os.environ.get("PCT", 90.0))  # the cloud's 90th percentile is expos
 TOWERS = [
     # the hero, right: front-lit (the sun is behind it, over your left
     # shoulder), its flat base low on the right edge, its domes climbing
-    # toward the zenith
+    # toward the zenith. The one subject of the frame: one glowing tower
+    # behind the dark hero culm, and from the sun a clean cobalt diagonal
     dict(az=57, dist=1.55, zb=1.3, zt=4.65, rb=0.5, rt=0.32, lean=0.3, seed=1, foot=0.8),
-    # low in the middle: side-lit from the left, its domes rising toward
-    # the frame's centre
-    dict(az=-6, dist=2.05, zb=1.6, zt=3.65, rb=0.5, rt=0.3, lean=0.25, seed=2),
-    # left, toward the sun: backlit, its shaded face toward you and its
-    # edges silvered; its domes stop short of the sun
-    dict(az=-51, dist=1.68, zb=1.4, zt=2.75, rb=0.42, rt=0.28, lean=0.15, seed=3),
-    # behind your head: domes just over the frame's top right
-    dict(az=102, dist=2.1, zb=1.5, zt=6.4, rb=0.55, rt=0.35, lean=0.0, seed=4),
+    # low in the middle, small and far: a subordinate cloud side-lit from
+    # the left, its domes just clearing the field, well under the hero
+    dict(az=2, dist=2.25, zb=1.6, zt=3.75, rb=0.36, rt=0.24, lean=0.2, seed=2),
 ]
+# (No mass toward the sun: the frame's top left quarter is the sun's open
+# corner, its bloom running clean into the cobalt. A backlit tower there
+# printed as a big grey-lavender mass with only a thin silver rim.)
 
 
 def unit(v):
@@ -765,6 +771,13 @@ def main():
     print("cloud percentiles 50/90/99/99.7/max", [round(float(np.percentile(mx, q)), 3) for q in (50, 90, 99, 99.7, 100)])
     pk = np.percentile(mx, PCT) if solid.any() else 1.0
     gain = WHITE / pk
+    # GAIN pins it: measured by percentile over the field it was, and with
+    # the shaded masses gone (the backlit one toward the sun, the one behind
+    # your head) the hero's own sunlit faces alone set it and printed it
+    # half a stop down. Pinned to the gain the field measured, the hero
+    # keeps its print
+    if GAIN > 0:
+        gain = GAIN
     print(f"exposure gain {gain:.3f}")
     rad *= gain
     # a print's shoulder on the cloud: the brightest roll off to warm white.
