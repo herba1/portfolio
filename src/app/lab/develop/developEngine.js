@@ -33,7 +33,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    cable only in patches: a front through its depth broke each wire into
 //    tapered slivers and left dark fragments floating in the sky.) The
 //    front's place along it is eased (REACH_GAMMA), so the wood is up
-//    early and the cables spend longer drawing out of the knot.
+//    early and the cables spend longer drawing out of the knot. Past the
+//    knot a cable is not grown (an end stopping short in open sky read as a
+//    photograph cut out with scissors): the spans fall into a few webs of
+//    crossing cables (reach.png B), each brought up whole, on the plate's
+//    own wire, out to the frame's edge, once every cable leading into it has
+//    grown out to it.
 //
 // A front sweeps that key, far to near (press on the sky) or near to far
 // (press on the pole). Behind it, the photograph. Ahead of it:
@@ -50,8 +55,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    lifted or offset, never drawn as a faint copy of itself. Ahead of the
 //    front there is only the sky behind it; at the front it comes up out of
 //    that sky, its density building in log light over a feather of ten
-//    device pixels of its length, so each cable grows out of the
-//    pole as one unbroken stroke with a short soft end.
+//    device pixels of its length, so each member grows out of the
+//    pole as one unbroken stroke with a short soft end, and each span past
+//    the knot comes up whole.
 // The front itself is the film's halation: a thin amber line along the
 // depth's iso-band only, a few device pixels wide, weighted by the light
 // under it, so it glows where it crosses cloud, all but vanishes over the
@@ -94,6 +100,11 @@ const SIGMA = 0.016; // the front's band at rest (speed widens it by uSig / SIGM
 const REACH_GAMMA = 1.8;
 // The soft end of a growing member, in device px of its length.
 const FEATHER_PX = 10;
+// Past the knot a span is not grown but comes up whole, out to the frame's
+// edge (reach.png B, the bake's span_of), its density building over this
+// much of the structure's key from the moment the cable's growing end
+// reaches it: a cable never ends in mid-air short of the frame.
+const SPAN_BAND = 0.008;
 const SKY_BAND = 0.12; // sky band width, in the sky's own key (0..1)
 const SKY_PX = 80; // ...and never narrower on screen than this, in print px
 const HALO = 0.22; // the front's halation line over cloud, linear
@@ -344,6 +355,7 @@ const float GRAIN = ${f(GRAIN)};
 const float SIGMA = ${f(SIGMA)};
 const float REACH_GAMMA = ${f(REACH_GAMMA)};
 const float FEATHER_PX = ${f(FEATHER_PX)};
+const float SPAN_BAND = ${f(SPAN_BAND)};
 const float SKY_BAND = ${f(SKY_BAND)};
 const float SKY_PX = ${f(SKY_PX)};
 const float BAND = ${f(BAND)};
@@ -554,6 +566,20 @@ void main() {
   // soft end of a stroke, never a taper), widened with the hand's speed.
   float wF = max(0.002, FEATHER_PX * fwidth(dF)) * uSig / SIGMA;
   float devF = 1.0 - smoothstep(-0.3 * wF, 0.7 * wF, dF);
+  // A span past the knot (reach.png B: 0 inside it, else 1 + 254 x the
+  // reach where its path leaves the knot, read unfiltered) is the plate's
+  // own wire out to the frame's edge, never a growing end in open sky: it
+  // does not grow along its reach at all but comes up whole, in density,
+  // once every cable leading into it has grown out to it. Its key is flat
+  // along it, so the front's line never runs on it.
+  float spanB = texelFetch(uReach, ivec2(iuv * vec2(textureSize(uReach, 0))), 0).b * 255.0;
+  // (From the far sky in, the cables already grow from the frame's edges
+  // inward, anchored there, so they keep their reach.)
+  float isSpan = step(0.5, spanB) * step(uDir, 0.0);
+  float dS = ahead(toFg(1.0 - pow(max(spanB - 1.0, 0.0) / 254.0, REACH_GAMMA)));
+  float devS = 1.0 - smoothstep(-SPAN_BAND * uSig / SIGMA, 0.0, dS);
+  devF = mix(devF, devS, isSpan);
+  float dLine = mix(dF, dS, isSpan);
 
   // Sky, as the lens sees it. The cap, for the print's finish: the developed
   // cloud's luminance here, the brightest the finished print reaches round
@@ -577,7 +603,7 @@ void main() {
   // The front: a thin halation line on each layer's iso-band, by cover,
   // weighted by the light under it (none on steel or wire, a little over the
   // blue, full over cloud), added as amber, never a filter on what is there.
-  float line = mix(isoLine(dB), isoLine(dF), fg.a);
+  float line = mix(isoLine(dB), isoLine(dLine), fg.a);
   float lum = dot(col, LUMA);
   float glow = mix(0.12, 1.0, smoothstep(0.3, 0.75, lum)) * smoothstep(0.08, 0.25, lum);
   float leak = 0.75 + 0.25 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));

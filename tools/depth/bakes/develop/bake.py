@@ -15,8 +15,8 @@ from those, never from the graded ones in out_dir.
 
 --grade-only re-grades from them and rewrites plate.webp and fill.webp.
 
---reach measures the structure's reach (reach_of) from out_dir's alpha.png
-alone and writes reach.png; nothing else is touched.
+--reach measures the structure's reach (reach_of) and its spans (span_of)
+from out_dir's alpha.png alone and writes reach.png; nothing else is touched.
 
 --fill-only re-paints the sky from the ungraded plate and out_dir's
 alpha.png, and leaves the matte's edges and key.png as they are (a full bake
@@ -42,7 +42,8 @@ Layers (2400x1600):
                  by reach.png instead
   reach.png   (2400x1600) the structure's reach, 0 at the pole's foot .. 1 at
               the furthest cable tip, 16 bit (R high byte, G low): geodesic
-              distance along the matte from the foot (reach_of)
+              distance along the matte from the foot (reach_of); B: past the
+              knot, 1 + 254 x the reach where the span leaves it (span_of)
   alpha.png   structure alpha: known-background matte, alpha =
                  (I - B).(F - B) / |F - B|^2, with B the fill and F the local
                  structure colour (from dark core pixels only); the depth map
@@ -817,7 +818,7 @@ def reach_of(alpha):
     k = int(np.argmax(s1 - s0))
     foot = idx[h - 1, s0[k]:s1[k]]
     foot = foot[foot >= 0]
-    d = dijkstra(g, directed=False, indices=foot, min_only=True)
+    d, pred, _ = dijkstra(g, directed=False, indices=foot, min_only=True, return_predecessors=True)
     D = np.full((h, w), np.inf, np.float32)
     D[ys, xs] = d
     fin = np.isfinite(D)
@@ -840,13 +841,114 @@ def reach_of(alpha):
     r = np.where(far, 1.0, r).astype(np.float32)
     print("reach: foot x", int(s0[k]), "..", int(s1[k]), "REACH_LEN", round(length, 1),
           "unreached matte px", int((soft & ~fin).sum()), "of them adrift", int(far.sum()))
-    return r, length
+    ext = span_of(alpha, d / length, pred, ys, xs, (s0[k] + s1[k]) // 2, on, lbl)
+    # a fleck adrift in open sky still comes up last, with no span of its own
+    return r, length, np.where(far, -1.0, ext).astype(np.float32)
 
 
-def write_reach(path, r):
-    """reach.png: R = high byte, G = low byte (16 bit), B = 0, full size."""
+# The spans: a cable never ends in mid-air. Along its reach a cable grows out
+# of the knot as one stroke, and while its end is among the knot's clutter
+# (crossarms, hardware, the other cables) that end reads as a wire going
+# behind something. Out in open sky it read as a photograph cut out with
+# scissors: a wire that stops short of the frame. So past the knot each span
+# is not grown but extended, whole, to the frame's edge, along the plate's
+# own wire (its own width, ink and grain: the extension is the photograph,
+# not a drawing of it), and comes up in density once every cable leading
+# into it has grown out to it.
+#  - the knot: the matte's density at the scale of the crossarms (Gaussian,
+#    KNOT_SIGMA px), over KNOT_LEVEL, with the pole's wood whole (TRUNK_R),
+#    the region joined to the pole's foot;
+#    inside it the structure develops by reach alone, as before;
+#  - past it, the structure falls into a few webs of spans (cables that
+#    cross out in the sky are one web). A web comes up whole, at the reach of
+#    the last of the knot's pixels it touches: if it came up with the first,
+#    a cable whose inner length was still growing would hang off a crossing
+#    with a cut end pointing back at the pole. Waiting, the growing ends sit
+#    at the knot's edge, among its clutter;
+#  - a fleck of span not touching the knot (joined only across the matte's
+#    bridges) comes up with the web within a few pixels of it, else at the
+#    latest moment its own geodesic paths leave the knot;
+#  - off the structure, as reach: the value of the nearest reached steel.
+# Written to reach.png B: 0 inside the knot (grow by reach), else
+# 1 + 254 x that reach (8 bit is plenty: it is a moment, not a place).
+KNOT_SIGMA = 40
+KNOT_LEVEL = 0.55
+KNOT_OPEN = 50  # px: spurs of the knot narrower than twice this are cut off
+TRUNK_R = 60  # members wider than twice this are the pole's wood
+
+
+def span_of(alpha, rn, pred, ys, xs, foot_x, on, lbl):
+    from scipy import ndimage
+
+    h, w = alpha.shape
+    dens = cv2.GaussianBlur(alpha, (0, 0), KNOT_SIGMA)
+    # and the pole's wood whole, to its soft edges: it climbs, never comes up
+    trunk = cv2.dilate(cv2.morphologyEx(_u8(alpha > 0.3), cv2.MORPH_OPEN, disk(TRUNK_R)), disk(4)) > 0
+    # less its spurs: a heavy bundle is dense along its length, and would grow
+    # out by reach to the spur's end and wait there in open sky
+    core = cv2.morphologyEx(_u8(dens > KNOT_LEVEL), cv2.MORPH_OPEN, disk(KNOT_OPEN)) > 0
+    _, cc = cv2.connectedComponents(_u8(core | trunk))
+    knot = cc == cc[h - 1, foot_x]
+    inside = knot[ys, xs]
+    fin = np.isfinite(rn)
+    # where each pixel's own geodesic path leaves the knot
+    entry = np.full(len(ys), -1.0, np.float32)
+    for i in np.argsort(np.where(fin, rn, np.inf)):
+        if not fin[i]:
+            break
+        if inside[i]:
+            continue
+        p = pred[i]
+        entry[i] = rn[i] if p < 0 or inside[p] else entry[p]
+    path = np.full((h, w), -1.0, np.float32)
+    path[ys, xs] = entry
+    R = np.full((h, w), -1.0, np.float32)
+    R[ys, xs] = np.where(fin, rn, -1.0)
+    # the webs, and the last of the knot's pixels each one touches
+    soft = alpha > 0.04
+    n, web = cv2.connectedComponents(_u8(soft & ~knot), connectivity=8)
+    web = np.where(on, web, 0)
+    ids = np.arange(1, n)
+    rim = np.zeros((h, w), np.int32)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            rim = np.maximum(rim, np.roll(np.roll(web, dy, 0), dx, 1))
+    rim = np.where(on & knot, rim, 0)
+    last = np.asarray(ndimage.maximum(R, rim, ids), np.float32) if n > 1 else np.zeros(0, np.float32)
+    touched = np.asarray(ndimage.sum(rim > 0, rim, ids)) > 0 if n > 1 else np.zeros(0, bool)
+    own = np.asarray(ndimage.maximum(path, web, ids), np.float32) if n > 1 else np.zeros(0, np.float32)
+    val = np.concatenate([[-1.0], np.where(touched, last, -1.0)]).astype(np.float32)
+    E = np.where(on & ~knot, val[web], -1.0).astype(np.float32)
+    # a fleck of matte apart from the webs (a cable's broken edge, hardware
+    # across a gap) comes up with the web beside it, else as its own paths
+    # do, so it never shows apart from the wire it belongs to
+    hit = E >= 0
+    if hit.any():
+        dist, near = cv2.distanceTransformWithLabels(_u8(~hit), cv2.DIST_L2, 5,
+                                                     labelType=cv2.DIST_LABEL_PIXEL)
+        src = np.full(int(near.max()) + 1, -1.0, np.float32)
+        hy, hx = np.nonzero(hit)
+        src[near[hy, hx]] = E[hy, hx]
+        lone = on & ~knot & ~hit
+        own_px = np.concatenate([[-1.0], own]).astype(np.float32)[web]
+        E = np.where(lone, np.where(dist <= 12, src[near], own_px), E).astype(np.float32)
+    src = np.full(int(lbl.max()) + 1, -1.0, np.float32)
+    oy, ox = np.nonzero(on)
+    src[lbl[oy, ox]] = E[oy, ox]
+    E = np.where(on, E, src[lbl])
+    big = [(int((web == i).sum()), round(float(val[i]), 3)) for i in ids if (web == i).sum() > 20000]
+    print("spans: knot px", int(knot.sum()), "span px", int(((E >= 0) & (alpha > 0.3)).sum()),
+          "webs (px, reach)", big)
+    return E
+
+
+def write_reach(path, r, ext=None):
+    """reach.png: R = high byte, G = low byte (16 bit), B = the span's entry
+    reach (span_of; 0 inside the knot), full size."""
     r16 = np.clip(np.round(r * 65535), 0, 65535).astype(np.uint32)
     z = np.zeros(r.shape, np.uint8)
+    if ext is not None:
+        z = np.where(ext >= 0, 1 + np.round(np.clip(ext, 0, 1) * 254), 0).astype(np.uint8)
     cv2.imwrite(path, np.stack([z, (r16 & 255).astype(np.uint8), (r16 >> 8).astype(np.uint8)], 2),
                 [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
@@ -855,8 +957,8 @@ def write_reach(path, r):
 # nothing else is touched.
 if "--reach" in sys.argv:
     alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
-    r, _ = reach_of(alpha)
-    write_reach(os.path.join(OUT, "reach.png"), r)
+    r, _, ext = reach_of(alpha)
+    write_reach(os.path.join(OUT, "reach.png"), r, ext)
     os.makedirs(WK, exist_ok=True)
     save8(os.path.join(WK, "p-reach.png"), cv2.resize(1 - r, (W // 2, H // 2), interpolation=cv2.INTER_AREA))
     print("reach: wrote reach.png")
@@ -1148,7 +1250,7 @@ save8(os.path.join(OUT, "alpha.png"), alpha)
 kr = cv2.resize(key_full, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
 kr8 = np.clip(np.round(kr * 255), 0, 255).astype(np.uint8)
 write_sky_key(os.path.join(OUT, "key.png"), sky_key, kr8)
-write_reach(os.path.join(OUT, "reach.png"), reach_of(alpha)[0])
+write_reach(os.path.join(OUT, "reach.png"), *reach_of(alpha)[::2])
 
 # previews
 save8(os.path.join(WK, "p-alpha.png"), alpha)
