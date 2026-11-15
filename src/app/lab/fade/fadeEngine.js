@@ -306,8 +306,8 @@ const FILM_TOE_COLOR = [0.75, 1, 1.2];
 // lies deeper through the winter, the shutter leaves and lanterns cast their
 // own shapes, and the top floors stand in the sun almost all the way across.
 // The light is light on the faded paint, not a grade over it: the faded
-// albedo times the lane's sky plus this sun (near neutral, about a stop
-// over the sky where it stands square on a wall), its shadow lines drawn
+// albedo lit at the photograph's own exposure where this sun stands and a
+// third of a stop under it in its shade (near neutral), its shadow lines drawn
 // with the penumbra the sun's disc throws from what casts them, so a still
 // reads as sunlight crossing the walls, and the paint under it keeps its own
 // hue and grain: a bleached band is paler and rosier than the shade beside
@@ -369,24 +369,25 @@ const WALL_REACH = 0.6;
 // height over the lane, not over the whole slant run along the ray: the run
 // a fitted roofline's penumbra is drawn from, as a share of the ray's.
 const ROOF_PENUMBRA = 0.12;
-// The sweep's light is light, not a grade: it multiplies the faded albedo,
-// rendered = albedo x (sky + SWEEP_SUN x visibility x N.L x beam). The
-// photograph's own illumination S (light.webp G) is split into the lane's
-// sky, SWEEP_SKY of it, which every surface keeps, and the photo's own high
-// sun, which the sweep's sun replaces. The sun is near neutral (no warm cast
-// of its own, so a lit wall shows its own paint, not a white balance), about
-// a stop over the sky where it stands square on a wall: a lit pink floor
-// lands on its own dusty rose at about the photograph's exposure, with the
-// render's texture intact, and its shade a stop under, still salmon.
-const SWEEP_SKY = 0.45;
-const SWEEP_SUN = 1.5;
+// The sweep's light is light, not a grade, and it is exposed like the
+// photograph: rendered = albedo x the photo's own sunlit level x (sun ?
+// 1 : SWEEP_SHADE). The photograph's illumination is near one level over
+// every wall (the lane is in high sun: light.webp G, about 1 on all of them),
+// and its own cast shadows (render.webp G) are taken out, so a face the held
+// sun stands on lands at the photograph's own exposure there, and a face in
+// its shade, or turned from it, sits at SWEEP_SHADE of that: a third of a
+// stop, never more than one (the lane's sky and the pale walls across it
+// light a shaded face well in a slot of a street this narrow). What is left between
+// sun and shade is then the paint itself, chalked and paled where the sun
+// stands, saturated where it does not: the fade, not a dimmed relight. The
+// sun is near neutral (no warm cast of its own, so a lit wall shows its own
+// paint, not a white balance).
+const SWEEP_SHADE = 0.8;
+// the photograph's own cast shadows are lifted out by at most this much
+// (render.webp G is clamped here), so a dark seam in the paint is never
+// mistaken for a shadow and blown up
+const SWEEP_LIFT_MIN = 0.35;
 const SWEEP_SUN_COLOR = [1.0, 0.995, 0.975];
-// The beam on a wall goes as its cosine, but read on the paint (a lit render
-// scatters, it is no Lambertian mirror of the sun's angle) and across a
-// frame as a stop between sun and shade, the cosine is taken to this power:
-// the pink's afternoon sun, at a grazing third of square, still lands the
-// lit wall at about the photograph's exposure and its shade a stop under.
-const SWEEP_WRAP = 0.6;
 // the sweep's light on the bare stone, which does not fade: most of its
 // contrast, so the eave's line runs on unbroken from the pink across the
 // bare stucco beside it and reads as one shadow, not a change of paint
@@ -839,7 +840,6 @@ uniform vec3 uSweepLight;
 uniform sampler2D uRecv;
 uniform float uUseRecv;
 uniform float uStillShade;
-uniform float uSunWrap;
 ${NOISE}
 ${DETAIL_PACK}
 vec3 toSrgb(vec3 c) {
@@ -1180,15 +1180,13 @@ void main() {
   dt = min(dt - log(shade), max(dt, 0.0));
   dt = uDetailClip * tanh(dt / uDetailClip);
   outLin *= exp(uDetailGain * c * dt);
-  // the sweep's light, on the albedo: outLin is S x the faded albedo, so
-  // this is albedo x (the lane's sky + the sweep's sun x visibility x N.L),
-  // the photograph's own sun taken out. Where the sun stands the wall shows
-  // its own paint at about the photograph's exposure, its texture and hue
-  // intact; in its shade a stop under. All of it goes back to the
-  // photograph when the clock rests.
+  // the sweep's light, on the albedo: outLin is the photo's light x the
+  // faded albedo, its own cast shadows taken out, then the held sun's: the
+  // photograph's exposure where it stands (sunlit, the same share the years
+  // follow, so the light's seam and the fade's are one line), SWEEP_SHADE of
+  // it in its shade. All of it goes back to the photograph when the clock rests.
   if (uSweepAmp > 0.001) {
-    vec3 illum = uSweepLight.x + uSunColor * (uSweepLight.y * vis * pow(max(cosi, 0.0), uSunWrap) * uSunGain / max(S, 0.1));
-    illum = min(illum, vec3(2.5));
+    vec3 illum = mix(vec3(uSweepLight.x), uSunColor, sunlit) / max(shade, uSweepLight.y);
     float stone = clamp(max(m.a - m.b / 0.85, 0.0) / 0.35, 0.0, 1.0);
     outLin *= mix(vec3(1.0), illum, uSweepAmp * smoothstep(0.1, 0.6, sw.a) * mix(1.0, uSweepLight.z, stone));
   }
@@ -2201,8 +2199,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSweepAmp, amp);
     gl.uniform1f(u.uSunGain, sunGain);
     gl.uniform3fv(u.uSunColor, SWEEP_SUN_COLOR);
-    gl.uniform3f(u.uSweepLight, SWEEP_SKY, SWEEP_SUN, SWEEP_STONE);
-    gl.uniform1f(u.uSunWrap, SWEEP_WRAP);
+    gl.uniform3f(u.uSweepLight, SWEEP_SHADE, SWEEP_LIFT_MIN, SWEEP_STONE);
     gl.uniform1f(u.uUseRecv, useRecv ? 1 : 0);
     gl.uniform1f(u.uStillShade, held && sunQ != null ? STILL_SHADE_SHARE : 0);
     gl.uniform1f(u.uDebug, debugQ === "recv" ? 8 : debugQ === "sun" ? 7 : debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
