@@ -22,13 +22,18 @@ a swing slides it against the rooftops.
              holding SEED; its puff on the right, joined to it by a thin neck
              of vapour, is split off at the neck and dropped, and so is the
              low cluster on its left.
-  foot       the cloud grows out of the horizon: the HDRI's rows of cumulus
-             nearer the horizon (lat 4-16.5) go on the same card through a
-             second, flatter view, laid in under the tower so its lower lobes
-             stand on their tops and they run on down far behind the roofs.
-             No base of the cloud hangs in the sky at any swing. Across the
-             frame the foot fades out along a wavering line (BANK_U), so the
-             horizon does not turn into one white band.
+  foot       the cloud grows out of the horizon. The HDRI's own rows under
+             the tower hold only scraps (they ended as a grey smear above the
+             roofs, a strip of clear sky under it), so the foot is the broad
+             congestus bank west of it (lon 55-93, lat 3-13, lit from the
+             right too), keyed from its own window the same way, parted from
+             the clouds above it and solid from its top silhouette down, laid
+             in under the tower through a second, linear view so the tower's
+             lower lobes stand on its tops and it runs on down past the
+             lowest roof (v 1.0 by lat 5) and far behind the town. No base of
+             the cloud hangs in the sky at any swing. Across the frame it
+             fades out along a wavering line (FOOT_U), behind the old house
+             and past the signal.
   edge       the key's outermost px are thin cloud over sky: a pale rim with
              dark-blue notches. Still at native resolution, the bays are
              closed, the silhouette eroded by ERODE px and feathered again,
@@ -44,10 +49,14 @@ a swing slides it against the rooftops.
              the shaded flank and lower body alike, is the cloud's own; only
              the finest bands are crisped a little. It runs from the darkest
              crevice through skylight blues (hue 210-214, the shaded lobes at
-             #9fb6d0) to the warm white of the sunlit tops that rolls off
-             below clipping, and the silhouette's relief, lit from the sun
-             (up and right, as in the photo), models the lobes a little.
-             Below the roofline the foot thins out lobe by lobe.
+             #9fb6d0) to the warm near-white (#f4f1ea) of the sunlit tops,
+             and the silhouette's relief, lit from the sun (up and right, as
+             in the photo), models the lobes a little. Only the crown's
+             sunward tops keep the sun (SUNLIT): the left flank and the lower
+             body take the same billows in skylight shade, #9fb6d0 deepening
+             to #7f9bbd toward the base, and the foot is all shade, its own
+             billows evened out against the horizon's haze, so the brightest
+             mass is the crown alone.
              Both views are rectilinear; the tower's is stretched upright
              (STRETCH) and scaled so the cloud stands far off over the town:
              its base down behind the roofs, the eave and the lamps, its top
@@ -62,6 +71,10 @@ a swing slides it against the rooftops.
              stack opening out of it does not pop.
   mattes     the cumulus's own alpha goes into the matte strip as plane 1
              (between the sky and the far houses), for picking focus.
+
+Set CUMULUS_CACHE to a .npy path to keep the two windows of the HDRI (the
+tower's and, beside it as <name>-foot.npy, the foot's) and iterate without
+reading the 16k pano again; CUMULUS_WORK writes previews.
 
 Reads the bake's pristine p0..p6.webp, photo.webp and mattes.png from
 <bakedir> (run bake.py to a work dir, or keep a copy of its output: this step
@@ -99,7 +112,7 @@ SS = 3  # the clouds card's px per 2 photo px (1.5x): crisp under magnification
 # Where the view is laid out, in photo uv: the region searched for the cloud
 # (it is cropped to the cloud plus PAD afterwards).
 # Even photo px, so the card's 3 px land on whole pairs of photo px.
-CR = [-614 / EW, -272 / EH, 2662 / EW, 1628 / EH]
+CR = [-614 / EW, -272 / EH, 2662 / EW, 1764 / EH]
 # The view out of the HDRI: the direction (lon, lat, deg) that lands at photo
 # (UC, VC); FOCAL in photo px; STRETCH scales it upright. The cloud stands far
 # off over the town: its base (lat 19.5) lands about v 0.78, down behind
@@ -119,22 +132,40 @@ SUB_LON, SUB_LAT = (117.0, 173.0), (-2.0, 48.0)
 # of vapour) and the low cluster on its left are left out.
 SEED, MERGE_R = (140.0, 30.0), 3
 HOLE_MAX = 4000  # pano px: only pockets this small inside a cloud are filled
-MIN_AREA = 30000  # pano px: cumulus, not the scraps round them
-# The foot: the cumulus rows nearer the horizon (lat BANK_LAT, their tops at
-# BANK_LAT[1]), on a second, flatter view laid in under the tower, so the
-# cloud grows up out of the town instead of floating over it with a base.
-# BANK_V: the photo v that BANK_LAT[1] and BANK_LAT[0] land at (the top
-# tucked under the tower's lower lobes, the bottom far behind the roofs);
-# BANK_LON0 lands at UC and BANK_PXDEG is its scale (photo px per degree,
-# foreshortened against the tower's, which is near the horizon). BANK_U: the
-# foot fades out over these photo u either side, so the horizon does not turn
-# into one white band.
-BANK_LAT, BANK_V = (4.0, 16.5), (1.25, 0.95)
-BANK_LON0, BANK_PXDEG = 144.0, 24.0
-BANK_U = ((0.1, 0.24), (0.6, 0.74))
-# FOOT_V: below the roofline the foot thins out (photo v); FOOT_LOBE, how
-# far its own lobes hold the fade back
-FOOT_V, FOOT_LOBE = (1.0, 1.2), 0.45
+# The foot. The HDRI's own rows under the tower (lat 4-16) hold only small
+# scraps of cumulus: laid in under it they ended as a grey smear a little
+# above the roofs, with a strip of clear sky under it, so the cloud hung in
+# the air. The foot is now the broad congestus bank west of it (lon 55-93,
+# lat 3-13, lit from the right like the tower), read from its own window of
+# the HDRI (FOOT_LON, FOOT_LAT) and keyed the same way. FOOT_SEED is a point
+# in the bank; its solid core is parted from the clouds above it by eroding
+# FOOT_PART px. Below its top silhouette it is solid all the way down
+# (column by column), so wherever the tower's lower lobes end the bank goes
+# on under them, down past the lowest roof and far behind the town.
+FOOT_LON, FOOT_LAT = (50.0, 100.0), (-1.0, 17.0)
+FOOT_SEED, FOOT_PART = (78.0, 8.0), 6
+# Its view: linear, lon FOOT_LON0 at photo u FOOT_U0, its top (lat
+# FOOT_TOP_LAT) at photo v FOOT_TOP_V, under the tower's lower lobes;
+# FOOT_PXDEG (u, v) photo px per degree, so its billows come out the size of
+# the tower's lower ones (it is farther off, nearer the horizon) and its body
+# runs down to v 1.0 by lat 5, well past the far roofs (v 0.72-0.93). Below
+# the HDRI's horizon its last rows run on.
+FOOT_LON0, FOOT_U0 = 90.0, 0.6
+FOOT_TOP_LAT, FOOT_TOP_V = 12.5, 0.69
+FOOT_PXDEG = (36.0, 48.0)
+# FOOT_U: across the frame the bank fades out along a wavering line over
+# these photo u (behind the old house on the left; past the signal on the
+# right), so the horizon does not turn into one wall of cloud.
+FOOT_U = ((0.02, 0.12), (0.7, 0.82))
+# Its tone: the bank is the cloud's shaded underside, in skylight blue-grey
+# only. Its own billows (log luminance) span FOOT_T on the tone ramp (TONE_AT
+# units: 0 the deep crevice blue, 0.24 the shade #9fb6d0), and it deepens
+# toward its base by FOOT_BASE over FOOT_BASE_DEG degrees under its top. Near
+# the horizon the HDRI's haze flattens them, so a share FOOT_LOCAL of the
+# tone is their local contrast (over FOOT_LOCAL_SIG px), evened out.
+FOOT_T, FOOT_BASE, FOOT_BASE_DEG = (0.02, 0.27), 0.1, (1.5, 7.0)
+FOOT_LOCAL, FOOT_LOCAL_SIG = 0.55, 40.0
+FOOT_FLAT_DEG = (6.0, 10.0)
 PAD = 0.07  # transparent margin round the cloud, photo widths
 # The silhouette, in pano px: bays of sky narrower than 2 CLOSE_R are closed,
 # the key's thin rim is eroded by ERODE and the edge feathered again by
@@ -159,11 +190,23 @@ FLAT_K, FLAT_D, FLAT_LON = 0.45, 60, 139.0
 # its sunlit top (1, the 97th) through skylight blues (hue 210-214) into the
 # warm white that rolls off below clipping: the shaded lobes stand at
 # CLOUD_SHADE, a sky-lit blue, never a flat grey.
-CLOUD_TOP = (0xFF, 0xF7, 0xEA)
+CLOUD_TOP = (0xF4, 0xF1, 0xEA)
 CLOUD_SHADE = (0x9F, 0xB6, 0xD0)
-TONE = ((0x7E, 0x98, 0xB9), CLOUD_SHADE, (0xBD, 0xCE, 0xE1), (0xE2, 0xE9, 0xEF), (0xF7, 0xF4, 0xEE), CLOUD_TOP)
-TONE_AT = (0.0, 0.24, 0.48, 0.7, 0.88, 1.05)
+TONE = ((0x7F, 0x9B, 0xBD), CLOUD_SHADE, (0xBA, 0xCB, 0xDE), (0xD8, 0xE0, 0xE8), (0xEA, 0xEA, 0xE8), CLOUD_TOP)
+TONE_AT = (0.0, 0.24, 0.48, 0.7, 0.86, 1.0)
 TONE_GAMMA = 1.0  # <1 lifts the mid tones toward the lit white
+# Where the sun reaches. The HDRI's luminance alone keeps nearly all of the
+# tower bright (it is lit from the side, and the shaded flank is only a few
+# stops down), so the cloud read as one flat white cut-out. Only the crown's
+# sunward tops keep that light: a sun potential, from where a px lies in the
+# tower (SUN_XY: weight of across, to the right, and of up, both 0..1 over
+# the tower's own extent), its relief facing the sun and its own brightness
+# (SUN_REL, SUN_T), is eased between SUNLIT; the rest of the tower takes its
+# tone in skylight shade, SHADE_T on the ramp (its billows kept), deeper
+# by SHADE_LOW toward its base.
+SUN_XY, SUN_REL, SUN_T = (0.6, 0.9), 0.35, 0.25
+SUNLIT = (1.0, 1.4)
+SHADE_T, SHADE_LOW = (0.0, 0.27), 0.4
 CRISP_SIG, CRISP = (1.5, 5.0, 16.0), (0.35, 0.35, 0.15)
 # The tower's own form, lit from the sun (up and right, as in the photo): its
 # silhouette's relief, so the lobes the outline gains are modelled, and the
@@ -207,79 +250,97 @@ z2 = -d[..., 1] * np.sin(a_) + d[..., 2] * np.cos(a_)
 LAT = np.degrees(np.arcsin(np.clip(y2, -1, 1)))
 LON = LON0 + np.degrees(np.arctan2(d[..., 0], z2))
 del d, y2, z2, X, Y
-# the foot's view: flatter (the rows near the horizon foreshortened), linear
-BLAT = BANK_LAT[1] + (V - BANK_V[1]) * (BANK_LAT[0] - BANK_LAT[1]) / (BANK_V[0] - BANK_V[1])
-BLON = BANK_LON0 + (U - UC) * EW / BANK_PXDEG
+# the foot's view: linear (FOOT_*), its last rows running on below the horizon
+FLON = FOOT_LON0 + (U - FOOT_U0) * EW / FOOT_PXDEG[0]
+FLAT = np.maximum(FOOT_TOP_LAT - (V - FOOT_TOP_V) * EH / FOOT_PXDEG[1], FOOT_LAT[0] + 1.5)
 
-# ---- the HDRI around the cloud, at its native resolution
+# ---- the HDRI around the cloud and round its foot, at native resolution
 (lo0, lo1), (la0, la1) = SUB_LON, SUB_LAT
 CACHE = os.environ.get("CUMULUS_CACHE")  # a .npy of the window, to iterate fast
-if CACHE and os.path.exists(CACHE):
-    sub = np.load(CACHE).astype(np.float32)
-    PW, PH = 16384, 8192
+FCACHE = CACHE and CACHE[:-4] + "-foot.npy"
+PW, PH = 16384, 8192
+
+
+def window(pano, lon_r, lat_r):
+    """The HDRI between lon_r and lat_r (deg), RGB float32, and its origin
+    (pano px)."""
+    x_0, x_1 = int(lon_r[0] / 360 * PW), int(lon_r[1] / 360 * PW)
+    y_0, y_1 = int((0.5 - lat_r[1] / 180) * PH), int((0.5 - lat_r[0] / 180) * PH)
+    if pano is None:
+        return None, x_0, y_0
+    return np.ascontiguousarray(pano[y_0:y_1, x_0:x_1, ::-1]).astype(np.float32), x_0, y_0
+
+
+if CACHE and os.path.exists(CACHE) and os.path.exists(FCACHE):
+    sub, x0, y0 = np.load(CACHE).astype(np.float32), *window(None, SUB_LON, SUB_LAT)[1:]
+    fsub, fx0, fy0 = np.load(FCACHE).astype(np.float32), *window(None, FOOT_LON, FOOT_LAT)[1:]
 else:
     print("reading", HDR)
     pano = cv2.imread(HDR, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
     if pano is None:
         sys.exit("cannot read " + HDR)
-    PH, PW = pano.shape[:2]
-x0, x1 = int(lo0 / 360 * PW), int(lo1 / 360 * PW)
-y0, y1 = int((0.5 - la1 / 180) * PH), int((0.5 - la0 / 180) * PH)
-if not (CACHE and os.path.exists(CACHE)):
-    sub = np.ascontiguousarray(pano[y0:y1, x0:x1, ::-1]).astype(np.float32)
+    if pano.shape[:2] != (PH, PW):
+        sys.exit("expected the 16k pano (16384 x 8192)")
+    sub, x0, y0 = window(pano, SUB_LON, SUB_LAT)
+    fsub, fx0, fy0 = window(pano, FOOT_LON, FOOT_LAT)
     del pano
     if CACHE:
         np.save(CACHE, sub)
-sub = np.maximum(np.minimum(np.nan_to_num(sub, posinf=50.0), 50.0), 1e-5)
+        np.save(FCACHE, fsub)
 sh_, sw_ = sub.shape[:2]
 slon = lo0 + (np.arange(sw_, dtype=np.float32) + 0.5) / PW * 360
 slat = 90 - (y0 + np.arange(sh_, dtype=np.float32) + 0.5) / PH * 180
-SLON = np.meshgrid(slon, slat)[0]
-
-# ---- key the cumulus out of its sky (in the equirect)
-L = sub @ LW
-chroma = (sub[..., 2] - sub[..., 0]) / (sub[..., 2] + sub[..., 0] + 1e-6)
-clear = (chroma > 0.36) & (L < np.percentile(L, 60) * 1.35)
-clear = erode(clear, 4)
-B = pushpull(sub, clear.astype(np.float32))
-B = cv2.GaussianBlur(B, (0, 0), 8)
-LB = B @ LW
-sB = (B[..., 2] - B[..., 0]) / (B[..., 2] + B[..., 0] + 1e-6)
+SLON, SLAT = np.meshgrid(slon, slat)
 S_CLOUD = 0.07  # a sunlit cumulus's own chroma
-a_s = np.clip((sB - chroma) / np.maximum(sB - S_CLOUD, 0.05), 0, 1)
-a_l = np.clip((L - LB) / np.maximum(1.4 * LB, 1e-3), 0, 1)
-alpha = np.maximum(a_s, a_l)
-alpha = np.where(alpha < 0.04, 0, alpha)
-a_key = alpha.copy()
-F = B + (sub - B) / np.maximum(alpha, 0.08)[..., None]
-F = np.maximum(F, 0)
-del sub
-# A cumulus is opaque: holes in the body (pockets of shade the key reads as
-# sky) are filled, and the shaded flanks are firmed up into solid cloud in
-# their own blue shade; only the outermost fringe stays soft. Only small
-# holes: a big one is real sky ringed by two clouds, and filled it becomes a
-# flat blue-grey slab with a straight soft wall for a flank.
-solid = (alpha > 0.3).astype(np.uint8)
-flood = np.pad(solid, 1)
-mask = np.zeros((flood.shape[0] + 2, flood.shape[1] + 2), np.uint8)
-cv2.floodFill(flood, mask, (0, 0), 2)
-holes = flood[1:-1, 1:-1] == 0
-nh, lh, sth, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), 8)
-small = sth[:, cv2.CC_STAT_AREA] < HOLE_MAX
-small[0] = False
-holes = small[lh]
-del lh, nh, sth, small
-body = cv2.GaussianBlur((solid.astype(bool) | holes).astype(np.float32), (0, 0), 2.5)
-# (the body's blur is faded out with the key's own alpha, never cut where the
-# key ends: a cut there leaves a translucent plateau with a hard outer edge,
-# a pale halo round the cloud)
-alpha = np.maximum(smoothstep(0.08, 0.5, alpha), body * smoothstep(0.04, 0.25, alpha))
-alpha = np.maximum(alpha, holes.astype(np.float32))
-F = np.where(holes[..., None], pushpull(F, (~holes & (alpha > 0.9)).astype(np.float32)), F)
 
-# which clouds: the tower (the component holding SEED) and, for its foot,
-# every cumulus (not the scraps) whose top is below BANK_LAT[1] (the rows
-# near the horizon; the foot's view and BANK_U decide how much of them shows)
+
+def key(sub):
+    """Key the cumulus in a window of the HDRI out of its sky (in the
+    equirect): its luminance, the key's alpha as read and firmed up, and the
+    filled pockets."""
+    sub = np.maximum(np.minimum(np.nan_to_num(sub, posinf=50.0), 50.0), 1e-5)
+    L = sub @ LW
+    chroma = (sub[..., 2] - sub[..., 0]) / (sub[..., 2] + sub[..., 0] + 1e-6)
+    clear = (chroma > 0.36) & (L < np.percentile(L, 60) * 1.35)
+    clear = erode(clear, 4)
+    B = pushpull(sub, clear.astype(np.float32))
+    B = cv2.GaussianBlur(B, (0, 0), 8)
+    LB = B @ LW
+    sB = (B[..., 2] - B[..., 0]) / (B[..., 2] + B[..., 0] + 1e-6)
+    a_s = np.clip((sB - chroma) / np.maximum(sB - S_CLOUD, 0.05), 0, 1)
+    a_l = np.clip((L - LB) / np.maximum(1.4 * LB, 1e-3), 0, 1)
+    alpha = np.maximum(a_s, a_l)
+    alpha = np.where(alpha < 0.04, 0, alpha)
+    a_key = alpha.copy()
+    # A cumulus is opaque: holes in the body (pockets of shade the key reads
+    # as sky) are filled, and the shaded flanks are firmed up into solid
+    # cloud in their own blue shade; only the outermost fringe stays soft.
+    # Only small holes: a big one is real sky ringed by two clouds, and
+    # filled it becomes a flat blue-grey slab with a straight soft wall for a
+    # flank.
+    solid = (alpha > 0.3).astype(np.uint8)
+    flood = np.pad(solid, 1)
+    mask = np.zeros((flood.shape[0] + 2, flood.shape[1] + 2), np.uint8)
+    cv2.floodFill(flood, mask, (0, 0), 2)
+    holes = flood[1:-1, 1:-1] == 0
+    _, lh, sth, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), 8)
+    small = sth[:, cv2.CC_STAT_AREA] < HOLE_MAX
+    small[0] = False
+    holes = small[lh]
+    body = cv2.GaussianBlur((solid.astype(bool) | holes).astype(np.float32), (0, 0), 2.5)
+    # (the body's blur is faded out with the key's own alpha, never cut where
+    # the key ends: a cut there leaves a translucent plateau with a hard outer
+    # edge, a pale halo round the cloud)
+    alpha = np.maximum(smoothstep(0.08, 0.5, alpha), body * smoothstep(0.04, 0.25, alpha))
+    alpha = np.maximum(alpha, holes.astype(np.float32))
+    return L, alpha, a_key
+
+
+L, alpha, a_key = key(sub)
+del sub
+
+# which cloud: the tower, the component holding SEED (its foot comes from
+# its own window, below)
 comp = (alpha > 0.15).astype(np.uint8)
 n, lab, st, _ = cv2.connectedComponentsWithStats(dilate(comp, 8).astype(np.uint8), 8)
 iy, ix = int((slat[0] - SEED[1]) / 180 * PH), int((SEED[0] - lo0) / 360 * PW)
@@ -291,14 +352,12 @@ def mode(a):
 
 
 tower = mode(lab[iy - 40:iy + 40, ix - 40:ix + 40])
-keep_b = np.zeros(n, bool)
 for i in range(1, n):
     l, t_, w_, h_ = st[i, cv2.CC_STAT_LEFT], st[i, cv2.CC_STAT_TOP], st[i, cv2.CC_STAT_WIDTH], st[i, cv2.CC_STAT_HEIGHT]
     lonA, lonB = slon[l], slon[min(sw_ - 1, l + w_ - 1)]
     latT, latB = slat[t_], slat[min(sh_ - 1, t_ + h_ - 1)]
-    keep_b[i] = i != tower and latT < BANK_LAT[1] + 1 and st[i, cv2.CC_STAT_AREA] > MIN_AREA
     if st[i, cv2.CC_STAT_AREA] > 8000:
-        print("  cloud %3d  lon %.1f..%.1f  lat %.1f..%.1f  area %7d %s" % (i, lonA, lonB, latB, latT, st[i, cv2.CC_STAT_AREA], "tower" if i == tower else "foot" if keep_b[i] else ""))
+        print("  cloud %3d  lon %.1f..%.1f  lat %.1f..%.1f  area %7d %s" % (i, lonA, lonB, latB, latT, st[i, cv2.CC_STAT_AREA], "tower" if i == tower else ""))
 # The puff on the tower's right hangs on to it by a thin neck of vapour: the
 # key's solid cores (alpha > 0.3, eroded by MERGE_R, before the body is
 # firmed up) come apart there, and every px of the tower's component goes to
@@ -315,15 +374,10 @@ tw &= l3 == mode(l3[iy - 40:iy + 40, ix - 40:ix + 40])  # and no scraps cut off 
 del l3
 del core, lc, d_t, d_o
 # The tower is cut out of the key hard (its cut on the left, where the low
-# cluster is parted from it, is rebuilt below as lobes like any shaded edge);
-# the foot's rows keep a soft selection. Off both the alpha is 0, so the views
-# below only need to tell the two apart (sel_t: everything but the foot).
-foot_m = keep_b[lab]
-sel_b = np.clip(cv2.GaussianBlur(foot_m.astype(np.float32), (0, 0), 3) * 1.6, 0, 1)
-alpha = alpha * np.maximum(cv2.GaussianBlur(tw.astype(np.float32), (0, 0), 1.0), sel_b)
-sel_t = 1 - cv2.GaussianBlur(dilate(foot_m, 6).astype(np.float32), (0, 0), 2)
+# cluster is parted from it, is rebuilt below as lobes like any shaded edge).
+alpha = alpha * cv2.GaussianBlur(tw.astype(np.float32), (0, 0), 1.0)
 near_t = cv2.GaussianBlur(dilate(tw, int(2 * LOBES[0][0])).astype(np.float32), (0, 0), 20)
-del lab, comp, foot_m
+del lab, comp
 alpha = np.where(alpha < 0.02, 0, alpha)  # no faint veil anywhere off the cloud
 inside = (alpha > 0.9) & tw
 del tw
@@ -440,10 +494,11 @@ lgR = cv2.GaussianBlur(np.log(np.maximum(L, 1e-4)), (0, 0), 0.8)
 del L
 
 
-def mblur(x, sg):
-    """Mean of x over the cloud only (the sky round it would pull the edges
-    down into a dark rim)."""
-    return cv2.GaussianBlur(x * ac, (0, 0), sg) / (cv2.GaussianBlur(ac, (0, 0), sg) + 1e-4)
+def mblur(x, sg, cov=None):
+    """Mean of x over the cloud only (cov, the tower's coverage by default:
+    the sky round it would pull the edges down into a dark rim)."""
+    cov = ac if cov is None else cov
+    return cv2.GaussianBlur(x * cov, (0, 0), sg) / (cv2.GaussianBlur(cov, (0, 0), sg) + 1e-4)
 
 
 # The key's last few px are thin cloud over sky, darker than the cloud: the
@@ -456,9 +511,6 @@ mb = [lgR] + [mblur(lgR, sg) for sg in CRISP_SIG]
 lg = mb[-1].copy()
 for i in range(len(CRISP_SIG)):
     lg += (1 + CRISP[i]) * (mb[i] - mb[i + 1])
-# the lobes (for thinning the foot out lobe by lobe)
-nlo = mb[2] - mblur(lgR, 60.0)
-nlo /= float(nlo[inside].std()) + 1e-4
 del mb, lgR
 top = float(np.percentile(lg[inside], 97))
 low = float(np.percentile(lg[inside], 3))
@@ -481,6 +533,24 @@ del hgt, gx, gy, nx, ny
 t = t + FORM * rel
 t = np.clip(t, -0.2, 1.2)
 t = np.where(t > 0, np.abs(t) ** TONE_GAMMA, t)
+# Only the crown's sunward tops keep the sun: the sun potential rises across
+# the tower to the right and, more, up it (its own extent, 0..1 each way),
+# and with the relief and brightness of each billow, so the light ends on
+# the lobes' own forms rather than along a line. Under it the tower is in
+# skylight shade, its billows kept as relief within SHADE_T.
+lo_a, lo_b = np.percentile(SLON[inside], (1, 99))
+la_a, la_b = np.percentile(SLAT[inside], (1, 99))
+xn = np.clip((SLON - lo_a) / (lo_b - lo_a), 0, 1)
+yn = np.clip((SLAT - la_a) / (la_b - la_a), 0, 1)
+sun = smoothstep(*SUNLIT, SUN_XY[0] * xn + SUN_XY[1] * yn + SUN_REL * rel + SUN_T * (t - 0.6))
+del xn
+# (the shade deepens down the tower, by SHADE_LOW at its base, into the bank)
+t = SHADE_T[0] + (SHADE_T[1] - SHADE_T[0]) * np.clip(t, 0, 1) * (1 - SHADE_LOW * (1 - yn)) * (1 - sun) + t * sun
+del yn
+if WORK:
+    os.makedirs(WORK, exist_ok=True)
+    cv2.imwrite(os.path.join(WORK, "sun.jpg"), (np.clip(sun * (ac > 0.02), 0, 1) * 255).astype(np.uint8)[::2, ::2])
+del sun
 if WORK:
     os.makedirs(WORK, exist_ok=True)
     for nm, im in (("t", t), ("rel", 0.5 + rel), ("a_out", a_out)):
@@ -512,41 +582,87 @@ del wf, ae
 alpha = a_out
 print("cumulus: log tone low", round(low, 3), "top", round(top, 3))
 
+# ---- the foot, from its own window: the bank west of the tower, keyed the
+# same way, solid from its top silhouette down, in skylight shade
+fL, fal, fak = key(fsub)
+del fsub
+fsh, fsw = fL.shape
+flat_ = 90 - (fy0 + np.arange(fsh, dtype=np.float32) + 0.5) / PH * 180
+fiy = int((flat_[0] - FOOT_SEED[1]) / 180 * PH)
+fix = int((FOOT_SEED[0] - FOOT_LON[0]) / 360 * PW)
+# the bank: the solid core holding FOOT_SEED, parted from the clouds over it
+_, lf = cv2.connectedComponents(erode(fak > 0.5, FOOT_PART).astype(np.uint8), connectivity=8)
+bank = lf == mode(lf[fiy - 40:fiy + 40, fix - 40:fix + 40])
+bank = dilate(bank, FOOT_PART + 2) & (fal > 0.02)
+del lf, fak
+fa = cv2.morphologyEx(fal * bank, cv2.MORPH_CLOSE, disk(CLOSE_R))
+fa = cv2.erode(fa, disk(ERODE))
+# solid from its top down, column by column: no sky under the bank, ever
+below = np.maximum.accumulate((fa > 0.5).astype(np.uint8), axis=0) > 0
+fa = np.maximum(fa, cv2.GaussianBlur(below.astype(np.float32), (0, 0), 3) * below)
+fa = cv2.GaussianBlur(fa, (0, 0), FEATHER[1])
+fa = np.where(fa < 1 / 255, 0, fa)
+# depth under the bank's top (deg), for the base deepening toward the horizon
+top_row = np.argmax(fa > 0.5, axis=0).astype(np.float32)
+top_row = cv2.GaussianBlur(top_row[None, :], (0, 0), 30)[0]
+depth = (np.arange(fsh, dtype=np.float32)[:, None] - top_row[None, :]) / PH * 180
+del below, bank, fal
+# its billows: the log luminance, carried out to the edge from the body as on
+# the tower, crisped the same way, spread over FOOT_T in the bank's body
+fsolid = erode(fa > 0.6, 4)
+flg = cv2.GaussianBlur(np.log(np.maximum(fL, 1e-4)), (0, 0), 0.8)
+del fL
+flg = np.where(fsolid, flg, pushpull(np.dstack([flg] * 3), fsolid.astype(np.float32))[..., 0])
+fmb = [flg] + [mblur(flg, sg, fa) for sg in CRISP_SIG]
+flg = fmb[-1].copy()
+for i in range(len(CRISP_SIG)):
+    flg += (1 + CRISP[i]) * (fmb[i] - fmb[i + 1])
+del fmb
+body_ = fsolid & (depth > 0.3) & (depth < 7.5)
+f_lo, f_hi = np.percentile(flg[body_], (3, 97))
+ft = np.clip((flg - f_lo) / (f_hi - f_lo), 0, 1)
+hp = flg - mblur(flg, FOOT_LOCAL_SIG, fa)
+hp /= np.sqrt(mblur(hp * hp, FOOT_LOCAL_SIG, fa)) + 1e-3
+ft = (1 - FOOT_LOCAL) * ft + FOOT_LOCAL * (0.5 + 0.3 * np.tanh(hp))
+del hp
+# far under the roofs (and where its last rows run on past the horizon, so
+# they would streak) the bank is its flat dark base
+ft = 0.5 + (ft - 0.5) * (1 - smoothstep(*FOOT_FLAT_DEG, depth))
+ft = FOOT_T[0] + (FOOT_T[1] - FOOT_T[0]) * ft - FOOT_BASE * smoothstep(*FOOT_BASE_DEG, depth)
+del flg, fsolid, body_, depth
+fcol = _lin(ramp(ft, TONE_AT, TONE))
+del ft
+print("cumulus: foot tone low", round(float(f_lo), 3), "top", round(float(f_hi), 3))
+
 # ---- onto the card: premultiplied, through the two views
-# The tower through its own view; under it the foot, the rows of cumulus
-# nearer the horizon through the flatter one, so the tower's lower lobes
-# stand on the foot's tops and the foot runs on down far behind the roofs:
-# the cloud grows up out of the town and no base of it hangs in the sky.
-# Across the frame the foot fades out over BANK_U along a wavering line,
-# so the horizon does not become one white band.
+# The tower through its own view; under it the foot, the bank through its
+# own, so the tower's lower lobes stand on the bank's tops and the bank runs
+# on down far behind the roofs: the cloud grows up out of the town and no
+# base of it hangs in the sky. Across the frame the bank fades out over
+# FOOT_U along a wavering line, so the horizon does not become one wall.
 pm = np.dstack([col * alpha[..., None], alpha]).astype(np.float32)
-del col, F, B
+fpm = np.dstack([fcol * fa[..., None], fa]).astype(np.float32)
+del col, fcol, fa
 
 
-def through(pm_, lon, lat):
-    mu = (lon - lo0) / 360 * PW - 0.5
-    mv = (90 - lat) / 180 * PH - y0 - 0.5
+def through(pm_, lon, lat, lon_0, y_0):
+    mu = (lon - lon_0) / 360 * PW - 0.5
+    mv = (90 - lat) / 180 * PH - y_0 - 0.5
     return cv2.remap(pm_, mu.astype(np.float32), mv.astype(np.float32), cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 
 
-card = through(pm * sel_t[..., None], LON, LAT)
-foot = through(pm * sel_b[..., None], BLON, BLAT)
-nlo_f = through(nlo, BLON, BLAT)
-del pm, sel_t, sel_b, nlo
+card = through(pm, LON, LAT, lo0, y0)
+foot = through(fpm, FLON, FLAT, FOOT_LON[0], fy0)
+del pm, fpm
 rng_ = np.random.default_rng(5)
 wob = cv2.resize(rng_.standard_normal((ch // 48 + 2, cw // 48 + 2)).astype(np.float32), (cw, ch), interpolation=cv2.INTER_CUBIC)
-wob = cv2.GaussianBlur(wob, (0, 0), 16)
+wob = cv2.GaussianBlur(wob, (0, 0), 48)
 wob /= max(float(wob.std()), 1e-6)
-uw = U + 0.035 * wob
+uw = U + 0.03 * wob
 del wob
-wu = smoothstep(*BANK_U[0], uw) * (1 - smoothstep(*BANK_U[1], uw))
-# and below the roofline (FOOT_V) it thins out lobe by lobe toward the
-# horizon rather than going on as one flat slab: where it fades, the lobes
-# (nlo) hold on longest and the hollows between them go first
-wu = wu * (1 - 0.85 * smoothstep(*FOOT_V, V)) * smoothstep(BANK_LAT[0] - 2, BANK_LAT[0], BLAT)
-wu = smoothstep(0.12, 0.88, wu + FOOT_LOBE * np.tanh(nlo_f) * 4 * wu * (1 - wu))
+wu = smoothstep(*FOOT_U[0], uw) * (1 - smoothstep(*FOOT_U[1], uw))
 card = card + foot * (wu[..., None] * (1 - np.clip(card[..., 3:], 0, 1)))
-del foot, wu, uw, nlo_f
+del foot, wu, uw
 ca_ = np.clip(card[..., 3], 0, 1)
 ca_ = np.where(ca_ < 1 / 255, 0, ca_)
 cc_ = np.clip(card[..., :3] / np.maximum(card[..., 3:], 1e-4), 0, 1)
@@ -645,7 +761,8 @@ if WORK:
     os.makedirs(WORK, exist_ok=True)
     pv = G.copy()
     oxx, oyy = cx0p - round(RECTS[0][0] * EW), cy0p - round(RECTS[0][1] * EH)
-    pv[oyy:oyy + ph_, oxx:oxx + pw_] = pv[oyy:oyy + ph_, oxx:oxx + pw_] * (1 - a_ph[..., None]) + c_ph * a_ph[..., None]
+    hh_, ww_ = min(ph_, pv.shape[0] - oyy), min(pw_, pv.shape[1] - oxx)  # (the card may run past the sky's)
+    pv[oyy:oyy + hh_, oxx:oxx + ww_] = pv[oyy:oyy + hh_, oxx:oxx + ww_] * (1 - a_ph[:hh_, :ww_, None]) + c_ph[:hh_, :ww_] * a_ph[:hh_, :ww_, None]
     pv = cv2.resize(pv, (sw // 2, sh // 2), interpolation=cv2.INTER_AREA)
     cv2.imwrite(os.path.join(WORK, "sky.jpg"), (np.clip(pv[:, :, ::-1], 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(os.path.join(WORK, "alpha.jpg"), (np.clip(a_ph, 0, 1) * 255).astype(np.uint8))

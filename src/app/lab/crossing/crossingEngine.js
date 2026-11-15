@@ -16,10 +16,11 @@ import { createFilm } from "../_kit/film";
 // The photo's own clouds were faint torn wisps, so the sky card holds the
 // clear cobalt gradient alone and an eighth card between it and the far
 // houses carries real cumulus (cumulus.py, from a Poly Haven summer HDRI):
-// sunlit warm tops that roll off below clipping, a lobed left flank and lower
-// body in skylight blue-grey shade that keep the HDRI's own billows, and no
-// base in the sky: it grows up out of the horizon, its foot (the HDRI's lower
-// rows of cumulus) running on down behind the roofs and the town.
+// the sun only on the crown's warm tops, a lobed left flank and lower body in
+// skylight blue-grey shade that keep the HDRI's own billows, and no base in
+// the sky: it grows up out of the horizon, its foot (a broad congestus bank
+// from the same HDRI, in shade) running on down past the lowest roof and far
+// behind the town.
 //
 // The closed photograph is the stack itself, not a plate laid over it: at
 // rest the cards are drawn flat and composite back to the picture, wires,
@@ -86,9 +87,9 @@ const PLANES = [
   { file: "p0", rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66, open: true }, // sky
   // The cumulus (cumulus.py): real cloud from a summer HDRI, its own card
   // between the sky and the town so a swing slides it against the roofs.
-  // It stands far off over the town, its base down behind the roofs, the
-  // eave and the lamps and its foot running on below the roofline, so a
-  // swing never uncovers a base hanging in the sky; it sits back near the
+  // It stands far off over the town, its foot a solid bank running on far
+  // below the roofline (to v 1.3), so a swing never uncovers a base hanging
+  // in the sky or a strip of clear sky under it; it sits back near the
   // sky card, so it barely slides against the sky and the street slides
   // across it. A cut-out on a wide transparent margin, feathered to 0 well
   // inside every edge, so it need not cover the window; it throws no shadow
@@ -96,8 +97,11 @@ const PLANES = [
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
   // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [0.06348, 0.19174, 0.73438, 1.20059], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
-  { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
+  { file: "clouds", rect: [-0.08984, 0.19174, 0.8457, 1.30088], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  // The town's travel is held (travel, below): looking up, the turned lens
+  // would carry the far roofs down out of the window until only a defocused
+  // sliver of roof was left streaking along its bottom edge.
+  { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38, travel: { anchor: [0.56, 0.76], drop: 0.04 } }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
   // each wire on as a horizontal shadow band with a hard lower edge.
@@ -220,6 +224,7 @@ uniform float uF;       // the box's depth scale: plate px at distance uF are pr
 uniform float uFP;      // the plate's own focal length, print px
 uniform mat3 uLens;     // plate ray -> screen (css px from centre, y up), homogeneous
 uniform vec2 uHalfView; // half the viewport, css px
+uniform float uLift;    // the card's lift (photo v): its travel held (liftsFor)
 uniform int uMat;       // 1: the paper round the window, drawn in screen space
 out vec2 vUv;
 void main() {
@@ -229,7 +234,7 @@ void main() {
     return;
   }
   vec2 uv = mix(uRect.xy, uRect.zw, aPos);
-  vec2 p = vec2((uv.x - 0.5) * 2.0 * uPlane.x, (0.5 - uv.y) * 2.0 * uPlane.y);
+  vec2 p = vec2((uv.x - 0.5) * 2.0 * uPlane.x, (0.5 - uv.y + uLift) * 2.0 * uPlane.y);
   // Off-axis projection from the eye onto the plate's image plane (a point
   // on the window's plane lands in the same place wherever the eye is), then
   // that ray through the turned camera: (A * uF / z, uFP) is the ray in the
@@ -258,6 +263,7 @@ uniform float uZ[${N}];
 uniform vec2 uHalf[${N}];
 uniform float uCast[${N}];       // 0: this plane throws no shadow
 uniform float uHold[${N}];       // 0: its matte ends at the photo's edge
+uniform float uLifts[${N}];      // each card's lift (photo v), as uLift
 uniform vec3 uLight;
 uniform float uShadow;
 uniform float uPrintW;
@@ -325,7 +331,7 @@ void main() {
   // gap (a larger penumbra the further the shadow falls).
   if (uShadow > 0.0 && c.a > 0.0) {
     vec2 h = uHalf[uK];
-    vec2 p = vec2((vUv.x - 0.5) * 2.0 * h.x, (0.5 - vUv.y) * 2.0 * h.y);
+    vec2 p = vec2((vUv.x - 0.5) * 2.0 * h.x, (0.5 - vUv.y + uLifts[uK]) * 2.0 * h.y);
     float lit = 1.0;
     for (int j = 0; j < ${N}; j++) {
       if (j <= uK || uCast[j] < 0.5) continue;
@@ -333,7 +339,7 @@ void main() {
       if (gap < 1.0) continue;
       vec2 q = p + uLight.xy * gap / uLight.z;
       vec2 hj = uHalf[j];
-      vec2 uvj = vec2(q.x / (2.0 * hj.x) + 0.5, 0.5 - q.y / (2.0 * hj.y));
+      vec2 uvj = vec2(q.x / (2.0 * hj.x) + 0.5, 0.5 - q.y / (2.0 * hj.y) + uLifts[j]);
       // penumbra grows with the gap; the shadow also sits on this plane, so
       // it shares the plane's defocus
       float pen = gap * 0.045 * ${MATTE[0]}.0 / (2.0 * hj.x);
@@ -663,7 +669,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const L = layout();
     const zs = PLANES.map((p) => L.f + s * SPREAD * p.o * L.printW);
     const pivot = L.f + s * SPREAD * PIVOT_O * L.printW;
-    return { ...L, zs, pivot };
+    return { ...L, zs, pivot, s };
   };
 
   const lens = (G, pitchOff) => lensFor(G.printW, G.printH, G.winH, LENS.restPitch + pitchOff);
@@ -672,7 +678,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   // centre, y up) meets plane k, in that plane's photo uv: back through the
   // lens to the plate's image plane, then from the eye to the card. null when
   // the ray points behind the plate.
-  const castUv = (G, Ln, E, sx, sy, k) => {
+  const castUv = (G, Ln, E, sx, sy, k, lifts) => {
     const s = Ln.inv(sx, sy);
     if (!s) return null;
     const zk = G.zs[k];
@@ -680,7 +686,44 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const x = E[0] + ((s[0] * G.pivot) / G.f - E[0]) * t;
     const y = E[1] + ((s[1] * G.pivot) / G.f - E[1]) * t;
     const sc = zk / G.f;
-    return [x / (G.printW * sc) + 0.5, 0.5 - y / (G.printH * sc)];
+    return [x / (G.printW * sc) + 0.5, 0.5 - y / (G.printH * sc) + (lifts ? lifts[k] : 0)];
+  };
+
+  // Where photo point (u, v) of plane k lands on the screen (css px from
+  // the centre, y up), unlifted: PLANE_VS in JS.
+  const project = (G, Ln, E, k, u, v) => {
+    const z = G.zs[k];
+    const px = (u - 0.5) * G.printW * (z / G.f) + E[0] * (z / G.pivot - 1);
+    const py = (0.5 - v) * G.printH * (z / G.f) + E[1] * (z / G.pivot - 1);
+    const a = [px * G.f, py * G.f, Ln.fP * z];
+    const r = (i) => Ln.m[i][0] * a[0] + Ln.m[i][1] * a[1] + Ln.m[i][2] * a[2];
+    return [r(0) / r(2), r(1) / r(2)];
+  };
+
+  // The town's travel. The lens turns about its own centre, so a swing up
+  // carries every card down the window alike; the town, low in the frame
+  // already, would leave it but for a sliver of defocused roof streaking
+  // along the bottom edge, and the stack would read as cut-outs over a bare
+  // gradient. A card with travel may drop no more than drop (a share of the
+  // window's height) below where its anchor sits at rest: past that it is
+  // lifted, as a tunnel book's card is slid up its slot, by the photo v that
+  // keeps the anchor there. Flat it is the photograph, so the lift opens in
+  // with the split.
+  const liftsFor = (G, Ln, E) => {
+    const lifts = new Float32Array(N);
+    const open = clamp(G.s / 0.3, 0, 1);
+    if (open <= 0) return lifts;
+    const rest = lens(G, 0);
+    PLANES.forEach((P, k) => {
+      if (!P.travel) return;
+      const [u, v] = P.travel.anchor;
+      const floor = project(G, rest, [0, 0], k, u, v)[1] - P.travel.drop * G.winH;
+      const now = project(G, Ln, E, k, u, v)[1];
+      if (now >= floor) return;
+      const dy = (project(G, Ln, E, k, u, v - 0.01)[1] - now) / 0.01;
+      if (dy > 0) lifts[k] = ((floor - now) / dy) * open * open * (3 - 2 * open);
+    });
+    return lifts;
   };
 
   // Which plane is under the pointer (nearest first), by casting the ray from
@@ -689,8 +732,9 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const G = geometry(easeSplit(clamp(split.x, 0, 1.08)));
     const E = eyeFor(G.pivot, swing.yaw);
     const Ln = lens(G, swing.pitch);
+    const lifts = liftsFor(G, Ln, E);
     for (let k = N - 1; k >= 1; k--) {
-      const c = castUv(G, Ln, E, px - G.W / 2, -(py - G.H / 2), k);
+      const c = castUv(G, Ln, E, px - G.W / 2, -(py - G.H / 2), k, lifts);
       if (!c) continue;
       const [u, v] = c;
       if (u < 0 || u > 1 || v < 0 || v > 1) continue;
@@ -723,12 +767,13 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const fits = (t) => {
       const E = eyeFor(G.pivot, onlyPitch ? 0 : yawDeg * t);
       const Ln = lens(G, onlyPitch ? pitchDeg * t : pitchDeg);
+      const lifts = liftsFor(G, Ln, E);
       for (let k = 0; k < MAT_K; k++) {
         const S = SAFE[k];
         if (S.every((v) => !Number.isFinite(v))) continue;
         const inset = 0.008 + cocs[k] / (stage.dpr * G.printW);
         for (const [ex, ey] of EDGE) {
-          const c = castUv(G, Ln, E, ex * G.winW, ey * G.winH, k);
+          const c = castUv(G, Ln, E, ex * G.winW, ey * G.winH, k, lifts);
           if (!c) return false;
           const [u, v] = c;
           const [rl, rt, rr, rb] = reach[k];
@@ -808,7 +853,9 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const U = plane.u;
     const E = eyeFor(G.pivot, yawDeg);
     const Ln = lens(G, pitchDeg);
+    const lifts = liftsFor(G, Ln, E);
     gl.uniform2f(U.uEye, E[0], E[1]);
+    gl.uniform1fv(U.uLifts, lifts);
     gl.uniform1f(U.uWinZ, G.pivot);
     gl.uniform1f(U.uF, G.f);
     gl.uniform1f(U.uFP, Ln.fP);
@@ -860,6 +907,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.uniform4f(U.uCrop, r[0], r[1], r[2], r[3]);
       gl.uniform2f(U.uTexSize, planeTex[k].size[0], planeTex[k].size[1]);
       gl.uniform3f(U.uPlane, halves[k * 2], halves[k * 2 + 1], z);
+      gl.uniform1f(U.uLift, lifts[k]);
       gl.uniform1f(U.uCoc, coc);
       gl.uniform1i(U.uK, k);
       gl.uniform1f(U.uShadow, shadow * (P.shade ?? 1));
