@@ -93,6 +93,12 @@ export const FILM = {
   skyHoldFull: 1.67,
 
   hiWarm: 0.025,
+  // The cumulus' sunlit tops roll off warm-neutral on the shoulder (towards
+  // #fff6ea), not the scan's grey-white: on the bake's cloud share (alpha) and
+  // off the sky, a highlight takes cloudWarm more red than blue before the
+  // paper-white cap, which keeps it under 255 at every exposure (clouds.py).
+  cloudWarm: 0.08,
+  cloudWarmHue: [1.0, 0.45, -0.45],
   // The softness belongs to the sky. At low exposure the needles (keyed on the
   // scene's luminance, needleY) take only 1 - needleBloomCap of the Pro-Mist veil
   // and 1 - needleHalCap of the halation, and are sampled from the full-size
@@ -135,7 +141,7 @@ uniform vec3 uGref;         // negative density of the printer-light grey
 uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax; uniform vec3 uShExt; uniform vec2 uShX;
 uniform vec2 uNeedleY; uniform vec2 uNeedleCap; // luminance key; bloom and halation caps, already scaled by exposure
 uniform float uLod;         // mip level the print is minified to
-uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm;
+uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm; uniform float uCloudWarm; uniform vec3 uCloudWarmHue;
 uniform vec2 uSkyQ; uniform float uHold; uniform float uHoldNeedle; uniform vec2 uHoldY; uniform float uHoldDepth; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
 uniform float uGrain; uniform float uSeed; uniform float uGrainPx;
@@ -211,6 +217,8 @@ void main(){
   c *= y / max(dot(c, LUMA), 1e-6);
   // Never past the paper's own white: a channel that would print brighter than
   // the base gives up luminance with the others, so the hue holds.
+  float cloud = 1.0 - clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0);
+  c *= 1.0 + uCloudWarm * hi * cloud * (1.0 - sky) * uCloudWarmHue;
   vec3 white = pow(vec3(10.0), -uDmin) * (1.0 - uSkyCap * sky);
   c /= max(1.0, max(c.r / white.r, max(c.g / white.g, c.b / white.b)));
   c *= 1.0 + uHiWarm * hi * vec3(1.0, 0.3, -0.6);
@@ -504,6 +512,8 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uBlueHue, F.blueHue);
     gl.uniform1f(u.uHiDesat, F.hiDesat);
     gl.uniform1f(u.uHiWarm, F.hiWarm);
+    gl.uniform1f(u.uCloudWarm, F.cloudWarm);
+    gl.uniform3fv(u.uCloudWarmHue, F.cloudWarmHue);
     gl.uniform2fv(u.uSkyQ, F.skyQ);
     gl.uniform1f(u.uSkyHiKeep, F.skyHiKeep);
     gl.uniform1f(u.uSkyHiHue, F.skyHiHue);
