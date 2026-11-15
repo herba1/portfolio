@@ -930,26 +930,34 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float lobe = HA2 / (PI * pow(nh * nh * (HA2 - 1.0) + 1.0, 2.0));
   float lobeS = uSunE * lit * sunVis * lobe * F * 0.3;
   vec3 sunC = SUNW * lobeS;
-  // its disc, never smaller than a pixel, energy kept, its edge soft; round
-  // it an aureole, the light the acrylic's micro-roughness and its weathered
-  // haze throw a few disc widths wide (falling as the cube of the angle, as
-  // a rough surface's near-specular tail does), which is what makes a sun in
-  // a mirror a glow with a hot centre, not a coin
+  // its disc, never smaller than a pixel, energy kept, its edge soft. A
+  // half-degree sun in a dome of 1 m radius is a point: the face turns the
+  // reflected ray twice as fast as its own normal, so the disc's image is
+  // under a quarter of a centimetre of acrylic, a css pixel or so. Round it
+  // an aureole, the near-specular tail of the acrylic's micro-roughness,
+  // steep (the fourth power of the angle) and only a few disc widths wide:
+  // a hard point with a glint, not a glow, so the cobalt the dome reflects
+  // runs right up to it
   float ang = acos(clamp(dot(r, uSun), -1.0, 1.0));
   float sunR = 0.00465;
   float rEff = max(sunR, spread * 0.75);
   float disc = smoothstep(rEff * 1.2, rEff * 0.3, ang) * (sunR * sunR) / (rEff * rEff);
   float sunL = uSunE / (PI * sunR * sunR);    // radiance of the disc
   float xa = ang / sunR;
-  float aureole = 160.0 * pow(1.0 + xa * xa, -1.5);
+  float aureole = 40.0 * pow(1.0 + xa * xa, -2.0);
   sunC += SUNW * (sunL * disc + aureole) * fr * uSunDisc * lv * (1.0 - 0.6 * smudge) * (1.0 - 0.1 * dust - 0.15 * smudge);
-  // dust and smudge scatter it a lot when it is near the mirrored direction,
-  // and the weathered face as a whole a little: a glare a few degrees wide
-  // round the disc, with a long faint skirt, which carries the sun's
-  // brightness out across the glass the way a lens sees it
-  float fwd = exp(-ang / 0.035) * 10.0 + exp(-ang / 0.12) * 1.5 + exp(-ang / 0.4) * 0.25 + 0.03;
-  float skirtD = (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * sunVis * fwd * 0.12;
-  float skirt = skirtD + (2.4 * exp(-ang / 0.02) + 1.0 * exp(-ang / 0.075) + 0.25 * exp(-ang / 0.26)) * lit * lv;
+  // dust and smudge scatter it when it is near the mirrored direction: a
+  // forward lobe a degree or two wide, no more. The smudge scatters only on
+  // its own body (its film, not the faint tail of its outline), so a sun
+  // that sits beside it is not wrapped in its haze; the dust, spread thin
+  // over the whole face, only a little.
+  float smB = smoothstep(0.25, 0.6, smudge);
+  float fwd = exp(-ang / 0.01) * 10.0 + exp(-ang / 0.035) * 1.2 + exp(-ang / 0.12) * 0.06 + 0.008;
+  float skirtD = (dust * 0.12 + smB * 0.5) * uSunE / PI * lit * sunVis * fwd * 0.12;
+  // and the halation: a thin warm ring at two or three disc widths, where
+  // the light the sheet carries sideways comes back out round the point
+  float ring = exp(-pow((ang - 0.011) / 0.004, 2.0));
+  float skirt = skirtD + (2.4 * exp(-ang / 0.006) + 0.35 * ring + 0.1 * exp(-ang / 0.022)) * lit * lv;
   sunC += SUNW * skirt;
 
   // As light. On a float scene the sun is what it is: past white, by a
@@ -973,9 +981,15 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
     // glass, and a warm glow thinned over cobalt reads grey, so the warm
     // skirt is drawn close round the core and falls off into the blue)
     // (and the haze's broad lobe, which as light is a sheen across the whole
-    // face, at under half: at full it was the milky veil)
-    float coreS = max(dot(sunC, vec3(0.3333)) / max(dot(SUNW, vec3(0.3333)), 1e-4) - skirt - 0.6 * lobeS, 0.0);
-    float skirtH = skirtD + (2.0 * exp(-ang / 0.018) + 1.2 * exp(-ang / 0.05) + 0.08 * exp(-ang / 0.2)) * lit * lv;
+    // face, at a tenth: at full it was the milky veil, and even at under
+    // half it greyed the dome's upper third round the sun. A 1 m dome
+    // reflects the sun as a point in deep cobalt; the glow is the
+    // Pro-Mist's, spread from that point, not the acrylic's)
+    // (the point itself is many times white, so a few px of it carry
+    // enough light for the mist to bloom warm round it, where the old
+    // broad skirt carried that light as a disc drawn on the glass)
+    float coreS = max(dot(sunC, vec3(0.3333)) / max(dot(SUNW, vec3(0.3333)), 1e-4) - skirt - 0.9 * lobeS, 0.0);
+    float skirtH = skirtD + (2.0 * exp(-ang / 0.005) + 0.45 * ring + 0.06 * exp(-ang / 0.02)) * lit * lv;
     vec3 hot = uSunHot * coreS + uSunSkirt * skirtH * uSunSkirtK;
     float hm = max(max(hot.r, hot.g), hot.b);
     hot *= uSunPeak * (1.0 - exp(-hm / uSunPeak)) / max(hm, 1e-6);
@@ -1721,11 +1735,14 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   // The sun at HDR (a float scene): a hot afternoon sun's colour as the
   // print should carry it in its glow, warmer than SUN_W's neutral (that is
   // what its blown core develops to anyway), worked back through the film's
-  // cool highlight tint; and its ceiling, in scene units, about twenty times
-  // white: enough that the Pro-Mist's spread of a sun a few px across blows a
-  // soft warm disc a few css px wide, not so much that it floods the glass.
+  // cool highlight tint (a deep amber, so that thinned over cobalt by the
+  // mist its glow still reads warm, not lavender-grey); and its ceiling, in
+  // scene units, a few hundred times white. The sun in the glass is a point
+  // a css px or two across, so it is the point that carries the light: high
+  // enough that the Pro-Mist's spread of it blooms a soft warm glow a few
+  // css px round it, with no broad skirt drawn on the glass to do it.
   const SUN_HOT = (() => {
-    const w = [1.0, 0.76, 0.5].map((v, i) => v / LOOK.highlightTint[i]);
+    const w = [1.0, 0.68, 0.38].map((v, i) => v / LOOK.highlightTint[i]);
     const m = Math.max(...w);
     return w.map((v) => v / m);
   })();
@@ -1734,7 +1751,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     const m = Math.max(...w);
     return w.map((v) => v / m);
   })();
-  const SUN_PEAK = 24;
+  const SUN_PEAK = 320;
   // without a float target the scene is stored as the film's sRGB input
   const sunTone = () => (linear ? TONE : TONE.map((v) => linearToSrgb(Math.min(v, 1))));
 
