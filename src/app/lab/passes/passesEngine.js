@@ -33,11 +33,13 @@ import { createStage, clamp } from "../_kit/stage";
 // of the canyon, filling its lower half behind the tower, and the open
 // canyon above stays cobalt. The sun itself is drawn where the light stands.
 //
-// Plate and dome are then developed as one exposure: a single film pass over
-// the matted frame spreads its highlights (a warm Pro-Mist diffusion), throws
-// a thin red halation ring onto the dark side of every bright edge, and lays
-// one fine luminance grain field, stepping at 24 fps, over sky and concrete
-// alike.
+// Plate and dome are then developed as one emulsion: the film over the
+// matted frame spreads its highlights through a half-size blur pyramid (a
+// warm Pro-Mist diffusion), lays a tight blur of their red layer back as a
+// thin orange-red halation on the dark side of every bright edge, prints
+// through a toe that lifts the blacks to a cool charcoal and a shoulder that
+// rolls the highlights off warm, and lays one luminance grain field, in the
+// midtones, stepping at 24 fps, over sky and concrete alike.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -491,9 +493,17 @@ void main(){
 }`;
 
 // The film the whole frame shares, plate and dome alike, so they read as one
-// exposure. First the light that scatters, at half size: only what is over
-// 0.78 in luma, for the diffusion (the open sky never reaches it), and the
-// near-white that halates in a.
+// emulsion. It runs in four steps after the light: the bright pass, a blur
+// pyramid built from it (the diffusion), a tight blur of its red layer (the
+// halation), and the print itself.
+//
+// First what scatters, at half size: the light over about 0.7 in luma, eased
+// in on a soft knee so no edge of it shows. The walls' sunlit plaster sits
+// right on that threshold. It is a matte surface, not a highlight, so it
+// gives a little less, and the film keeps its halation out of the walls'
+// own joints (the scene's alpha is 1 on the walls): there, a red ring in
+// every panel joint and window frame read as a sepia line drawing. Where
+// the lit facade meets the open sky the fringe still lands, on the sky.
 // Four bilinear taps cover the 4x4 block, so a bright hairline does not
 // shimmer in and out of it.
 const PREP = `#version 300 es
@@ -502,17 +512,11 @@ uniform sampler2D uScene;
 uniform vec2 uTexel;      // the scene's texel
 out vec4 o;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-// The walls' sunlit plaster prints just under the crowns' white, on the
-// threshold, but it is a matte surface, not a highlight: its halation laid a
-// red ring in every panel joint and window frame, a sepia line drawing, and
-// its warm diffusion a cream veil over the recesses. So it takes no part in
-// the halation and only a little in the diffusion (the scene's alpha is 1 on
-// the walls); the clouds, the sun and the tower's white paint keep both.
+// rgb is the diffusion's source; a is the halation's, the red layer alone.
 vec4 src(vec2 uv){
   vec4 s = texture(uScene, uv);
-  float l = luma(s.rgb);
-  vec3 lin = pow(s.rgb, vec3(2.2));
-  return vec4(lin * smoothstep(0.78, 0.97, l) * (1.0 - 0.7 * s.a), smoothstep(0.84, 0.97, l) * (1.0 - s.a));
+  vec3 lin = pow(s.rgb, vec3(2.2)) * smoothstep(0.6, 0.9, luma(s.rgb));
+  return vec4(lin * (1.0 - 0.35 * s.a), lin.r * (1.0 - 0.15 * s.a));
 }
 void main(){
   vec2 uv = gl_FragCoord.xy * 2.0 * uTexel;
@@ -520,19 +524,87 @@ void main(){
   o = 0.25 * (src(uv + vec2(-t.x, -t.y)) + src(uv + vec2(t.x, -t.y)) + src(uv + vec2(-t.x, t.y)) + src(uv + t));
 }`;
 
-// Then the frame itself: a Pro-Mist diffusion from those highlights (a few
-// px at DPR 2, warm, since the filter's scatter is warmer than the light it
-// takes), a thin red-orange halation on the dark side of every bright edge
-// (the tower and the walls against the cloud), a breath of vignette, a lifted
-// toe, and one grain field for the whole frame, stepping at 24 fps.
+// The pyramid, down: each level half the last, five taps (the centre and
+// four diagonals a source texel out), so it spreads as it shrinks with no
+// box in it.
+const DOWN = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;      // the source's texel
+uniform vec2 uOut;        // this level's size
+out vec4 o;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uOut;
+  vec2 t = uTexel;
+  o = (4.0 * texture(uSrc, uv) + texture(uSrc, uv + vec2(-t.x, -t.y)) + texture(uSrc, uv + vec2(t.x, -t.y))
+       + texture(uSrc, uv + vec2(-t.x, t.y)) + texture(uSrc, uv + t)) / 8.0;
+}`;
+
+// And up: the coarser level spread on a tent of eight taps and laid over
+// this level's own, weighted, so the sum is a tight core with a long soft
+// tail, the way a Pro-Mist's scatter falls off.
+const UP = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc, uBase;
+uniform vec2 uTexel;      // the coarser level's texel
+uniform vec2 uOut;
+uniform float uW;         // this level's own share
+uniform float uS;         // the coarser level's (its own, at the coarsest)
+out vec4 o;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uOut;
+  vec2 t = uTexel;
+  vec4 s = texture(uSrc, uv + vec2(-2.0 * t.x, 0.0)) + texture(uSrc, uv + vec2(2.0 * t.x, 0.0))
+         + texture(uSrc, uv + vec2(0.0, -2.0 * t.y)) + texture(uSrc, uv + vec2(0.0, 2.0 * t.y))
+         + 2.0 * (texture(uSrc, uv + vec2(-t.x, -t.y)) + texture(uSrc, uv + vec2(t.x, -t.y))
+                + texture(uSrc, uv + vec2(-t.x, t.y)) + texture(uSrc, uv + t));
+  o = uS * s / 12.0 + uW * texture(uBase, uv);
+}`;
+
+// The halation's source: the bright pass's red layer alone, blurred tight,
+// a Gaussian of about two half-size texels (4 px at DPR 2, a ring 3 to 6 px
+// wide at 1x), one axis at a time.
+const HALO = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uStep;       // one texel along the axis
+uniform int uCh;          // which channel holds it: the bright pass's a, then r
+uniform vec2 uOut;
+out vec4 o;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uOut;
+  float s = 0.0, w = 0.0;
+  for (int i = -6; i <= 6; i++) {
+    float k = exp(-float(i * i) / 8.0);
+    s += k * texture(uSrc, uv + uStep * float(i))[uCh];
+    w += k;
+  }
+  o = vec4(s / w, 0.0, 0.0, 1.0);
+}`;
+
+// Then the print. Diffusion: about a tenth of the pyramid laid back, warmer
+// than the light it took, a share of each highlight's own light taken out
+// where it left so a wide cloud keeps its level, and the cloud's crowns and
+// the sunlit wall glow softly out into the cobalt. Halation: the blurred
+// red laid back warm orange-red wherever it lands on something darker than
+// what threw it, so a thin warm fringe stands where the cloud, the lit
+// facade and the white bands of the spire meet the deep blue. Then the
+// curve: a toe that lifts the blacks off zero to a cool charcoal (a window
+// recess prints about #2a2f36, not a hole), and a shoulder that rolls the
+// highlights off warm, the blue layer first, rather than flattening them.
+// A breath of vignette, and one grain field for the whole frame, luminance
+// only, strongest in the midtones, stepping at 24 fps.
 const FILM = `#version 300 es
 precision highp float;
-uniform sampler2D uScene, uBright;
+uniform sampler2D uScene, uDiffuse, uHalo;
 uniform vec2 uRes;        // canvas px
-uniform vec2 uHalf;       // uBright's texel
+uniform float uNorm;      // the pyramid's total weight
 uniform float uSeed;
 uniform float uDay;
 out vec4 o;
+const vec3 TOE = vec3(34.0, 38.0, 44.0) / 255.0;
+const vec3 WHITE = vec3(0.995, 0.98, 0.95);
+const float HALO_GAIN = 1.0;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float vnoise(vec2 p){
@@ -540,55 +612,52 @@ float vnoise(vec2 p){
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
-// The bright layer spread at a mip: four taps a texel of that level apart,
-// turned off the pixel grid, so the mips' boxes do not show.
-vec4 spread(vec2 uv, float lod){
-  vec2 r = uHalf * exp2(lod) * 0.75;
-  return 0.25 * (textureLod(uBright, uv + r * vec2(0.92, 0.38), lod) + textureLod(uBright, uv + r * vec2(-0.38, 0.92), lod)
-               + textureLod(uBright, uv + r * vec2(-0.92, -0.38), lod) + textureLod(uBright, uv + r * vec2(0.38, -0.92), lod));
+// The shoulder, per layer: linear to the knee, then an exponential roll to
+// that layer's white, so nothing reaches 255 and the top of the range
+// keeps its modelling instead of piling into one flat value.
+vec3 shoulder(vec3 c){
+  const float K = 0.8, END = 1.05;
+  vec3 a = ((END - K) - (WHITE - K)) / ((END - K) * (END - K));
+  vec3 x = clamp(c, K, END) - K;
+  return mix(c, K + x - a * x * x, step(K, c));
 }
 void main(){
   vec2 uv = gl_FragCoord.xy / uRes;
-  vec3 c = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb;
-  vec3 lin = pow(c, vec3(2.2));
-  float l = luma(c);
+  vec4 sc = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0);
+  vec3 lin = pow(sc.rgb, vec3(2.2));
+  float l = luma(sc.rgb);
+  float wall = sc.a;
 
-  // Only the half and quarter size levels: a tight kernel, a few px at
-  // DPR 2. Read wider, the bright deck and the bank spread into the open
-  // sky round the tower as a pale glow.
-  vec4 b0 = textureLod(uBright, uv, 0.0);
-  vec4 b1 = spread(uv, 0.0);
-  vec4 b2 = spread(uv, 1.0);
+  // Diffusion.
+  vec3 own = lin * smoothstep(0.6, 0.9, l);
+  vec3 diff = texture(uDiffuse, uv).rgb / uNorm;
+  lin += 0.12 * (diff * vec3(1.0, 0.95, 0.86) - 0.5 * own * (1.0 - 0.35 * wall));
 
-  // Diffusion: a share of the highlight leaves its pixel and lands spread
-  // round it, so the cloud's white veils softly over the steel and the wall
-  // edges in front of it, and the tops lose their paper-cut edge. It only
-  // moves light, so a wide cloud keeps its level; what lands outside the
-  // highlight is warmer than what left.
-  vec3 d = b1.rgb * 0.5 + b2.rgb * 0.5 - b0.rgb;
-  lin += 0.4 * (max(d, 0.0) * vec3(1.0, 0.93, 0.82) + min(d, 0.0));
+  // Halation, on the dark side of the edge only, and not inside the walls.
+  float hal = texture(uHalo, uv).r;
+  float land = (1.0 - smoothstep(0.45, 0.88, l)) * (1.0 - 0.85 * wall);
+  // The red layer it exposes sits over the blue one, so where it lands on
+  // the cobalt it also holds back a little of the blue: the fringe reads
+  // warm, not lilac.
+  float h = max(hal - 0.7 * own.r, 0.0) * land * HALO_GAIN * mix(0.8, 1.0, uDay);
+  lin = lin * (1.0 - min(h, 0.5) * vec3(0.0, 0.15, 0.5)) + vec3(1.0, 0.42, 0.1) * h;
 
-  // Halation: light through the emulsion off the base and back through the
-  // red layer. A ring, not a glow: the spread source minus what is already
-  // white here, only where the pixel is darker than the source.
-  float ring = max(b1.a * 0.4 + b2.a * 0.6 - b0.a * 0.85, 0.0) * (1.0 - smoothstep(0.45, 0.9, l));
-  lin += vec3(1.0, 0.3, 0.08) * ring * 0.32 * mix(0.75, 1.0, uDay);
-
-  c = pow(max(lin, 0.0), vec3(1.0 / 2.2));
-  c = mix(vec3(0.018, 0.016, 0.02), vec3(1.0), c);
+  vec3 c = pow(max(lin, 0.0), vec3(1.0 / 2.2));
+  // Toe, then shoulder.
+  c += TOE * pow(max(1.0 - luma(c) / 0.55, 0.0), 2.4);
+  c = shoulder(c);
   vec2 cv = uv - 0.5;
-  c *= 1.0 - 0.16 * dot(cv, cv);
+  c *= 1.0 - 0.14 * dot(cv, cv);
 
-  // Grain: soft clumps about a pixel and two across at DPR 2, no per-pixel
-  // hash (that read as a sensor's salt and pepper), luminance only, the same
-  // step on every channel. Weighted to the midtones, where a negative's
-  // grain shows, and thinning to a quarter in the darks and the highlights,
-  // so it never clumps in a shadow. One law for sky and concrete.
+  // Grain: soft clumps a pixel or two across at DPR 2 (a per-pixel hash
+  // reads as a sensor's salt and pepper), the same step on every channel.
+  // Weighted to the midtones, where a negative's grain shows, and thinning
+  // in the darks and the highlights. One law for sky and concrete.
   vec2 p = gl_FragCoord.xy + uSeed * vec2(37.1, 91.7);
-  float g = (vnoise(p / 1.1) - 0.5) + 0.6 * (vnoise(p / 2.3 + 41.7) - 0.5);
+  float g = (vnoise(p / 1.25) - 0.5) + 0.7 * (vnoise(p / 2.6 + 41.7) - 0.5) + 0.35 * (vnoise(p / 5.0 + 9.3) - 0.5);
   float lc = luma(c);
-  float mid = lc * (1.0 - lc) * 4.0;
-  c += g * 0.024 * (mid * 0.75 + 0.25);
+  float mid = smoothstep(0.0, 0.35, lc) * (1.0 - smoothstep(0.7, 1.0, lc));
+  c += g * 0.05 * (mid * 0.8 + 0.2);
   o = vec4(c, 1.0);
 }`;
 
@@ -700,18 +769,20 @@ export async function createPasses(host) {
     return p;
   };
   const prepProg = program(PREP);
+  const downProg = program(DOWN);
+  const upProg = program(UP);
+  const haloProg = program(HALO);
   const filmProg = program(FILM);
   const prog = program(FS);
   gl.useProgram(prog);
   const U = (n) => gl.getUniformLocation(prog, n);
   const u = { res: U("uRes"), map: U("uMap"), sun: U("uSun"), sunCol: U("uSunCol"), up: U("uUp"), day: U("uDay"), dome: U("uDome") };
-  const up = { texel: gl.getUniformLocation(prepProg, "uTexel") };
-  const uf = {
-    res: gl.getUniformLocation(filmProg, "uRes"),
-    half: gl.getUniformLocation(filmProg, "uHalf"),
-    seed: gl.getUniformLocation(filmProg, "uSeed"),
-    day: gl.getUniformLocation(filmProg, "uDay"),
-  };
+  const loc = (p, ...names) => Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)]));
+  const up = loc(prepProg, "uTexel");
+  const ud = loc(downProg, "uTexel", "uOut", "uSrc");
+  const uu = loc(upProg, "uTexel", "uOut", "uW", "uS", "uSrc", "uBase");
+  const uh = loc(haloProg, "uStep", "uOut", "uSrc", "uCh");
+  const uf = loc(filmProg, "uRes", "uNorm", "uSeed", "uDay");
 
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -770,19 +841,34 @@ export async function createPasses(host) {
   dome(skyCloud, 6, "uSky");
   dome(skyBlue, 8, "uSkyBlue");
 
-  // The film's targets: the matted frame at full size (unit 10), and the
-  // light that scatters from it at half size, with mips to spread it (11).
-  // Allocated whenever the canvas changes size.
-  const scene = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
-  const bright = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
+  // The film's targets: the matted frame at full size; the bright pass at
+  // half; the pyramid's levels down to a thirty-second, with one level per
+  // step on the way back up; and the halation's two axes at half size. Half
+  // floats where the GPU can render to them, so the spread light keeps its
+  // darks without banding. Allocated whenever the canvas changes size.
+  const half = gl.getExtension("EXT_color_buffer_float");
+  const fmt = half ? [gl.RGBA16F, gl.HALF_FLOAT] : [gl.RGBA8, gl.UNSIGNED_BYTE];
+  const LEVELS = 5;
+  // Each level's own share on the way up, finest first: a tight core and a
+  // long tail.
+  const LEVEL_W = [1.0, 0.9, 0.8, 0.7, 0.55];
+  const NORM = LEVEL_W.reduce((a, b) => a + b, 0);
+  const rt = () => ({ tex: gl.createTexture(), fbo: gl.createFramebuffer(), w: 0, h: 0 });
+  const scene = rt();
+  const down = Array.from({ length: LEVELS }, rt);
+  const ups = Array.from({ length: LEVELS - 1 }, rt);
+  const haloA = rt();
+  const haloB = rt();
+  const all = [scene, ...down, ...ups, haloA, haloB];
   let fw = 0;
   let fh = 0;
-  const alloc = (t, unit, w, h, mips) => {
-    gl.activeTexture(gl.TEXTURE0 + unit);
+  const alloc = (t, w, h, f) => {
+    t.w = w;
+    t.h = h;
+    gl.activeTexture(gl.TEXTURE15);
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
-    params2d(mips);
+    gl.texImage2D(gl.TEXTURE_2D, 0, f[0], w, h, 0, gl.RGBA, f[1], null);
+    params2d(false);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
   };
@@ -790,15 +876,39 @@ export async function createPasses(host) {
     if (W === fw && Hc === fh) return;
     fw = W;
     fh = Hc;
-    alloc(scene, 10, W, Hc, false);
-    alloc(bright, 11, Math.ceil(W / 2), Math.ceil(Hc / 2), true);
+    alloc(scene, W, Hc, [gl.RGBA8, gl.UNSIGNED_BYTE]);
+    for (let i = 0; i < LEVELS; i++) {
+      const d = 2 ** (i + 1);
+      alloc(down[i], Math.max(1, Math.ceil(W / d)), Math.max(1, Math.ceil(Hc / d)), fmt);
+      if (i < LEVELS - 1) alloc(ups[i], down[i].w, down[i].h, fmt);
+    }
+    alloc(haloA, down[0].w, down[0].h, fmt);
+    alloc(haloB, down[0].w, down[0].h, fmt);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   };
+  // A post step: into one target, reading others on units 13 and up.
+  const into = (t) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.viewport(0, 0, t.w, t.h);
+  };
+  const bind = (unit, t) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+  };
+  // The scene stays on unit 10 for the bright pass and the film.
   gl.useProgram(prepProg);
   gl.uniform1i(gl.getUniformLocation(prepProg, "uScene"), 10);
+  gl.useProgram(downProg);
+  gl.uniform1i(ud.uSrc, 13);
+  gl.useProgram(upProg);
+  gl.uniform1i(uu.uSrc, 13);
+  gl.uniform1i(uu.uBase, 14);
+  gl.useProgram(haloProg);
+  gl.uniform1i(uh.uSrc, 13);
   gl.useProgram(filmProg);
   gl.uniform1i(gl.getUniformLocation(filmProg, "uScene"), 10);
-  gl.uniform1i(gl.getUniformLocation(filmProg, "uBright"), 11);
+  gl.uniform1i(gl.getUniformLocation(filmProg, "uDiffuse"), 13);
+  gl.uniform1i(gl.getUniformLocation(filmProg, "uHalo"), 14);
 
   let dirty = true;
   stage.onResize(() => {
@@ -881,14 +991,46 @@ export async function createPasses(host) {
     gl.uniformMatrix3fv(u.dome, false, domeFor(S.az));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // What scatters, at half size, spread through its mips.
-    gl.bindFramebuffer(gl.FRAMEBUFFER, bright.fbo);
+    // What scatters, at half size, then its pyramid down and back up, and
+    // its red layer blurred for the halation.
+    bind(10, scene);
+    into(down[0]);
     gl.useProgram(prepProg);
-    gl.viewport(0, 0, Math.ceil(W / 2), Math.ceil(Hc / 2));
-    gl.uniform2f(up.texel, 1 / W, 1 / Hc);
+    gl.uniform2f(up.uTexel, 1 / W, 1 / Hc);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.activeTexture(gl.TEXTURE11);
-    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.useProgram(downProg);
+    for (let i = 1; i < LEVELS; i++) {
+      bind(13, down[i - 1]);
+      into(down[i]);
+      gl.uniform2f(ud.uTexel, 1 / down[i - 1].w, 1 / down[i - 1].h);
+      gl.uniform2f(ud.uOut, down[i].w, down[i].h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.useProgram(upProg);
+    for (let i = LEVELS - 2; i >= 0; i--) {
+          // The coarsest level enters at its own share.
+      const src = i === LEVELS - 2 ? down[LEVELS - 1] : ups[i + 1];
+      bind(13, src);
+      bind(14, down[i]);
+      into(ups[i]);
+      gl.uniform2f(uu.uTexel, 1 / src.w, 1 / src.h);
+      gl.uniform2f(uu.uOut, ups[i].w, ups[i].h);
+      gl.uniform1f(uu.uW, LEVEL_W[i]);
+      gl.uniform1f(uu.uS, i === LEVELS - 2 ? LEVEL_W[LEVELS - 1] : 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.useProgram(haloProg);
+    gl.uniform2f(uh.uOut, down[0].w, down[0].h);
+    bind(13, down[0]);
+    into(haloA);
+    gl.uniform1i(uh.uCh, 3);
+    gl.uniform2f(uh.uStep, 1 / down[0].w, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    bind(13, haloA);
+    into(haloB);
+    gl.uniform1i(uh.uCh, 0);
+    gl.uniform2f(uh.uStep, 0, 1 / down[0].h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   // The film, to the canvas: cheap, so it alone runs for each grain step.
@@ -898,17 +1040,20 @@ export async function createPasses(host) {
     if (W !== fw || Hc !== fh) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.useProgram(filmProg);
+    bind(10, scene);
+    bind(13, ups[0]);
+    bind(14, haloB);
     gl.viewport(0, 0, W, Hc);
-    gl.uniform2f(uf.res, W, Hc);
-    gl.uniform2f(uf.half, 1 / Math.ceil(W / 2), 1 / Math.ceil(Hc / 2));
-    gl.uniform1f(uf.seed, seed);
-    gl.uniform1f(uf.day, day);
+    gl.uniform2f(uf.uRes, W, Hc);
+    gl.uniform1f(uf.uNorm, NORM);
+    gl.uniform1f(uf.uSeed, seed);
+    gl.uniform1f(uf.uDay, day);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   return {
     destroy() {
-      [scene, bright].forEach((t) => {
+      all.forEach((t) => {
         gl.deleteFramebuffer(t.fbo);
         gl.deleteTexture(t.tex);
       });
