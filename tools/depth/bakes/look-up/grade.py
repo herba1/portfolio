@@ -23,163 +23,16 @@ def grade(eq0, P, sky2=None):
     cap = grade_cap(eq0, wsky, P, prof, sky2)
     return out, wsky, alpha, cap
 
-def align_sky2(sky, eq0, yaw, P=None):
+def align_sky2(sky, eq0, yaw):
     # Resample the sky onto eq0's grid (rows from the zenith down, same span)
-    # and turn it by yaw degrees. With P (sky2Scale, sky2TiltAz, sky2Tilt) it
-    # is also re-aimed and shrunk, see _sky2_map.
+    # and turn it by yaw degrees, so its sun lands where it should.
     h, w = eq0.shape[:2]
     hs, ws = sky.shape[:2]
     span, spans = 180.0 * h / (w / 2), 180.0 * hs / (ws / 2)
     if (hs, ws) != (h, w) or abs(span - spans) > 1e-3:
         sky = cv2.resize(sky, (w, int(round(hs * w / ws))), interpolation=cv2.INTER_AREA)[:h]
-    if P is not None and (P.get('sky2Scale', 1) != 1 or P.get('sky2Tilt', 0) != 0):
-        sky = sky.astype(np.float32)
-        out, slope = _sky2_map(sky, w, span, yaw, P['sky2Scale'], P.get('sky2Tilt', 0.0), P.get('sky2TiltAz', 0.0), P, slope_out=True)
-        # Where the map runs out of sky (low down on the tilted side, where
-        # the sky's horizon is near) it stretches the last few degrees of it
-        # into streaks; there the sky is shown as captured, only turned by
-        # yaw, its low cumulus at their own size (sky2Fall: the radial
-        # stretch against the tangential one, where it takes over)
-        lo, hi = P.get('sky2Fall', (0.6, 0.9))
-        wf = 1 - smooth(lo, hi, slope)
-        if wf.max() > 0:
-            sh = int(round(yaw / 360 * w))
-            out += (np.roll(sky, sh, axis=1) - out) * wf[..., None]
-        del slope, wf
-        for lay in P.get('sky2Layers', []):
-            _sky2_over(out, _sky2_map(sky, w, span, *lay[:4], P, *lay[4:], el_out=True, slope_out=True), P)
-        return out
     sh = int(round(yaw / 360 * w))
     return np.roll(sky, sh, axis=1).astype(np.float32)
-
-# Kloofendal's own zenith holds four big puffs on open blue, a hole in the cover
-# 30 to 40 degrees up, and its smaller cumulus lower down. Looking straight up
-# between the towers we want a field of small cumulus overhead (ref 2: towers
-# converging into a cloud field), so the sky is shrunk about a pole, re-aimed,
-# and laid over itself:
-#   sky2Tilt, sky2TiltAz  the pole (in the street's azimuths, after yaw) is the
-#                 sky's direction sky2Tilt degrees down from its zenith toward
-#                 sky2TiltAz, so its busiest stretch lands overhead
-#   sky2Scale     the angle from that pole is multiplied by this near the pole
-#                 (easing back to 1 past sky2Ease degrees), so each cloud is
-#                 that much smaller and more of them fit between the towers;
-#                 the angle eases off at a soft knee (sky2Knee) before the
-#                 sky's horizon, never reaching the ground below it
-#   sky2Layers    more [yaw, scale, tilt, tiltAz, mirror] passes of the same
-#                 sky, each laid over the one before through its own cloud
-#                 matte, so the gaps between the first pass's clouds fill with
-#                 others (mirrored and aimed elsewhere, so no cloud repeats
-#                 as itself); a pass is laid only overhead (sky2OverTh), high
-#                 in its own sky (sky2OverEl) and where its map stays round
-# Every pass keeps the sky's sun (azimuth 214, 48 up) behind the towers, away
-# from the open sky; the clouds are relit by the street's key anyway (_sunlit).
-def _sky2_matte(K, P):
-    # cloud cover of a sky pass, as in _sky2: how much less blue than the
-    # open sky of its row
-    Ks = cv2.GaussianBlur(K, (0, 0), 1.0)
-    b = (Ks[..., 2] - Ks[..., 0]) / (Ks[..., 2] + 1e-4)
-    del Ks
-    pb = np.percentile(b, 92, axis=1).astype(np.float32)
-    pb = cv2.GaussianBlur(pb[:, None], (1, 0), sigmaX=0.1, sigmaY=K.shape[0] / 40, borderType=cv2.BORDER_REPLICATE)[:, 0]
-    return (1 - smooth(P['s2Lo'], P['s2Hi'], b / np.maximum(pb, 0.05)[:, None])).astype(np.float32)
-
-def _sky2_over(K, L, P):
-    # L over K, in place. L's clouds are laid on as light over K scaled by
-    # their own cover (premultiplied, with L's open sky taken out under its
-    # thin edges), so an edge that crosses a cloud of K never draws a blue-grey
-    # outline into it. Where L reads the sky low down, foreshortened and hazy,
-    # it is not laid on at all (sky2OverEl, degrees up in the sky).
-    L, el, slope = L
-    a = _sky2_matte(L, P)
-    # L's open sky behind its clouds: a normalised blur of its clear pixels
-    h_, w_ = L.shape[:2]
-    wc = (1 - a) ** 4
-    q = lambda x: cv2.resize(x, (max(1, w_ // 4), max(1, h_ // 4)), interpolation=cv2.INTER_AREA)
-    sq = w_ / 360 / 4 * 3.0
-    num = cv2.GaussianBlur(q(L * wc[..., None]), (0, 0), sq, borderType=cv2.BORDER_REPLICATE)
-    den = cv2.GaussianBlur(q(wc), (0, 0), sq, borderType=cv2.BORDER_REPLICATE)
-    gap = cv2.resize(num / (den[..., None] + 1e-4), (w_, h_), interpolation=cv2.INTER_LINEAR)
-    del num, den, wc
-    gap *= (1 - a)[..., None]; L -= gap
-    del gap
-    np.maximum(L, 0, out=L)
-    # where it is laid on: high enough in the sky it reads...
-    lo, hi = P.get('sky2OverEl', (14.0, 26.0))
-    g = smooth(lo, hi, el)
-    # ...where its own map does not pull the clouds out along the spokes...
-    lo, hi = P.get('sky2Fall', (0.6, 0.9))
-    g *= smooth(lo, hi, slope)
-    del el, slope
-    # ...and overhead, where the map is close to conformal (sky2OverTh: the
-    # angle from the zenith, degrees, where the layer fades out)
-    span = 180.0 * h_ / (w_ / 2)
-    th = ((np.arange(h_, dtype=np.float32) + 0.5) / h_ * span)[:, None]
-    t0, t1 = P.get('sky2OverTh', (38.0, 56.0))
-    g *= 1 - smooth(t0, t1, th)
-    g = g.astype(np.float32)
-    L *= g[..., None]; a *= g
-    # (and never darker than what it covers: a thin edge of L crossing a
-    # cloud of K leaves that cloud as it was)
-    L += K * (1 - a)[..., None]
-    np.maximum(K, L, out=K)
-
-def _sky2_map(sky, w, span, yaw, s, tilt, taz, P, mirror=0, el_out=False, slope_out=False):
-    h = sky.shape[0]
-    tilt, taz = np.radians(tilt), np.radians(taz)
-    emin = np.radians(P.get('sky2Emin', 3.0)); knee = P.get('sky2Knee', 6.0)
-    ease = np.radians(P.get('sky2Ease', 30.0))
-    # rotation taking the zenith to the pole D, about the horizontal axis
-    # perpendicular to the tilt azimuth (vectors x east, y up, z north: az = atan2(x, z))
-    ax = np.array([np.cos(taz), 0.0, -np.sin(taz)])
-    c, sn = np.cos(tilt), np.sin(tilt)
-    K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
-    R = (np.eye(3) + sn * K + (1 - c) * K @ K).astype(np.float32)
-    D = R @ np.array([0, 1, 0], np.float32)
-    Ex = R @ np.array([0, 0, 1], np.float32)   # az 0 at the pole
-    Ey = R @ np.array([1, 0, 0], np.float32)   # az 90 at the pole
-    # prefilter: the sky is minified by about s
-    if s > 1:
-        sky = cv2.GaussianBlur(sky, (0, 0), 0.45 * s)
-    pad = 4
-    skyp = np.concatenate([sky[:, -pad:], sky, sky[:, :pad]], 1)
-    del sky
-    out = np.empty((h, w, 3), np.float32)
-    elo = np.empty((h, w), np.float32) if el_out else None
-    slo = np.empty((h, w), np.float32) if slope_out else None
-    az = np.radians((np.arange(w, dtype=np.float32) + 0.5) / w * 360)[None, :]
-    ca, sa = np.cos(az), np.sin(az)
-    tx, ty, tz = (Ex[i] * ca + Ey[i] * sa for i in range(3))   # bearing tangent
-    # distance from D along each bearing to the sky's horizon (emin up)
-    Rr = np.sqrt(D[1] ** 2 + ty ** 2)
-    dmax = np.arctan2(ty, D[1]) + np.arccos(np.clip(np.sin(emin) / Rr, -1, 1))
-    for r0 in range(0, h, 256):
-        r1 = min(h, r0 + 256)
-        th = np.radians(((np.arange(r0, r1, dtype=np.float32) + 0.5) / h * span))[:, None]
-        # (toward the tilt the horizon is nearer: that side is shrunk in
-        # proportion instead of running into the horizon haze and smearing
-        # it; away from it the sky runs on at scale, over the old zenith)
-        dn = np.maximum(dmax, np.pi / 2 - emin)
-        x = (th + (s - 1) * ease * np.tanh(th / ease)) / dn
-        d = dmax * x / (1 + x ** knee) ** (1 / knee)
-        if slope_out:
-            # d d / d theta, the radial stretch of the map,
-            dx = (1 + (s - 1) / np.cosh(th / ease) ** 2) / dn
-            # against the tangential one: below 1 a cloud is pulled out
-            # along the spoke, toward the zenith
-            tang = np.sin(d) / np.maximum(np.sin(th), 1e-4)
-            slo[r0:r1] = dmax * dx * (1 + x ** knee) ** (-1 - 1 / knee) / np.maximum(tang, 1e-4)
-        cd, sd = np.cos(d), np.sin(d)
-        vx, vy, vz = cd * D[0] + sd * tx, cd * D[1] + sd * ty, cd * D[2] + sd * tz
-        el = np.degrees(np.arcsin(np.clip(vy, -1, 1)))
-        saz = (np.degrees(np.arctan2(-vx if mirror else vx, vz)) - yaw) % 360
-        mu = (saz / 360 * w - 0.5 + pad).astype(np.float32)
-        mv = ((90 - el) / span * h - 0.5).astype(np.float32)
-        out[r0:r1] = cv2.remap(skyp, mu, mv, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        if el_out:
-            elo[r0:r1] = el
-    if el_out:
-        return out, elo, slo
-    return (out, slo) if slope_out else out
 
 CAP = 50.0  # half-size of the rotated cap, degrees
 def cap_maps(w, h_eq, ppd):
@@ -678,12 +531,9 @@ def _tower_curve(graded, mblur, w, P):
 # being redrawn from noise; no unsharp. Lit tops roll off warm-neutral
 # (cloudLit) while the shaded folds keep the skylight blue (cloudShade).
 # (aLo..sharpA only drive the street's own sky, used when no sky2 is given.)
-# sky2Yaw/sky2Scale/sky2Tilt*/sky2Layers re-aim and shrink the cumulus capture
-# (see _sky2_map): at the resting yaw (YAW0 = 20) a field of small cumulus
-# fills the zenith between the towers, the first pass tilted 40 degrees toward
-# its busy side, a mirrored second pass filling the gaps overhead, and the
-# capture's sun (azimuth 214, 48 up) lands behind the big tower on the left in
-# both. The capture's own light reads flat overhead, so the clouds are relit (_sunlit)
+# sky2Yaw turns the cumulus capture so its sun (azimuth 214, 48 degrees up in
+# the HDRI) stands at 200, behind the engine's resting view (YAW0 = 20). The
+# capture's own light reads flat overhead, so the clouds are relit (_sunlit)
 # by the street's key instead: a low warm sun at sunAz/sunEl, from the right
 # of the resting view, the side the sunlit stone and the warm sills are on.
 # Looking up, each puff splits warm cream on its sunward domes to skylight
@@ -696,15 +546,13 @@ def _tower_curve(graded, mblur, w, P):
 # skyHex is a soft film cobalt, not polariser ink: lighter and less
 # saturated (the engine's film pass adds only a little blue depth on top), so
 # the frame deepens on a straight ramp to about #235fb0 at the zenith and
-# lightens toward the horizon. The zenith end sits a touch greener than the
-# mid (hue 207, not 214): the print curve swings the deepest blue about 3
-# degrees toward violet, so overhead it lands near 210, not past 215.
+# lightens toward the horizon.
 # cloudShade/s2Keep/s2ShadeLift/sunSky: the cloud bases take the dome's
 # skylight, opened up and cool; cloudLit and the engine's print shoulder warm
 # the sunward tops. sunKey (log luminance, about sunPivot) sets how far apart
 # the two sides sit; sunClar* is the clarity inside the cloud.
 P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
-         skyHex=['#0b69b6', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
+         skyHex=['#0e5ec8', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
          expo=0.36, cloudLit=[1.0, 0.92, 0.78], cloudShade=[0.32, 0.6, 1.0],
          restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3,
          bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#201f1e', bLit='#d6c3a2', bLitGain=1.12, bFloor=0.25,
@@ -712,8 +560,7 @@ P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          bKeep=0.8, bKeepLit=0.6, bWB=[0.77, 1.04, 1.27], bWBk=0.5, bWBkLit=1.2, bChromaR=1.5, bRefl=0.3, bReflDark=0.6, bReflAdd=0.06,
          bLocal=0.35, bLcR=0.35, bLcClip=0.35, bCon=1.18, bPivot=0.12, bConTop=0.5, bToe=0.007,
          # the second sky (see _sky2)
-         sky2Yaw=60.0, sky2Scale=2.1, sky2Tilt=40.0, sky2TiltAz=150.0, sky2Layers=[[-135.0, 2.1, 20.0, 120.0, 1]],
-         s2Clamp=40.0, s2Expo=0.8, s2Denoise=1.0, s2Lo=0.45, s2Hi=0.9,
+         sky2Yaw=-14.0, s2Clamp=40.0, s2Expo=0.8, s2Denoise=1.0, s2Lo=0.45, s2Hi=0.9,
          s2Gap1=1.5, s2Gap2=8.0, s2ShLo=0.25, s2ShHi=1.1, s2Keep=0.05, s2Mid=0.7, s2Form=0.25, s2ShadeLift=0.8,
          s2CloudGain=1.0, s2Glow=0.5, eRad=2.0,
          # the clouds' key light (see _sunlit) and their clarity
