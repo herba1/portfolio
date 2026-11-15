@@ -102,7 +102,10 @@ const FILM = {
   contrast: 1.25,
   blueDepth: 0.85,
   saturation: 1.06,
-  grain: 0.38,
+  // The kit's grain is off: it is value noise in ~1.5 px clumps with a dye
+  // component, which at DPR 2 mottled the open cobalt and the cloud's body
+  // blue and white. The grain is laid on at the print instead (GRAIN).
+  grain: 0,
   vignette: 0.2,
   // Kept for ?halation= trials only (the kit's halation is off above). The
   // piece's own, thin halation pass, HALO, has its own threshold:
@@ -111,6 +114,22 @@ const FILM = {
   // The summer preset cools its highlights; the plate lifts the cloud tops to
   // warm-neutral itself, so the print leaves them as they come.
   highlightTint: [1, 1, 1],
+};
+// Grain, laid on the finished print (PRINT_F), so it is the paper's grain
+// and no curve downstream can coarsen it. 24 fps film, not a sensor:
+// luminance only (every channel moves together, no dye speckle), one device
+// px, triangular so there are no lone hot pixels. Weighted by the midtones of
+// the print luma (rising over toe[0]-toe[1], gone by shoulder[0]-[1]), so the
+// lit crown stays clean, and eased off by saturation over sat[0]-sat[1] down
+// to satFloor, so the open cobalt reads as a smooth, dithered sky and the
+// grain lives in the cloud's shaded body, the steel and the poles.
+// ?grain= overrides amount (0..1; 0.18 is about +-3.5/255 at the peak).
+const GRAIN = {
+  amount: 0.18,
+  toe: [0.04, 0.22],
+  shoulder: [0.62, 0.86],
+  sat: [0.25, 0.6],
+  satFloor: 0.3,
 };
 // The plate is split three ways before the film (see PLATE), on a baked key
 // (tools/depth/bakes/catenary/key.py): R is the structure, the depth map's
@@ -820,7 +839,16 @@ uniform vec3 uToeTint;
 uniform vec3 uWb;      // paper white, luma-normalised (display)
 uniform vec4 uPrint;   // pin, neutral from, to (0..1), neutral amount
 uniform vec2 uToeSat;  // the toe's lift eases out over this saturation
+uniform float uGrain;  // GRAIN.amount
+uniform vec4 uGrainY;  // GRAIN.toe, GRAIN.shoulder
+uniform vec3 uGrainS;  // GRAIN.sat, GRAIN.satFloor
+uniform float uSeed;   // per 24 fps tick
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+float hash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
 float paper(float y) {
   float x = clamp(y, 0.0, 1.0) * 1023.0;
   int i = int(floor(x));
@@ -848,6 +876,15 @@ void main() {
   // not cream, and only the tops of the big masses take the warm bias.
   vec3 wt = mix(vec3(1.0), uWb, smoothstep(uPrint.z - 0.06, uPrint.z + 0.03, t));
   c = mix(c, wt * dot(c, LUMA), uPrint.w * smoothstep(uPrint.y, uPrint.z, t));
+  // Grain (GRAIN): one value per device px, added to all three channels.
+  float py = dot(c, LUMA);
+  float pmx = max(c.r, max(c.g, c.b));
+  float ps = (pmx - min(c.r, min(c.g, c.b))) / max(pmx, 1e-4);
+  float gw = smoothstep(uGrainY.x, uGrainY.y, py) * (1.0 - smoothstep(uGrainY.z, uGrainY.w, py));
+  gw *= mix(1.0, uGrainS.z, smoothstep(uGrainS.x, uGrainS.y, ps));
+  vec2 gp = gl_FragCoord.xy + uSeed * vec2(37.17, 91.31);
+  float g = hash(gp) + hash(gp.yx + 19.19) - 1.0;
+  c += g * uGrain * 0.1 * gw;
   outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
@@ -1072,6 +1109,9 @@ export async function createCatenary(host, { embedded = false } = {}) {
   for (const key of Object.keys(FILM)) {
     if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
   }
+  // ?grain= drives the print's grain (GRAIN); the kit's stays off.
+  const grainAmt = clamp(num("grain", GRAIN.amount), 0, 1);
+  film0.grain = 0;
 
   // The colour field the frame opens from: the sky, overexposed.
   host.style.background = "#dfe8ef";
@@ -1598,7 +1638,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
   };
 
   // PRINT: the developed frame onto the paper, to the canvas.
-  const printPass = () => {
+  const printPass = (seed) => {
     gl.disable(gl.BLEND);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.bindVertexArray(quadVao);
@@ -1614,6 +1654,10 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform3fv(printP.u.uWb, printWhite);
     gl.uniform4fv(printP.u.uPrint, printU);
     gl.uniform2fv(printP.u.uToeSat, PRINT_TOE_SAT);
+    gl.uniform1f(printP.u.uGrain, grainAmt);
+    gl.uniform4f(printP.u.uGrainY, ...GRAIN.toe, ...GRAIN.shoulder);
+    gl.uniform3f(printP.u.uGrainS, ...GRAIN.sat, GRAIN.satFloor);
+    gl.uniform1f(printP.u.uSeed, seed % 997);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
@@ -1660,7 +1704,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       drawScene();
       halation();
       film.render(haloed.tex, { ...film0, exposure, grainSeed: tick * 7.31 }, filmed.fbo);
-      printPass();
+      printPass(tick * 7.31);
       lastKey = key;
       lastGrain = tick;
     }
