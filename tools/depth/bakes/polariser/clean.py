@@ -19,12 +19,24 @@
 # How each is filled:
 #  - the lamp arm (inside cloud): LaMa (tools/depth/fill.py).
 #  - top right: LaMa invents buildings and a dark rim on a hole this big that
-#    runs off the plate, so it is a transplant instead. The plate is
-#    stereographic about the zenith, so turning it about its centre carries sky
-#    to sky at the same angle from the zenith. The open right rim (-24 to +22
-#    deg, image angle) is turned into the hole (-82 to -28 deg); radii are
-#    scaled by 0.65 so the corner (below the plate's last real sky) reads
-#    clouds squeezed toward the horizon, never past the source's own sky.
+#    runs off the plate, so it is a transplant instead, at scale 1.0 so the
+#    cloud edges stay as fine as their neighbours' (an earlier pass turned the
+#    open right rim into the hole with radii scaled by 0.65, which blew the
+#    clouds up 1.5x into soft mush). No sky in the plate sits at the hole's
+#    zenith angle: the hole runs 2000-3070 px out, the open right rim stops at
+#    the frame edge (1920-2100 px), and the print's corner (2830 px, 96 deg
+#    from the zenith) is below the horizon, so no azimuth of the HDRI has sky
+#    there either. So the fill is a rigid copy, no resampling
+#    scale at all: the crisp cumulus right of the mast and above the drum
+#    (550-1800 px out, the sharpest open sky after the zenith's own clouds) is
+#    turned 117 deg and slid 1050 px out along the radius into the hole. A
+#    search over turn, mirror and slide picked it as the copy whose source
+#    lands wholly on clean sky with the most fine cloud edge; the copies from
+#    the open right rim it also tried carry that rim's soft, ghosted cloud
+#    masses. Clouds keep their size in px, close to their size in degrees out
+#    there (stereographic is conformal). Toward the corner the copy's cloud
+#    contrast (not its edges) eases off a quarter, as the real sky's does
+#    toward the horizon, so it does not out-shout the rim beside it.
 #  - bottom: the cloud bands there run parallel to the rim, so the sky 360 px
 #    further in along the same radius is carried out over the office row.
 #  Both transplants are matched to the surrounding sky in low frequencies (the
@@ -97,39 +109,55 @@ print('lama calls', lama.calls, 'secs', round(lama.secs, 1))
 # ------------------------------------------------------------------ transplants
 cx, cy = W / 2, H / 2
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-ang = np.degrees(np.arctan2(yy - cy, xx - cx))
-rad = np.hypot(xx - cx, yy - cy)
 sky_ok = ((aux[..., 0] > 0.9) & ~hole) | small  # the arm is sky again now
 
 
-def ray_extent(angles, ok):
-    """Per angle, the radius out to which the ray from r=600 stays on ok pixels."""
-    out = np.zeros(len(angles), np.float32)
-    rs = np.arange(600, 3200, 2, dtype=np.float32)
-    for i, a in enumerate(angles):
-        t = np.radians(a)
-        x = (cx + rs * np.cos(t)).astype(int)
-        y = (cy + rs * np.sin(t)).astype(int)
-        inside = (x >= 0) & (x < W) & (y >= 0) & (y < H)
-        good = np.zeros_like(inside)
-        good[inside] = ok[y[inside], x[inside]]
-        bad = np.nonzero(~good)[0]
-        out[i] = rs[-1] if not len(bad) else rs[max(bad[0] - 1, 0)]
-    return out
+def polar(src_of):
+    """A source map given as (angle, radius) -> (angle, radius), as image x, y."""
+    def f(x, y):
+        a = np.degrees(np.arctan2(y - cy, x - cx))
+        sa, sr = src_of(a, np.hypot(x - cx, y - cy))
+        t = np.radians(sa)
+        return (cx + sr * np.cos(t)).astype(np.float32), (cy + sr * np.sin(t)).astype(np.float32)
+    return f
 
 
-def transplant(base, region, pad, src_of, feather):
-    """Fill region (+pad) from base at the source points src_of(angle, radius),
-    matched in low frequencies to the sky ring around it, feathered outward."""
+def rigid(amid, mirror, turn, slide, across=0.0):
+    """A source map that keeps scale exactly: mirror about the ray at amid
+    (deg) if asked, turn about the plate centre by turn (deg), then slide
+    slide px toward the centre along the turned ray and across px across it."""
+    a, p = np.radians(amid), np.radians(turn)
+    ux, uy = np.cos(a + p), np.sin(a + p)
+
+    def f(x, y):
+        dx, dy = x - cx, y - cy
+        if mirror:
+            c2, s2 = np.cos(2 * a), np.sin(2 * a)
+            dx, dy = c2 * dx + s2 * dy, s2 * dx - c2 * dy
+        c, s = np.cos(p), np.sin(p)
+        bx, by = c * dx - s * dy, s * dx + c * dy
+        return ((bx - slide * ux - across * uy + cx).astype(np.float32),
+                (by - slide * uy + across * ux + cy).astype(np.float32))
+    return f
+
+
+def transplant(base, region, pad, src_xy, feather, haze=None):
+    """Fill region (+pad) from base at the source points src_xy(x, y),
+    matched in low frequencies to the sky ring around it, feathered outward.
+    haze(r), if given, scales the copy's cloud contrast at radius r."""
     regx = kit.dilate(region, pad)
     ys, xs = np.nonzero(regx)
     y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
     m = regx[y0:y1, x0:x1]
-    sa, sr = src_of(ang[y0:y1, x0:x1], rad[y0:y1, x0:x1])
-    sx = (cx + sr * np.cos(np.radians(sa))).astype(np.float32)
-    sy = (cy + sr * np.sin(np.radians(sa))).astype(np.float32)
+    sx, sy = src_xy(xx[y0:y1, x0:x1], yy[y0:y1, x0:x1])
+    ok = sky_ok[np.clip(sy[m].astype(int), 0, H - 1), np.clip(sx[m].astype(int), 0, W - 1)]
+    print('  source on clean sky', round(float(ok.mean()) * 100, 1), '%')
     f = base.copy()
     moved = cv2.remap(base, sx, sy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    if haze is not None:
+        k = haze(np.hypot(xx[y0:y1, x0:x1] - cx, yy[y0:y1, x0:x1] - cy))[..., None]
+        low = cv2.GaussianBlur(moved, (0, 0), 40)
+        moved = low + (moved - low) * k
     f[y0:y1, x0:x1] = np.where(m[..., None], moved, base[y0:y1, x0:x1])
     ring = kit.dilate(region, 60) & ~region & ~hole & (aux[..., 0] > 0.9)
     w = ring.astype(np.float32)
@@ -141,21 +169,16 @@ def transplant(base, region, pad, src_of, feather):
     return base * (1 - a) + f * a
 
 
-# top right: turn the open right rim into it
-A = ang[top_r]
-a0, a1 = float(A.min()), float(A.max())
-S0, S1, K = -24.0, 22.0, 0.65
-abins = np.linspace(a0 - 2, a1 + 2, 400)
-Rs = ray_extent(S0 + (abins - a0) / (a1 - a0) * (S1 - S0), sky_ok) - 40
-Rs = cv2.GaussianBlur(Rs[None], (0, 0), 3)[0]
-print('top right', round(a0, 1), round(a1, 1), 'deg; source sky reach', int(Rs.min()), '-', int(Rs.max()), 'px')
+def haze_top(r):
+    t = np.clip((r - 1900) / 900, 0, 1)
+    return 1 - 0.25 * t * t * (3 - 2 * t)
 
 
-def top_src(a, r):
-    return S0 + (a - a0) / (a1 - a0) * (S1 - S0), np.minimum(r * K, np.interp(a, abins, Rs))
-
-
-img = transplant(img, top_r, 80, top_src, 24)
+# top right: the cumulus right of the mast, turned 117 deg and slid 1050 px out.
+# The feather is wide (64 px) so the hole's straight upper edges (the lamp
+# heads' box) melt into the hazy band of real sky under them.
+print('top right')
+img = transplant(img, top_r, 80, rigid(-55, False, 117, 1050, 100), 64, haze_top)
 
 
 # bottom: carry the cloud bands outward along the radius, clear of the drum's
@@ -164,7 +187,8 @@ def bot_src(a, r):
     return np.maximum(a, 54.6), r - 360
 
 
-img = transplant(img, bot, 30, bot_src, 14)
+print('bottom')
+img = transplant(img, bot, 30, polar(bot_src), 14)
 
 enc = np.clip(np.round(img * 255), 0, 255).astype(np.uint8)
 Image.fromarray(enc).save(dst, quality=92, subsampling=0, optimize=True)
