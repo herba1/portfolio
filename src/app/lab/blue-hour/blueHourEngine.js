@@ -115,7 +115,8 @@ uniform float uCloudCeil;   // the brightest a cloud may print, scene units befo
 uniform vec3 uCloudWhite;   // lit tops, luminance 1: peach-white to a faint warm grey
 uniform vec3 uCloudPeach;   // afterglow on the undersides, luminance 1
 uniform float uAfter;       // afterglow left, 1 at sunset, 0 by mid-span
-uniform float uFgGain;      // building layer: linear gain (0.42, about 1.25 stops down)
+uniform float uFgGain;      // building layer: linear gain, riding the sky's own fall
+uniform float uReflK;       // the shaft's light the curtain-wall glass gives back
 uniform float uFgGamma;     // and its log contrast about the plate's mid
 uniform float uGlow;        // sun-side brightening
 uniform float uZenDeep;     // stops the zenith sits below the low sky
@@ -267,15 +268,30 @@ void main(){
   float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   sky *= 1.0 + (ign - 0.5) * 0.022;
 
-  // The city is the frame, not the subject: about a stop down and a harder
-  // log contrast about the plate's mid, so towers, crane and brick read as
-  // near-black silhouettes against the shaft; glass highlights roll off
-  // before they can compete with the cloud.
+  // The city is the frame, not the subject, but it is lit by the same sky:
+  // a harder log contrast about the plate's mid keeps towers, crane and
+  // brick darker than the shaft, while the gain (which falls with the sky's
+  // own level) keeps them carrying skylight rather than crushed to a mass;
+  // glass highlights roll off before they can compete with the cloud.
   vec3 fa = amb * uWB;
   float fy = dot(fa, LUMA) + 1e-6;
-  float ny = FG_MID * pow(fy / FG_MID, uFgGamma) * uFgGain;
+  // Within a texel or two of the sky matte the plate's ambient is the split's
+  // padding, not facade: hold it at the old, lower gain there and give it no
+  // reflection, so the lift never brightens a matte edge into a contour.
+  float edge = smoothstep(0.02, 0.35, am);
+  float ny = FG_MID * pow(fy / FG_MID, uFgGamma) * uFgGain * (1.0 - 0.55 * edge);
   ny = ny / (1.0 + ny / 0.06);
-  vec3 fg = fa * (ny / fy) * uAmbK;
+  vec3 fg = fa * (ny / fy);
+  // Mirror glass: the bright, blue panes of the curved curtain wall and the
+  // towers are the sky seen in a mirror, so they take a share of the shaft's
+  // own radial gradient (here, at the rim: the paler cyan, riding the time's
+  // sky level), and glow cyan-cobalt round the opening as the sky does.
+  // Brick, the tree and the dark spandrels (low, or not blue) take none.
+  vec3 ap = amb + 1e-6;
+  float glass = smoothstep(-3.6, -1.6, log2(dot(ap, LUMA)))
+              * smoothstep(1.3, 2.3, ap.b / ap.r) * (1.0 - edge);
+  fg += col * lum * uReflK * glass;
+  fg *= uAmbK;
   if (id > 0) {
     int k = id - 1;
     fg += em * uB[k] * uTint[k];
@@ -422,6 +438,8 @@ const CLOUD_STOPS = 4.8;
 const CORE_LIFT = 1.1; // stops: the reference lit core the curve is solved for
 const CLOUD_SKY1 = 0.8; // skylight a cloud passes on at +20 min, vs open sky
 const CLOUD_CEIL = 0.8; // of the film's white: the brightest a cloud top may print
+const FG_GAIN = 0.85; // building layer at sunset, about a quarter stop under the plate
+const GLASS_REFL = 0.25; // the shaft's light the curtain-wall glass gives back
 
 function lerpParams(a, b, k) {
   const out = {};
@@ -753,7 +771,10 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uCloudWhite, mix3(CLOUD_WHITE0, CLOUD_WHITE1, smooth(0.0, 0.7, t)));
     gl.uniform3fv(u.uCloudPeach, CLOUD_PEACH);
     gl.uniform1f(u.uAfter, 1 - smooth(0, 0.65, t));
-    gl.uniform1f(u.uFgGain, 0.42);
+    // the buildings are lit by the same sky, so they fall with its level
+    // (with uAmbK and the camera, the shaft's ~3.5 stops) from FG_GAIN
+    gl.uniform1f(u.uFgGain, FG_GAIN * (sky.lum / SKY0.lum));
+    gl.uniform1f(u.uReflK, GLASS_REFL);
     gl.uniform1f(u.uFgGamma, 1.7);
     gl.uniform1f(u.uGlow, sky.glow);
     gl.uniform1f(u.uZenDeep, sky.zenDeep);
