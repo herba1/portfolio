@@ -255,6 +255,41 @@ vec3 cloudAir(vec3 c, vec3 sky, float b) {
   vec3 thin = hsv2rgb(vec3(sh.x, mix(ch.y, sh.y, 0.5), mix(ch.z, sh.z, 0.35)));
   return mix(c, thin, air * 0.85);
 }
+// The tower's top edge against the cobalt. There the coverage is a steep
+// 0-to-1 ramp (~12 plate px) straight off the open sky, and the falloff
+// over it, mixed in display values, holds the cobalt's value while its
+// saturation drains; the crowns' spread light, their warm ring and the
+// film's colour bleed then turn that band a dull grey-violet hugging the
+// crowns (GLOW takes those off it). On that edge alone (the anvil's wide feather and the flank's veil keep
+// their falloff) the sky goes over into the crown in light, not in display
+// values, across 3-4 plate px of the ramp, and the mix keeps the sky's own
+// hue until the crown's warm neutral takes over, so the edge reads as
+// brighter sky becoming lit cloud. topEdge: 1 where both the open sky and
+// the cloud's full body lie within 9 plate px.
+float topEdge(vec2 pp) {
+  float mx = 0.0;
+  float mn = 1.0;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982;
+    float v = texture(uSky, (pp + 9.0 * vec2(cos(a), sin(a))) / uPlate).b;
+    mx = max(mx, v);
+    mn = min(mn, v);
+  }
+  return smoothstep(0.72, 0.95, mx - mn) * (1.0 - smoothstep(0.02, 0.12, mn));
+}
+vec3 srgbToLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 linToSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+vec3 crownEdge(vec3 sky, vec3 crown, float b) {
+  float w = smoothstep(0.28, 0.66, b);
+  vec3 c = linToSrgb(mix(srgbToLin(sky), srgbToLin(crown), w));
+  vec3 h = rgb2hsv(c);
+  vec3 skyHue = hsv2rgb(vec3(rgb2hsv(sky).x, h.y, h.z));
+  return clamp(mix(skyHue, c, smoothstep(0.55, 1.0, w)), 0.0, 1.0);
+}
 // The concrete, in the same light as the cumulus. The scan has the shaft and
 // its cans in sun from the right (their lit flanks ~0.66-0.90, the shade
 // third and the cans' undersides ~0.27-0.37), and the tower behind is lit from
@@ -453,7 +488,12 @@ void main() {
   // whose upper right the pole's verticals run up into as well
   float deep = clamp(0.73 * sk.g + 0.5 * (1.0 - pp.y / uPlate.y), 0.0, 1.0);
   vec3 graded = skyGrade(behind, deep);
-  if (sk.b > 0.002) graded = mix(graded, cloudAir(cloudGrade(cloudTex(pp), sk.g), graded, sk.b), sk.b);
+  if (sk.b > 0.002) {
+    vec3 crown = cloudGrade(cloudTex(pp), sk.g);
+    vec3 soft = mix(graded, cloudAir(crown, graded, sk.b), sk.b);
+    float te = sk.b < 0.995 ? topEdge(pp) : 0.0;
+    graded = te > 0.0 ? mix(soft, crownEdge(graded, crown, sk.b), te) : soft;
+  }
   float skyA;
   if (hwUp || shUp) {
     // Over the hardware and the shaft the pixel is built again from its
@@ -800,7 +840,32 @@ uniform float uDiff;
 uniform float uHal;
 uniform vec3 uHalC;
 uniform float uHalThin;
+uniform sampler2D uSky;
+uniform vec2 uPlate;
 ${LIN}
+// 1 on the open cobalt over the tower's top edge, fading out ~50 plate px off
+// it: somewhere within reach the cumulus's coverage (sky.png B) climbs from
+// nothing to its full body inside 20 px (its ramp there is ~12). The anvil's
+// wide feather and the flank's veil never do, so their light is left as it
+// was. EDGE_LIFT, EDGE_RICH: how far the cobalt's last few px brighten into
+// the crown in their own hue, and how much richer they stand to meet the
+// film's colour bleed.
+const float EDGE_LIFT = 1.0;
+const float EDGE_RICH = 0.6;
+float nearTop(vec2 pp) {
+  float k = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.7853982;
+    vec2 d = vec2(cos(a), sin(a));
+    for (int j = 0; j < 6; j++) {
+      float r = float(j) * 8.0;
+      float b0 = texture(uSky, (pp + d * (r - 10.0)) / uPlate).b;
+      float b1 = texture(uSky, (pp + d * (r + 10.0)) / uPlate).b;
+      k = max(k, smoothstep(0.7, 0.9, b1 - b0) * (1.0 - smoothstep(0.02, 0.12, b0)) * (1.0 - smoothstep(20.0, 48.0, r)));
+    }
+  }
+  return k;
+}
 vec3 toSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
@@ -824,12 +889,19 @@ void main() {
     hair = max(hair, min(lumAt(vUv + o), lumAt(vUv - o)) - y);
   }
   float keep = 1.0 - smoothstep(0.04, 0.25, hair);
-  float sx = shares(t.a).x;
+  vec2 sh = shares(t.a);
+  float sx = sh.x;
+  // Over the tower's top edge the cobalt takes none of the crowns' spread
+  // light or warm ring: white and orange laid on that deep blue turn it a
+  // dull grey-violet, a dark band hugging the crowns. The edge there is the
+  // comp's own: the sky's hue brightening into the crown over a few px.
+  float top = 0.0;
+  if (sx > 0.5 && sh.y < 0.9 && g.a > 0.002) top = nearTop(vec2(vUv.x, 1.0 - vUv.y) * uPlate) * (1.0 - sh.y);
   // diffusion: the highlights' own light, spread; it lands off them, so the
   // billows inside a crown keep their shadows, and hardly at all on the
   // concrete, whose edge against the crowns stays cut (a white veil there
   // reads as a halo round a pasted layer)
-  l += g.rgb * uDiff * (1.0 - self) * mix(1.0, keep, 0.6) * mix(0.12, 1.0, sx);
+  l += g.rgb * uDiff * (1.0 - self) * mix(1.0, keep, 0.6) * mix(0.12, 1.0, sx) * (1.0 - top);
   // halation: the ring outside the bright edge, in the sun's warm colour, on
   // what is darker than the cloud's shade (the cobalt), never filling the
   // cloud's own folds. On the shaft, the hardware and the wires (not sky) the
@@ -837,7 +909,7 @@ void main() {
   // edge that has the brightest of the sky (the sunlit crowns, nothing less)
   // right beside it, so the dark silhouette stays dark and crisp and carries
   // no second warm accent.
-  float wide = max(g.a - self, 0.0) * (1.0 - smoothstep(0.2, 0.5, y)) * keep * sx;
+  float wide = max(g.a - self, 0.0) * (1.0 - smoothstep(0.2, 0.5, y)) * keep * sx * (1.0 - top);
   float thin = 0.0;
   if (sx < 0.99) {
     for (int k = 0; k < 8; k++) {
@@ -852,6 +924,25 @@ void main() {
     thin *= (1.0 - sx) * (1.0 - smoothstep(0.1, 0.35, y));
   }
   l += uHalC * (wide * uHal + thin * uHalThin);
+  // In its place the cobalt brightens into the crown in its own hue over the
+  // last few px (lit sky becoming lit cloud), and stands a little richer
+  // there, so the film's colour bleed, which lays the crown's neutral over
+  // those px at their own lightness, leaves pale sky and not a grey-violet line.
+  if (top > 0.0 && y < 0.3) {
+    float w = 0.0;
+    for (int k = 0; k < 8; k++) {
+      float a = float(k) * 0.7853982;
+      vec2 d = vec2(cos(a), sin(a)) * uTexel;
+      for (int j = 1; j <= 6; j++) {
+        vec4 n = texture(uTex, vUv + d * float(j));
+        float c = smoothstep(0.25, 0.7, dot(toLin(n.rgb), vec3(0.2126, 0.7152, 0.0722))) * smoothstep(0.2, 0.6, shares(n.a).y);
+        w = max(w, c * (1.0 - float(j - 1) / 6.0));
+      }
+    }
+    w *= top * (1.0 - smoothstep(0.15, 0.3, y));
+    l = max(vec3(y) + (l - vec3(y)) * (1.0 + EDGE_RICH * w), 0.0);
+    l *= 1.0 + EDGE_LIFT * w;
+  }
   outColor = vec4(toSrgb(l), 1.0);
 }`;
 
@@ -1356,6 +1447,8 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       gl.uniform1f(P.glow.u.uHal, OPTIC.halation);
       gl.uniform3fv(P.glow.u.uHalC, OPTIC.halationColor);
       gl.uniform1f(P.glow.u.uHalThin, OPTIC.halationThin);
+      bindTex(2, skyTex, P.glow.u.uSky);
+      gl.uniform2f(P.glow.u.uPlate, PW, PH);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       film.render(
