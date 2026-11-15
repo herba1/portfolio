@@ -338,40 +338,50 @@ const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at 
 // them. They are given the deck's sun:
 //   - haze: the overcast's veil (a pale grey-blue lift on every channel) is
 //     taken off before anything else, so the darks can go dark;
-//   - contrast and toe: log luminance steepened about a sunlit facade (a
-//     slope of 1.3), the walls printed half a stop under (exposed for the
-//     sunny sky they stand in, as a real worm's-eye frame would be), and
-//     the glass and the shadow sides pulled down on to a deep blue-black
-//     (about 0.06 on the print) that they never fall through, so the
-//     facades and poles read as crisp, dark silhouettes converging on the
-//     sky;
-//   - light: the faces bright enough to be in the sun take a slight warm
-//     key, the colour of the 52 degree sun that warms the cumulus tops, and
-//     the glass takes on the cobalt it would be reflecting; the shade keeps
-//     the skylight blue-black. What is pale and cool is no face but the
-//     plate's own overcast low among the far roofs, where the matte could
-//     not find the sky, and it goes to the pale blue of the sky's rim;
+//   - contrast and toe: log luminance steepened hard (a slope of 1.7)
+//     about the plate's brighter facade, the side the sun would light, and
+//     the walls printed a stop under (exposed for the sunny sky they stand
+//     in, as a real worm's-eye frame would be), so the walls split in two:
+//     the recesses, the shade sides and the glass collapse on to a deep
+//     blue-black (about 0.06 on the print) that they never fall through,
+//     and the facades and poles read as crisp, dark silhouettes converging
+//     on the sky;
+//   - light: the overcast's own cast (its grey-green, the blue stains and
+//     sky reflections on the concrete) comes off every face, and the faces
+//     above the shade take a clear warm ochre key, the colour of the 52
+//     degree sun that warms the cumulus tops; the shade keeps the skylight
+//     blue-black. Glass is found over a patch, not per pixel: a flat pane
+//     clearly blue all over (its local chroma high, its light barely
+//     varying) takes on the cobalt it would be reflecting, while concrete
+//     with a blue tint keeps none. What is pale and cool over a patch is no
+//     face but the plate's own overcast among the far roofs, where the matte
+//     could not find the sky, and it goes to the pale blue of the sky's rim;
 //   - edge: the plate's rim against the old sky (its anti-aliased edge still
 //     holds the overcast) is choked to the wall's own tone just inside it,
 //     so a roofline cuts cleanly against the blue and only the finish's
-//     thin halation ring is left there.
+//     thin halation ring is left there;
+//   - low down: below about 15 degrees of elevation the plate is the far
+//     skyline seen nearly edge on, smeared and low-res, and it folds into
+//     one clean blue-black silhouette (the matte eroded a little there, so
+//     its pinholes and ragged fringe of old sky go with it).
 // One warm accent: the Docklands red crane on the quay stays; the red and
 // yellow chevrons of the van at the far kerb are muted to a neutral grey so
 // they stop competing with it across the cobalt.
 const STRUCT_GRADE = {
   structGrade: 1, // overall strength
-  structSlope: 1.3, // log contrast about the pivot
-  structPivot: 0.85, // pivot (linear print value) the contrast turns about: a sunlit facade
-  structHaze: 0.03, // overcast veil taken off (linear print value)
-  structEv: -0.5, // stops the walls are printed under: exposed for the sunny sky they stand against, not for themselves
+  structSlope: 1.7, // log contrast about the pivot: hard, so the walls split by the sun into lit faces and shade
+  structPivot: 0.32, // pivot (linear print value) the contrast turns about: the plate's brighter facade, the side the sun would light
+  structHaze: 0.06, // overcast veil taken off (linear print value)
+  structEv: -1.0, // stops the walls are printed under: exposed for the sunny sky they stand against, not for themselves
   structFloor: 0.06, // deep blue-black the shadows and glass are pulled on to (print value, sRGB)
-  structWarm: 0.45, // strength of the warm key on the sunlit faces
+  structWarm: 0.8, // strength of the warm key on the sunlit faces
+  structLow: 15, // elevation (degrees) below which the walls start to fold into one dark silhouette (fully by two thirds of it)
   structGlass: 0.55, // cobalt mixed into the glass
   structEdge: 1, // strength of the rim choke
   mute: 0.95, // how far the van's chevrons are muted
 };
 const STRUCT_DEEP = srgbHex("#0B111D"); // the blue-black of the shade
-const STRUCT_WARM = [1.09, 0.99, 0.88]; // the sun's key on a lit face, linear, about unit luminance
+const STRUCT_WARM = [1.42, 0.94, 0.46]; // the sun's key on a lit face, linear, about unit luminance: a warm ochre
 const STRUCT_VEIL = [0.94, 1, 1.08]; // the overcast veil's colour, linear
 // the van's chevrons, in plate uv (4096 px plate: x 618..741, y 1265..1430)
 const MUTE_AT = [671 / 4096, 1356 / 4096, 0.024, 0.034]; // centre, inner and outer radius
@@ -406,7 +416,7 @@ uniform vec4 uStruct;    // strength, slope, pivot (log2), haze
 uniform vec4 uStructKey; // floor (linear), warm, glass, edge
 uniform float uMute;     // how far the van's chevrons are muted
 uniform float uPlatePx;  // one plate pixel, print uv
-uniform float uStructEv; // stops the walls sit under the sky they stand in
+uniform vec2 uStructEv;  // stops the walls sit under the sky they stand in, sine of the elevation they fold into the shade below
 uniform vec2 uTop;       // diffusion glow off the tops into the blue, shade split by the sun
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float THMAX = ${THMAX.toFixed(6)};
@@ -472,7 +482,9 @@ vec3 structGrade(vec3 lin, vec3 d) {
   float yin = 0.0;
   float win = 0.0;
   float yloc = 0.0;
+  float yloc2 = 0.0;
   float wloc = 0.0;
+  vec3 cloc = vec3(0.0);
   for (int j = 1; j <= 7; j++) {
     float r = 1.4 * float(j) * uPlatePx;
     for (int i = 0; i < 8; i++) {
@@ -482,7 +494,11 @@ vec3 structGrade(vec3 lin, vec3 d) {
       if (aq > 0.3) dist = min(dist, float(j));
       if (j >= 2 && j <= 4) {
         float wq = 1.0 - smoothstep(0.02, 0.3, aq);
-        yloc += wq * log2(dot(toLin(texture(uDev, q).rgb), LUMA) + 1e-4);
+        vec3 lq = toLin(texture(uDev, q).rgb);
+        float yq = log2(dot(lq, LUMA) + 1e-4);
+        yloc += wq * yq;
+        yloc2 += wq * yq * yq;
+        cloc += wq * lq;
         wloc += wq;
       }
       if (j >= 6) {
@@ -516,8 +532,19 @@ vec3 structGrade(vec3 lin, vec3 d) {
   vec3 ch = c / (dot(c, LUMA) + 1e-5);
   float Yc = max(Yb * choke - uStruct.w, 0.0) / (1.0 - uStruct.w) + 1e-5;
   // glass: the cool, cyan-grey panes that reflected the overcast (bright
-  // specular sheets of cloud keep their light)
-  float glass = smoothstep(0.06, 0.22, (c.b - c.r) / (c.b + 1e-4)) * (1.0 - smoothstep(0.25, 0.6, Yc));
+  // specular sheets of cloud keep their light). Read over the same three to
+  // six plate pixel footprint as the clarity, not per pixel: a pane is a
+  // flat patch that is clearly blue all over, so its chroma is the local
+  // mean's and its light must barely vary there. Concrete with a slight
+  // blue cast, or a grain speck of it, is no pane and keeps no cobalt.
+  vec3 cl = (cloc + 2.0 * lin * choke) / (wloc + 2.0);
+  cl = max(cl - uStruct.w * VEIL, 0.0) / (1.0 - uStruct.w);
+  float brl = (cl.b - cl.r) / (cl.b + 1e-4);
+  float ym = yloc / max(wloc, 1e-4);
+  float yvar = wloc > 2.0 ? max(yloc2 / wloc - ym * ym, 0.0) : 1.0;
+  float Yl = log2(dot(cl, LUMA) + 1e-4);
+  float pane = smoothstep(0.28, 0.5, brl) * (1.0 - smoothstep(0.08, 0.4, yvar));
+  float glass = pane * (1.0 - smoothstep(-2.0, -0.7, Yl));
   // contrast in log about a sunlit facade, with a little clarity (the fine
   // relief against the wall three to six plate pixels round, so mullions,
   // ledges and window reveals stay drawn as the facade goes down), glass a
@@ -526,7 +553,7 @@ vec3 structGrade(vec3 lin, vec3 d) {
   // land on the floor and never pass through it
   float Lc = log2(Yc);
   float rel = wloc > 2.0 ? clamp(log2(Yb * choke) - yloc / wloc, -2.0, 2.0) : 0.0;
-  float Lo = uStruct.z + uStruct.y * (Lc - uStruct.z) + 0.3 * rel - 0.7 * glass * uStructKey.z + uStructEv * (1.0 - paint);
+  float Lo = uStruct.z + uStruct.y * (Lc - uStruct.z) + 0.3 * rel - 0.7 * glass * uStructKey.z + uStructEv.x * (1.0 - paint);
   float Yo = exp2(Lo);
   Yo = Yo / pow(1.0 + pow(Yo / 0.95, 3.0), 1.0 / 3.0);
   float fl = uStructKey.x;
@@ -537,24 +564,33 @@ vec3 structGrade(vec3 lin, vec3 d) {
   vec3 zen = toLin(ZEN);
   zen /= dot(zen, LUMA);
   float shade = 1.0 - smoothstep(fl * 2.0, 0.07, Yo);
+  // the overcast's cast comes off every face first: its grey-green, and the
+  // blue of the stains and the sky reflections on the concrete, so the
+  // light alone decides the colour from here and nothing mottles
+  ch = mix(ch, vec3(1.0), 0.85 * (1.0 - pane) * (1.0 - paint));
   ch = mix(ch, deep, 0.8 * shade * (1.0 - paint));
-  ch = mix(ch, mix(vec3(1.0), zen, 0.35), glass * uStructKey.z * (1.0 - 0.6 * shade));
-  // a sunlit face loses the overcast's grey-green cast before it takes the
-  // sun's colour. Pale and cool is not a face: it is the plate's own hazy
-  // overcast low on the horizon, where the matte could not find the sky
-  // among the far roofs, and it goes to the pale blue of the sky's rim
-  // instead of to a warm wall.
-  float cool = smoothstep(0.02, 0.12, (c.b - c.r) / (c.b + 1e-4));
+  ch = mix(ch, mix(vec3(1.0), zen, 0.35), pane * uStructKey.z * (1.0 - 0.6 * shade));
+  // Pale and cool over a whole patch is not a face: it is the plate's own
+  // hazy overcast low on the horizon, where the matte could not find the
+  // sky among the far roofs, and it goes to the pale blue of the sky's rim
+  // instead of to a warm wall. Every other face above the shade takes the
+  // sun's colour.
+  float cool = smoothstep(0.1, 0.22, brl);
   float haze = cool * smoothstep(0.25, 0.55, Yc) * (1.0 - paint);
   vec3 rim = toLin(RIM);
   ch = mix(ch, rim / dot(rim, LUMA), 0.6 * haze);
-  float lit = smoothstep(0.06, 0.3, Yo) * (1.0 - glass) * (1.0 - cool);
-  ch = mix(ch, vec3(1.0), 0.55 * lit * (1.0 - paint));
+  float lit = smoothstep(0.02, 0.1, Yo) * (1.0 - pane) * (1.0 - haze) * (1.0 - paint);
   ch *= mix(vec3(1.0), WARM, lit * uStructKey.y);
   c = Yo * ch * grain;
   float Ym = dot(c, LUMA);
   float hot = smoothstep(0.05, 0.3, (max(c.r, c.g) - c.b) / (max(c.r, c.g) + 1e-4));
   c = mix(c, Ym * vec3(0.98, 1.0, 1.02) * 0.85, mu * hot);
+  // low down, towards the disk's rim, the plate is the far skyline seen
+  // nearly edge on: smeared, low-res walls the matte only roughly cuts
+  // from the old sky. There the walls fold into one clean blue-black
+  // silhouette against the blue (the crane's paint stays its accent).
+  float low = (1.0 - smoothstep(0.65 * uStructEv.y, uStructEv.y, d.z)) * (1.0 - paint);
+  c = mix(c, toLin(DEEP) * grain, low);
   return mix(lin, c, uStruct.x);
 }
 
@@ -571,6 +607,17 @@ void main() {
   float m = raw.a;
   vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;
   vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
+  // Low down the matte is eroded a little: the far skyline's pinholes and
+  // ragged fringe of old sky go to the silhouette, so its edge is clean.
+  float lowM = 1.0 - smoothstep(0.65 * uStructEv.y, uStructEv.y, d.z);
+  if (lowM > 0.002 && m > 0.02) {
+    float mn = m;
+    for (int i = 0; i < 8; i++) {
+      float an = float(i) * 0.785398;
+      for (int j = 1; j <= 4; j++) mn = min(mn, texture(uRaw, vUv + vec2(cos(an), sin(an)) * (1.5 * float(j)) * uPlatePx).a);
+    }
+    m = mix(m, mn, lowM);
+  }
   float st = 1.0 - smoothstep(0.1, 0.55, m);
   vec3 linS = st > 0.002 ? mix(lin0, structGrade(lin0, d), st) : lin0;
   vec2 dith = vec2(hash12(gl_FragCoord.xy + uSeed), hash12(gl_FragCoord.yx + 5.3 + uSeed));
@@ -1509,7 +1556,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform4f(g.uStructKey, struct0.structFloor ** 2.2, struct0.structWarm, struct0.structGlass, struct0.structEdge);
     gl.uniform1f(g.uMute, struct0.mute);
     gl.uniform1f(g.uPlatePx, (PLATE_RAD * F) / (img / f));
-    gl.uniform1f(g.uStructEv, struct0.structEv);
+    gl.uniform2f(g.uStructEv, struct0.structEv, Math.sin((struct0.structLow * Math.PI) / 180));
     gl.uniform2f(g.uTop, grade0.glow, grade0.sunSplit);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
