@@ -23,6 +23,10 @@ only through two blurs, weighted 60/40
 toward the big one (about 34 and 10 plate px across), and stored as its slope:
 G across the card, B down it, 0.5 flat, +-SLOPE/2 card px per px. Written
 lossless: the lossy codec's chroma subsampling would bleed the slope into R.
+
+The engine lights this relief only at a quarter strength (CLOUD_RELIEF), as a
+grain on the soft volume it reads from the blurred coverage and tone: lit at
+full strength, every crease catches the light and the cloud reads as foil.
 """
 import os
 import sys
