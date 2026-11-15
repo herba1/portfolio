@@ -14,7 +14,7 @@
 #
 # Two plates, the same log2 radiance encoding as scene.webp (LO..HI in 8 bits,
 # TPDF dither):
-#   cloud.webp  NC px (8192): the cumulus deck, with the sun taken out (filled with the
+#   cloud.webp  NC px: the cumulus deck, with the sun taken out (filled with the
 #               clear sky round it). The engine advects this one, so the
 #               clouds drift between prints.
 #   sky.webp    NS px: the static clear sky, the clouds taken out (push-pull
@@ -24,13 +24,12 @@
 #   overcast.webp  NO px: the Docklands plate's own overcast, structures filled
 #               (see below), used only to clean the structures' rims.
 # usage: python3 -I skyplate.py kloofendal_8k.hdr scene.webp mask.webp outdir [sunAz] [NC] [NS] [NO]
-# env: CLOUD_Q (cloud.webp quality, default 95, or lossless), DECK_DITHER (default 1)
 import sys, os, numpy as np, cv2
 from PIL import Image
 LO, HI, THMAX = -8.0, 5.0, 120.0
 SRC, SCENE, MASK, OUT = sys.argv[1:5]
 SUN_AZ = float(sys.argv[5]) if len(sys.argv) > 5 else -52.0
-NC = int(sys.argv[6]) if len(sys.argv) > 6 else 8192
+NC = int(sys.argv[6]) if len(sys.argv) > 6 else 4096
 NS = int(sys.argv[7]) if len(sys.argv) > 7 else 768
 NO = int(sys.argv[8]) if len(sys.argv) > 8 else 512
 ZEN = 8.0  # degrees round the zenith the exposure is matched over
@@ -50,12 +49,11 @@ tgt_pan = np.degrees(np.arctan2(np.cos(np.radians(SUN_AZ)), -np.sin(np.radians(S
 YAW0 = sun_pan - tgt_pan
 print(f"sun: azimuth {sun_pan:.1f}, elevation {sun_el:.1f}; turned {-YAW0:+.2f} deg onto disk angle {SUN_AZ}")
 
-def disk(S, ss=2, rows=None):
-    y0, y1 = rows or (0, S)
+def disk(S, ss=2):
     acc = 0
     for oy in range(ss):
         for ox in range(ss):
-            ys, xs = np.mgrid[y0:y1, 0:S].astype(np.float32)
+            ys, xs = np.mgrid[0:S, 0:S].astype(np.float32)
             x = (xs + (ox + .5) / ss - S / 2) / (S / 2)
             y = (ys + (oy + .5) / ss - S / 2) / (S / 2)
             th = np.hypot(x, y) * np.radians(THMAX)
@@ -73,13 +71,8 @@ def radius_deg(S):
 def blueness(c):  # (b - r) / b: open sky against cloud, the engine's key
     return (c[..., 2] - c[..., 0]) / (c[..., 2] + 1e-6)
 
-# Everything is measured on a plate of at most 4096 px (the gain, the sun, the
-# clear-sky fill); a larger cloud deck is then resampled from the source in
-# strips at NC and laid over that analysis (see below), so an 8192 px deck
-# never needs more than a 4096 px plate in memory.
-NB = min(NC, 4096)
-deck = disk(NB)
-r = radius_deg(NB)
+deck = disk(NC)
+r = radius_deg(NC)
 
 # exposure: open blue at the zenith against the Docklands plate's open sky there
 sc = np.asarray(Image.open(SCENE).convert("RGB")).astype(np.float32) / 255
@@ -106,14 +99,13 @@ def pushpull(img, w):
 # the sun and its glare: where the deck is far over the brightest cloud
 ldeck = np.log2(deck)
 Yd = deck @ LUMA
-ys, xs = np.mgrid[0:NB, 0:NB].astype(np.float32)
-sx = NB / 2 + (90 - sun_el) / THMAX * (NB / 2) * np.cos(np.radians(SUN_AZ))
-sy = NB / 2 + (90 - sun_el) / THMAX * (NB / 2) * np.sin(np.radians(SUN_AZ))
-dsun = np.hypot(xs - sx, ys - sy) / (NB / 2) * THMAX  # degrees, near enough
+ys, xs = np.mgrid[0:NC, 0:NC].astype(np.float32)
+sx = NC / 2 + (90 - sun_el) / THMAX * (NC / 2) * np.cos(np.radians(SUN_AZ))
+sy = NC / 2 + (90 - sun_el) / THMAX * (NC / 2) * np.sin(np.radians(SUN_AZ))
+dsun = np.hypot(xs - sx, ys - sy) / (NC / 2) * THMAX  # degrees, near enough
 sunw = np.clip((3.0 - dsun) / 1.5, 0, 1) * (Yd > np.percentile(Yd, 99.5))
-sunw = cv2.GaussianBlur(sunw.astype(np.float32), (0, 0), NB / 2048 * 2)
-del xs, ys
-print(f"sun in the disk at ({sx * NC / NB:.0f}, {sy * NC / NB:.0f}) px, peak luminance {Yd[dsun < 1].max():.0f}")
+sunw = cv2.GaussianBlur(sunw.astype(np.float32), (0, 0), NC / 2048 * 2)
+print(f"sun in the disk at ({sx:.0f}, {sy:.0f}) px, peak luminance {Yd[dsun < 1].max():.0f}")
 
 # static sky: the open blue (and the sun), filled in log space under the clouds
 # open sky sits at 0.6-0.75 on the blue key, cloud at 0.15-0.4 (even its blue
@@ -131,48 +123,12 @@ clear_round_sun = pushpull(ldeck, (k * (dsun > 4)).astype(np.float32))
 cloud = ldeck * (1 - sunw[..., None]) + clear_round_sun * sunw[..., None]
 
 rng = np.random.default_rng(7)
-def code(l, dither=1.0):
+def enc(l, dither=1.0):
     l = (np.clip(l, LO, HI) - LO) / (HI - LO) * 255
     l = l + (rng.random(l.shape) - rng.random(l.shape)) * dither
-    return np.clip(np.round(l), 0, 255).astype(np.uint8)
-def enc(l, dither=1.0):
-    return Image.fromarray(code(l, dither))
+    return Image.fromarray(np.clip(np.round(l), 0, 255).astype(np.uint8))
 
-# The deck at NC: resampled straight from the source in strips (no
-# supersampling: at 8192 px the disk already oversamples the 8k panorama
-# round the zenith), with the sun patch taken from the analysis plate.
-DECK_DITHER = float(os.environ.get("DECK_DITHER", 1.0))
-if NC == NB:
-    deck8 = code(cloud, DECK_DITHER)
-else:
-    deck8 = np.empty((NC, NC, 3), np.uint8)
-    crs = clear_round_sun.astype(np.float32)
-    for y0 in range(0, NC, 512):
-        y1 = min(NC, y0 + 512)
-        ls = np.log2(disk(NC, 1, (y0, y1)) * gain)
-        yb, xb = np.mgrid[y0:y1, 0:NC].astype(np.float32)
-        xb, yb = (xb + .5) * NB / NC - .5, (yb + .5) * NB / NC - .5
-        sw = cv2.remap(sunw.astype(np.float32), xb, yb, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)[..., None]
-        cs = cv2.remap(crs, xb, yb, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        deck8[y0:y1] = code(ls * (1 - sw) + cs * sw, DECK_DITHER)
-    del crs
-# The prints are magnified crops of this deck, so its resolution and its
-# compression set the ceiling on every cloud. Lossy WebP codes chroma at half
-# resolution in 16 px blocks, and the engine keys cloud against sky on chroma
-# (blue against white), so the old 4096 px deck at 0.16 bits a pixel turned
-# every cumulus edge to cotton. At 8192 px and quality 95 the chroma lands at
-# 4096 px with fine blocks, and the cumulus keep their scalloped edges through
-# a three-pixel feather, for about 1.2 MB. Lossless would be exact but is 38 MB
-# (14 MB undithered: the capture's own noise), so CLOUD_Q=lossless is only for
-# reference stills.
-cq = os.environ.get("CLOUD_Q", "95")
-if os.environ.get("KEEP"):
-    np.save(f"{OUT}/cloud8.npy", deck8)
-if cq == "lossless":
-    Image.fromarray(deck8).save(f"{OUT}/cloud.webp", lossless=True, quality=100, method=6)
-else:
-    Image.fromarray(deck8).save(f"{OUT}/cloud.webp", quality=float(cq), method=6)
-del deck8
+enc(cloud).save(f"{OUT}/cloud.webp", quality=94, method=6)
 # lossless: the static sky is all smooth gradient, where lossy webp blocks up
 # into squares a print magnifies; the dither alone breaks up the 8-bit steps
 enc(static).save(f"{OUT}/sky.webp", lossless=True, quality=100, method=6)
