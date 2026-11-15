@@ -27,21 +27,36 @@ clouds:
    the loss of the sky's chroma in OKLab (a cloud, lit or shaded, is grey;
    the sky behind it is not), and P = I - (1 - a) S, so a cloud composited
    back over S at its own place is the photograph exactly.
-4. Sprites: each cloud (a connected run of alpha) cut out with its alpha and
-   P. A cloud the towers or the frame edge cut is feathered off along the
-   cut, so its hidden side never slides into view as a straight edge.
+4. Material: the photograph's four biggest cumulus (connected runs of
+   alpha), lifted again from the photograph at twice the frame's scale
+   (it is 4000 px wide), so a cloud scaled 2-3x is resampled only 1-1.5x
+   from its own pixels. Each keeps its alpha, its own light as a ratio
+   about a broad mean (its sunlit lobes and shaded folds), and a thickness:
+   the soft body plus a dome rising from the edge into the interior. A
+   cloud the towers or the frame edge cut is ended short of the cut on a
+   lumpy, noise-roughened edge, so its hidden side closes like a cumulus
+   lobe, not a ruled line or a smoke.
 5. The deck: a strip along the wind, periodic over the loop (its length is
-   the drift over N frames), holding the photograph's clouds at their own
-   places at frame AT and copies of them (scaled 0.7-1.5, turned up to 25
-   degrees, mirrored at random) scattered to twice the photograph's own
-   cover, so a long exposure has silk across the whole sky, not one streak
-   per cloud of a fair afternoon. The wind runs 30 degrees up from the
-   frame's horizontal, across the photograph's chain of cumulus rather than
-   along it, so the chain sweeps the sky instead of tracing one line. Every cloud
-   breathes over the loop: its alpha is thresholded by a slow periodic
-   amount, so thin edges evaporate and re-form while the cores hold, the way
-   fair-weather cumulus lives. Periodic, so the bake's loop cross-fade is
-   between equal frames.
+   the drift over N frames), holding five big cumulus, one dominant, built
+   from those four: each is a few of them scaled 2-3x along their long axis
+   (a little less across it), laid along the wind as cumulus streets lie,
+   overlapping so their thicknesses add into one body with turrets, the cut
+   side of one buried in the next; small holes and gaps are closed and
+   stray wisps dropped. About a third to two fifths of the sky is cloud.
+   The clouds keep to three lanes across the wind with clear sky between
+   them, so a long exposure draws three broad bands of silk, the dominant
+   lane (which a second cloud shares) the brightest. The wind runs 30
+   degrees up from the frame's horizontal.
+   The light comes from the thickness, not from a flat alpha: where a cloud
+   is deep it is a sunlit, faintly warm white crest, where it is thin (its
+   rim, its base) a skylight blue-grey, its flank toward the sun (left and
+   down in the frame, as the engine's SUN) lit up, the far flank shaded,
+   and the photograph's own lobes ride on top. Opacity is Beer-Lambert of
+   the same thickness, so the rim is translucent and the core solid. Every
+   part breathes over the loop (its thickness swells and ebbs on a slow
+   period), so thin edges evaporate and re-form while the cores hold, the
+   way fair-weather cumulus lives. Periodic, so the bake's loop cross-fade
+   is between equal frames.
 6. Frames: S, the deck composited over it, the towers over that (their
    edge pixels have their own photographed sky swapped for the frame's).
    Written as a near-lossless 1920x1080 sRGB video, 257 frames: bake.py's
@@ -59,7 +74,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
-from grade import lin2oklab, lin2srgb, srgb2lin  # noqa: E402
+from grade import lin2oklab, lin2srgb, oklab2lin, srgb2lin  # noqa: E402
 from kit import pushpull  # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -73,7 +88,6 @@ ap.add_argument("--loop", type=int, default=232, help="the deck's period in fram
 ap.add_argument("--at", type=int, default=24 + 96, help="the frame the photograph's own clouds sit at their places")
 ap.add_argument("--speed", type=float, default=17.0, help="px per frame at 1920 wide")
 ap.add_argument("--wind", type=float, default=-30.0, help="degrees from +x (frame y down; negative = up the frame)")
-ap.add_argument("--cover", type=float, default=2.0, help="the deck's cloud cover, times the photograph's")
 ap.add_argument("--seed", type=int, default=11)
 args = ap.parse_args()
 
@@ -84,8 +98,8 @@ rng = np.random.default_rng(args.seed)
 
 # 1. Frame.
 src = Image.open(args.photo).convert("RGB").transpose(Image.ROTATE_270)
-lin = srgb2lin(np.asarray(src).astype(np.float32) / 255)
-lin = cv2.resize(lin, (FW, FH), interpolation=cv2.INTER_AREA)
+full = srgb2lin(np.asarray(src).astype(np.float32) / 255)
+lin = cv2.resize(full, (FW, FH), interpolation=cv2.INTER_AREA)
 
 # 2. Towers.
 tow = np.zeros((FH, FW), np.float32)
@@ -124,143 +138,269 @@ P = np.maximum(lin - (1 - a)[..., None] * S, 0) * (a > 0)[..., None]
 COVER = a[open_sky].mean()
 print("cloud cover in the open sky: %.1f%%" % (100 * COVER))
 
-# 4. Sprites. A cut (tower or frame edge) is feathered off over FEATHER px,
-# the distance itself roughened by a smooth noise, so the fade is a wisp and
-# not a ruled line.
+# 4. The photograph's cumulus as material. Each of its clouds (a connected
+# run of alpha) is lifted from the 2x plate: alpha, its own light (texture)
+# and a thickness. A cloud the towers or the frame edge cut is ended short
+# of the cut on a lumpy edge: the distance to the cut, roughened by noise at
+# three scales (the lobes of a cumulus), thresholded on a narrow ramp, so the
+# hidden side closes as a cauliflower edge, not a ruled line or a smoke.
 FEATHER = 90.0
-nz = cv2.GaussianBlur(rng.standard_normal((FH, FW)).astype(np.float32), (0, 0), 30)
+nz = np.zeros((FH, FW), np.float32)
+for sig, wt in ((2.0, 0.25), (6.0, 0.35), (16.0, 0.4)):
+    g = cv2.GaussianBlur(rng.standard_normal((FH, FW)).astype(np.float32), (0, 0), sig)
+    nz += wt * g / g.std()
 nz = nz / nz.std()
 cut = (tow > 0.3).astype(np.uint8)
 cut[:2], cut[-2:], cut[:, :2], cut[:, -2:] = 1, 1, 1, 1
 dcut = cv2.distanceTransform(1 - cut, cv2.DIST_L2, 5)
 blob = cv2.dilate((a > 0.06).astype(np.uint8), np.ones((9, 9), np.uint8))
 n, lab_cc, st, _ = cv2.connectedComponentsWithStats(blob, connectivity=8)
-sprites = []
-for c in range(1, n):
-    x, y, w, hh, area = st[c]
-    if area < 400:
-        continue
-    sel = (lab_cc[y:y + hh, x:x + w] == c)
-    sa = a[y:y + hh, x:x + w] * sel
-    if sa.sum() < 150:
-        continue
-    sp = P[y:y + hh, x:x + w] * sel[..., None]
-    touches = bool((dcut[y:y + hh, x:x + w][sa > 0.05] < 16).any())  # the alpha stops ~8 px short of a tower
-    if touches:
-        f = np.clip(dcut[y:y + hh, x:x + w] / FEATHER * (1 + 0.25 * nz[y:y + hh, x:x + w]), 0, 1)
-        f = f * f * (3 - 2 * f)
-        sa, sp = sa * f, sp * f[..., None]
-    sprites.append(dict(x=x, y=y, a=sa.astype(np.float32), p=sp.astype(np.float32), whole=not touches, mass=float(sa.sum())))
-print("clouds: %d (%d whole)" % (len(sprites), sum(s["whole"] for s in sprites)))
+mass_cc = {c: float(a[lab_cc == c].sum()) for c in range(1, n)}
+order = [c for c in sorted(mass_cc, key=lambda c: -mass_cc[c]) if mass_cc[c] > 1000][:4]
 
-# 5. The deck. Wind u, across it v; frame coordinates: plate px in the 1920x1440 photo.
+U = 2  # the material's scale: the photograph is 4000 px wide, twice the frame's
+lin2 = cv2.resize(full, (FW * U, FH * U), interpolation=cv2.INTER_AREA)
+del full
+R_DOME = 34.0 * U  # px: how far in from its edge a cloud reaches its full thickness
+
+
+def material(c):
+    x, y, w, hh = (int(v) for v in st[c][:4])
+    x0, y0, x1, y1 = max(x - 8, 0), max(y - 8, 0), min(x + w + 8, FW), min(y + hh + 8, FH)
+    sz = ((x1 - x0) * U, (y1 - y0) * U)
+    up = lambda m, f=cv2.INTER_LINEAR: cv2.resize(m[y0:y1, x0:x1].astype(np.float32), sz, interpolation=f)  # noqa: E731
+    li = lin2[y0 * U:y1 * U, x0 * U:x1 * U]
+    Si = up(S)
+    lb, lbS = lin2oklab(li), lin2oklab(Si)
+    Li, Ci = lb[..., 0], np.hypot(lb[..., 1], lb[..., 2])
+    LSi, CSi = lbS[..., 0], np.hypot(lbS[..., 1], lbS[..., 2])
+    ai = np.clip((1 - Ci / np.maximum(CSi, 1e-3) - 0.06) / 0.8, 0, 1)
+    ai = np.maximum(ai, np.clip((Li - LSi - 0.03) / np.maximum(0.93 - LSi, 1e-3), 0, 1))
+    ai *= up(open_sky.astype(np.float32)) > 0.5
+    ai *= cv2.dilate((up((lab_cc == c).astype(np.float32), cv2.INTER_NEAREST) > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8))
+    ai[ai < 0.03] = 0
+    dc = up(dcut)
+    f = np.clip((dc / FEATHER - 0.5 + 0.3 * up(nz)) / 0.1 + 0.5, 0, 1)
+    f = f * f * (3 - 2 * f)
+    # the noise leaves islands of cut inside the body: only what reaches the
+    # cut itself is cut
+    nh, lh = cv2.connectedComponents((f < 0.5).astype(np.uint8), connectivity=4)
+    f[~np.isin(lh, np.unique(lh[(dc < 12) & (lh > 0)])) & (lh > 0)] = 1
+    ai *= f
+    # Pinholes: the small gaps of sky inside the body, filled. Scaled up they
+    # would be blue puddles, and their rims contour lines across the white.
+    nh, lh, sh, _ = cv2.connectedComponentsWithStats((ai < 0.45).astype(np.uint8), connectivity=4)
+    edge = set(np.unique(np.concatenate([lh[0], lh[-1], lh[:, 0], lh[:, -1]])))
+    hole = np.isin(lh, [k for k in range(1, nh) if k not in edge and sh[k, cv2.CC_STAT_AREA] < 2500 * U * U])
+    hole = cv2.GaussianBlur(cv2.dilate(hole.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(np.float32), (0, 0), U)
+    a0 = ai
+    ai = np.maximum(ai, 0.9 * hole)
+    # Its own light: the cloud's colour's luminance about a broad mean, the
+    # photograph's sunlit lobes and shaded folds (a ratio, ~0.7..1.3).
+    # Read off the photograph's own light, only where the cloud is near
+    # solid: over a thin part it is the sky's, and its contour would print
+    # as a line.
+    Y = li @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    solid = np.clip((np.minimum(a0, cv2.GaussianBlur(a0, (0, 0), 3 * U)) - 0.6) / 0.3, 0, 1)
+    Y = pushpull(Y, (solid > 0.5).astype(np.float32))
+    tex = np.clip(Y / np.maximum(cv2.GaussianBlur(Y, (0, 0), 12 * U), 1e-4), 0.65, 1.35)
+    # only well inside the cloud: at its rim the ratio reads the sky's fill,
+    # and where parts overlap it would draw the rim as a contour line
+    tex = 1 + (cv2.medianBlur(tex.astype(np.float32), 5) - 1) * cv2.GaussianBlur(solid, (0, 0), U)
+    # Thickness: the soft body (alpha, a little blurred) and a dome that
+    # rises from the edge into the interior, so the core is deep and the
+    # rim is thin.
+    core = cv2.GaussianBlur(ai, (0, 0), U)
+    d = cv2.distanceTransform((core > 0.45).astype(np.uint8), cv2.DIST_L2, 5)
+    T = 0.4 * core + 0.6 * (1 - np.exp(-d / R_DOME)) * np.clip(core / 0.45, 0, 1)
+    yy, xx = np.mgrid[0:T.shape[0], 0:T.shape[1]].astype(np.float32)
+    m0 = T.sum()
+    cx, cy = (T * xx).sum() / m0, (T * yy).sum() / m0
+    mu20, mu02, mu11 = (T * (xx - cx) ** 2).sum(), (T * (yy - cy) ** 2).sum(), (T * (xx - cx) * (yy - cy)).sum()
+    axis = 0.5 * np.degrees(np.arctan2(2 * mu11, mu20 - mu02))  # the long axis, deg from +x (y down)
+    return dict(T=T.astype(np.float32), tex=tex.astype(np.float32), c=(cx, cy), axis=axis, box=(x, y, w, hh))
+
+
+LIB = [material(c) for c in order]
+for k, m in enumerate(LIB):
+    print("cumulus %d: box %s, axis %.0f deg, body %.0f px" % (k, m["box"], m["axis"], m["T"].sum() / U / U))
+
+# 5. The deck: a strip along the wind, periodic over the loop (its length is
+# the drift over N frames), holding a few big cumulus. Wind u, across it v,
+# frame coordinates: plate px in the 1920x1440 photo.
 th = np.radians(args.wind)
 u = np.array([np.cos(th), np.sin(th)])
 v = np.array([-u[1], u[0]])
 N = args.loop
 D = args.speed * N  # the strip's length along the wind: one loop of drift
 corners = np.array([[0, Y0], [CW, Y0], [0, Y0 + CH], [CW, Y0 + CH]], np.float64)
-s_lo, s_hi = (corners @ u).min(), (corners @ u).max()
-t_lo, t_hi = (corners @ v).min(), (corners @ v).max()
-MARGIN = 700.0  # the largest cloud's reach
-assert D > (s_hi - s_lo) + 2 * MARGIN, "the loop's drift must exceed the frame plus a cloud"
-s0 = s_lo - MARGIN  # the strip is [s0, s0 + D)
+s_mid = np.dot([CW / 2, Y0 + CH / 2], u)
 
-inst = []
-for sp in sprites:  # the photograph's own clouds, at their places at frame AT
-    cx, cy = sp["x"] + sp["a"].shape[1] / 2, sp["y"] + sp["a"].shape[0] / 2
-    inst.append(dict(sp=sp, s=np.dot([cx, cy], u) - args.speed * args.at, t=np.dot([cx, cy], v), k=1.0, flip=False, rot=0.0))
-# Copies of the whole ones over the rest of the strip, to the photograph's own
-# cover: the strip's area times the cover, less what is there.
-target = args.cover * COVER * D * (t_hi - t_lo + MARGIN)
-mass = sum(sp["mass"] for sp in sprites)
-own_s = [((i["s"] - s0) % D) for i in inst]
-tries = 0
-lib_p = np.array([w["mass"] for w in sprites]) ** 0.7
-lib_p /= lib_p.sum()
-while mass < target and tries < 2000:
-    tries += 1
-    sp = sprites[rng.choice(len(sprites), p=lib_p)]
-    k = rng.uniform(0.7, 1.5)
-    s = s0 + rng.uniform(0, D)
-    t = rng.uniform(t_lo - MARGIN * 0.5, t_hi + MARGIN * 0.5)
-    # Keep the photograph's own clouds from being crowded at frame AT.
-    if any(abs(((s - s0) % D) - o) < 120 and abs(t - inst[j]["t"]) < 160 for j, o in enumerate(own_s)):
-        continue
-    inst.append(dict(sp=sp, s=s, t=t, k=k, flip=bool(rng.random() < 0.5), rot=float(rng.uniform(-25, 25))))
-    mass += sp["mass"] * k * k
-for i in inst:  # each cloud breathes: a slow periodic threshold
-    i["cyc"] = int(rng.integers(1, 3))
-    i["ph"] = float(rng.uniform(0, 2 * np.pi))
-    i["amp"] = float(rng.uniform(0.08, 0.22))
-print("deck: %d clouds, strip %.0f px, cover target %.0f" % (len(inst), D, target))
+# The cloud's light, from its thickness. Seen from below at noon a cumulus is
+# lit from above and the sun's side: where it is deep its tops scatter the
+# sun back down as a warm white crest, and where it is thin, at its rim and
+# its base, it is lit only by the blue sky round it, a skylight blue-grey.
+# So the thickness sets the light (crest to base) and the slope of the
+# thickness toward the sun sets which flank is lit; the photograph's own
+# lobes and folds ride on top as a ratio. Opacity is Beer-Lambert of the same
+# thickness, so the rim is translucent and the core is solid.
+SUN = np.array([-0.8, 0.6]) / np.hypot(0.8, 0.6)  # toward the sun in the frame (the engine's SUN)
+KAPPA, T0 = 5.0, 0.1
+CREST = (0.968, 0.010, 80.0)  # OKLab L, C, hue: a sunlit white with the faintest warmth
+BASE = (0.735, 0.052, 250.0)  # the skylight base
 
-# Prebuilt scaled sprites.
-for i in inst:
-    sp = i["sp"]
-    A, Pp = sp["a"], sp["p"]
-    if i["flip"]:
-        A, Pp = A[:, ::-1], Pp[:, ::-1]
-    if i["k"] != 1.0 or i["rot"] != 0.0:
-        hh, w = A.shape
-        R = cv2.getRotationMatrix2D((w / 2, hh / 2), i["rot"], i["k"])
-        cs, sn = abs(R[0, 0]), abs(R[0, 1])
-        nw, nh = int(np.ceil(w * cs + hh * sn)) + 2, int(np.ceil(w * sn + hh * cs)) + 2
-        R[0, 2] += nw / 2 - w / 2
-        R[1, 2] += nh / 2 - hh / 2
-        A = cv2.warpAffine(A, R, (nw, nh), flags=cv2.INTER_CUBIC)
-        Pp = cv2.warpAffine(Pp, R, (nw, nh), flags=cv2.INTER_CUBIC)
-    i["A"] = np.clip(np.ascontiguousarray(A), 0, 1)
-    i["P"] = np.maximum(np.ascontiguousarray(Pp), 0)
 
-# 6. Frames.
+def ab(C, hdeg):
+    return C * np.cos(np.radians(hdeg)), C * np.sin(np.radians(hdeg))
+
+
+def light(T, tex):
+    H = cv2.GaussianBlur(T, (0, 0), 10)
+    gy, gx = np.gradient(H)
+    facing = -(gx * SUN[0] + gy * SUN[1])  # the thickness falls toward the sun: a sunlit flank
+    deep = 1 - np.exp(-1.6 * T)
+    lit = np.clip(0.02 + 0.95 * deep + 12.0 * facing, 0, 1)
+    lit = lit * lit * (3 - 2 * lit)
+    # the deepest core shades itself a little: a tall cumulus seen from
+    # below is never one flat white, it has a soft grey belly
+    belly = 0.07 * np.clip((T - 1.0) / 1.0, 0, 1) * (1 - np.clip(8.0 * facing, 0, 1))
+    L = np.minimum((BASE[0] + (CREST[0] - BASE[0]) * lit - belly) * tex ** 0.7, 0.985)
+    wa = np.clip((lit - 0.35) / 0.6, 0, 1)
+    ba, bb = ab(BASE[1], BASE[2])
+    ca, cb = ab(CREST[1], CREST[2])
+    return np.maximum(oklab2lin(np.stack([L, ba + (ca - ba) * wa, bb + (cb - bb) * wa], -1).astype(np.float32)), 0)
+
+
+# Each cloud: where it sits at frame AT (along the wind from the frame's
+# middle, and across it, plate px), and its parts: (cumulus, scale along its
+# long axis, scale across it, turn about the wind in deg, mirrored, along,
+# across). A part's long axis is laid along the wind, as cumulus streets lie,
+# and stretched along it a little more than across; its parts overlap, so
+# their thicknesses add up into one body with turrets, and the cut side of
+# one is buried in the next. The clouds keep to three lanes across the wind,
+# with clear sky between them, so a long exposure draws three broad bands of
+# silk: the dominant mass's lane, which a second cloud shares, is the
+# brightest.
+DECK = [
+    # the dominant mass, over the middle of the frame at rest
+    dict(s=-80, t=1090, parts=[(0, 3.0, 2.4, 0, False, 0, 0), (0, 2.6, 2.1, 8, True, 820, 70),
+                               (1, 2.7, 2.0, -6, False, -860, -30), (3, 2.2, 1.8, 15, True, 160, -190)]),
+    # the dominant lane again, upstream: its silk gets a core
+    dict(s=1820, t=1120, parts=[(1, 2.9, 2.2, 0, False, 0, 0), (0, 2.6, 2.0, 174, False, -660, 30)]),
+    # the lane below the dominant one: lower right at rest, and upstream
+    dict(s=860, t=1730, parts=[(1, 3.0, 2.3, 0, True, 0, 0), (3, 2.4, 1.9, -10, False, -520, -40),
+                               (0, 2.2, 1.7, 5, False, 620, 50)]),
+    dict(s=-1650, t=1700, parts=[(0, 2.8, 2.1, -4, True, 0, 0), (1, 2.2, 1.7, 8, False, 620, -30)]),
+    # the lane above it: comes in from the lower left
+    dict(s=-1250, t=470, parts=[(0, 2.8, 2.1, 180, False, 0, 0), (1, 2.4, 1.8, -5, True, 680, 40)]),
+]
+for cl in DECK:
+    cl["s"] += s_mid - args.speed * args.at  # strip position at frame 0
+s0 = min(np.dot(corners, u)) - 1500.0  # the strip is [s0, s0 + D)
+
+
+GROW = 1.12  # all the deck's scales, for its cover
+
+
+def rot(p):
+    p = np.radians(p)
+    return np.array([[np.cos(p), -np.sin(p)], [np.sin(p), np.cos(p)]])  # turns angle q (y down) to q + p
+
+
+for cl in DECK:
+    parts = []
+    for (k, ka, kc, turn, flip, du, dv) in cl["parts"]:
+        m = LIB[k]
+        T, tex, (cx, cy), axis = m["T"], m["tex"], m["c"], m["axis"]
+        if flip:
+            T, tex, cx, axis = T[:, ::-1], tex[:, ::-1], T.shape[1] - 1 - cx, -axis
+        Lm = rot(args.wind + turn) @ np.diag([GROW * ka / U, GROW * kc / U]) @ rot(-axis)
+        hh, w = T.shape
+        box = (np.array([[0, 0], [w, 0], [0, hh], [w, hh]], np.float64) - [cx, cy]) @ Lm.T
+        off = du * u + dv * v
+        parts.append(dict(T=np.ascontiguousarray(T), tex=np.ascontiguousarray(tex), L=Lm, c=np.array([cx, cy]),
+                          off=off, ext=np.abs(box).max(0) + np.abs(off)))
+    half = np.max([p["ext"] for p in parts], 0) + 24
+    Wc, Hc = int(2 * half[0]), int(2 * half[1])
+    cl["half"] = half
+    Ts, Xs = [], []
+    for p in parts:
+        M = np.hstack([p["L"], (half + p["off"] - p["L"] @ p["c"])[:, None]]).astype(np.float64)
+        Tw = np.maximum(cv2.warpAffine(p["T"], M, (Wc, Hc), flags=cv2.INTER_CUBIC), 0)
+        Xw = cv2.warpAffine(p["tex"], M, (Wc, Hc), flags=cv2.INTER_CUBIC, borderValue=1.0)
+        Ts.append(Tw)
+        Xs.append(Tw * Xw)
+    # One body. Its parts' thicknesses add; a little body bridges a narrow
+    # gap between them and fills a small hole (a closing, softened), and
+    # stray wisps (any piece under 15% of the main body's area) are dropped.
+    T = sum(Ts)
+    tex = (sum(Xs) + 0.05) / (T + 0.05)
+    Tb = cv2.GaussianBlur(cv2.morphologyEx(T, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (61, 61))), (0, 0), 5)
+    Tb = np.maximum(np.maximum(T, 0.9 * Tb), 0.8 * cv2.GaussianBlur(T, (0, 0), 14))
+    nb, lb, sb, _ = cv2.connectedComponentsWithStats((T > 0.2).astype(np.uint8), connectivity=8)
+    big = sb[1:, cv2.CC_STAT_AREA].max()
+    keep = np.isin(lb, [k for k in range(1, nb) if sb[k, cv2.CC_STAT_AREA] >= 0.15 * big]).astype(np.uint8)
+    keep = cv2.GaussianBlur(cv2.dilate(keep, np.ones((13, 13), np.uint8)).astype(np.float32), (0, 0), 4)
+    Tb *= keep
+    cl["T"] = Tb
+    cl["col"] = light(Tb, tex)
+    # every part breathes: a slow periodic swell of its thickness, so thin
+    # edges evaporate and re-form while the cores hold
+    cl["parts"] = [T * keep / np.maximum(Tb, 1e-3) for T in Ts]  # each part's share of the body
+    cl["breath"] = [(int(rng.integers(1, 3)), float(rng.uniform(0, 2 * np.pi)), float(rng.uniform(0.1, 0.18))) for _ in parts]
+    print("cloud: %d parts, %dx%d px" % (len(parts), Wc, Hc))
+
+
+# 6. Frames: S, the deck composited over it, the towers over that (their
+# edge pixels have their own photographed sky swapped for the frame's).
 Sf = S[Y0:Y0 + CH]
 towf = tow[Y0:Y0 + CH][..., None]
 linf = lin[Y0:Y0 + CH]
-# The towers' edge pixels carry the photograph's sky: swapped for the frame's.
 bg = pushpull(lin, (sky > 0.97).astype(np.float32))[Y0:Y0 + CH]
 
 
-def frame(j):
+def deck(j):
     Acc = np.zeros((CH, CW), np.float32)
     Pacc = np.zeros((CH, CW, 3), np.float32)
-    for i in inst:
-        s = s0 + ((i["s"] + args.speed * j - s0) % D)
-        c = s * u + i["t"] * v  # the cloud's centre, photo px
-        A, Pp = i["A"], i["P"]
-        hh, w = A.shape
-        x0, y0 = c[0] - w / 2, c[1] - hh / 2 - Y0
-        ix, iy = int(np.floor(x0)), int(np.floor(y0))
-        if ix + w + 2 < 0 or iy + hh + 2 < 0 or ix > CW or iy > CH:
-            continue
-        # the breath: thin edges go first
-        thr = i["amp"] * 0.5 * (1 - np.cos(2 * np.pi * i["cyc"] * (j - args.at) / N + i["ph"])) * (i["sp"] is not None)
-        if i["k"] == 1.0 and not i["flip"] and i["rot"] == 0.0 and (j - args.at) % N == 0:
-            thr = 0.0
-        M = np.float32([[1, 0, x0 - ix], [0, 1, y0 - iy]])
-        Aw = cv2.warpAffine(A, M, (w + 2, hh + 2), flags=cv2.INTER_LINEAR)
-        Pw = cv2.warpAffine(Pp, M, (w + 2, hh + 2), flags=cv2.INTER_LINEAR)
-        if thr > 0:
-            An = np.clip((Aw - thr) / (1 - thr), 0, 1)
-            Pw = Pw * (An / np.maximum(Aw, 1e-4))[..., None]
-            Aw = An
-        xa, ya, xb, yb = max(ix, 0), max(iy, 0), min(ix + w + 2, CW), min(iy + hh + 2, CH)
-        if xb <= xa or yb <= ya:
-            continue
-        sa = Aw[ya - iy:yb - iy, xa - ix:xb - ix]
-        spp = Pw[ya - iy:yb - iy, xa - ix:xb - ix]
-        # over: the new cloud behind what is there (order does not matter much)
-        Pacc[ya:yb, xa:xb] += spp * (1 - Acc[ya:yb, xa:xb])[..., None]
-        Acc[ya:yb, xa:xb] += sa * (1 - Acc[ya:yb, xa:xb])
+    for cl in DECK:
+        sj = s0 + ((cl["s"] + args.speed * j - s0) % D)
+        A = None
+        for s in (sj - D, sj, sj + D):
+            c = s * u + cl["t"] * v
+            x0, y0 = c[0] - cl["half"][0], c[1] - Y0 - cl["half"][1]
+            if x0 > CW or y0 > CH or x0 + 2 * cl["half"][0] < 0 or y0 + 2 * cl["half"][1] < 0:
+                continue
+            if A is None:
+                ph = 2 * np.pi * (j - args.at) / N
+                swell = sum((1 + amp * np.sin(cyc * ph + p0)) * f for (cyc, p0, amp), f in zip(cl["breath"], cl["parts"]))
+                A = 1 - np.exp(-KAPPA * np.maximum(cl["T"] * swell - T0, 0))
+                P = cl["col"] * A[..., None]
+            M = np.float32([[1, 0, x0], [0, 1, y0]])
+            Aw = cv2.warpAffine(A, M, (CW, CH), flags=cv2.INTER_LINEAR)
+            Pw = cv2.warpAffine(P, M, (CW, CH), flags=cv2.INTER_LINEAR)
+            Pacc += Pw * (1 - Acc)[..., None]
+            Acc += Aw * (1 - Acc)
+    return Acc, Pacc
+
+
+def frame(j):
+    Acc, Pacc = deck(j)
     skyc = Sf * (1 - Acc)[..., None] + Pacc
     out = linf + (1 - towf) * (skyc - bg)
     return np.maximum(out, 0)
 
 
+skym = sky[Y0:Y0 + CH] > 0.5
+cov = [deck(j)[0][skym].mean() for j in range(0, N, 29)]
+print("deck cover over the open sky: %.0f%% (%.0f..%.0f%%)" % (100 * np.mean(cov), 100 * min(cov), 100 * max(cov)))
+
 if args.preview:
     tiles = [cv2.resize(lin2srgb(frame(j)), (640, 360), interpolation=cv2.INTER_AREA) for j in (0, args.at - 40, args.at, args.at + 40, args.at + 80, args.at + 120)]
     sheet = np.vstack([np.hstack(tiles[0:3]), np.hstack(tiles[3:6])])
     Image.fromarray((sheet * 255).astype(np.uint8)).save(args.preview, quality=88)
+    Image.fromarray((lin2srgb(frame(args.at)) * 255).astype(np.uint8)).save(args.preview.replace(".jpg", "-at.jpg"), quality=92)
+    bulb = np.mean([frame(j) for j in range(args.at, args.at + 155, 3)], 0)
+    Image.fromarray((lin2srgb(bulb) * 255).astype(np.uint8)).save(args.preview.replace(".jpg", "-bulb.jpg"), quality=92)
     alpha_dbg = np.dstack([a, a, a])[Y0:Y0 + CH]
     Image.fromarray((np.hstack([lin2srgb(Sf), alpha_dbg]) * 255).astype(np.uint8)).resize((1280, 360)).save(args.preview.replace(".jpg", "-layers.jpg"), quality=88)
     print("wrote", args.preview)
