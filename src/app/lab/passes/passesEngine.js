@@ -15,16 +15,16 @@ import { createStage, clamp } from "../_kit/stage";
 // key of the tower's box (tools/depth/bakes/passes/lattice.py) is taken over
 // it by max, with the steel in its gaps unmixed from the haze the same way.
 //
-// The drag is the sun: across is its azimuth around the camera (straight
-// ahead, behind the tower, in the middle; behind your shoulder at either
-// edge), up and down its elevation. The concrete faces and the tower's
-// lattice take a warm key from it, shaded by the MoGe normals and kept out of
-// the creases the depth map finds, and a fill in the open sky's own colour:
-// on the walls, a warm grey concrete in full colour, the sunlit face prints a
-// warm neutral stone and the one turned away a cool slate in the sky's light,
-// each falling off across the face with the sky it sees, its creases, and the
-// light the sunlit wall across the canyon bounces back. Dragging across swaps
-// which wall glows.
+// The drag is the sun: across is which wall it lights, up and down its
+// elevation. Drag toward a wall and the sun swings round behind the opposite
+// shoulder to rake it (straight ahead, behind the tower, in the middle). The
+// concrete faces and the tower's lattice take a warm key from it, shaded by
+// the MoGe normals and kept out of the creases the depth map finds, and a
+// fill in the open sky's own colour: on the walls, a warm grey concrete in
+// full colour, the sunlit face prints a warm stone and the one turned away
+// the sky's own blue, each falling off across the face with the sky it sees,
+// its creases, and the light the sunlit wall across the canyon bounces back.
+// Dragging across swaps light and shade across the canyon.
 //
 // The plate's own sky was flat haze, so inside the sky matte it is replaced by
 // a photographed summer cumulus dome (Poly Haven, Rural Asphalt Road, Alexander Scholten, CC0;
@@ -106,23 +106,22 @@ const float WALL_MID = 0.6;
 // split between them: the one gesture is moving the sun, so which wall
 // glows has to be the loudest thing it does. CONCRETE is that albedo's hue,
 // the plate's own warm grey (its grade had pushed it olive). The fill is
-// the sky's own colour a third of the way up the canyon, taken at FILL_SAT
-// of its saturation (a face sees the open blue, the bank's white and the
-// canyon's grey together), and it lands on every face, lit or not: a face
-// turned from the sun is that light times the concrete, a cool slate that
-// keeps about 0.4 of the lit face's chroma, never a grey. Its level is set as the print should show
-// it, SHADE_Y, the luma of a face turned away at the canyon's middle; the
-// key is then what a face standing KEY_NDL to the sun (a wall's own share
-// at mid elevation) needs over that fill to print STONE, a warm neutral
-// stone at hue 35, low in saturation: the tower's orange stays the only
-// warm accent in the frame. SUN_HIGH is the luma and SUN_HUE_HIGH the hue of
-// sunFor's colour with the sun high: a weaker sun takes the key down by the
-// square root of its share, and a setting one ambers it by its own hue's
-// shift from the high sun's.
+// the open sky's light, and it lands on every face, lit or not. It is set
+// as the print should show it: SHADE, a face turned from the sun at the
+// canyon's middle, is the concrete in the sky's own blue, hue 205 at about
+// a third of full saturation, a cool shade with colour in it, never the
+// desaturated grey of a black-and-white print, and well down from the lit
+// face. The key is then what a face standing KEY_NDL to the sun (a wall's
+// own share with the sun behind your shoulder) needs over that fill to
+// print STONE, a warm sunlit stone at hue 36: the sun carries the face
+// about half again up in luma, so dragging across swaps a warm wall and a
+// blue one, not two greys a few percent apart. SUN_HIGH is the luma and
+// SUN_HUE_HIGH the hue of sunFor's colour with the sun high: a weaker sun
+// takes the key down by the square root of its share, and a setting one
+// ambers it by its own hue's shift from the high sun's.
 const vec3 CONCRETE = vec3(198.0, 191.0, 184.0) / 255.0;
-const vec3 STONE = vec3(209.0, 195.0, 181.0) / 255.0;
-const float SHADE_Y = 0.6;
-const float FILL_SAT = 0.38;
+const vec3 STONE = vec3(224.0, 202.0, 166.0) / 255.0;
+const vec3 SHADE = vec3(90.0, 145.0, 170.0) / 255.0;
 const float KEY_NDL = 0.6;
 const float SUN_HIGH = 2.52;
 const vec3 SUN_HUE_HIGH = vec3(1.0, 0.78, 0.6);
@@ -510,18 +509,15 @@ void main(){
   // its foot, nearer the frame's edge, sees mostly the wall opposite, so the
   // sky's light falls off down each face and the bounce takes over.
   float open = smoothstep(0.0, 0.35, (textureLod(uMatte, uv, 5.5).b + textureLod(uMatte, uv, 6.5).b + textureLod(uMatte, uv, 7.5).b) / 3.0);
-  // Sky: the sky's own colour a third of the way up the canyon (from
-  // SKY_LOW toward SKY_HIGH), at FILL_SAT of its saturation, and
-  // whiter where the bank stands over the face (read very soft along the
-  // face's own upward view). Scaled so a face turned from the sun at the
-  // canyon's middle prints SHADE_Y.
+  // Sky: the light that prints SHADE on the concrete at the canyon's middle,
+  // a little whiter where the bank stands over the face (read very soft
+  // along the face's own upward view): a face that sees the cloud's white
+  // takes less of the open blue.
   vec3 Dn = normalize(n + uUp) * uDome;
   float bank = smoothstep(0.2, 3.0, density(Dn, 7.5));
-  vec3 skyHue = toLin(mix(SKY_LOW, SKY_HIGH, 0.35));
-  skyHue /= luma(skyHue);
-  skyHue = mix(vec3(1.0), skyHue, FILL_SAT * (1.0 - 0.45 * bank));
-  float fillY = untone(vec3(SHADE_Y)).r / (WALL_MID * luma(concrete * skyHue));
-  vec3 skyFill = skyHue * fillY * mix(0.6, 1.0, uDay) * skyVis / SKY_VERT * mix(0.55, 1.3, open) * ao;
+  vec3 fillMid = untone(SHADE) / (WALL_MID * concrete);
+  vec3 skyHue = mix(fillMid, vec3(luma(fillMid)), 0.3 * bank);
+  vec3 skyFill = skyHue * mix(0.6, 1.0, uDay) * skyVis / SKY_VERT * mix(0.55, 1.3, open) * ao;
   // A recess the sun does not get into still sees the sky, a little less.
   skyFill *= 1.0 - 0.3 * recess;
   // MoGe's own normal, read soft, still holds how each face turns across the
@@ -538,11 +534,15 @@ void main(){
   // sum, and the sky's blue on a sunlit face is in it. Unclamped past
   // KEY_NDL, a low sun square to a face carries it up the shoulder, toward a
   // pale gold, not to paper.
-  vec3 fillMid = skyHue * fillY;
   // A setting sun ambers it, but only by half its own shift: the walls
   // stay stone, and the warmth in the frame stays the tower's.
   vec3 keyTint = mix(vec3(1.0), uSunCol / max(uSunCol.r, 1e-3) / SUN_HUE_HIGH, 0.5);
   vec3 sunKey = max(untone(STONE) / (WALL_MID * concrete) - fillMid, vec3(0.0)) / KEY_NDL;
+  // That difference is an orange with no blue in it, right for the sum at
+  // KEY_NDL but a sodium lamp wherever a face stands squarer to the sun:
+  // the key is taken a little way back to its own grey, so a face full on
+  // to a low sun prints a sunlit stone, not a sepia.
+  sunKey = mix(sunKey, vec3(luma(sunKey)), 0.15);
   sunKey *= keyTint * luma(sunKey) / max(luma(sunKey * keyTint), 1e-4);
   sunKey *= sqrt(max(luma(uSunCol), 1e-3) / SUN_HIGH);
   // The same over the key: MoGe's N.L against the bake's, as a ratio, so
@@ -743,8 +743,9 @@ const IMG_ASPECT = 2048 / 1536;
 // The camera looks up this far above the horizon.
 const PITCH = (55 * Math.PI) / 180;
 // Where the sun rests, in drag coordinates (0..1 across and down the frame):
-// low in the west behind your left shoulder, so it rakes the right wall
-// warm, leaves the left one a cool grey, and catches the tower's left legs.
+// toward the left wall, so the sun stands low behind your right shoulder:
+// it rakes the left wall warm, leaves the right one in the sky's blue, and
+// catches the tower's right legs.
 const REST = { x: 0.15, y: 0.55 };
 
 function loadImage(url) {
@@ -758,12 +759,14 @@ function loadImage(url) {
 }
 
 // The sun for a point of the drag. Across: azimuth relative to where the
-// camera faces, from 165 degrees left through straight ahead to 165 right.
+// camera faces, mirrored so the drag points at the wall it lights: from 165
+// degrees right (the left wall square to it) through straight ahead to 165
+// left (the right wall).
 // Down: elevation, from 78 degrees to 3. Returns its direction in camera
 // space, its colour and intensity (warmer and weaker near the horizon), how
 // high it is, and its azimuth and elevation.
 function sunFor(x, y) {
-  const az = (x - 0.5) * 2 * ((165 * Math.PI) / 180);
+  const az = (0.5 - x) * 2 * ((165 * Math.PI) / 180);
   const el = ((78 - (78 - 3) * clamp(y, 0, 1)) * Math.PI) / 180;
   const sx = Math.cos(el) * Math.sin(az);
   const sh = Math.cos(el) * Math.cos(az);
