@@ -118,9 +118,13 @@ const PLANE_AZ = -36;
 // rest aim (relative to facing the lens) and limits, degrees
 const REST = [20, -15];
 // The hero aim (?aim=hero): turned toward the far side of the crossing and
-// tipped up, so the glass holds the crossbuck and the cumulus behind the
-// viewer against the deep cobalt over them.
-const HERO = [-40, 5];
+// tipped up a little, so the glass holds the turned crossbuck well inside its
+// rim with the far side's cumulus tower (reproject.py's far heap) rising
+// behind it over nearly half the dome, and the sun's glint off to the upper
+// rim, clear of the heap: a miniature of the scene, deep cobalt, one big
+// sunlit cloud, one sharp crossbuck. (Traced: the cloud takes ~44% of the
+// glass, the glint sits at 0.95 of the radius, the crossbuck at 0.64.)
+const HERO = [-50, 5];
 // What the bracket can do. The arm's clamp band turns on the pole, but the
 // yoke's stops (and the street the mirror is bolted to watch) hold the face
 // within 65 degrees of the lens either way, so its back, the bare pressed

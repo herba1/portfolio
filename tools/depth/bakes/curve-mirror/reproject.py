@@ -36,6 +36,13 @@ rebuilds everything above the road toward the crossing from the plate alone:
     the plate (street_develop: its HDR crunch, crushed blacks, milky whites
     and crisp JPEG edges taken to the plate's local contrast, black, plaster
     white, colour and spread), its sky rebased on the plate's gradient.
+  - over the far side, a tower of its own (far_heap): the plate's cumulus
+    is a cut scrap at its right edge, so turned it was a sliver on the far
+    side and the glass held there (the engine's HERO) an empty cobalt disc.
+    The photographed congestus (cumulus.py, whole; its source must be at
+    CUMULUS) is laid in a virtual camera rising behind the turned
+    crossbuck, under every surface and wire, its sun-side turrets clear of
+    the sun, and goes into envc so the engine carries its tops past 8 bits.
   - and no seam runs straight across the sky: the plate's and the 360's
     skies cross over a wide band (in azimuth where both are sky, and by
     elevation up the sky over the 360), and a cloud that a frame cut (the
@@ -61,6 +68,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import kit  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import clouds  # noqa: E402
+import cumulus  # noqa: E402
 import develop  # noqa: E402
 import match  # noqa: E402
 import sky_grade  # noqa: E402
@@ -452,6 +461,80 @@ env, envc = heap_fade(env, sky360, envc)
 env = street_develop(env, cv2.GaussianBlur((1 - sky360).astype(np.float32), (0, 0), 1.0))
 T.mark("street")
 
+# ---------------------------------------------------------------- the far side's heap
+# The plate's cumulus stands at its right edge, cut by the frame, so turned
+# over the plane it is a scrap low on the far side's left, and the glass
+# held on the far side (the engine's HERO) showed an empty cobalt disc with
+# the reflected crossbuck at its edge. Refs 1-3 are the opposite: one big
+# soft glowing heap rising behind a sharp crossbuck. So the far side is given
+# its own tower: the photographed congestus (cumulus.py, the whole of it,
+# not the plate's cut crop), laid as match.py lays the one behind the lens,
+# in a virtual camera at the plate's focal length aimed past the turned
+# crossbuck (FAR_LON, FAR_PITCH), placed by FAR_PLACE: its crown at about
+# 55 degrees, its sunlit turrets on the sun's side (the sun stands off its
+# left shoulder, clear of it, so the glint and the heap both fit the glass),
+# its belly faded at the source's frame edges and its foot into the cobalt
+# low behind the turned roofs and the crossbuck. It goes under every
+# surface and wire (clouds._lay_over, with the plate's halo taken out), and
+# into envc, so the engine carries its tops past 8 bits like the plate's.
+FAR_LON, FAR_PITCH = -97.0, 30.0  # the virtual camera's aim: longitude, pitch, degrees
+FAR_W, FAR_H = 2800, 2000  # its size, px at the plate's f (28 px/deg)
+# the source's top-left corner and scale (cumulus.place): its crown at about
+# 54 degrees over lon -97, its sun-side turrets down to about -132, some
+# twelve degrees under and right of the sun
+FAR_PLACE = {"x": 300.0, "y": 180.0, "k": 0.56}
+# Its belly runs out of the source's frame at both sides and the foot: ended
+# not on the frame's lines but on the heap's own flanks, two lines falling
+# away from its shoulders (virtual camera px, each kept on the tower's
+# side), and its foot over these rows (about 23 to 11 degrees up, behind the
+# turned roofs and the crossbuck), every cut roughened (FAR_WOB px) and
+# taken off by the cloud's own density, so a turret's wisps go first and the
+# belly thins into the cobalt like a cloud's lee side.
+FAR_CUT = {"left": [[480, 800], [300, 1588]], "right": [[2300, 845], [2420, 1588]], "feather": 130, "foot": [1200, 1520]}
+FAR_WOB = (70.0, 110.0)  # px: the cuts' roughness, and its noise's scale
+
+
+def far_heap(c, sk):
+    """The far side's tower over the panorama c (linear) under its sky
+    matte sk; returns the panorama and the heap's matte (for envc)."""
+    Rv = match.view_frame(FAR_LON, FAR_PITCH)
+    v_lin, _ = match.to_view(c, Rv, f, FAR_W, FAR_H)
+    v_sky, _ = match.to_view(np.clip(sk, 0, 1).astype(np.float32), Rv, f, FAR_W, FAR_H)
+    # a wire is darker than the sky closed over it: the heap goes behind it
+    Lv = kit.luma(v_lin)
+    Lc = cv2.morphologyEx(Lv, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (match.WIRE, match.WIRE)))
+    v_sky = (v_sky * kit.smoothstep(0.72, 0.93, Lv / np.maximum(Lc, 1e-4))).astype(np.float32)
+    sun = np.array(sc["sun"], np.float32)
+    C, A = cumulus.place(FAR_W, FAR_H, 1.0, FAR_PLACE, float(Rv[:, 0] @ sun), clouds.TOP, clouds.SHADE, clouds.BASE_C)
+    # the flanks and the foot, eroded by density
+    xs, ys = np.meshgrid(np.arange(FAR_W, dtype=np.float32), np.arange(FAR_H, dtype=np.float32))
+    rng = np.random.default_rng(31)
+    nz = cv2.GaussianBlur(rng.standard_normal((FAR_H // 8, FAR_W // 8)).astype(np.float32), (0, 0), FAR_WOB[1] / 8)
+    nz2 = cv2.GaussianBlur(rng.standard_normal((FAR_H // 8, FAR_W // 8)).astype(np.float32), (0, 0), FAR_WOB[1] / 20)
+    wob = FAR_WOB[0] * (0.75 * nz / nz.std() + 0.45 * nz2 / nz2.std())
+    wob = cv2.resize(wob, (FAR_W, FAR_H), interpolation=cv2.INTER_CUBIC)
+
+    def side(line, inside_x):
+        (x1, y1), (x2, y2) = line
+        nx, ny = y2 - y1, -(x2 - x1)
+        nn = np.hypot(nx, ny)
+        sd = ((xs - x1) * nx + (ys - y1) * ny) / nn
+        if (inside_x - x1) * nx < 0:
+            sd = -sd
+        return kit.smoothstep(-FAR_CUT["feather"], FAR_CUT["feather"], sd + wob)
+
+    ramp = side(FAR_CUT["left"], FAR_W) * side(FAR_CUT["right"], 0)
+    ramp = ramp * kit.smoothstep(FAR_CUT["foot"][1], FAR_CUT["foot"][0], ys + wob)
+    k = erode_by(A, ramp.astype(np.float32))
+    A, C = A * k, C * k[..., None]
+    new = v_lin * (1 - A[..., None]) + C
+    out, _ = clouds._lay_over(v_lin, new.astype(np.float32), v_sky, clouds.SHRINK)
+    delta, wt = match.from_view((out - v_lin).astype(np.float32), Rv, f, E)
+    a, _ = match.from_view((A * v_sky).astype(np.float32), Rv, f, E)
+    print("far heap: %.2f%% of the upper hemisphere" % (100 * ((a * wt) > 0.5)[: EH // 2].mean()))
+    return np.clip(c + delta * wt[..., None], 0, None).astype(np.float32), (a * wt).astype(np.float32)
+
+
 # ---------------------------------------------------------------- compose
 # the plate's world: its sky by elevation where the plate does not reach,
 # the plate where it does. Its surfaces meet that sky over FEATHER degrees
@@ -488,12 +571,19 @@ reg = np.maximum(reg, cov * azn).astype(np.float32)
 reg = cv2.GaussianBlur(reg, (0, 0), 1.5)
 env2 = env * (1 - reg[..., None]) + world * reg[..., None]
 
+# its sky: the plate's world's, and wherever a ray found only the far plane
+# (one carried on through the background plate behind the crossbuck or a
+# pole reads that surface's own sky matte, 0, but sees the sky)
+far_sky = np.maximum(sky_w, kit.smoothstep(150.0, 400.0, dist))
+env2, far_a = far_heap(env2, reg * far_sky + (1 - reg) * sky360)
+T.mark("far heap")
+
 dold = np.exp2(L2(cv2.resize(envd, (EW, EH), interpolation=cv2.INTER_LINEAR)))
 dnew = np.exp(np.log(dold) * (1 - reg) + np.log(np.maximum(dist, D0)) * reg)
 code = np.clip((np.log2(np.minimum(dnew, 1000)) - np.log2(D0)) / (np.log2(1000) - np.log2(D0)), 0, 1)
 code = cv2.resize(code.astype(np.float32), (envd.shape[1], envd.shape[0]), interpolation=cv2.INTER_AREA)
 regs = cv2.resize(reg, (envc.shape[1], envc.shape[0]), interpolation=cv2.INTER_AREA)
-envc2 = envc * (1 - regs)
+envc2 = np.maximum(envc * (1 - regs), cv2.resize(far_a, (envc.shape[1], envc.shape[0]), interpolation=cv2.INTER_AREA))
 T.mark("compose")
 
 os.makedirs(OUT, exist_ok=True)
