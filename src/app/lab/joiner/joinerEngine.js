@@ -345,9 +345,9 @@ const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at 
 //     the walls printed a stop under (exposed for the sunny sky they stand
 //     in, as a real worm's-eye frame would be), so the walls split in two:
 //     the recesses, the shade sides and the glass collapse on to a deep
-//     blue-black (about 0.06 on the print) that they never fall through,
-//     and the facades and poles read as crisp, dark silhouettes converging
-//     on the sky;
+//     blue (about 0.11 on the print) that they never fall through, still
+//     light enough to hold the window grids and mullions, and the facades
+//     and poles read as crisp, dark shapes converging on the sky;
 //   - light: the overcast's own cast (its grey-green, the blue stains and
 //     sky reflections on the concrete) comes off every face, and the faces
 //     above the shade take a clear warm ochre key, the colour of the 52
@@ -362,10 +362,16 @@ const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at 
 //     holds the overcast) is choked to the wall's own tone just inside it,
 //     so a roofline cuts cleanly against the blue and only the finish's
 //     thin halation ring is left there;
-//   - low down: below about 15 degrees of elevation the plate is the far
-//     skyline seen nearly edge on, smeared and low-res, and it folds into
-//     one clean blue-black silhouette (the matte eroded a little there, so
-//     its pinholes and ragged fringe of old sky go with it).
+//   - far skyline: below about 10 degrees of elevation the matte is eroded
+//     a little, so the lattice of old sky it finds through the far scaffolds
+//     and cranes goes to the walls, and below about 16 a pale, neutral speck
+//     well above the wall round it (old sky through a window or a lattice)
+//     is printed down to just above that wall, so the far facades keep
+//     their grid without white flecks in it. Only the last sliver, below
+//     about 4 degrees, where the plate is smeared nearly edge on, folds into
+//     one clean silhouette at the shade's own deep blue. (The matte's
+//     pinholes, specks of sky wholly inside a structure, are closed in the
+//     bake: tools/depth/bakes/joiner/seal.py.)
 // One warm accent: the Docklands red crane on the quay stays; the red and
 // yellow chevrons of the van at the far kerb are muted to a neutral grey so
 // they stop competing with it across the cobalt.
@@ -375,11 +381,14 @@ const STRUCT_GRADE = {
   structPivot: 0.32, // pivot (linear print value) the contrast turns about: the plate's brighter facade, the side the sun would light
   structHaze: 0.06, // overcast veil taken off (linear print value)
   structEv: -1.0, // stops the walls are printed under: exposed for the sunny sky they stand against, not for themselves
-  structFloor: 0.06, // deep blue-black the shadows and glass are pulled on to (print value, sRGB)
+  structFloor: 0.11, // deep blue-black the shadows and glass are pulled on to (print value, sRGB)
   structWarm: 0.8, // strength of the warm key on the sunlit faces
-  structLow: 15, // elevation (degrees) below which the walls start to fold into one dark silhouette (fully by two thirds of it)
-  structGlass: 0.55, // cobalt mixed into the glass
+  structLow: 4, // elevation (degrees) below which the walls start to fold into one dark silhouette (fully by two thirds of it)
+  structGlass: 0.75, // cobalt mixed into the glass
   structEdge: 1, // strength of the rim choke
+  structSpeck: 1, // how far the far skyline's pale glints (old sky through a lattice or a window) are printed down
+  structSpeckLow: 16, // elevation (degrees) below which they are (fully by 60% of it)
+  structErode: 10, // elevation (degrees) below which the matte is eroded (fully by two thirds of it): the far skyline's lattice of sky goes to the walls
   mute: 0.95, // how far the van's chevrons are muted
 };
 const STRUCT_DEEP = srgbHex("#0B111D"); // the blue-black of the shade
@@ -419,6 +428,7 @@ uniform vec4 uStructKey; // floor (linear), warm, glass, edge
 uniform float uMute;     // how far the van's chevrons are muted
 uniform float uPlatePx;  // one plate pixel, print uv
 uniform vec2 uStructEv;  // stops the walls sit under the sky they stand in, sine of the elevation they fold into the shade below
+uniform vec3 uStructSpeck; // strength, sine of the elevation below which the far skyline's pale glints are printed down, and below which the matte is eroded
 uniform vec2 uTop;       // diffusion glow off the tops into the blue, shade split by the sun
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float THMAX = ${THMAX.toFixed(6)};
@@ -583,6 +593,15 @@ vec3 structGrade(vec3 lin, vec3 d) {
   float Lc = log2(Yc);
   float rel = wloc > 2.0 ? clamp(log2(Yb * choke) - yloc / wloc, -2.0, 2.0) : 0.0;
   float Lo = uStruct.z + uStruct.y * (Lc - uStruct.z) + 0.3 * rel - 0.7 * glass * uStructKey.z + uStructEv.x * (1.0 - paint);
+  // the far skyline's glints: low down, a pale, neutral-to-cool speck well
+  // above the wall round it is the old overcast seen through a scaffold, a
+  // crane's lattice or a window, which the matte left to the structure. It
+  // is printed down to just above its wall, so the facade keeps its grid
+  // without white flecks of another day's sky floating in it.
+  float brp = (c.b - c.r) / (c.b + 1e-4);
+  float far = 1.0 - smoothstep(0.6 * uStructSpeck.y, uStructSpeck.y, d.z);
+  float speck = smoothstep(0.3, 1.2, rel) * smoothstep(-0.1, 0.1, brp) * far * (1.0 - paint) * uStructSpeck.x;
+  Lo -= speck * (uStruct.y * max(rel - 0.25, 0.0) + 0.3 * rel);
   float Yo = exp2(Lo);
   Yo = Yo / pow(1.0 + pow(Yo / 0.95, 3.0), 1.0 / 3.0);
   float fl = uStructKey.x;
@@ -614,12 +633,12 @@ vec3 structGrade(vec3 lin, vec3 d) {
   float Ym = dot(c, LUMA);
   float hot = smoothstep(0.05, 0.3, (max(c.r, c.g) - c.b) / (max(c.r, c.g) + 1e-4));
   c = mix(c, Ym * vec3(0.98, 1.0, 1.02) * 0.85, mu * hot);
-  // low down, towards the disk's rim, the plate is the far skyline seen
-  // nearly edge on: smeared, low-res walls the matte only roughly cuts
-  // from the old sky. There the walls fold into one clean blue-black
-  // silhouette against the blue (the crane's paint stays its accent).
+  // the last sliver towards the disk's rim, the plate seen nearly edge on:
+  // smeared, low-res walls the matte only roughly cuts from the old sky.
+  // There the walls fold into one clean silhouette at the shade's own deep
+  // blue (the crane's paint stays its accent).
   float low = (1.0 - smoothstep(0.65 * uStructEv.y, uStructEv.y, d.z)) * (1.0 - paint);
-  c = mix(c, toLin(DEEP) * grain, low);
+  c = mix(c, deep * fl * grain, low);
   return mix(lin, c, uStruct.x);
 }
 
@@ -636,9 +655,9 @@ void main() {
   float m = raw.a;
   vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;
   vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
-  // Low down the matte is eroded a little: the far skyline's pinholes and
-  // ragged fringe of old sky go to the silhouette, so its edge is clean.
-  float lowM = 1.0 - smoothstep(0.65 * uStructEv.y, uStructEv.y, d.z);
+  // Low down the matte is eroded a little: the far skyline's lattice of old
+  // sky through scaffolds and cranes, and its ragged fringe, go to the walls.
+  float lowM = 1.0 - smoothstep(0.65 * uStructSpeck.z, uStructSpeck.z, d.z);
   if (lowM > 0.002 && m > 0.02) {
     float mn = m;
     for (int i = 0; i < 8; i++) {
@@ -647,10 +666,14 @@ void main() {
     }
     m = mix(m, mn, lowM);
   }
-  float st = 1.0 - smoothstep(0.1, 0.55, m);
+  // Under the horizon there is no sky to lay the deck in (below), so what
+  // the matte calls sky there, the river's reflections of the old overcast,
+  // is graded with the walls rather than left as the raw print.
+  float hz = smoothstep(0.01, 0.06, d.z);
+  float st = 1.0 - smoothstep(0.1, 0.55, m) * hz;
   vec3 linS = st > 0.002 ? mix(lin0, structGrade(lin0, d), st) : lin0;
   vec2 dith = vec2(hash12(gl_FragCoord.xy + uSeed), hash12(gl_FragCoord.yx + 5.3 + uSeed));
-  m = smoothstep(0.1, 0.55, m) * smoothstep(0.01, 0.06, d.z) * uSky.y;
+  m = smoothstep(0.1, 0.55, m) * hz * uSky.y;
   if (m < 0.002) {
     outColor = vec4(clamp(toSrgb(linS) + (dith.x + dith.y - 1.0) / 255.0, 0.0, 1.0), 1.0);
     return;
@@ -1592,6 +1615,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform1f(g.uMute, struct0.mute);
     gl.uniform1f(g.uPlatePx, (PLATE_RAD * F) / (img / f));
     gl.uniform2f(g.uStructEv, struct0.structEv, Math.sin((struct0.structLow * Math.PI) / 180));
+    gl.uniform3f(g.uStructSpeck, struct0.structSpeck, Math.sin((struct0.structSpeckLow * Math.PI) / 180), Math.sin((struct0.structErode * Math.PI) / 180));
     gl.uniform2f(g.uTop, grade0.glow, grade0.sunSplit);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.activeTexture(gl.TEXTURE1);
