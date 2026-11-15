@@ -9,8 +9,12 @@ everywhere, not only in the holes it filled, and the cumulus lost about
 half their texture to it (high-pass energy 1.7 against the photo's 3.1):
 graded, the cloud bodies printed as flat posterized blobs. Here every sky
 pixel that LaMa did not have to invent is the photograph's own again,
-downsampled from the 6000 px original (INTER_AREA) and lightly sharpened
-back to what the reduction took off. Where the plate differs from the photo
+downsampled from the 6000 px original with a plain area filter and nothing
+else. (It was once sharpened back to what the reduction took off: through
+the grade that printed as a crunchy, mottled cumulus with a dark rim inside
+every bright edge, an unsharp-mask halo, where film clouds bleed soft. The
+download is already a sharpened file; the reduction's softness is the
+print's.) Where the plate differs from the photo
 (the holes the loose objects and the live cables were lifted out of) it
 stays LaMa's, with grain matched to the photo's laid over it so the fill
 does not read as a smooth patch. Steel keeps the plate's pixels (the print
@@ -39,10 +43,6 @@ front = np.asarray(Image.open(FRONT).convert("RGB")).astype(np.float32) / 255
 sky_h = np.asarray(Image.open(SKY).convert("RGB")).astype(np.float32) / 255
 aF = front[..., 0]
 
-# light sharpening: what INTER_AREA's 2.5x reduction softened, not more
-SHARP, SHARP_SIGMA = 0.55, 1.0
-photo_s = np.clip(img + SHARP * (img - cv2.GaussianBlur(img, (0, 0), SHARP_SIGMA)), 0, 1)
-
 # where LaMa invented the sky: the plate differs from the photo by more than
 # its own smoothing (median 2/255, p90 5/255 over the sky), grown past the
 # soft rims of what was lifted out
@@ -58,13 +58,13 @@ print("holes", round(float(hole.mean()), 4))
 skyW = 1 - np.clip((aF - 0.3) / 0.4, 0, 1)
 skyW = skyW * skyW * (3 - 2 * skyW)
 take = (skyW * (1 - holeW))[..., None]
-new = plate * (1 - take) + photo_s * take
+new = plate * (1 - take) + img * take
 
 # grain in the fill: the photo's own high-pass over its open sky, matched in
 # amplitude per channel (robustly: the median, so the cloud's edges do not
 # count as grain), laid over the LaMa pixels
 sky_m = (aF < 0.02) & (hole == 0)
-hp = photo_s - cv2.GaussianBlur(photo_s, (0, 0), 1.5)
+hp = img - cv2.GaussianBlur(img, (0, 0), 1.5)
 amp = 1.4826 * np.median(np.abs(hp[sky_m]), 0)
 rng = np.random.default_rng(7)
 n = rng.standard_normal((H, W)).astype(np.float32)
