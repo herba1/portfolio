@@ -11,6 +11,8 @@
 #     && python3 rekey.py <copy of scene.webp>   (once: the pines as ink on a hard matte -> trees.webp, the plate under them refilled with sky)
 #     && python3 foliage.py <copy of scene.webp> <copy of trees.webp> <copy of optics.png> <tree_lined_driveway_8k.hdr>
 #                (the pines re-keyed from the HDR's own radiance: soft coverage matte + real needle light -> trees.webp; plate and right-edge strip rebuilt)
+#     && python3 cumulus.py <copy of scene.webp> <copy of trees.webp> <copy of optics.png> <tree_lined_driveway_8k.hdr>
+#                (the cumulus re-solved from the 3x render: per-pixel depth matte, the photograph's luminance above lobe scale, clouds.py's shade below it)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image

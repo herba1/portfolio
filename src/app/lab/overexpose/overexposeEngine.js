@@ -177,11 +177,14 @@ void main(){
   vec2 p = (gl_FragCoord.xy - uRect.xy) / uRect.zw;
   vec2 uv = vec2(p.x, 1.0 - p.y); // textures are uploaded top row first
   vec4 sc = texture(uScene, uv);
-  // the needles are read from the full-size scene, the sky from the minified one
+  // the needles and the cumulus are read from the full-size scene, the open sky from
+  // the minified one: the cloud plate carries the photograph's own turret edges and
+  // rims (cumulus.py), and the Pro-Mist veil below is the only softening it gets
   vec4 sc0 = textureLod(uScene, uv, 0.0);
   vec3 L0 = uLogIn > 0.5 ? dec(sc0.rgb) : sc0.rgb;
   float needle = 1.0 - smoothstep(log2(uNeedleY.x), log2(uNeedleY.y), log2(max(dot(L0, LUMA), 1e-6)));
-  sc = mix(sc, sc0, needle * step(0.01, uLod));
+  float cloud0 = smoothstep(0.0, 0.25, 1.0 - clamp((sc0.a * 255.0 - 3.0) / 252.0, 0.0, 1.0));
+  sc = mix(sc, sc0, max(needle, cloud0) * step(0.01, uLod));
   vec3 L = uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb;
   float Ys = dot(L, LUMA);
   float hx = clamp(uv.x, 0.002, 0.998) * 0.5;
