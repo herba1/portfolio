@@ -51,8 +51,11 @@ crossing's cloud ramp.
   card       the cloud sits on a transparent margin (PAD) and its alpha is
              feathered to 0 well inside all four edges besides, so no
              straight card edge can show at any split, yaw or pitch. Baked
-             at SS card px per 2 photo px, so the edges stay crisp under the
-             print's magnification.
+             at SS card px per 2 photo px, so the edges stay clean under the
+             print's magnification; their softness (FEATHER here) is a
+             working edge only: cloudlight.py cuts the silhouette clean and
+             puts the whole card through the photo plate's own lens and
+             grain, so it reads as shot through the same lens as the street.
   photo      if <bakedir> holds the bake's pristine planes (p0..p6.webp,
              photo.webp and the 7-plane mattes.png), the sky card becomes the
              clear gradient alone (skygrad.sky_gradient), the flat photograph
@@ -63,7 +66,9 @@ crossing's cloud ramp.
 Writes clouds.webp to <outdir> and prints its rect for the engine (PLANES)
 and for cloudlight.py (CLOUD_RECT). The card is finished by cloudlight.py
 (after the later steps): the silhouette's soft edges rebuilt as lobes, the
-sunward crown glowing. CUMULUS_WORK writes previews.
+flat haze of the far tower on the right flank (what CUT_RIGHT leaves of it)
+rebuilt as shaded billows, the sunward crown glowing, the card through the
+plate's lens and grain. CUMULUS_WORK writes previews.
 """
 import os
 import sys

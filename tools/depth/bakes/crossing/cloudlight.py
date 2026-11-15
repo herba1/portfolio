@@ -20,10 +20,9 @@ behind the town; and the crown is a matte grey-white with no light in it.
               and wherever the old edge was a wide soft fade rather than a
               keyed rim (SOFT: the share of px round it that are part
               cloud) the edge is rebuilt as a chain of round lobes (LOBES,
-              common.lobed), so the foot ends in billows, not a smear. Only
-              the outer rim is feathered: RIM sigma px on the keyed edges,
-              a little more where the edge was rebuilt. The tower's own
-              crisp cauliflower edges are kept as keyed.
+              common.lobed), so the foot ends in billows, not a smear. The
+              tower's own cauliflower edges are kept as keyed. (RIM feathers
+              the working alpha only: the card's own edge is the lens's, below.)
   colour      every px that was part sky (and is solid now) takes the colour
               of the cloud just inside it (push-pull from the solid body).
   lobes       the tone is read back off the cumulus ramp (cumulus.TONE) and
@@ -43,6 +42,22 @@ behind the town; and the crown is a matte grey-white with no light in it.
               shade, and every tone passes a shoulder (SHOULDER) that tops out
               at #f4f1ea (244, 241, 234) and never at a flat 255: the film's
               headroom, bloom and halation pick it up as unclipped light.
+  flank       under the crown on the sunward side, behind the crossbuck,
+              the photographed congestus was a far tower in haze: a flat pale
+              blue-grey field meeting the sky along a near-straight edge,
+              which read as a veil and, split, as a cut card. It is cut away
+              and rebuilt as shaded billows (FLANK_LOBES): big lobes stepping
+              down the flank with medium ones on their sunward rims, each a
+              skylight-blue core under a lit warm-neutral rim, carrying the
+              real tower's own fine relief, ending in rounded lobes.
+  lens        keyed and rebuilt clean, the card read as pasted on next to
+              the photo's planes: an edge with no lens in it, a tone with no
+              grain. The silhouette is cut clean and the card (premultiplied)
+              goes through the plate's own blur kernel (LENS_SIG: its edges
+              rise 10-90% over about 2 photo px), so the edge takes the same
+              1-2 px feather as the signal's and the house's and the tone the
+              same softness; then the plate's grain (GRAIN, read off the
+              original frame's open sky) is laid on at photo px.
   mattes      the cloud's matte (plane 1 of the strip) gets the new alpha.
 
 The engine draws the closed photograph from the stack itself, so
@@ -59,7 +74,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import disk, erode, lobed, pushpull, smoothstep  # noqa: E402
+from common import dilate, disk, erode, lobed, pushpull, smoothstep  # noqa: E402
 from skygrad import _enc, _lin  # noqa: E402
 
 SRC, OUT = sys.argv[1:3]
@@ -126,6 +141,27 @@ GLOW, GLOW_SIG, GLOW_DEEP = 0.3, 50.0, 0.05
 CROWN = (0.6, 0.9)
 SHOULDER = (0.8, 0.22)
 SUN2D = (0.62, -0.78)  # the sun across the view: up and right (cumulus.py)
+# The right flank's billows (see below), card px: big lobes (x, y, radius,
+# z: forward of the flank; the outer ones, z >= FLANK_OUTER, carry the rim
+# lobes), stepping down the flank from the crown's shoulder to the lit
+# lobes over the base, each a little out from or in from the one above;
+# the inner ones fill in behind them.
+FLANK_LOBES = (
+    (2905, 330, 105, 0), (2975, 458, 86, 10), (2915, 590, 100, 0), (2840, 742, 92, 0),
+    (2930, 878, 82, 15), (3018, 1000, 90, 10),
+    (2790, 420, 140, -60), (2760, 620, 150, -70), (2700, 840, 150, -70), (2850, 960, 115, -30), (2640, 560, 120, -90),
+)
+FLANK_OUTER, FLANK_SEED, FLANK_SOFT = -40, 5, 6.0
+FLANK_MED = (42.0, 2.6, 0.55)  # rim lobes: radius px, how many per big lobe's radius, how deep they sit
+FLANK_SUN = np.array([0.62, -0.66, 0.42], np.float32)  # up, right, a little toward us: the flank is side-lit
+FLANK_WRAP = 0.35
+FLANK_TONE = (0.3, 0.93, 0.1)  # on the ramp: the core, the lit rim, the deepest crevice
+FLANK_DET = (800, 10.0, 1.0)  # the real billows: read px to the left, under px, gain
+FLANK_REAL, FLANK_CUT, FLANK_X = (0.02, 0.05), 90, 2600  # billow rms; cut reach px; only right of card x
+# The lens (Gaussian sigma, photo px) and the grain (x255 std at photo px,
+# channel correlation)
+LENS_SIG = 0.65
+GRAIN, GRAIN_CORR, GRAIN_SEED = 2.4, 0.92, 51
 
 
 def rows(v):
@@ -307,6 +343,103 @@ t = t + FORM * body * rel
 # (above the lower body the tone keeps its finest grain, as baked)
 t = t + (1 - body) * (t_raw - t0)
 del t_raw
+
+
+# ---- the right flank: shaded billows where the veil was
+# Under the crown, on the sunward side behind the crossbuck, the photographed
+# congestus is a far tower in haze: on the ramp a flat pale blue-grey field
+# that met the sky along a near-straight edge (a veil, a cut card). It is
+# rebuilt as billows: a stack of big rounded lobes stepping down the flank
+# (FLANK_LOBES, card px: centre, radius, how far forward), medium lobes on
+# their sunward rims (FLANK_MED), the form lit from FLANK_SUN with a wrapped
+# falloff (a cloud scatters: no hard terminator), so each lobe is a
+# skylight-blue core (FLANK_TONE[0] on the ramp, falling to FLANK_TONE[2] in
+# the crevices) under a lit warm-neutral rim (FLANK_TONE[1]). The real
+# tower's own fine relief (its tone's detail under FLANK_DET[1] px, read
+# FLANK_DET[0] px to its left) rides on them, so they carry photographed
+# billows, not smooth clay. The old flat field round them is cut away
+# (within FLANK_CUT px of a lobe, wherever it has no billows of its own), so
+# the flank ends in the lobes' own rounded outline.
+def flank_lobes():
+    hgt = np.full((hh, ww), -1e4, np.float32)
+    rng = np.random.default_rng(FLANK_SEED)
+
+    def put(cx, cy, r, z0):
+        x0, x1 = int(max(0, cx - 1.15 * r - 1)), int(min(ww, cx + 1.15 * r + 2))
+        y0, y1 = int(max(0, cy - 1.15 * r - 1)), int(min(hh, cy + 1.15 * r + 2))
+        if x1 <= x0 or y1 <= y0:
+            return
+        gx_, gy_ = np.meshgrid(np.arange(x0, x1) - cx, np.arange(y0, y1) - cy)
+        th = np.arctan2(gy_, gx_)
+        p = rng.uniform(0, 2 * np.pi, 3)
+        # (no lobe is a true circle)
+        re = r * (1 + 0.05 * np.sin(3 * th + p[0]) + 0.035 * np.sin(5 * th + p[1]) + 0.02 * np.sin(8 * th + p[2]))
+        d2 = (gx_ * gx_ + gy_ * gy_).astype(np.float32)
+        h = np.where(d2 < re * re, z0 + np.sqrt(np.maximum(re * re - d2, 0)) * (r / re), -1e4)
+        # a soft union (over FLANK_SOFT px): lobes meet in a rounded crevice,
+        # not a crease
+        cur = hgt[y0:y1, x0:x1]
+        hi_, lo_ = np.maximum(cur, h), np.minimum(cur, h)
+        hgt[y0:y1, x0:x1] = hi_ + FLANK_SOFT * np.log1p(np.exp(-(hi_ - lo_) / FLANK_SOFT))
+
+    for lb in FLANK_LOBES:
+        put(*lb)
+    # medium lobes on the outer lobes' rims, mostly toward the sun
+    R, per, depth = FLANK_MED
+    s2 = FLANK_SUN[:2] / np.linalg.norm(FLANK_SUN[:2])
+    med = []
+    for cx, cy, r, z in FLANK_LOBES:
+        if z < FLANK_OUTER:
+            continue
+        for _ in range(int(per * r / R)):
+            ang = np.arctan2(s2[1], s2[0]) + rng.normal(0, 1.25)
+            rad = r * rng.uniform(0.55, 0.98)
+            x, y = cx + rad * np.cos(ang), cy + rad * np.sin(ang)
+            ix, iy = round(float(x)), round(float(y))
+            if not (0 <= ix < ww and 0 <= iy < hh) or hgt[iy, ix] < -1e3:
+                continue
+            rc = R * rng.uniform(0.7, 1.3)
+            med.append((x, y, rc, float(hgt[iy, ix]) - depth * rc))
+    for lb in med:
+        put(*lb)
+    return hgt, len(med)
+
+
+hgt, n_med = flank_lobes()
+fl_in = hgt > -1e3
+hs = cv2.GaussianBlur(np.where(fl_in, hgt, -60).astype(np.float32), (0, 0), 4.0)
+gx = cv2.Sobel(hs, cv2.CV_32F, 1, 0, ksize=3) / 8
+gy = cv2.Sobel(hs, cv2.CV_32F, 0, 1, ksize=3) / 8
+nz = 1 / np.sqrt(1 + gx * gx + gy * gy)
+sun_ = FLANK_SUN / np.linalg.norm(FLANK_SUN)
+lam = (-gx * sun_[0] - gy * sun_[1] + sun_[2]) * nz
+fl_lit = np.clip((lam + FLANK_WRAP) / (1 + FLANK_WRAP), 0, 1)
+occ = np.clip((cv2.GaussianBlur(hs, (0, 0), 30) - hs) / 60, 0, 1)
+del gx, gy, nz, lam
+t_core, t_rim, t_deep = FLANK_TONE
+tf = t_core + (t_rim - t_core) * smoothstep(0.55, 0.85, fl_lit)
+tf = tf - (t_core - t_deep) * occ * (1 - 0.6 * smoothstep(0.6, 0.95, fl_lit))
+off, sig, k_det = FLANK_DET
+det = cv2.warpAffine(t0 - mblur(t0, sig), np.float32([[1, 0, -off], [0, 1, 0]]), (ww, hh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+tf = tf + k_det * det * (0.5 + 0.5 * smoothstep(0.4, 0.9, fl_lit))
+del det, occ, hs
+# where the old cloud has billows of its own (the crown's, the lower lobes')
+d1 = t0 - mblur(t0, 4)
+d2 = mblur(t0, 4) - mblur(t0, 16)
+rms = np.sqrt(mblur(d1 * d1 + d2 * d2, 20))
+real = (smoothstep(*FLANK_REAL, rms) > 0.5) & erode(m, 12)
+del d1, d2, rms
+m_old = m
+near_edge = cv2.distanceTransform(m_old, cv2.DIST_L2, 5) < FLANK_CUT * 0.75
+cut = dilate(fl_in, FLANK_CUT) & ~dilate(real, 6) & near_edge & (xx > FLANK_X)
+m = (fl_in | (m_old.astype(bool) & ~cut)).astype(np.uint8)
+m = cv2.morphologyEx(m, cv2.MORPH_OPEN, disk(5))
+m = drop_islands(fill_pockets(m))
+w_fl = cv2.GaussianBlur(dilate(fl_in, 6).astype(np.float32), (0, 0), 3) * (1 - cv2.GaussianBlur(real.astype(np.float32), (0, 0), 6))
+t = t * (1 - w_fl) + tf * w_fl
+print("cloudlight: flank", len(FLANK_LOBES), "lobes,", n_med, "rim lobes; silhouette px changed", int((m != m_old).sum()))
+preview("flank.png", np.dstack([w_fl, tf * fl_in, fl_lit * fl_in]))
+del hgt, fl_in, fl_lit, tf, real, cut, near_edge, w_fl, m_old
 # the glow: a broad soft lift (GLOW over GLOW_SIG px) spreading out of the
 # crown's sunlit lobes and rolling off into the shade. Mostly on the lit
 # faces: the crevices take GLOW_DEEP of it, so the crown's lobes keep their
@@ -334,10 +467,43 @@ def ramp(x):
 
 # mixed in linear light along the ramp, as cumulus.py did
 col = _enc(_lin(ramp(t)))
-# a light unsharp mask in the body keeps the lit edges crisp (cumulus.py)
-core_ = cv2.GaussianBlur(erode(alpha > 0.6, 3).astype(np.float32), (0, 0), 2)
-col = np.clip(col + 0.3 * core_[..., None] * (col - cv2.GaussianBlur(col, (0, 0), 1.6)), 0, 1)
-del core_, t
+del t
+# ---- the lens: the card through the photo plate's own MTF
+# The cloud was keyed and rebuilt as a clean silhouette, and next to the
+# photo's planes it read as pasted on: an edge with no lens in it, a tone
+# with no grain. The plate's edges (the signal, the house, the town, against
+# the sky) rise 10-90% over about 2 photo px, a Gaussian of LENS_SIG photo
+# px over the px's own box. So the silhouette is cut clean (antialiased, a
+# px wide) and then the card, colour premultiplied by its alpha, goes
+# through that same kernel: the edge takes a 1-2 px feather and the tone the
+# same softness as the photograph, instead of the unsharp mask it had.
+a_h = np.clip((cv2.GaussianBlur(m.astype(np.float32), (0, 0), 0.7) - 0.5) * 2.2 + 0.5, 0, 1)
+ks = LENS_SIG * SS / 2  # (card px)
+a_l = cv2.GaussianBlur(a_h, (0, 0), ks)
+pm = cv2.GaussianBlur(col * a_h[..., None], (0, 0), ks)
+col = np.where((a_l > 1e-3)[..., None], pm / np.maximum(a_l, 1e-3)[..., None], col)
+alpha = np.where(a_l > 254.5 / 255, 1.0, np.where(a_l < 1 / 255, 0.0, a_l)).astype(np.float32)
+del a_h, a_l, pm
+# The grain: the original frame's open sky, at the export size, carries
+# about 2/255 of luma noise (std, nearly white at the px, its channels
+# correlated GRAIN_CORR); GRAIN is a little over that, as the card's webp
+# encode takes some of it back. Laid on at photo px and enlarged with the
+# card, so on screen it is the plate's own grain; a little less in the
+# highlights, as on the film.
+rng_g = np.random.default_rng(GRAIN_SEED)
+gw, gh = int(np.ceil(ww * 2 / SS)), int(np.ceil(hh * 2 / SS))
+lum_n = rng_g.standard_normal((gh, gw)).astype(np.float32)
+ch_n = rng_g.standard_normal((gh, gw, 3)).astype(np.float32)
+c_ = np.sqrt(GRAIN_CORR)
+gr = c_ * lum_n[..., None] + np.sqrt(1 - c_ * c_) * ch_n
+del lum_n, ch_n
+gr = cv2.resize(gr, (ww, hh), interpolation=cv2.INTER_CUBIC)
+# (normalised as the plate is read: at photo px)
+gr *= GRAIN / 255 / float(cv2.resize(gr, (gw, gh), interpolation=cv2.INTER_AREA).std())
+y_ = col @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+col = np.clip(col + gr * (1 - 0.2 * smoothstep(0.75, 1.0, y_))[..., None], 0, 1)
+del gr, y_
+solid = alpha > 0.5
 print("cloudlight: brightest px", np.round(np.percentile(col[solid], 99.9, axis=0) * 255).astype(int).tolist(), "max", np.round(col[solid].max(0) * 255).astype(int).tolist())
 
 # ---- the card, its edge fade put back

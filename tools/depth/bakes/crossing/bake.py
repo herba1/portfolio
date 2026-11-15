@@ -37,6 +37,9 @@ which may run past the photo: rects in layers.json go below 0 and above 1),
 Then cumulus.py re-plates the sky with real cumulus on a card of its own
 (clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match, and
 wires.py redraws p2.webp with every wire as one whole catenary, and
+wiretrim.py (after catenary.py) takes an orphan hook (a fitting that
+floats in open sky once the signal post slides off it) off that card and
+draws its wire back, and
 crossbuck.py takes the pale hood out from behind the crossbuck head on
 p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline,
 and townmatte.py keys the old sky out of the town card's top (p1.webp and
@@ -44,8 +47,9 @@ its matte), ends it on the ridge tiles and refills what the signal hides
 there from the town alone, and lamphood.py takes the bristly fringe off the
 signal lamps' outline on p5.webp (and its matte), and cloudlight.py makes
 the clouds card one solid, lit mass (opaque down past the roofline, its
-lower body's lobes at full contrast, a soft glow on the sunward crown) and
-rewrites its matte.
+lower body's lobes at full contrast, the hazy right flank rebuilt as shaded
+billows, a soft glow on the sunward crown, the whole card through the photo
+plate's lens and grain) and rewrites its matte.
 """
 import sys
 import os
