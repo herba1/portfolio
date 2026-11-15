@@ -311,6 +311,8 @@ void main() {
   vec2 p1 = pc - growth(pc);
   float occ = 0.0;
   float thin = 0.0;
+  // how far the sample has run toward the photograph's foot, high up only
+  float foot = smoothstep(0.6, 0.95, uCam.x) * smoothstep(0.76, 0.97, pc.y / PLATE.y);
   // pure sky far from any cloud (or past the photograph): nothing to evolve
   if (pc.y > 0.0 && textureLod(uFields, p1 / PLATE, 3.0).b > 0.0) {
   vec2 d = vec2(0.0);
@@ -327,7 +329,7 @@ void main() {
   vec2 q = p1 - d;
   vec2 qb = q / PLATE;
   vec4 fl = texture(uFields, qb);
-  float act = fl.r * uBoil;
+  float act = fl.r * uBoil * (1.0 - foot);
   vec3 base = texture(uLow20, qb).rgb;
 
   // Lobes: curl flow at ~90 px, 11 s re-seed; curd: ~34 px, 6.5 s.
@@ -383,6 +385,19 @@ void main() {
   // sky there is no cloud to relight, and scaling it would lift a pale rim)
   vec3 dC = cl - skyQ;
   vec3 lit = mix(skyQ + max(dC, 0.0) * R + min(dC, 0.0), cl * R, solid);
+  // With the sun behind, the faces we see are lit by the sky alone. Scaling
+  // the photograph's warm, sun-lit colour by a cool skylight only greys it to
+  // lavender; instead keep the relit luminance and give it the sky's own hue:
+  // the blue of the sky round it, a little thinned on the brightest lobes and
+  // full in the shade, so the shadows read as skylight, not as haze.
+  float yS = dot(skyQ, LUMA);
+  vec3 skyHue = skyQ / max(yS, 1e-4);
+  float yC = dot(cl * R, LUMA);
+  float shade = 1.0 - smoothstep(0.18, 0.95, yC);
+  vec3 tint = mix(vec3(1.0), skyHue, mix(0.1, 0.62, shade));
+  tint /= dot(tint, LUMA);
+  vec3 litSky = mix(skyQ + dot(max(dC, 0.0) * R, LUMA) * tint + min(dC, 0.0), yC * tint, solid);
+  lit = mix(lit, litSky, uBehind);
 
   // Silver lining: thin edges facing the sun transmit it when it is behind.
   float thick = textureLod(uCloud, qb, 4.0).b;
@@ -408,6 +423,18 @@ void main() {
   thin = smoothstep(0.0, 0.04, exc) * (1.0 - smoothstep(0.08, 0.4, exc));
   // the cloud's own light stays as photographed; only the sky through it deepens
   col = max(skyN + lit - skyQ - (skyN - sky0) * occ, 0.0);
+  // Toward the photograph's foot (only ever reached high up, where the lens
+  // magnifies it two- to threefold and its texels smear into brush strokes,
+  // over a base that was inpainted behind the signal) the cloud gives way to
+  // the fitted sky, and the boil and its smear fade out with it. The dim,
+  // soft base goes first and the bright lobes last, judged on the lightly
+  // smoothed light (lobes, not curd) so they keep whole, crisp outlines.
+  float exL = dot(texture(uLow4, qb).rgb * R - skyQ, LUMA) / 0.55;
+  float thr = foot * 1.15 - 0.05;
+  float keep = mix(1.0, smoothstep(thr - 0.04, thr + 0.04, exL), smoothstep(0.0, 0.2, foot));
+  col = mix(skyN, col, keep);
+  occ *= keep;
+  thin *= keep;
   }
   // aureole round the hidden sun, only where there is sky
   float ds = length(pS - uSunPx) / PLATE.x;
