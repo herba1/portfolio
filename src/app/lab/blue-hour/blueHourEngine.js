@@ -122,6 +122,8 @@ const float FG_MID = 0.06;  // the plate's median facade luminance
 float lightOf(float b){ return clamp((b * 255.0 - 16.0) / 239.0, 0.0, 1.0); }
 // Cloud density for reading form: cover, heavier where the cloud is bright.
 float denAt(vec2 t){ vec4 x = textureLod(uAux, t, 1.5); return x.g * (0.5 + 0.5 * lightOf(x.b)); }
+// The same density, heavily blurred: the puff as one mass, for its form.
+float denF(vec2 t, float l){ vec4 x = textureLod(uAux, t, l); return x.g * (0.5 + 0.5 * lightOf(x.b)); }
 
 void main(){
   vec2 p = gl_FragCoord.xy / uSize;
@@ -177,15 +179,14 @@ void main(){
   // its lee is in skylight. Read at two broad scales, so a puff shades as a
   // form, not as its texture, and its rim does not outline it.
   float side = 0.5 * (denAt(uv - sd * 24.0) - denAt(uv + sd * 24.0) + denAt(uv - sd * 64.0) - denAt(uv + sd * 64.0));
-  float lit = smoothstep(-0.16, 0.16, side);
+  float lit = smoothstep(-0.3, 0.3, side);
   // Alpha. aux.g is the cloud's blue/red log-ratio below the local clear sky,
-  // linear (clouds.py no longer thresholds it), so cover is feathered here
-  // across most of its range: a puff thins into the sky through its wisps
-  // instead of stopping on a contour. A share of the ratio a few texels wide
-  // gives the edge the soft fall-off of a volume rather than a cut line.
-  float covW = textureLod(uAux, uv, 2.5).g;
+  // linear (clouds.py no longer thresholds it). Read mostly at mip 1 through
+  // a tight ramp, so a puff ends on a soft but definite edge, a texel or two
+  // wide, instead of smearing out into haze over a wide blurred feather.
+  float covW = textureLod(uAux, uv, 1.0).g;
   float covM = textureLod(uAux, uv, 4.5).g;
-  float cw = smoothstep(0.06, 0.9, mix(cov, covW, 0.32));
+  float cw = smoothstep(0.1, 0.62, mix(cov, covW, 0.85));
   // The buildings occlude the cloud, not the sky: alpha goes to zero a few
   // texels inside the matte's edge (its eroded, blurred self), so no puff
   // shows through balcony gaps or fringes a silhouette; the clear sky the
@@ -195,8 +196,23 @@ void main(){
   // Light and thickness come from the broad field, not from the texel, so a
   // puff's colour is one function across its edge and fading alpha can only
   // take it towards the sky, never paint a lighter rim around a darker body.
-  float liW = lightOf(textureLod(uAux, uv, 2.0).b);
-  float core = mix(li, liW, 0.5);                   // sunlit tops and flanks
+  // Form: each puff is shaded as one rounded volume. A pseudo-normal from
+  // the gradient of the density blurred to the size of a puff (mip 3-4, on
+  // the same two-scale sun axis 'side' reads), lit by a wrapped Lambert
+  // towards the low sun, so the light falls off across a wide terminator
+  // over the whole sun-facing flank instead of switching texel by texel.
+  vec2 sp = vec2(-sd.y * uTexSize.y / uTexSize.x, sd.x * uTexSize.x / uTexSize.y);
+  float gA = 0.5 * (denF(uv - sd * 28.0, 3.0) - denF(uv + sd * 28.0, 3.0))
+           + 0.5 * (denF(uv - sd * 64.0, 4.0) - denF(uv + sd * 64.0, 4.0));
+  float gP = 0.5 * (denF(uv - sp * 28.0, 3.0) - denF(uv + sp * 28.0, 3.0))
+           + 0.5 * (denF(uv - sp * 64.0, 4.0) - denF(uv + sp * 64.0, 4.0));
+  vec3 nF = normalize(vec3(gA, gP, 0.5));
+  vec3 lF = normalize(vec3(1.0, 0.0, 0.2));
+  float wrapK = 0.5;
+  float form = clamp((dot(nF, lF) + wrapK) / (1.0 + wrapK), 0.0, 1.0);
+  // a small share of the fine light rank survives as surface texture,
+  // multiplied in so it can only modulate the form, never draw an edge
+  float core = form * (0.85 + 0.15 * li);           // sunlit tops and flanks
   float body = smoothstep(0.35, 0.9, covM);         // deep inside a puff
   // Two parts, added, never mixed. Skylight: a cumulus is lit through and
   // through by multiple scattering of the blue sky around it, so its body
@@ -205,12 +221,12 @@ void main(){
   // from just over the sky on thin wisps to just under it in a thick lee.
   // That floor rides the sky's own level (lum, uCloudSkyK), so as the
   // exposure falls the body goes slate-blue under the cobalt, not brown.
-  // Sun: added on top, in stops, by the light rank (core) and the lit side,
-  // peach while the afterglow lasts; as the span runs it narrows to the top
-  // ranks only, a thin warm cap over a blue body.
-  float sunny = clamp(core * (0.55 + 0.45 * lit), 0.0, 1.0);
+  // Sun: added on top, in stops, by the form shading (core), peach while the
+  // afterglow lasts; as the span runs it narrows to the sun-facing tops, a
+  // warm band along each puff's lit flank over a blue body.
+  float sunny = clamp(core, 0.0, 1.0);
   float glowK = clamp(uAfter * (0.45 + 0.55 * facing), 0.0, 1.0);
-  float topK = smoothstep(0.15, 0.95, sunny);         // the lit tops only
+  float topK = smoothstep(0.2, 0.9, sunny);         // the lit tops only
   // The floor's colour: the sky's hue pushed a little bluer, about half its
   // chroma at sunset (a cloud is paler than the gap beside it) and most of
   // it by blue hour (slate under cobalt). Its level: just over the sky on
@@ -226,9 +242,9 @@ void main(){
   float up = uCloudGain * (0.08 + 0.72 * core) * (0.6 + 0.5 * lit);
   float room = uShoulder - uKnee;
   up = up < uKnee ? up : uKnee + room * (1.0 - exp(-(up - uKnee) / room));
-  // the cap: all ranks at sunset, only the brightest by blue hour
-  float capLo = 0.45 * smoothstep(0.35, 1.0, uS);
-  float capW = smoothstep(capLo, mix(0.45, 0.95, uS), sunny);
+  // the cap: the whole lit flank at sunset, a band along its top by blue hour
+  float capLo = 0.2 * smoothstep(0.35, 1.0, uS);
+  float capW = smoothstep(capLo, mix(0.6, 0.9, uS), sunny);
   // what of the sun reaches the middle ranks arrives scattered, so it
   // carries the sky's colour there; only the tops see it warm (a warm
   // added to a blue of the same weight would print grey)
