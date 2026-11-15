@@ -6,9 +6,9 @@ Run after cumulus.py. Reads cloud.webp's R (the photographed luminance) and A
 (coverage), and writes the relief the engine lights into its G and B, so the
 lobes light as rounded volume rather than as a bump map of the plate's grain.
 
-Every part of the body carries photographed billows (cumulus.py: the
-plate's crowns, and below them billows quilted from the same HDRI's tower
-body), lit in the photograph from the same side as the plate. So the relief
+Every part of the body carries billows lit from the same side as the
+plate (cumulus.py: the plate's photographed crowns, and below them rounded
+lobes lit as the crowns are). So the relief
 is the plate's own tone, read as a height over the card: a billow bulges
 toward us where it is brightest, its shaded flank falls away from the light,
 and the crease where it tucks under the next is the photograph's own darker

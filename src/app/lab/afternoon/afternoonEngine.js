@@ -75,8 +75,8 @@ const SKY_WARMC = [1.0, 0.92, 0.8];
 const SKY_WARM_AMT = 1.0;
 // The cumulus: a photographed plate (cloud.webp, from tools/depth/bakes/
 // afternoon/cumulus.py: R its own luminance, A its coverage, built as a main
-// tower and a smaller turret in front of its flank, every billow below the
-// crowns quilted from the same HDRI's tower body; relief.py: G and B the slope
+// tower and a smaller turret in front of its flank, the body below the
+// crowns built as large rounded lobes lit as the crowns are; relief.py: G and B the slope
 // of the plate's own tone read as a height) laid behind the street so
 // both rise from behind the right-hand roofs with their crowns whole in the
 // sky and blue between them. The main crown's top (CLOUD_FOOT, card px) lands
@@ -414,8 +414,9 @@ void main() {
   // The cumulus: a photographed plate, its own luminance and alpha, relit by
   // the sun here. Its drawing (the tone of every billow, lit from its upper
   // left in the photograph, as this sun stands) is kept; the sun model decides
-  // which faces take the sun. Every billow is photographed (the crowns from
-  // the plate, the body below them quilted from the same HDRI's tower), and
+  // which faces take the sun. Every billow is lit from that side (the crowns
+  // photographed in the plate, the body below them rounded lobes lit as the
+  // crowns are, dressed in the crowns' own grain), and
   // it is lit as a soft volume: its shape is its coverage through wide blurs
   // plus the photograph's tone blurred to its billows, read as rounded
   // swells, with the plate's fine relief (relief.py) only a quarter-strength
@@ -464,6 +465,13 @@ void main() {
   // wrapped: light diffuses round a cloud's limb rather than ending at it
   float dif = dot(cn, cl3);
   float wrap = clamp((dif + 0.35) / 1.35, 0.0, 1.0);
+  // and the same read off the tower's broad form alone (its coverage, never
+  // the billows' tone): deep in the body the sun follows this, so the lobes
+  // there are drawn by the dome's light on their tops and in their creases,
+  // not flipped in and out of sun lobe by lobe into a dappled pattern
+  vec2 gvB = 1.6 * g7 + 1.1 * g5;
+  vec3 cnB = normalize(vec3(-vec2(gvB.x * rc + gvB.y * rs, -gvB.x * rs + gvB.y * rc), 1.0));
+  float wrapB = clamp((dot(cnB, cl3) + 0.35) / 1.35, 0.0, 1.0);
   // the photograph's tone, soft: the billows against the lobe round them
   // (lit crowns bright, the tucks between them in shade)
   float tB = textureLod(uCloud, cuv, 3.8).r;
@@ -505,8 +513,20 @@ void main() {
   // sun reaches into the mass; the photograph's darker tucks and the inner
   // billows stay in the shade. A wide smoothstep, so the terminator is a
   // soft roll across each lobe, never a ridge.
-  float sunK = smoothstep(-0.05, 1.0, 0.75 * reach + 0.95 * wrap + 2.0 * mid * (1.0 - 0.4 * deep) + 0.35 * (tn - 0.4)
+  float wrapS = mix(wrap, wrapB, 0.7 * deep);
+  float sunK = smoothstep(-0.05, 1.0, 0.75 * reach + 0.95 * wrapS + 2.0 * mid * (1.0 - 0.75 * deep) + 0.35 * (tn - 0.4) * (1.0 - 0.5 * deep)
                           + 0.15 * up - 0.35 * deep - 0.35 * down - 0.35);
+  // The plate's tucks may shade a lit crown only so far: never below the
+  // light the broad form there takes (the same sum without the billows'
+  // tone), less a soft hollow's worth. Unfloored, a few small dark tucks on
+  // the sunlit crown drop into full shade, a field of blue pits, crumpled foil.
+  float tBB = textureLod(uCloud, cuv, 5.5).r;
+  float midB = tBB - textureLod(uCloud, cuv, 7.5).r;
+  midB = midB / (1.0 + 5.0 * abs(midB));
+  float tnB = clamp((tBB - 0.45) / 0.5, 0.0, 1.0);
+  float sunKB = smoothstep(-0.05, 1.0, 0.75 * reach + 0.95 * mix(wrap, wrapB, 0.5) + 2.0 * midB * (1.0 - 0.75 * deep)
+                           + 0.35 * (tnB - 0.4) * (1.0 - 0.5 * deep) - 0.35 * deep - 0.35);
+  sunK = max(sunK, sunKB - 0.25);
   // The sunlit side: a warm white (a pale peach once low) that rolls off on
   // a shoulder and is never clipped, brightest where a lobe faces the sun
   // square and dimming as it turns away. Set above paper white in print:
@@ -519,10 +539,18 @@ void main() {
   // 210), a little over half the sunlit side. Faces turned up to the dome and
   // the photograph's brighter billows stand paler; the undersides, the body
   // low down and the tucks between billows go deepest.
-  float skyK = clamp(0.45 + 0.45 * up + 2.0 * mid + 0.5 * (tn - 0.45) - 0.3 * deep - 0.35 * down, 0.0, 1.0);
+  // Below 0 it runs on into the creases: the body low in the tower sits
+  // about at the foot of that range, so its lobes need room both ways, their
+  // tops paler and the creases under them deeper (shadeCr), or the body
+  // reads as one flat sheet with pale puffs on it.
+  float skyR = 0.45 + 0.45 * up + (2.0 + 2.0 * deep) * mid + (0.5 + 0.4 * deep) * (tn - 0.45) - 0.3 * deep - 0.35 * down;
+  // (the same floor: a crease is the dome's shade a step down, never a hole)
+  skyR = max(skyR, 0.45 + (2.0 + 2.0 * deep) * midB + (0.5 + 0.4 * deep) * (tnB - 0.45) - 0.3 * deep - 0.3);
+  float skyK = clamp(skyR, 0.0, 1.0);
   vec3 shadeHi = mix(vec3(0.67, 0.77, 0.835), vec3(0.71, 0.76, 0.82), low);
   vec3 shadeLo = mix(vec3(0.47, 0.585, 0.655), vec3(0.51, 0.575, 0.65), low);
-  vec3 shadeC = mix(shadeLo, shadeHi, skyK);
+  vec3 shadeCr = shadeLo * vec3(0.84, 0.88, 0.91);
+  vec3 shadeC = mix(mix(shadeLo, shadeHi, skyK), shadeCr, clamp(-skyR / 0.45, 0.0, 1.0) * smoothstep(0.2, 0.8, deep));
   // Multiple scattering: the sun that went into the lit billows comes back
   // out of the shade just beside them, a soft lift of the shade near the
   // light that dies away deeper in, so the terminator glows rather than cuts.
@@ -530,9 +558,13 @@ void main() {
   shadeC = mix(shadeC, msC, 0.35 * reach * (1.0 - deep) * (1.0 - 0.6 * down));
   // and the photograph's own billows drawn faintly into both, at their own
   // soft scale only (never the plate's fine grain, which reads as foil)
+  // (its dark side clamped: the grain can lift a billow but darkens one only
+  // a few percent, never below the shade floor round it)
   float fine = textureLod(uCloud, cuv, 1.6).r - textureLod(uCloud, cuv, 4.5).r;
+  fine = max(fine, -0.05);
   float draw = 0.5 + 0.4 * (1.0 - sunK);
   vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + 0.6 * fine * draw), vec3(1.07));
+  cloud = max(cloud, shadeC * 0.95);
   // Where the cloud thins to its edge the sun comes through it, so a sunlit
   // billow's top ends in a bright fringe. That is only true where the sun
   // stands: the edge has to face it (squared, so it fades fast as the edge
