@@ -267,9 +267,11 @@ void main() {
 //     a cloud's edge and a firm one inside its body, so the deck's own
 //     silhouettes, wisps and soft fringes come through exactly and only
 //     their tone and colour change. The blue's deepening fades out under
-//     the cloud by the same density (no dark moat), a bloom of the cloud's
-//     light lifts the blue round it, climbing from a few turrets out right
-//     up to the edge, and on top of that the SX-70's diffusion: the
+//     the cloud by the same density (no dark moat; the blue's exposure is
+//     metered off the open sky round it, never off the deck's own deeper
+//     blue hugging each cloud), a bloom of the cloud's light lifts the blue
+//     round it, read off a true blur of the view (its mip chain) so it
+//     climbs smoothly from a cumulus mass out right up to the edge, and on top of that the SX-70's diffusion: the
 //     brightest tops throw a soft glow further into the blue round them.
 //     Both pale the blue towards a lit pale cyan (#D2E6F6), and the cloud is
 //     laid into the blue, on a perceptual scale (square roots of the
@@ -292,7 +294,7 @@ const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) 
 const SKY_GRADE = {
   cloudGain: 0.5, // stops into the shoulder at a mid cloud of the deck (x = 1 is the knee)
   cloudToe: 1.2, // log contrast of the cloud's broad modelling (the deck's cumulus have their own; more cuts them out)
-  detail: 0.6, // log contrast of the fine detail against the local mean (turret scale; above 1 it is an unsharp mask)
+  detail: 0.3, // log contrast of the fine detail against the local mean (out to a cumulus mass; more rings every edge like an unsharp mask)
   depth: 2, // stops the shade side can fall below the knee, at most
   cloudSlope: 0.3, // film's slope in the clouds (log out per log exposure), to take the meter out
   cloudKeep: 1, // stops of the print's own exposure put back on the cloud, per stop
@@ -306,16 +308,16 @@ const SKY_GRADE = {
   sunGain: 2, // stops into the shoulder on the side of a cloud that faces the sun
   sunShade: 1.5, // stops out of the shoulder on the far side, at most, towards the skylight-blue shade
   relief: 0.1, // facing per unit of slope (stops of plate radiance per print width)
-  feather: 8, // cloud density blur radius, 4096 px plate pixels (16 of the 8192 px deck's)
+  feather: 20, // cloud density blur radius, 4096 px plate pixels (40 of the 8192 px deck's): wide, so a cloud's edge thins into the blue
   densLo: 0.08, // cloud density ramp: share of the blue's chroma taken away where cloud starts
   densHi: 0.9, // ... and where it is solid cloud, at a cloud's edge (wide: wisps stay wisps)
   densLight: 2.5, // light above the clear blue (in multiples of it) that also reads as solid cloud there
   fillHi: 0.6, // the same two inside a cloud's body, where a shade side lit by the blue keeps
   fillLight: 1.2, // some of its chroma and must not go to lacy holes
-  bloom: 0.4, // how far the blue round a cloud pales towards it (share of the perceptual mix, at the edge)
+  bloom: 0.55, // how far the blue round a cloud pales towards it (share of the perceptual mix, at the edge; it falls away over a cumulus mass, so the blue beside a cloud is never deeper than the open sky)
   sunAz: -52, // sun azimuth, degrees in the disk frame (table right = 0, up = -90)
   sunEl: 52, // sun elevation, degrees
-  glow: 0.65, // diffusion bloom off the cloud tops into the blue round them (share of the perceptual mix per unit of top)
+  glow: 0.8, // diffusion bloom off the cloud tops into the blue round them (share of the perceptual mix where bright cumulus fills the wide blur)
   sunSplit: 1.0, // stops a cloud's side turned away from the sun is pulled down towards the skylight shade
   skyDeep: 0.95, // stops the clear sky is taken down at the zenith, falling off towards the rim
   skySat: 0.45, // extra chroma at the zenith (share of the sky's own), falling off the same way
@@ -444,7 +446,7 @@ float hash12(vec2 p) {
 }
 
 vec3 rawLin(vec2 p) {
-  vec3 c = texture(uRaw, p).rgb;
+  vec3 c = textureLod(uRaw, p, 0.0).rgb;
   return uRawSrgb > 0.5 ? pow(c, vec3(2.2)) : c;
 }
 // How much cloud the scene light c holds over the clear blue (brS its
@@ -460,6 +462,33 @@ float density(vec3 c, float brS, float YS, vec2 ramp, float firm) {
   // as the cloud, so inside a body the cloud is also simply what is not
   // blue: no holes punched through it where it meets the glare.
   return max(x, firm * (1.0 - smoothstep(0.28, 0.62, (c.b - c.r) / (c.b + 1e-4))));
+}
+
+// How much of the sky round p is cloud, read off the raw view's mip chain
+// at level lod (a box blur 2^lod texels across): the blue's chroma a cloud
+// takes away is linear in the light, so the blurred view's chroma is the
+// blurred cover. The walls, all but neutral, count as neither: the chroma
+// is read against the matte's own share there. Also the light above the
+// blue (how bright the cloud there is) and the sky's share itself.
+vec3 coverAt(vec2 p, float lod, float brS, float YS) {
+  vec4 q = textureLod(uRaw, p, lod);
+  vec3 c = uRawSrgb > 0.5 ? pow(q.rgb, vec3(2.2)) : q.rgb;
+  float a = max(q.a, 0.02);
+  float ac = 1.0 - (c.b - c.r) / (brS * a);
+  float top = max(dot(c, LUMA) / (YS * a) - 1.0, 0.0);
+  float cov = clamp((max(ac, top / uDens.z) - uDens.x) / (1.0 - uDens.x), 0.0, 1.0);
+  return vec3(cov, top, q.a);
+}
+// the same, smoothed by four more reads round p (the mip's own boxes would
+// otherwise show as a faint lattice in the blue)
+vec3 coverSoft(vec2 p, float r, float brS, float YS) {
+  float lod = log2(r * float(textureSize(uRaw, 0).x));
+  vec3 h = coverAt(p, lod, brS, YS) * 2.0;
+  for (int i = 0; i < 4; i++) {
+    float a = float(i) * 1.570796 + 0.785398;
+    h += coverAt(p + 0.6 * r * vec2(cos(a), sin(a)), lod, brS, YS);
+  }
+  return h / 6.0;
 }
 
 vec2 diskUv(vec3 d) {
@@ -490,7 +519,7 @@ vec3 structGrade(vec3 lin, vec3 d) {
     for (int i = 0; i < 8; i++) {
       float an = float(i) * 0.785398 + float(j) * 0.39;
       vec2 q = vUv + vec2(cos(an), sin(an)) * r;
-      float aq = texture(uRaw, q).a;
+      float aq = textureLod(uRaw, q, 0.0).a;
       if (aq > 0.3) dist = min(dist, float(j));
       if (j >= 2 && j <= 4) {
         float wq = 1.0 - smoothstep(0.02, 0.3, aq);
@@ -596,7 +625,7 @@ vec3 structGrade(vec3 lin, vec3 d) {
 
 void main() {
   vec4 dev = texture(uDev, vUv);
-  vec4 raw = texture(uRaw, vUv);
+  vec4 raw = textureLod(uRaw, vUv, 0.0);
   vec3 lin0 = toLin(dev.rgb);
 
   // The sky matte, as the view swapped it in: its rims were already cleaned
@@ -614,7 +643,7 @@ void main() {
     float mn = m;
     for (int i = 0; i < 8; i++) {
       float an = float(i) * 0.785398;
-      for (int j = 1; j <= 4; j++) mn = min(mn, texture(uRaw, vUv + vec2(cos(an), sin(an)) * (1.5 * float(j)) * uPlatePx).a);
+      for (int j = 1; j <= 4; j++) mn = min(mn, textureLod(uRaw, vUv + vec2(cos(an), sin(an)) * (1.5 * float(j)) * uPlatePx, 0.0).a);
     }
     m = mix(m, mn, lowM);
   }
@@ -666,13 +695,14 @@ void main() {
     + toLin(texture(uDev, vUv - vec2(0.0, tx.y)).rgb));
   float Yb = dot(linb, LUMA);
   float L = log2(Yb + 0.002);
-  // The local mean, in log luminance, over two rings a cumulus turret
-  // across (fractions of the print), weighted to cloud: clear sky and walls
+  // The local mean, in log luminance, over three rings out to a cumulus
+  // mass across (fractions of the print; a narrower mean makes the detail an
+  // unsharp mask that rings every edge), weighted to cloud: clear sky and walls
   // are never read as a cloud's surroundings. The same rings, read in scene
   // light (grain-free, the same for every print), give the cloud's relief:
   // the slope of its log radiance, the plate's cloud seen as a height field
-  // that the sun then lights. The two inner rings also give the bloom (how
-  // much cloud lies just round a pixel) and every ring the clear sky's own
+  // that the sun then lights. The two inner rings also say how much of a
+  // cloud's body lies just round a pixel, and every ring the clear sky's own
   // exposure on this print, read where the rings find open blue.
   float Lm = 0.0;
   float wm = 0.0;
@@ -680,10 +710,8 @@ void main() {
   vec2 grad = vec2(0.0);
   float onSky = 0.0;
   float bloom = 0.0;
-  float glowL = 0.0;
   float vs = 0.0;
   float wv = 0.0;
-  float nearC = 0.0;
   for (int j = 0; j < 4; j++) {
     float r = j == 0 ? 0.014 : (j == 1 ? 0.04 : (j == 2 ? 0.08 : 0.14));
     vec2 gj = vec2(0.0);
@@ -692,24 +720,17 @@ void main() {
       vec2 dir = vec2(cos(a), sin(a));
       vec2 p = vUv + dir * r;
       p = 1.0 - abs(1.0 - abs(p)); // mirrored at the print's edge, never smeared
-      vec4 rw = texture(uRaw, p);
+      vec4 rw = textureLod(uRaw, p, 0.0);
       vec3 rl = uRawSrgb > 0.5 ? pow(rw.rgb, vec3(2.2)) : rw.rgb;
       float dq = density(rl, brS, YS, uFill, 1.0);
       float cl = rw.a * dq;
       vec3 lq = toLin(texture(uDev, p).rgb);
-      if (j == 1 || j == 2) {
-        float w = 0.02 + cl;
+      if (j >= 1) {
+        float w = (0.02 + cl) * (j == 1 ? 0.6 : 1.0);
         Lm += w * log2(dot(lq, LUMA) + 0.002);
         wm += w;
       }
-      if (j < 2) {
-        bloom += cl * (j == 0 ? 0.6 : 0.4);
-        // the light the cloud there throws into the film round it: the
-        // brightest tops count most
-        float yq = dot(lq, LUMA);
-        glowL += cl * yq * yq * (j == 0 ? 0.6 : 0.4);
-      }
-      nearC += cl * (j == 0 ? 0.35 : (j == 1 ? 0.3 : (j == 2 ? 0.2 : 0.15)));
+      if (j < 2) bloom += cl * (j == 0 ? 0.6 : 0.4);
       float ws = rw.a * (1.0 - dq) * (1.0 - dq);
       vs += ws * max(lq.r, max(lq.g, lq.b));
       wv += ws;
@@ -725,8 +746,6 @@ void main() {
   }
   onSky /= 32.0;
   bloom /= 8.0;
-  glowL /= 8.0;
-  nearC /= 8.0;
   // A cloud's edge is read on the wide ramp, so its fringe and wisps thin
   // out into the blue as the deck has them; inside its body (all cloud just
   // round it) on the firm one, so a shade side lit by the blue, which keeps
@@ -819,8 +838,12 @@ void main() {
   float tn = min(sk.r, min(sk.g, sk.b));
   sk = tv - (tv - sk) * min(1.0 + uDome.y * zw, 0.93 * tv / max(tv - tn, 1e-4));
   vec3 tgt = toLin(sk) * exp2(-uDome.x * zw);
+  // The exposure is metered off the open blue the rings find, never off the
+  // pixel itself: the deck's blue is a little deeper right against its
+  // clouds (the sky photograph's own local contrast), and kept here that
+  // dark moat became a navy ring round every cloud.
   float Vb = max(linb.r, max(linb.g, linb.b));
-  float Vs = mix(Vb, wv > 0.5 ? vs / wv : Vb, smoothstep(0.0, 0.5, dens));
+  float Vs = wv > 0.5 ? vs / wv : Vb;
   vec3 sky = tgt * pow(clamp(Vs / VREF, 0.55, 1.25), uSky.x);
   // The bloom where cloud meets blue: the blue round a cloud lifts towards
   // it, so a cloud's edge dissolves into the sky instead of being cut out of
@@ -833,10 +856,17 @@ void main() {
   // (square roots of the light): added linearly, any near-white light puts
   // the cobalt's red up first and the fringe goes a dull lilac navy that
   // reads as a dark ring. This way it pales along the blue's own hue.
-  float near = (0.55 * bloom + 0.45 * nearC) * smoothstep(0.6, 0.95, onSky);
-  float fringe = uDens.w * smoothstep(0.0, 0.45, near)
-    + uTop.x * glowL * (1.0 - 0.6 * smoothstep(0.55, 0.95, bloom));
-  fringe = min(fringe, 0.85) * (1.0 - dens);
+  // How near the cloud is, and how bright, is read off the raw view's mip
+  // chain, a true blur at two widths (a turret and a cumulus mass across),
+  // so the lift falls away smoothly with distance: a ring of taps here
+  // stamps shifted copies of the cloud's edge into the blue as contours.
+  vec3 hn = coverSoft(vUv, 0.03, brS, YS);
+  vec3 hw = coverSoft(vUv, 0.09, brS, YS);
+  float halo = 0.45 * hn.x + 0.55 * hw.x;
+  float tops = smoothstep(0.4, 2.5, 0.5 * (hn.y + hw.y));
+  float fringe = uDens.w * smoothstep(0.0, 0.55, halo)
+    + uTop.x * hw.x * tops * (1.0 - 0.6 * smoothstep(0.6, 0.95, hn.x));
+  fringe = min(fringe, 0.8) * smoothstep(0.45, 0.85, hw.z) * (1.0 - dens);
   sky = mix(sqrt(sky), sqrt(toLin(GLOW)), fringe);
   sky *= sky;
 
@@ -1528,6 +1558,11 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, devTex);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, rawTex);
+    // the bloom reads how much cloud lies round a pixel off the raw view's
+    // mip chain: a true wide blur, where a ring of taps would stamp shifted
+    // copies of the cloud's edge into the blue as contour lines
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.uniform1i(g.uDev, 0);
     gl.uniform1i(g.uRaw, 1);
     gl.uniform1f(g.uRawSrgb, rawLinear ? 0 : 1);
@@ -1559,6 +1594,9 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform2f(g.uStructEv, struct0.structEv, Math.sin((struct0.structLow * Math.PI) / 180));
     gl.uniform2f(g.uTop, grade0.glow, grade0.sunSplit);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, rawTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 
     // the finish (halation, scan softness, grain), into the print
     gl.bindFramebuffer(gl.FRAMEBUFFER, p.fbo);
