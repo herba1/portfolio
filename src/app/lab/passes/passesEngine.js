@@ -248,7 +248,8 @@ void main(){
   // clouds keep their light, warmed toward the key. The clouds are read a
   // mip sharp: the derivatives halved, so their sunlit edges stay hard and
   // the cumulus is not a blurred mip pasted over the canyon.
-  vec3 cloud = skyDecode(textureGrad(uSky, st, sx * 0.5, sy * 0.5).rgb, 4.0);
+  vec3 cloudRaw = textureGrad(uSky, st, sx * 0.5, sy * 0.5).rgb;
+  vec3 cloud = skyDecode(cloudRaw, 4.0);
   // Low in the dome the frame magnifies it (two pixels to a texel), so no
   // mip is sharp enough: the edges and lobes are given back by an unsharp
   // mask against the same layer spread over a few texels (or a few pixels,
@@ -257,6 +258,23 @@ void main(){
   vec3 cloudB = skyDecode(0.25 * (textureGrad(uSky, st + r * vec2(0.92, 0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(-0.38, 0.92), sx, sy).rgb
                                 + textureGrad(uSky, st + r * vec2(-0.92, -0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(0.38, -0.92), sx, sy).rgb), 4.0);
   cloud = max(cloud + 0.8 * (cloud - cloudB), 0.0);
+  // The photograph's own structure inside the cloud: its luminance as
+  // printed (the layer as stored) against its average over a patch a few
+  // dozen pixels across, the size of a billow on the screen. That ratio is
+  // the cumulus's modelling, the lobes, crevices and shadowed undersides,
+  // and it is kept through the relighting below instead of being replaced
+  // by one tint per side. Three bands: the bulges, the lobes, and the
+  // bank's shading across them.
+  vec2 skyTs = vec2(textureSize(uSky, 0));
+  float rho = max(length(vec2(sx.x, sy.x) * skyTs.x), length(vec2(sx.y, sy.y) * skyTs.y));
+  float lpS = luma(textureLod(uSky, st, log2(max(rho * 4.0, 1.0))).rgb);
+  float lpM = luma(textureLod(uSky, st, log2(max(rho * 24.0, 1.0))).rgb);
+  float lpL = luma(textureLod(uSky, st, log2(max(rho * 96.0, 1.0))).rgb);
+  float lpX = luma(textureLod(uSky, st, log2(max(rho * 320.0, 1.0))).rgb);
+  // Low in the dome the bank is magnified and soft: its billows are there
+  // but a few percent apart, so each band is taken up as well as kept.
+  float detail = 2.2 * log2(max(lpS, 0.02) / max(lpM, 0.06)) + 2.6 * log2(max(lpM, 0.02) / max(lpL, 0.06))
+               + 1.8 * log2(max(lpL, 0.02) / max(lpX, 0.06));
   float beta = skyDecode(textureGrad(uSkyBlue, st, sx, sy).rrr, 1.0).r;
   // The blue layer's own variation, against its average a few degrees
   // round: kept as a texture inside the gradient, never allowed to flatten
@@ -328,7 +346,23 @@ void main(){
   float facing = dot(D, DOME_SUN);
   float aureole = smoothstep(0.75, 0.95, facing) * (1.0 - body);
   float light = 1.05 * sunLit + 0.2 * skyLit + 0.3 * model + 0.3 * aureole - 0.12;
-  float t = clamp(light, 0.0, 1.0);
+  // The photograph's modelling, in the cloud's dense body only: at its
+  // edge the patch average takes in the clear sky and every rim would read
+  // as a lobe.
+  float det = detail * smoothstep(0.35, 0.65, lpX) * smoothstep(0.3, 0.6, lpL) * mask;
+  // On the far side the sun's term is flat, so the lobes laid in above are
+  // modelled by the open sky instead: each turned up and toward the viewer
+  // catches more of it, its underside and the crevice under it less.
+  // Measured against the bank's own slope, so it only adds the lobes and
+  // never darkens the bank as a whole.
+  vec2 gB = 0.2 * gL + 0.3 * gM + 0.12 * gF;
+  vec3 Ls = normalize(vec3(0.15, 0.75, 0.65));
+  float lobe = dot(normalize(vec3(-gB - 0.02 * bg, 1.0)), Ls) - dot(normalize(vec3(-gB, 1.0)), Ls);
+  det += 1.0 * lobe * body * (1.0 - smoothstep(0.2, 0.7, light));
+  det = det / (1.0 + abs(det) / 0.9);
+  // Its lobes that catch more light sit a little further up the grade:
+  // the relit factor is the volume's light and the photograph's together.
+  float t = clamp(light + 0.3 * det, 0.0, 1.0);
   // Graded in print values on three stops: the sun-facing flank a warm
   // cream under paper white, the body a pale grey-blue, and the far side
   // and the base the sky's own blue at a bit over half its light. The low
@@ -336,7 +370,14 @@ void main(){
   vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.97, 0.92), 1.0 - uDay);
   float dusk = mix(0.72, 1.0, uDay);
   vec3 cloudG = mix(mix(CLOUD_SHADE, CLOUD_BODY, smoothstep(0.0, 0.55, t)), crown, smoothstep(0.45, 0.95, t));
-  vec3 cloudP = tone(untone(min(cloudG, vec3(0.98))) * mix(dusk, 1.0, t * t));
+  // Then the tint is a grade on the photograph's own luminance, not a flat
+  // fill: the print value is multiplied by the source's local contrast, all
+  // of it on the far side (where the relighting has nothing else to model
+  // the billows with) and never under 60% of it toward the sun.
+  // A crevice falls into bluer light than the lobe over it (the sky is all
+  // that reaches it), so the red goes first.
+  cloudG *= exp2(det * mix(1.0, 0.6, smoothstep(0.3, 0.9, t)) * mix(vec3(1.0), vec3(1.25, 1.0, 0.75), step(det, 0.0)));
+  vec3 cloudP = tone(untone(clamp(cloudG, vec3(0.0), vec3(0.98))) * mix(dusk, 1.0, t * t));
   // The open sky dims less than the clouds' shade with a low sun: it is
   // the zenith's light, not the sun's.
   vec3 skyP = blueP * pow(mottle, 0.45) * mix(0.93, 1.0, uDay);
@@ -697,15 +738,16 @@ void main(){
   vec2 cv = uv - 0.5;
   c *= 1.0 - 0.14 * dot(cv, cv);
 
-  // Grain: soft clumps a pixel or two across at DPR 2 (a per-pixel hash
-  // reads as a sensor's salt and pepper), the same step on every channel.
-  // Weighted to the midtones, where a negative's grain shows, and thinning
-  // in the darks and the highlights. One law for sky and concrete.
+  // Grain: fine, about a pixel across at DPR 2 (a per-pixel hash reads as
+  // a sensor's salt and pepper, and clumps of five read as blotches in the
+  // flat sky), the same step on every channel. Weighted to the midtones,
+  // where a negative's grain shows, and thinning in the darks and the
+  // highlights. One law for sky and concrete.
   vec2 p = gl_FragCoord.xy + uSeed * vec2(37.1, 91.7);
-  float g = (vnoise(p / 1.25) - 0.5) + 0.7 * (vnoise(p / 2.6 + 41.7) - 0.5) + 0.35 * (vnoise(p / 5.0 + 9.3) - 0.5);
+  float g = (vnoise(p / 0.9) - 0.5) + 0.5 * (vnoise(p / 1.7 + 41.7) - 0.5);
   float lc = luma(c);
   float mid = smoothstep(0.0, 0.35, lc) * (1.0 - smoothstep(0.7, 1.0, lc));
-  c += g * 0.05 * (mid * 0.8 + 0.2);
+  c += g * 0.03 * (mid * 0.8 + 0.2);
   o = vec4(c, 1.0);
 }`;
 
