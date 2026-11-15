@@ -113,8 +113,9 @@ const PLANES = [
   // sides are ends, not margin to keep covered (they would only narrow the
   // swing). They are in the closed photograph too: it is this stack.
   { file: "p2", rect: [-0.2998, 0.03466, 1.22021, 1.19027], o: 0.2, hold: false, ends: [true, false, false, true] }, // wires
-  // the mechanism box is cut by the right edge and ends a few px past
-  // it (bake.py): that side is a cut-out end, not overscan to keep covered.
+  // the spire and mechanism box past the mast are cut off along the mast's
+  // edge (corner.py): its right side is a cut-out end, not overscan to keep
+  // covered.
   // Its orange and red band were regraded to a muted ochre and a dull brick
   // (boomgrade.py) and it is a little soft (cocFor): one warm accent, the
   // crossbuck.

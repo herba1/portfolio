@@ -38,8 +38,9 @@ Then cumulus.py re-plates the sky with real cumulus on a card of its own
 (clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match, and
 wires.py redraws p2.webp with every wire as one whole catenary, and
 wiretrim.py (after catenary.py) takes an orphan hook (a fitting that
-floats in open sky once the signal post slides off it) off that card and
-draws its wire back, and
+floats in open sky once the signal post slides off it) and the clamp's
+smears and the strap's arc by the barrier mast off that card and draws the
+wires back, and
 crossbuck.py takes the pale hood out from behind the crossbuck head on
 p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline,
 and townmatte.py keys the old sky out of the town card's top (p1.webp and
@@ -49,7 +50,12 @@ signal lamps' outline on p5.webp (and its matte), and cloudlight.py makes
 the clouds card one solid, lit mass (opaque down past the roofline, its
 lower body's lobes at full contrast, the hazy right flank rebuilt as shaded
 billows, a soft glow on the sunward crown, the whole card through the photo
-plate's lens and grain) and rewrites its matte.
+plate's lens and grain) and rewrites its matte, and, last, corner.py cuts
+the galvanised spire, the mechanism box and its pipe off the boom's card
+(p3.webp) along the mast's edge and rebuilds the town card (p1.webp) right of
+the mast as one quilted tree line over a plain ground (no doubled house or
+boom's foot), with both mattes, the town's faded out at its right edge so
+its held edge texel throws no horizontal shadow band on the sky.
 """
 import sys
 import os
