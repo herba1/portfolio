@@ -43,7 +43,7 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uLattice, uSteel, uSky, uSkyBlue, uWall;
+uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uLattice, uSteel, uSky, uSkyBlue, uWall, uFacade;
 uniform vec2 uRes;        // canvas px
 uniform vec4 uMap;        // image uv = frag * uMap.xy + uMap.zw (cover fit)
 uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y up, z to the viewer)
@@ -164,6 +164,14 @@ void main(){
   vec3 mt = texture(uMatte, uv).rgb;
   float sky = clamp((mt.b - 0.02) / 0.98, 0.0, 1.0);
   float tower = mt.g;
+  // Where the depth map says a building face stands, near the camera, the
+  // key is choked to its core: a part-open edge on a wall's sunlit face is
+  // the face's own antialiasing against the plate's haze, and let through it
+  // laid the dome over the concrete as a see-through rim. Not in the tower's
+  // box, where a partial value is a gap a pixel wide and the dome belongs in it.
+  vec4 dp = texture(uDepth, uv);
+  float dNear = (dp.r * 65280.0 + dp.g * 255.0) / 65535.0;
+  float face = smoothstep(0.1, 0.16, dNear);
   // And the plate's haze between the girders, keyed fine at the source's
   // full resolution, read inside the tower's box only: every gap shows the
   // dome, not the haze brought up and lit as a milky fill.
@@ -171,6 +179,7 @@ void main(){
   float inBox = step(0.0, lb.x) * step(lb.x, 1.0) * step(0.0, lb.y) * step(lb.y, 1.0);
   lb = clamp(lb, 0.0, 1.0);
   float gap = texture(uLattice, lb).r * inBox;
+  sky *= mix(1.0, smoothstep(0.85, 0.98, mt.b), face * (1.0 - inBox));
   // Where that key is open and the first one was not, the steel comes from
   // the same bake, with the haze's share taken out of each pixel: a gap a
   // pixel wide stays a partial key, and the rest of it is paint, not haze.
@@ -372,10 +381,18 @@ void main(){
   // are soft blobs, and a sun shaded by them laid lit veils across the truss
   // like cobwebs. Over the tower they come from a coarse mip, so the light
   // turns with its faces, and each member, round, wraps the light further.
+  // The walls' come from their own bake (tools/depth/bakes/passes/facades.py),
+  // each face flattened to one plane: MoGe's wander inside a face, a tenth of
+  // a radian, is the whole key when the sun stands edge-on to the walls, and
+  // it lit the left building's louvre face in soft white blots, cloud shapes
+  // that read as the dome seen through the concrete. The folds between faces
+  // (a soffit, a reveal, the louvre's corner) are kept.
+  float bend = (dp.b - 0.5) * 2.0;
+  float plane = 1.0 - smoothstep(0.03, 0.08, abs(bend));
   vec3 n = texture(uNormal, uv).rgb * 2.0 - 1.0;
+  n = mix(n, texture(uFacade, uv).rgb * 2.0 - 1.0, (1.0 - tower) * mix(0.6, 1.0, plane));
   n = normalize(mix(n, textureLod(uNormal, uv, 4.5).rgb * 2.0 - 1.0, tower * 0.9));
   float wrap = mix(0.08, 0.4, tower);
-  float bend = (texture(uDepth, uv).b - 0.5) * 2.0;
 
   // No cast shadows: the depth map only holds what the camera saw, so a
   // march through it finds noise, not the walls above the frame. What it can
@@ -394,7 +411,6 @@ void main(){
   // the fence stand clear of the walls (their depth jumps), and are dark
   // because they are dark, not because they are set back.
   float wlC = pow(textureLod(uWall, uv, 5.0).r, 2.2) * WALL_RANGE;
-  float plane = 1.0 - smoothstep(0.03, 0.08, abs(bend));
   // Read a little soft, so a joint a pixel or two wide is a shallow groove
   // that dims, not a slot drawn in ink.
   float wlS = pow(textureLod(uWall, uv, 1.5).r, 2.2) * WALL_RANGE;
@@ -623,8 +639,8 @@ function domeFor(az) {
 }
 
 export async function createPasses(host) {
-  const [albedo, depth, normal, matte, lattice, steel, skyCloud, skyBlue, wall] = await Promise.all(
-    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "lattice.png", "lattice-steel.webp", "sky-cloud.avif", "sky-blue.avif", "wall.webp"].map(
+  const [albedo, depth, normal, matte, lattice, steel, skyCloud, skyBlue, wall, facade] = await Promise.all(
+    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "lattice.png", "lattice-steel.webp", "sky-cloud.avif", "sky-blue.avif", "wall.webp", "facade.webp"].map(
       (f) => loadImage(SRC + f),
     ),
   );
@@ -694,6 +710,7 @@ export async function createPasses(host) {
   tex(lattice, 5, "uLattice", true);
   tex(steel, 7, "uSteel", true);
   tex(wall, 9, "uWall", true);
+  tex(facade, 12, "uFacade", false);
 
   // The sky dome's two layers: azimuth repeats, and anisotropic filtering
   // where the GPU has it, since the equirect stretches across toward the
