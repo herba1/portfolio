@@ -311,7 +311,9 @@ function readCard(card, fail) {
   if (!(card.tan[0] > 0 && card.tan[1] > 0)) fail("has an invalid card extent.");
   const [u0, v0, u1, v1] = card.rect;
   if (!(u0 >= 0 && v0 >= 0 && u1 <= 1 && v1 <= 1 && u1 > u0 && v1 > v0)) fail("has an invalid card rect.");
-  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice(), extend: readCardExtend(card.extend, finite) };
+  // card_finish.py: the top edge carries no border ramp, so the player cuts it hard
+  const finish = card.finish && typeof card.finish === "object" ? { topRamp: card.finish.topRamp !== false } : null;
+  return { image, tan: card.tan.slice(), rect: card.rect.slice(), plane: card.plane.slice(), finish, extend: readCardExtend(card.extend, finite) };
 }
 
 // How the card carries on past the photo's edges (card_extend.py): straight
@@ -333,7 +335,8 @@ function readCardExtend(extend, finite) {
     seamPx: extend.seamPx,
     edgeFade: extend.edgeFade,
     basis: { origin: basis.origin.slice(), e1: basis.e1.slice(), e2: basis.e2.slice() },
-    wires: lines.map((w) => ({ start: w.start.slice(), run: w.run.slice(), across: w.across.slice(), half: w.half })),
+    // a sleeve: [half-width, taper start, taper end, offset across], plane units
+    wires: lines.map((w) => ({ start: w.start.slice(), run: w.run.slice(), across: w.across.slice(), half: w.half, sleeve: finite(w.sleeve, 4) && w.sleeve[0] > 0 && w.sleeve[2] > w.sleeve[1] ? w.sleeve.slice() : null })),
     wireColor: finite(extend.wireColor, 3) ? extend.wireColor.slice() : [0.08, 0.12, 0.18],
     truss: trussOk ? { ref: truss.ref.slice(), axis: truss.axis.slice(), window: truss.window.slice(), band: truss.band.slice() } : null,
     extrude: finite(extend.extrude, 2) ? extend.extrude.slice() : null,

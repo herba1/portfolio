@@ -18,7 +18,9 @@ import { CARD } from "./splatVideoParams";
 // column out.
 // Inside the photo the card is the image, with the border ramp baked into its
 // left and right edges divided back out so the image and its continuation
-// meet without a seam.
+// meet without a seam. After card_finish.py the top edge carries no ramp:
+// the card is cut at the photo's top row as one antialiased line, so the
+// signal head ends on a crisp chord instead of a smear.
 
 const CARD_VERTEX = `
 precision highp float;
@@ -77,6 +79,7 @@ uniform vec2 uTrussAxis;
 uniform vec2 uTrussWindow;
 uniform vec2 uTrussBand;
 uniform vec2 uExtrude;
+uniform float uTopCut;
 
 in vec2 vPhoto;
 in float vSourceY;
@@ -106,12 +109,20 @@ float ramp(float px) {
 }
 
 // card.py faded the image over its border; with the card extended the left
-// and right ramps are divided back out, the top and bottom ones kept.
+// and right ramps are divided back out, the bottom one kept (and the top one,
+// unless card_finish.py took it off for the hard cut).
 float unfade(vec2 photo) {
   vec2 px = photo * uPhotoPx - 0.5;
   float sides = min(px.x, uPhotoPx.x - 1.0 - px.x);
-  float ends = min(px.y, uPhotoPx.y - 1.0 - px.y);
+  float ends = uTopCut > 0.5 ? uPhotoPx.y - 1.0 - px.y : min(px.y, uPhotoPx.y - 1.0 - px.y);
   return ramp(ends) / max(ramp(min(sides, ends)), 1e-3);
+}
+
+// Coverage of the photo's top row as a hard edge: about one device pixel of
+// antialiasing, however the lens stretches the card.
+float topCut(vec2 photo) {
+  float y = photo.y * uPhotoPx.y;
+  return clamp(y / max(fwidth(y), 1e-4) + 0.5, 0.0, 1.0);
 }
 
 // The image with its film diffusion: the centre tap and four taps half a
@@ -143,10 +154,11 @@ void main() {
   } else {
     vec2 q = planeOf(vPhoto);
     vec2 px = vPhoto * uPhotoPx - 0.5;
-    bool inside = px.x >= uSeamPx && px.x <= uPhotoPx.x - 1.0 - uSeamPx && vPhoto.y >= 0.0 && vPhoto.y <= 1.0;
+    float top = uTopCut > 0.5 ? topCut(vPhoto) : topFade;
+    bool inside = px.x >= uSeamPx && px.x <= uPhotoPx.x - 1.0 - uSeamPx && vPhoto.y <= 1.0 && (vPhoto.y >= 0.0 || uTopCut > 0.5);
     if (inside) {
       c = image(vPhoto, gx, gy);
-      c.a = clamp(c.a * unfade(vPhoto), 0.0, 1.0) * topFade;
+      c.a = clamp(c.a * unfade(vPhoto), 0.0, 1.0) * top;
     } else {
       bool left = vPhoto.x < 0.5;
       // The truss, bay by bay, or an edge column carried out.
@@ -169,7 +181,7 @@ void main() {
         edge.a *= unfade(from);
         base = edge.a > base.a ? edge : base;
       }
-      c = vec4(base.rgb, base.a * topFade);
+      c = vec4(base.rgb, base.a * top);
     }
   }
   if (c.a < 0.5 / 255.0) discard;
@@ -178,7 +190,10 @@ void main() {
 `;
 
 // The wires past the photo: each a straight line on the plane from the seam
-// (start + t * run, camera0 frame), run out to its vanishing point. t grows
+// (start + t * run, camera0 frame), run out to its vanishing point. A wire
+// that leaves the photo inside a splice sleeve keeps the sleeve's width and
+// centre for the rest of the sleeve's length, then tapers to the wire
+// (uSleeve: half-width, taper start, taper end, offset across). t grows
 // as s / (1 - s) along the strip, so the samples are dense where the lens
 // bends the wire hardest and the last ones sit at the vanishing point. Each
 // vertex is pushed sideways in screen space by the wire's own projected
@@ -194,7 +209,9 @@ uniform vec3 uStart[WIRES_MAX];
 uniform vec3 uRun[WIRES_MAX];
 uniform vec3 uAcross[WIRES_MAX];
 uniform float uHalf[WIRES_MAX];
+uniform vec4 uSleeve[WIRES_MAX];
 uniform float uReach;
+uniform float uOverlap;
 
 in float aWire;
 in float aSide;
@@ -217,11 +234,16 @@ vec3 project(vec3 point) {
 void main() {
   int i = int(aWire + 0.5);
   float s = position.x;
-  float t = uReach * s / max(1.0 - s, 1e-4);
-  vec3 point = uStart[i] + t * uRun[i];
+  // starts a hair inside the seam, so no sliver of sky opens between the
+  // card's last texel and the ribbon
+  float t = uReach * s / max(1.0 - s, 1e-4) - uOverlap;
+  vec4 sleeve = uSleeve[i];
+  float inSleeve = 1.0 - smoothstep(sleeve.y, sleeve.z, t);
+  float halfWidth = mix(uHalf[i], sleeve.x, inSleeve);
+  vec3 point = uStart[i] + t * uRun[i] + inSleeve * sleeve.w * uAcross[i];
   vec3 here = project(point);
   vec3 ahead = project(point + max(0.02, 0.02 * t) * uRun[i]);
-  vec3 side = project(point + uHalf[i] * uAcross[i]);
+  vec3 side = project(point + halfWidth * uAcross[i]);
   vec2 along = ahead.xy - here.xy;
   vec2 normal = normalize(vec2(-along.y, along.x) + 1e-9);
   float halfPx = abs(dot(side.xy - here.xy, normal));
@@ -310,7 +332,10 @@ function createWireMesh(extend) {
       uRun: { value: pad(extend.wires.map((w) => new THREE.Vector3(...w.run)), () => new THREE.Vector3(1, 0, 0)) },
       uAcross: { value: pad(extend.wires.map((w) => new THREE.Vector3(...w.across)), () => new THREE.Vector3(0, 1, 0)) },
       uHalf: { value: pad(extend.wires.map((w) => w.half), () => 0) },
+      // no sleeve: the taper has ended before the seam
+      uSleeve: { value: pad(extend.wires.map((w) => new THREE.Vector4(...(w.sleeve ?? [0, -2, -1, 0]))), () => new THREE.Vector4(0, -2, -1, 0)) },
       uReach: { value: CARD.wireReach },
+      uOverlap: { value: CARD.wireOverlap },
       uWireColor: { value: new THREE.Vector3(...extend.wireColor) },
     },
     transparent: true,
@@ -384,6 +409,7 @@ export function createCardLayer(card, image, remap, gl) {
       uTrussWindow: { value: new THREE.Vector2(...(truss ? truss.window : [0, 1])) },
       uTrussBand: { value: new THREE.Vector2(...(truss ? truss.band : [0, 0])) },
       uExtrude: { value: new THREE.Vector2(...(extend?.extrude ?? [-1, -1])) },
+      uTopCut: { value: extend && card.finish?.topRamp === false ? 1 : 0 },
     },
     transparent: true,
     side: THREE.DoubleSide,

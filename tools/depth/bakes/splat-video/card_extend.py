@@ -19,9 +19,14 @@
 #   * truss: the gantry's box truss repeats bay by bay along its own axis on
 #     the plane, so outside the photo the player fills the truss band with
 #     the cleanest whole bay just inside the edge, shifted by whole periods;
-#   * extrude: the building block at the bottom-left (and the trees at the
-#     bottom-right) barely clear the frame at full lean, so those rows simply
-#     carry the column just inside the edge outward.
+#   * sleeves: a wire that leaves the photo inside a sleeve (the splice
+#     sleeves on the catenary are a few hundred px long) is carried on at the
+#     sleeve's width for the rest of a typical sleeve's length, then tapers to
+#     the wire, so it never stops in a straight cut at the photo's edge;
+#   * extrude: the building block at the bottom-left barely clears the frame
+#     at full lean, so those rows simply carry the column just inside the
+#     edge outward. The bottom-right corner is wires only after
+#     card_finish.py, so nothing is extruded there.
 #
 #   python3 -I tools/depth/bakes/splat-video/card_extend.py public/lab/splat-video/fumikiri-sky
 #
@@ -47,7 +52,12 @@ REACH_PX = 700             # how far in from the edge a wire is followed to fit 
 # 0.12, full lean), the building and the trees by x = -0.03 and 1.0. The
 # wires are not bounded by it: each is its own ribbon run out to its
 # vanishing point, since overhead wires cross the whole sky.
-EXTEND_RECT = [-1.0, 0.0, 1.05, 1.0]
+# The top row starts a few texels above the photo so the player can cut the
+# card there as one antialiased line (card_finish.py takes the ramp off it).
+EXTEND_RECT = [-1.0, -0.004, 1.05, 1.0]
+SLEEVE_PX = 520            # a splice sleeve's length on the photo, near the right edge
+SLEEVE_MIN_PX = 120        # carried on at least this far past the seam
+SLEEVE_TAPER = 0.2         # of the carried length, where it narrows to the wire
 
 # The truss, measured on the rectified plane near the left edge (origin
 # TRUSS_REF, axis at TRUSS_ANGLE, where its three chords run level): one
@@ -167,6 +177,7 @@ def fit_wire(x0, y0, direction):
     across = np.array([-d[1], d[0]])
     per_px = abs((px_to_q(*(ex + across)) - px_to_q(*(ex - across))) @ nq) / 2
     fit = carried(m, d, width * float(per_px) / 2, direction)
+    fit["sleeve"] = sleeve_at_seam(m, d, width, direction, fit)
     fit.update({
         "line": [float(nq[0]), float(nq[1]), float(nq @ qa)],
         "width_px": width,
@@ -193,6 +204,47 @@ def carried(m, d, half, direction):
         "across": [float(v) for v in across / np.linalg.norm(across)],
         "half": float(half),
     }
+
+
+def sleeve_at_seam(m, d, width, direction, fit):
+    """A sleeve the wire is inside where it crosses the seam: its width and
+    centre (photo px, off the wire's line) and how far in it reaches. Returned
+    on the plane as [half, taper start, taper end, offset across], with
+    lengths along the carried run from the seam; None when the wire leaves
+    the photo bare."""
+    seam_x = SEAM_PX if direction > 0 else W - 1 - SEAM_PX
+    across_px = np.array([-d[1], d[0]])
+    sums, cens, inside = [], [], 0
+    for step in np.arange(0, SLEEVE_PX, 2.0):
+        x = seam_x + direction * step
+        y = m[1] + (x - m[0]) * d[1] / d[0]
+        offs, pr = profile(x, y, d[0], d[1], half=20)
+        if pr.sum() < 1.6 * width:
+            break
+        sums.append(pr.sum())
+        cens.append((pr * offs).sum() / pr.sum())
+        inside = step
+    if len(sums) < 6:
+        return None
+    sleeve_w = float(np.median(sums[:20]))
+    offset_px = float(np.median(cens[:20]))
+    y_seam = m[1] + (seam_x - m[0]) * d[1] / d[0]
+    on_line = uv_to_point((seam_x + 0.5) / W, (y_seam + 0.5) / H)
+    off = uv_to_point((seam_x + offset_px * across_px[0] + 0.5) / W, (y_seam + offset_px * across_px[1] + 0.5) / H)
+    side = uv_to_point((seam_x + (offset_px + 1) * across_px[0] + 0.5) / W, (y_seam + (offset_px + 1) * across_px[1] + 0.5) / H)
+    per_px_across = abs((side - off) @ np.array(fit["across"]))
+    # plane units per photo px along the run, just outside the seam
+    out_x = seam_x - direction * 20
+    beyond = uv_to_point((out_x + 0.5) / W, (m[1] + (out_x - m[0]) * d[1] / d[0] + 0.5) / H)
+    per_px_along = np.linalg.norm(beyond - on_line) / 20
+    reach = max(SLEEVE_PX - inside, SLEEVE_MIN_PX) * per_px_along
+    print(f"  sleeve at the seam: {sleeve_w:.1f} px wide, {inside:.0f} px inside, centre {offset_px:+.1f} px off the wire")
+    return [
+        float(sleeve_w * per_px_across / 2),
+        float(reach * (1 - SLEEVE_TAPER)),
+        float(reach),
+        float((off - on_line) @ np.array(fit["across"])),
+    ]
 
 
 def fit_stub(x0, y0, direction, reach=80, span=20):
@@ -241,7 +293,9 @@ def seeds(x, direction, low, high):
 # Wires leave through the left edge below the truss and above the building,
 # and through the right edge above the trees.
 truss_bottom = 560
-left_floor, right_floor = 1575, 1615
+# (the right edge is clean to the bottom since card_finish.py, so its wires
+# are seeded all the way down and nothing is extruded there)
+left_floor, right_floor = 1575, 1990
 candidates = seeds(SEAM_PX + 2, 1, truss_bottom, left_floor) + seeds(W - 60, -1, truss_bottom, right_floor)
 # the wire that crosses the truss itself, leaving the left edge at row ~308
 candidates.append((SEAM_PX + 2, 322.0, 1))
@@ -284,7 +338,7 @@ meta["card"]["extend"] = {
     },
     # each wire from where it leaves the photo, fitted at that edge, so a few
     # pixels of sag across the photo never show as a jog at the other one
-    "wires": [{key: w[key] for key in ("start", "run", "across", "half")} for w in wires],
+    "wires": [{key: w[key] for key in ("start", "run", "across", "half", "sleeve") if w.get(key) is not None} for w in wires],
     "wireColor": [round(float(v), 4) for v in wire_rgb],
     "truss": {
         "ref": list(TRUSS_REF),
@@ -293,7 +347,7 @@ meta["card"]["extend"] = {
         "band": list(TRUSS_BAND),
     },
     # photo rows (px) from which the left and right edge columns are carried outward
-    "extrude": [left_floor, right_floor],
+    "extrude": [left_floor, -1],
 }
 with open(meta_path, "w") as fh:
     fh.write(json.dumps(meta, indent=2) + "\n")

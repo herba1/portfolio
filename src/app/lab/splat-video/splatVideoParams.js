@@ -78,10 +78,12 @@ export const RENDER = {
 // the strips the carried-on wires are drawn with.
 export const CARD = {
   segments: [192, 128],
-  wiresMax: 12,
+  wiresMax: 16,
   // a carried-on wire: plane units per step of s / (1 - s), how far along
   // the strip it stops (t = 999 reach, at the vanishing point), and its samples
   wireReach: 1,
+  // plane units the ribbon reaches back over the card at the seam (~2 photo px)
+  wireOverlap: 0.006,
   wireEnd: 0.999,
   wireSegments: 768,
   anisotropy: 8,
