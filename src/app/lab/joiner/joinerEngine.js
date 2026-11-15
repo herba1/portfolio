@@ -614,6 +614,7 @@ void main() {
   float sGlow = 0.0;
   float sSky = 0.0;
   float sw = 0.0;
+  vec2 sDir = vec2(0.0);
   for (int j = 1; j <= 3; j++) {
     float r = uHal.z * (j == 1 ? 0.45 : (j == 2 ? 0.9 : 1.5));
     float w = j == 1 ? 1.0 : (j == 2 ? 0.6 : 0.35);
@@ -623,22 +624,40 @@ void main() {
       float mq = texture(uRaw, q).a;
       sGlow += w * mq * dot(toLin(texture(uImg, q).rgb), LUMA);
       sSky += w * mq;
+      sDir += w * mq * vec2(cos(a), sin(a));
       sw += w;
     }
   }
+  // how one-sided the sky is: about 0.6 at a straight wall edge, near 0 when
+  // sky lies on both sides of a thin member
+  float side = length(sDir) / max(sSky, 1e-4);
+  // and whether that sky is open sky, not a window's reflection or a slot
+  // between slats: a little further out on the sky side it must still be sky
+  vec2 sN = sDir / max(length(sDir), 1e-4);
+  vec2 sT = vec2(-sN.y, sN.x);
+  float far = 0.0;
+  for (int i = -1; i <= 1; i++) {
+    far += texture(uRaw, vUv + (sN * 4.0 + sT * float(i) * 1.5) * uHal.z).a;
+  }
+  far /= 3.0;
   sSky /= sw;
   // the brightness of the sky across the edge, and how near the edge is
   float glow = smoothstep(0.08, 0.6, sGlow / max(sSky * sw, 1e-4));
   float edgeIn = (1.0 - m0) * smoothstep(0.02, 0.4, sSky) * glow;
   float edgeOut = m0 * smoothstep(0.04, 0.4, 1.0 - sSky) * smoothstep(0.25, 0.7, Y0);
-  // structure side: the ring. On a dark wall it is light added, red-orange;
-  // on a pale rim (the plate's own edge, which would read as a white matte
-  // fringe) the same ring is a filter that takes the white over to it.
+  // structure side: the ring, as light added on a genuinely dark wall only.
+  // A pale pixel the matte calls structure (a cloud scrap, leaked overcast, a
+  // light window frame) gets nothing: tinting it draws a hard orange contour,
+  // an electronic edge, not halation. Nor does a thin dark member with sky on
+  // both sides (a crane strut, a louvre between reflections): there the rings
+  // are mostly sky, or sky in opposite directions, or the "sky" is a small
+  // patch, and the glow would trace the whole strut or slat as a line.
   float darkW = 1.0 - smoothstep(0.04, 0.35, Y0);
-  lin += uHal.x * edgeIn * darkW * glow * 0.8 * HALO;
-  lin *= mix(vec3(1.0), vec3(1.0, 0.7, 0.5), clamp(uHal.x * edgeIn * (1.0 - darkW) * 1.6, 0.0, 1.0));
-  // sky side: the white along the same edge warms a little
-  lin *= mix(vec3(1.0), vec3(1.0, 0.85, 0.72), clamp(uHal.y * edgeOut, 0.0, 1.0));
+  float wall = (1.0 - smoothstep(0.45, 0.72, sSky)) * smoothstep(0.22, 0.45, side) * smoothstep(0.5, 0.9, far);
+  lin += uHal.x * edgeIn * darkW * wall * glow * 0.8 * HALO;
+  // sky side: the white along the same edge warms a little, never enough to
+  // read as a second line
+  lin *= mix(vec3(1.0), vec3(1.0, 0.85, 0.72), clamp(uHal.y * edgeOut, 0.0, 0.15));
 
   vec3 c = pow(clamp(lin, 0.0, 1.0), vec3(1.0 / 2.2));
 
