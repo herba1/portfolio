@@ -8,9 +8,10 @@
 #
 # The scan's sky has no cloud worth the name: a few wisps and a grey fragment cut
 # off at the top right. This puts a real, photographed towering cumulus behind
-# the pole as the clean sky's subject: its sunlit upper tower rises out of the
-# bottom of the frame behind the shaft, crown just under the pole head, with
-# clear cobalt over it, its anvil shelf running out to the left, so each
+# the pole as the frame's bright subject: the tower rises out of the bottom of
+# the frame behind the shaft and fills its right half, its crown up behind the
+# transformers, so the dark pole and its hardware cut across glowing cloud,
+# with clear cobalt over it and its anvil shelf running out to the left. Each
 # removal (the wires, then the hardware, then the pole) uncovers more of it and
 # the clean sky at the end has a subject.
 #
@@ -23,17 +24,16 @@
 # from elements.json, export.py): the cloud stands in a vertical plane through
 # the zenith, so its verticals converge on the same vanishing point as the
 # pole's, and the camera's roll tilts it with the pole. It is cut from the 16k
-# HDRI at its own resolution: 1.5 times its angles, which makes one HDRI pixel
-# one plate pixel, so its billows are as sharp as the photograph's wires and
-# the two read as one exposure. (A bigger tower, blown up from the HDRI, went
-# soft and pasted-in.) At that size the HDRI's tower, 27.6 deg up at its
-# crown, has only ~12 deg of cloud over the tree in front of its flank, so
-# it is set low in the frame, crown at plate (1300, 1010) just under the pole
-# head, turned LEAN degrees about its crown so its lower edge runs with the
-# frame's: the HDRI's tree line, and the lower body under it, stay below the
-# bottom of the frame. The only cloud on screen is the sunlit upper tower,
-# rising out of the bottom of the frame behind the shaft, with clear cobalt
-# over it.
+# HDRI at nearly its own resolution: 2 times its angles, about 0.72 HDRI pixel
+# to a plate pixel, so its billows stay close to as sharp as the photograph's
+# wires and the two read as one exposure. (Much bigger, blown up from the HDRI,
+# it went soft and pasted-in; at 1.5, one to one, it was too small to stand
+# behind the pole head without the HDRI's ground coming into the frame.) Its
+# crown is at plate (1350, 500), up behind the transformers, turned LEAN
+# degrees about it; the tower then fills the right half of the frame down to
+# its bottom edge, and the eucalyptus that stands under its crown in the HDRI
+# is replaced with the tower's own body (the ground, below): the HDRI's fence
+# line under that stays below the bottom of the frame.
 #
 # Matte: the sky in the HDRI is a saturated blue, the cloud near neutral, so
 # the cloud's coverage is how far a pixel's blue excess q = (B - R) / (B + R)
@@ -72,12 +72,12 @@ preview = sys.argv[3] if len(sys.argv) > 3 else None
 U_CROWN, EL_CROWN = 0.163, 27.6
 # ... and it lands at plate (AX, AY), magnified MAG times (angles) up it and
 # MAGB across. At 1.5 one HDRI pixel (16k: 45.5 px a degree) is one plate
-# pixel (f 1760: 30.7 px a degree): the tower is cut at the HDRI's own
-# resolution, its billows as sharp as the photograph's wires, never a
-# resampled blow-up of them.
-AX, AY = 1300.0, 1010.0
-MAG = 1.5
-MAGB = 1.5
+# pixel (f 1760: 30.7 px a degree); at 2 the tower is drawn up a third from
+# the HDRI's own pixels, never a soft blow-up of them, and is big enough to
+# carry the right half of the frame.
+AX, AY = 1350.0, 500.0
+MAG = 2.0
+MAGB = 2.0
 # turned LEAN degrees about the crown off the true vertical through it
 LEAN = 4.0
 if os.environ.get("CLOUD_PLACE"):  # exploration: "AX,AY,MAG,MAGB,LEAN"
@@ -142,7 +142,10 @@ hdr = cv2.imread(src, cv2.IMREAD_UNCHANGED)
 EH, EW = hdr.shape[:2]
 uu = (U_CROWN + az / (2 * np.pi)) * EW - 0.5
 vv = (0.5 - np.radians(el) / np.pi) * EH - 0.5
-x0, x1 = int(np.floor(uu.min())) - 4, int(np.ceil(uu.max())) + 4
+# (and, past its right edge, the tower's tree-free right flank that is cloned
+# in behind the tree at its foot: FILL_D below)
+FILL_D = (13.0, 19.0)
+x0, x1 = int(np.floor(uu.min())) - 4, int(np.ceil(uu.max())) + 4 + int(max(FILL_D) / 360 * EW) + 60
 y0, y1 = max(0, int(np.floor(vv.min())) - 4), min(EH, int(np.ceil(vv.max())) + 400)
 win = hdr[y0:y1, x0:x1, ::-1].astype(np.float32).copy()  # RGB
 del hdr
@@ -163,17 +166,58 @@ print(f"power lines: {line.mean() * 100:.2f}% of the window")
 win = push_pull(win, (~line).astype(np.float32)) * line[..., None] + win * (~line)[..., None]
 # The ground. Under the tower, in the HDRI, stand trees, a lamp post and a
 # fence: in each of its columns, the highest thing that is neither sky nor
-# cloud (dark, and not blue), its envelope smoothed across the columns. The
-# tallest tree reaches ~16 deg, halfway up the tower. Nothing at or under it
-# is used: the tower is placed so that its foot, and the HDRI's tree line with
-# it, is below the bottom of the frame, and the only cloud on screen is its
-# sunlit upper tower. (Should the envelope come into the frame, the cloud is
-# cut off just above it.)
-wq = (win[..., 2] - win[..., 0]) / np.maximum(win[..., 2] + win[..., 0], 1e-6)
-wY = win @ np.array([0.2126, 0.7152, 0.0722], np.float32)
-rowY = np.median(wY[: max(8, (vv.min() - y0).astype(int) + 8)], axis=0)  # the sky high above, per column
-ground = (wY < 0.55 * np.maximum(rowY, 1e-6)) & (wq < 0.32)
-ground = cv2.morphologyEx(ground.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)) > 0
+# cloud (dark, and not blue). The tallest tree, a eucalyptus standing right
+# under the crown, reaches ~15 deg, halfway up the tower; with the tower set
+# high in the frame (its crown behind the pole head) the frame's bottom edge
+# runs across that tree's crown. Behind it the tower's body runs on down to
+# the horizon, as it does a few degrees to the right, where nothing stands in
+# front of it above the fence (~6 deg): so what the tree hides is filled with
+# the tower's own right flank, shifted across by FILL_D degrees at the same
+# elevation (a turret's shading stays where the sun puts it), its light matched
+# to the body it fills (the log ratio of the two, known in the cloud round the
+# tree, drawn in by a membrane) and feathered into it. Whatever ground is left
+# under that (the fence, the lamp post's foot) is the new tree line; nothing at
+# or under it is used, and it stays below the bottom of the frame.
+def ground_of(win):
+    wq = (win[..., 2] - win[..., 0]) / np.maximum(win[..., 2] + win[..., 0], 1e-6)
+    wY = win @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    rowY = np.median(wY[: max(8, (vv.min() - y0).astype(int) + 8)], axis=0)  # the sky high above, per column
+    g = (wY < 0.55 * np.maximum(rowY, 1e-6)) & (wq < 0.32)
+    return cv2.morphologyEx(g.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)) > 0
+
+
+def band_of(g):
+    # every row under the highest ground in its column (and its leaves' fringe)
+    t = np.where(g.any(0), g.argmax(0), g.shape[0]).astype(np.float32)
+    t = cv2.erode(t[None], np.ones((1, 13), np.float32))[0]
+    return np.arange(g.shape[0])[:, None] >= t[None] - 28
+
+
+ground = ground_of(win)
+treeTop = 90 - (np.where(ground.any(0), ground.argmax(0), win.shape[0]).min() + y0 + 0.5) / EH * 180
+lw = np.log(np.maximum(win, 1e-5))
+for D in FILL_D:
+    Dp = int(round(D / 360 * EW))
+    band = band_of(ground)
+    shift = lambda v: np.concatenate([v[:, Dp:], np.repeat(v[:, -1:], Dp, 1)], 1)
+    win_s, band_s = shift(win), shift(band)
+    m = band & ~band_s
+    # light matched to the body round the tree: the ratio of the original to the
+    # copy, known in a ring 20-60 px clear of the tree in both, drawn inward
+    ls_ = np.log(np.maximum(win_s, 1e-5))
+    bu = band.astype(np.uint8)
+    ring = (cv2.dilate(bu, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (121, 121))) > 0) \
+        & ~(cv2.dilate(bu, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (41, 41))) > 0) & ~band_s
+    gain = cv2.GaussianBlur(push_pull((lw - ls_).astype(np.float32), ring.astype(np.float32)), (0, 0), 12)
+    # feathered outward into the cloud round it, never across the copy's own ground
+    mf = np.clip(cv2.GaussianBlur(m.astype(np.float32), (0, 0), 16) * 2, 0, 1) * ~band_s
+    mf = np.maximum(mf, m)[..., None]
+    win = win * (1 - mf) + np.exp(ls_ + gain) * mf
+    lw = np.log(np.maximum(win, 1e-5))
+    print(f"tree fill at +{D:g} deg: {m.sum()} px")
+    ground = ground_of(win)
+print(f"ground: highest {treeTop:.1f} deg before the fill, "
+      f"{90 - (np.where(ground.any(0), ground.argmax(0), win.shape[0]).min() + y0 + 0.5) / EH * 180:.1f} after")
 top = np.where(ground.any(0), ground.argmax(0), win.shape[0]).astype(np.float32)
 # envelope: the highest ground within a few columns either side, then smoothed
 k = max(3, int(win.shape[1] * 0.02))
