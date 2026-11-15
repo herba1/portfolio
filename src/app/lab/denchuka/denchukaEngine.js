@@ -85,6 +85,16 @@ const WIRE_W = 2.6;
 const WIRE_STREAK = (2.5 * WIRE_W).toFixed(2);
 // the streak is sampled half a pixel apart
 const STREAK_SAMPLES = 14;
+// A wire let go at this pole has a free end, and a free end is never a blunt
+// cut with its grip still on it: its last WIRE_TAIL of span hangs along
+// gravity in a short curl (its drop grows with the square of how far into the
+// tail it is; never under TAIL_MIN plate px, so a short steep span's grip is
+// in it too) and its matte narrows and thins to nothing over it, so the line
+// ends in a soft taper. It comes in over the first TAIL_FREE plate px of the
+// fall, so at the moment it lets go the end is still the wire's own.
+const WIRE_TAIL = "0.075";
+const TAIL_MIN = "110.0";
+const TAIL_FREE = "70.0";
 // the emulsion's light (GLOW): how much of the highlights' light spreads, and
 // how much comes back warm off the base as a ring
 // how much of the highlights' light spreads, and how much comes back warm off
@@ -131,7 +141,7 @@ uniform int uNW;
 uniform vec4 uW[${MAX_W}];        // span start, end (x, or y for a steep wire), sag, fall
 uniform vec4 uW2[${MAX_W}];       // id, y0, y1, this pole's end (1: at the span's end, 0: its start)
 uniform vec4 uW3[${MAX_W}];       // sag, fall when the shutter opened; fall slant dx/dy; steep
-uniform vec4 uW4[${MAX_W}];       // the far end's fall, now and when the shutter opened
+uniform vec4 uW4[${MAX_W}];       // the far end's fall, now and when the shutter opened; its line's slope (across/along)
 uniform int uNP;
 uniform vec4 uPo[${MAX_P}];       // id, k, c, offset
 uniform vec4 uPo2[${MAX_P}];      // top, base, reach from the axis, how far the last hardware has gone
@@ -684,23 +694,33 @@ void main() {
     float k = steep ? 1.0 : g;
     float here = steep ? pp.y : pp.x;
     float span = a.y - a.x;
-    float reach = abs(k) * (abs(a.z) + max(a.w, e.x)) + 2.0;
+    // the free end's curl (WIRE_TAIL): how far its tip hangs, now and when the
+    // shutter opened, kept short enough that the solve below still has one root
+    float free1 = smoothstep(0.0, ${TAIL_FREE}, a.w);
+    float free0 = smoothstep(0.0, ${TAIL_FREE}, c.y);
+    float tf = max(${WIRE_TAIL}, ${TAIL_MIN} / abs(span));
+    float curl = min(0.85, 0.4 / max(abs(k), 1e-3)) * tf * abs(span);
+    float reach = abs(k) * (abs(a.z) + max(a.w, e.x) + curl) + 2.0;
     float lo = here - reach;
     float hi = here + reach;
     for (int it = 0; it < 20; it++) {
       float s = 0.5 * (lo + hi);
       float us = clamp((s - a.x) / span, 0.0, 1.0);
       float ls = b.w > 0.5 ? us : 1.0 - us;
-      float h = s + k * (a.z * 4.0 * us * (1.0 - us) + a.w * ls + e.x * (1.0 - ls)) - here;
+      float ts = clamp((ls - 1.0 + tf) / tf, 0.0, 1.0);
+      float h = s + k * (a.z * 4.0 * us * (1.0 - us) + a.w * ls + e.x * (1.0 - ls) + curl * free1 * ts * ts) - here;
       if (h > 0.0) hi = s;
       else lo = s;
     }
-    float u = clamp((0.5 * (lo + hi) - a.x) / span, 0.0, 1.0);
+    float sAt = 0.5 * (lo + hi);
+    float u = clamp((sAt - a.x) / span, 0.0, 1.0);
     float bow = 4.0 * u * (1.0 - u);
     // 0 at the far end, which holds; 1 at this pole, where it was let go
     float lead = b.w > 0.5 ? u : 1.0 - u;
-    float dy1 = a.z * bow + a.w * lead + e.x * (1.0 - lead);
-    float dy0 = c.x * bow + c.y * lead + e.y * (1.0 - lead);
+    // how far into the free end's tail (0 where it starts, 1 at the tip)
+    float tl = clamp((lead - 1.0 + tf) / tf, 0.0, 1.0);
+    float dy1 = a.z * bow + a.w * lead + e.x * (1.0 - lead) + curl * free1 * tl * tl;
+    float dy0 = c.x * bow + c.y * lead + e.y * (1.0 - lead) + curl * free0 * tl * tl;
     // the streak, in rows of drop: the shutter's travel, capped in length
     float slantL = sqrt(1.0 + g * g);
     float path = abs(dy1 - dy0) * slantL;
@@ -708,8 +728,22 @@ void main() {
     float dyB = dy1 - back;
     if (pp.y - min(dyB, dy1) < b.y - 3.0 || pp.y - max(dyB, dy1) > b.z + 3.0) continue;
     int id = int(b.x + 0.5);
+    // the tail is drawn from the clean wire just before it, mirrored about
+    // where the tail starts along the wire's own line (uW4.z: its slope), so
+    // the grip, its insulators and the leads past the span's end never ride
+    // down on it; the mirror is the wire itself at the tail's start, so the
+    // line runs on into it without a step
+    // (how far past this pole's end of the span the pixel's wire is: its grip
+    // and the leads it feeds, which are not mirrored but go as it lets go)
+    float past = b.w > 0.5 ? sAt - a.y : a.x - sAt;
+    vec2 mir = vec2(0.0);
+    if (free1 > 0.0 && tl > 0.0 && past <= 0.0) {
+      float s0 = b.w > 0.5 ? a.y - tf * span : a.x + tf * span;
+      float dal = 2.0 * (s0 - sAt);
+      mir = steep ? vec2(e.z * dal, dal) : vec2(dal, e.z * dal);
+    }
     ivec2 bestP;
-    float A = wireMatte(vec2(pp.x - g * dy1, pp.y - dy1), id, bestP);
+    float A = wireMatte(vec2(pp.x - g * dy1, pp.y - dy1) + mir, id, bestP);
     float bestK = A;
     float n = min(ceil(abs(back) * slantL * 2.0), ${STREAK_SAMPLES}.0);
     for (int t = 1; t <= ${STREAK_SAMPLES}; t++) {
@@ -717,7 +751,7 @@ void main() {
       float f = float(t) / n;
       float d = dy1 - back * f;
       ivec2 bp;
-      float m = wireMatte(vec2(pp.x - g * d, pp.y - d), id, bp);
+      float m = wireMatte(vec2(pp.x - g * d, pp.y - d) + mir, id, bp);
       float k = m * (1.0 - f) * (1.0 - f * 0.35);
       if (k > A) A = k;
       if (m > bestK) {
@@ -725,6 +759,13 @@ void main() {
         bestP = bp;
       }
     }
+    // the free end narrows (its matte's thin rim goes first) and thins to
+    // nothing at the tip; its grip and leads, past the span's end, go as soon
+    // as it lets go
+    float tw = 1.0 - free1 * tl;
+    float cut = 0.55 * (1.0 - tw);
+    A = clamp((A - cut) / (1.0 - cut), 0.0, 1.0) * tw;
+    if (past > 0.0) A *= 1.0 - smoothstep(0.0, 0.3, free1);
     if (A <= 0.003 || bestP.x < 0) continue;
     // its ink: the wire unmixed against the plate behind it, at its densest texel
     int srk = ids(bestP).w / 64;
@@ -1128,6 +1169,7 @@ function fitWires(img, wires, pole) {
       const ac = m * al + q;
       return w.steep ? [ac, al] : [al, ac];
     };
+    w.m = m;
     const off = (p) => Math.abs(p[0] - (pole.k * p[1] + pole.c));
     w.pe = off(at(1)) < off(at(0)) ? 1 : 0;
     const k = w.steep ? 1 : w.g;
@@ -1387,7 +1429,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       uW.set([w.from, w.b, s1, f1], nw * 4);
       uW2.set([w.id, w.y0, w.y1, w.pe], nw * 4);
       uW3.set([s0, f0, w.g, w.steep ? 1 : 0], nw * 4);
-      uW4.set([q1, q0, 0, 0], nw * 4);
+      uW4.set([q1, q0, w.m, 0], nw * 4);
       nw++;
     }
     let np = 0;

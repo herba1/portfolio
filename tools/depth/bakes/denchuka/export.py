@@ -5,7 +5,8 @@
 # p0.webp          the photograph
 # p1..p3.webp      the clean plates, kept only where they differ from the one
 #                  before (R1 c R2 c R3, each its holes grown 6 px); flat grey
-#                  elsewhere, so they cost little
+#                  elsewhere, so they cost little (then run wisp.py: it takes
+#                  the scan's wisp left of the crossarms out of all four)
 # ids.png          R  wire id (over its hole, so the hole follows the wire)
 #                  G  hardware piece id * 16 + shaft id (over their holes)
 #                  B  plate region (0 none, 1..3: first plate that differs) * 64
