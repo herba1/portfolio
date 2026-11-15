@@ -50,7 +50,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // CC0, cut at its own resolution and placed under this camera so its
 // verticals converge with the pole's), laid into the same regrade through
 // the same matte (sky.png B its soft coverage, cloud.webp its unmixed
-// colour): its sunlit tops warm-neutral and rolled off below white, its
+// value, and in B - R where its flank's base is): its sunlit tops warm-neutral and rolled off below white, its
 // shade pockets skylight blue, keeping the billows' own relief, deepening up
 // the sky with the cobalt. Each removal
 // uncovers more of it; at the end it is the subject of the clean sky.
@@ -216,7 +216,12 @@ vec3 cloudGrade(vec3 c, float zen) {
   // and a touch bluer up the sky, its saturation falling as a billow catches
   // more light; never pale cyan, never a dead grey
   float ss = mix(0.32, 0.08, smoothstep(0.78, 0.93, L)) * mix(0.95, 1.08, zen);
-  vec3 shadeC = hsv2rgb(vec3((205.0 + 3.0 * zen) / 360.0, ss, L * mix(1.0, 0.97, zen)));
+  // the base of the flank (cloud.py's underside cue, B - R in the bake): lit
+  // only by the sky under it, a deeper, more saturated skylight blue (its
+  // shade only: a lit lobe low on it stays white)
+  float base = clamp((c.b - c.r) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(0.82, 0.9, L));
+  ss = mix(ss, 0.44, base);
+  vec3 shadeC = hsv2rgb(vec3((205.0 + 3.0 * zen + 2.0 * base) / 360.0, ss, L * mix(1.0, 0.97, zen)));
   vec3 sunC = SUN * L;
   return mix(shadeC, sunC, top);
 }

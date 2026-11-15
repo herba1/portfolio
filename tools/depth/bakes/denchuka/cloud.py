@@ -53,7 +53,8 @@
 # pockets skylight blue, the sunlit flanks and crowns warm-neutral, lit from
 # the right as the pole is.
 #
-# Writes cloud.webp (RGB: the cloud's colour, opaque) and the B channel of
+# Writes cloud.webp (RGB: the cloud's value, opaque, neutral but for the
+# underside's skylight cue in B - R; the underside, below) and the B channel of
 # sky.png (the cloud's coverage). Run after export.py, which writes sky.png R, G.
 import os, sys, json
 import numpy as np, cv2
@@ -302,8 +303,9 @@ sil = sil * np.isin(lab, keep)
 body = cv2.GaussianBlur(cv2.erode(sil, ell(6)).astype(np.float32), (0, 0), 2)
 a = np.maximum(a, body)
 # the tree line, should it come into the frame: the cloud stops above it
-a = a * np.clip((el - footEl - 0.3) / 0.5, 0, 1)
-a = np.clip(a * tail, 0, 1).astype(np.float32)
+fade = (np.clip((el - footEl - 0.3) / 0.5, 0, 1) * tail).astype(np.float32)
+a_shape = a.astype(np.float32)  # its coverage before the fades (the underside, below)
+a = np.clip(a * fade, 0, 1).astype(np.float32)
 Ys = cv2.GaussianBlur(Y.astype(np.float32), (0, 0), 6) / np.percentile(Y[a > 0.9], 99.5)
 soft = 1 - np.clip((Ys - 0.45) / 0.3, 0, 1)
 
@@ -371,11 +373,93 @@ print("relief x: " + "  ".join(f"p{p} {np.percentile(x[a > 0.9], p):.3f}" for p 
 SH, FLOOR = 0.995, 0.5
 GX = 1.15
 disp = FLOOR + (SH - FLOOR) * np.clip(x, 0, 1) ** GX
+
+# ---------------------------------------------------------------- the underside
+# The tower's lower-left flank, its anvil shelf and the lobes under it, is
+# the HDRI's flattest cloud: a uniform shade with a hard edge on the cobalt
+# and a flat base, so it read as a cut-out laid on the sky. A cumulus's base
+# is the darkest of it, lit only by the sky under it (the grade draws a low
+# value there as a deeper, more saturated skylight blue, hue ~205-208), its
+# sunlit lobes above stay bright, and where it thins at its edge it melts
+# into the blue. So, on that flank (UND_REG: the plate x, y where it fades
+# out and in):
+# - how far a pixel stands above the base (its distance to the matte's
+#   edge, weighed by how far that edge faces down) darkens it: most just
+#   inside the base, fading up over UND_L (and a weaker, longer UND_L2, so
+#   the whole shelf runs from blue shade at its base to its lit lobes), the
+#   lobes' own relief riding on it, and its sunlit lobes, even low on it,
+#   kept bright; the same share is written as the underside's skylight cue
+#   (cloud.webp, below), which the grade turns to a saturated skylight blue;
+# - the thin margin inside the edge (UND_RIM px) is lifted to the cloud just
+#   inside it (the HDRI's own darker margin, its cloud thinning over its
+#   sky, unmixed, drew a dark outline), the darkening rolls off a little
+#   there and it lifts a touch: lit through, never an outline;
+# - the matte's edge is rebuilt from its signed distance as a soft logistic
+#   falloff, ~9 px from half coverage to clear sky on the base (~13 px
+#   10-90%) and ~6 on the flank's other edges, so it dissolves into the
+#   cobalt instead of being cut.
+UND_REG = ((1450.0, 1750.0), (760.0, 900.0))
+UND_L, UND_L2, UND_DARK, UND_RIM = 40.0, 150.0, 0.075, 6.0
+UND_S = (2.0, 3.0)  # logistic scale, plate px: up/side-facing edge, underside
+sm = lambda e0, e1, v: np.clip((v - e0) / (e1 - e0), 0, 1) ** 2 * (3 - 2 * np.clip((v - e0) / (e1 - e0), 0, 1))
+reg = ((1 - sm(*UND_REG[0], xs)) * sm(*UND_REG[1], ys)).astype(np.float32)
+solid = (a_shape > 0.5).astype(np.uint8)
+# signed distance to the matte's half-coverage contour (+ inside), plate px
+sd = (cv2.distanceTransform(solid, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - solid, cv2.DIST_L2, 5)).astype(np.float32)
+# which way an edge faces: the outward normal of the smoothed matte; under:
+# it faces down, onto sky below it
+ab = cv2.GaussianBlur(a_shape, (0, 0), 10)
+gy, gx = np.gradient(ab)
+under = sm(0.15, 0.6, -gy / np.maximum(np.hypot(gx, gy), 1e-5)).astype(np.float32)
+under = cv2.GaussianBlur(under, (0, 0), 6)
+# the base: each pixel's distance to the matte's edge, weighed by how far the
+# nearest stretch of edge faces down (so the shade turns off smoothly where
+# the edge turns from a base to a flank)
+edge = ((solid == 0) & (cv2.dilate(solid, ell(1)) > 0)).astype(np.uint8)
+dedge, lab_ = cv2.distanceTransformWithLabels(1 - edge, cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+ey, ex = np.nonzero(edge)
+lut = np.zeros(lab_.max() + 1, np.float32)
+lut[lab_[ey, ex]] = under[ey, ex]
+facing = cv2.GaussianBlur(lut[lab_], (0, 0), 8)
+base = (0.7 * np.exp(-dedge / UND_L) + 0.3 * np.exp(-dedge / UND_L2)) * facing
+base = cv2.GaussianBlur(base.astype(np.float32), (0, 0), 4)
+# the sunlit lobes that hang low on the flank keep their light (the grade
+# lights everything over ~0.6 in the bake): only the shade is the base's
+base = base * (1 - sm(0.575, 0.62, cv2.GaussianBlur(disp.astype(np.float32), (0, 0), 2)))
+# the thin margin just inside the edge is lifted to the cloud just inside it
+# where it falls below it (the HDRI's darker margin: its cloud thinning over
+# its sky, unmixed), the falloff outside the edge takes the margin's own value
+# (not the brighter fill the unmixing left there), and it rolls up a touch
+# toward the edge: lit through, never an outline, dark or light
+rim = 1 - sm(0.0, UND_RIM, np.maximum(sd, 0))
+fill = lambda v, w: push_pull(np.repeat(v.astype(np.float32)[..., None], 3, -1), w.astype(np.float32))[..., 0]
+d2 = disp + (np.maximum(disp, fill(disp, sd > UND_RIM + 2)) - disp) * rim
+d2 = np.where(sd < 1, fill(d2, sd >= 1), d2)
+d2 = d2 - UND_DARK * base * (1 - 0.35 * rim) + 0.012 * rim
+d2 = np.maximum(d2, FLOOR + 0.004)
+disp = disp + (d2 - disp) * reg
+print(f"underside: {np.mean((reg * base > 0.3) & (sd > 0)) * 100:.2f}% of the frame darkened toward the base")
+# the soft edge: rebuilt from the signed distance, scaled by which way it faces
+s_ = UND_S[0] + (UND_S[1] - UND_S[0]) * under
+a_soft = 1 / (1 + np.exp(-(sd - 0.5) / s_))
+# away from the edge the matte keeps its own holes and wisps
+a_soft = np.where(np.abs(sd) > 8 * s_, a_shape, a_soft)
+a = np.clip(a + (a_soft * fade - a) * reg, 0, 1).astype(np.float32)
+
 chroma = C / np.maximum(CY, 1e-6)[..., None]
-# keep the HDRI's own tint, a little softened (the live grade sets the tint)
+# the HDRI's own tint, a little softened, for the value below
 chroma = 1 + (chroma - 1) * 0.6
 lin = chroma * (disp ** 2.2)[..., None]
 rgb = np.clip(lin, 0, 1) ** (1 / 2.2)
+# The live grade draws the cloud from its value alone (cloudGrade), so the
+# tint above never reaches the screen: the bake is written neutral, at the
+# same value, and carries one cue in its colour instead, the underside's
+# skylight (B - R, at unchanged luminance): how far a pixel is the base's
+# own deeper, more saturated blue. The grade turns it to skylight saturation.
+UND_CUE = 0.2
+v_ = rgb @ np.array([0.2126, 0.7152, 0.0722])
+cue = np.clip(reg * base, 0, 1) * UND_CUE
+rgb = np.clip(v_[..., None] + cue[..., None] * np.array([-0.0722, 0, 0.2126]) / 0.2848, 0, 1)
 ry = rgb[a > 0.9] @ np.array([0.2126, 0.7152, 0.0722])
 print("cloud display Y: " + "  ".join(f"p{p} {np.percentile(ry, p):.3f}" for p in (5, 25, 50, 75, 95, 99, 99.9)) + f"  max {rgb[a > 0.5].max():.3f}")
 print(f"coverage: {np.mean(a > 0.5) * 100:.1f}% of the frame")
