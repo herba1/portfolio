@@ -110,13 +110,23 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // skylight blue, its tops rolled softly under paper white. After the film,
 // the scan's lifted black is taken back out over the sky alone.
 //
+// And the cause, while the clock moves: the bake's 144 suns run again across
+// the walls as a moving light and shade (the eave slot's shadow line, the
+// houses across the lane, the shutter leaves and lanterns, marched live on
+// geo.webp and slab.webp, sweep.py), and each pixel's years follow the clock
+// faster where that sun stands on it, so the fade builds up behind the light
+// as it passes. At rest the light goes back to the photograph and the faded
+// paint stays.
+//
 // Query: ?years=0..30 holds the clock; ?still=1 skips the reveal; ?film=0
 // shows the aged frame before the film; ?debug=dose shows the dose map;
 // ?debug=local shows the dose with its ledge shelter, tails and drips;
 // ?debug=runoff shows the bake (R shelter, G runoff tails, B drips);
 // ?debug=cloud shows the sky's split (R cloud, G its lit term); ?debug=render
 // shows what chalks (R render, G shade, B dose); ?sky=0
-// shows the sky as shot.
+// shows the sky as shot; ?sun=0..144 holds the sweep's light at that sun of
+// the path; ?debug=sun shows that light; ?debug=recv shows the years each
+// pixel has received against the clock's (darker lags) while it sweeps.
 
 const BASE = "/lab/fade/";
 const PW = 2000;
@@ -194,6 +204,21 @@ const RESIDUAL_MIN = 0.038;
 // coat's hue by at most this much (Oklab hue, degrees): it loses chroma and
 // gains value, and keeps its family.
 const HUE_CAP = 3;
+// Except where the paint is pale. A pink lime wash is a little red earth and
+// ochre in a lot of lime; the ochre's yellow goes first, so as the coat fades
+// what is left of its tint turns from salmon toward rose, by up to ROSE_TURN
+// (Oklab hue, degrees) with the yellow ink's loss, and with so little pigment
+// to hold it, it chalks further (PALE_CHALK more bloom) and nearer the lime:
+// its value may climb PALE_CAP past the others' before the shoulder. A pale coat is one below PALE_CHROMA
+// (Oklab chroma, ramped over its last quarter) and warm (Oklab hue 25 to 62
+// degrees): the pinks (about 0.05), not the orange and ochre faces (0.09 and
+// up), which go to apricot as before, nor the grey-green house or the stone.
+// The most exposed wall, the pink top floor at the top left, so goes to a
+// dusty pink (#E9CFC6) rather than a beige.
+const ROSE_TURN = 15;
+const PALE_CAP = 0.12;
+const PALE_CHALK = 0.35;
+const PALE_CHROMA = 0.085;
 // Where the light falls at the scale of a ledge. Every sill, cornice and eave
 // shelters a strip of wall below it from sun and driving rain, out to about
 // its own depth; world up is toward the verticals' vanishing point, which the
@@ -263,6 +288,88 @@ const JBU_RANGE = 0.08;
 // The scan's lifted black (the film's toe x toe colour), removed over the sky.
 const FILM_TOE = 0.035;
 const FILM_TOE_COLOR = [0.75, 1, 1.2];
+// The cause, made visible. The dose is a year of sun summed into one number
+// per pixel, and the fade it drives is all a still can show. So while the
+// clock moves, the bake's own 144 suns (the 21st of each month, twelve steps
+// from sunrise to sunset) are run again as light across the walls, one after
+// another, the days taken alternately forward and back so the sun never jumps:
+// once over the thirty years, a day's arc every two and a half, starting at
+// midsummer noon. The houses across the lane throw their shade, the slot's
+// shadow line climbs and falls down the low storeys through each day and
+// lies deeper through the winter, the shutter leaves and lanterns cast their
+// own shapes, and the top floors stand in the sun almost all the way across.
+// The light is shown at a low amplitude (warm where the sun is, the lane's
+// cool sky light where it is not) and goes back to the photograph when the
+// clock rests. The years a pixel has received follow the clock faster where
+// the sun stands on it (K_LIT, a few tenths of a second) than in its shade
+// (K_DARK), so the fade builds up behind the light as it passes; going back,
+// and once the clock rests (K_SETTLE), every pixel takes the clock's years and
+// the faded paint stays.
+// The frame the bake fitted (dose.py, as sweep.py prints it: world up, the
+// level right and back axes in camera space, and the azimuth the back axis
+// points to) and the half-res camera (f, cx, cy in px).
+const LAT = 44.1;
+const SUN_DAYS = [21, 52, 80, 111, 141, 172, 202, 233, 264, 294, 325, 355];
+const SUN_HOURS = 12;
+const FACING = 260.043;
+const WORLD_UP = [-0.06897, 0.60755, -0.79128];
+const WORLD_RT = [0.99762, 0.042, -0.05471];
+const WORLD_BK = [0, 0.79317, 0.609];
+const GEO_K = [642.2, 499.5, 374.5];
+const GEO_ZMAX = 64;
+const SLAB_SPAN = 16;
+const SLOT_SPAN = 24;
+const LANE = 6;
+const SWEEP_START = 66;
+const SUN_TINT = [1.2, 1.12, 1.0];
+const SHADE_TINT = [0.58, 0.64, 0.78];
+const K_LIT = 9;
+const K_DARK = 0.25;
+const K_SETTLE = 5;
+const K_BACK = 14;
+
+// The 144 suns in sweep order: camera-space direction and beam (Meinel's
+// clear sky, as dose.py's irradiance), the beam normalised to the brightest.
+const sunPath = (() => {
+  const rad = Math.PI / 180;
+  const phi = LAT * rad;
+  const out = [];
+  SUN_DAYS.forEach((day, di) => {
+    const dec = 23.44 * rad * Math.sin(((2 * Math.PI) / 365) * (284 + day));
+    const ws = Math.acos(-Math.tan(phi) * Math.tan(dec)) / rad;
+    for (let k = 0; k < SUN_HOURS; k++) {
+      const j = di % 2 ? SUN_HOURS - 1 - k : k;
+      const hw = -ws + ((j + 0.5) * 2 * ws) / SUN_HOURS;
+      const w = hw * rad;
+      const se = Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(w);
+      const el = Math.asin(clamp(se, -1, 1));
+      const az = Math.atan2(Math.sin(w), Math.cos(w) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)) + Math.PI;
+      const f = FACING * rad;
+      const lx = Math.cos(el) * Math.cos(az - (f - Math.PI / 2));
+      const ly = Math.sin(el);
+      const lz = Math.cos(el) * Math.cos(az - f);
+      const dir = [0, 1, 2].map((i) => lx * WORLD_RT[i] + ly * WORLD_UP[i] + lz * WORLD_BK[i]);
+      const deg = el / rad;
+      const am = 1 / (Math.sin(el) + 0.50572 * Math.pow(Math.max(deg + 6.07995, 1e-3), -1.6364));
+      const beam = el > rad ? 1361 * Math.pow(0.7, Math.pow(am, 0.678)) : 0;
+      out.push({ dir, beam });
+    }
+  });
+  const top = Math.max(...out.map((s) => s.beam));
+  out.forEach((s) => (s.beam /= top));
+  return out;
+})();
+// the sun at a continuous place along the path (wrapping), interpolated
+const sunAt = (k) => {
+  const n = sunPath.length;
+  const k0 = ((Math.floor(k) % n) + n) % n;
+  const a = sunPath[k0];
+  const b = sunPath[(k0 + 1) % n];
+  const t = k - Math.floor(k);
+  const d = a.dir.map((v, i) => v + (b.dir[i] - v) * t);
+  const l = Math.hypot(d[0], d[1], d[2]) || 1;
+  return { dir: d.map((v) => v / l), beam: a.beam + (b.beam - a.beam) * t };
+};
 
 const srgbToLin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const hsvLin = ([h, s, v]) => {
@@ -611,8 +718,19 @@ uniform sampler2D uDetail;
 uniform float uDetailGain;
 uniform float uDetailClip;
 uniform float uChalkCap;
+uniform float uRoseTurn;
+uniform float uPaleCap;
+uniform float uPaleChroma;
+uniform float uPaleChalk;
 uniform sampler2D uRender;
 uniform sampler2D uDose;
+uniform sampler2D uSweep;
+uniform float uSweepAmp;
+uniform float uSunGain;
+uniform vec3 uSunTint;
+uniform vec3 uShadeTint;
+uniform sampler2D uRecv;
+uniform float uUseRecv;
 ${NOISE}
 ${DETAIL_PACK}
 vec3 toSrgb(vec3 c) {
@@ -784,6 +902,25 @@ void main() {
   // chalked wall instead of being read as a darker paint and lifted out
   float shade = max(rd.g, 0.1);
   S = max(S * shade, 0.02);
+  // the light of the one sun the sweep stands at (0 in its shade, its beam's
+  // cosine on the wall where it falls), and the years this pixel has received:
+  // while the clock moves, a wall ages as the light passes over it
+  vec4 sw = texture(uSweep, uv);
+  float sunlit = clamp(sw.r / max(sw.a, 1e-3) * 2.4 * sqrt(uSunGain), 0.0, 1.0);
+  float yrs = uYears;
+  if (uUseRecv > 0.5) {
+    vec2 rv = texture(uRecv, uv).rg;
+    yrs = (rv.x + rv.y / 255.0) * 32.0;
+  }
+  if (uDebug > 7.5) {
+    // the years received against the clock's: grey is level, darker lags
+    outColor = vec4(vec3(clamp(0.6 + (yrs - uYears) / 8.0, 0.0, 1.0)) * vec3(1.0, 0.9 + 0.1 * sunlit, 0.8 + 0.2 * sunlit), 1.0);
+    return;
+  }
+  if (uDebug > 6.5) {
+    outColor = vec4(toSrgb(vec3(sunlit * sw.a + 0.08 * sw.a)), 1.0);
+    return;
+  }
   if (uDebug > 5.5) {
     outColor = vec4(render, shade, dose * 0.5, 1.0);
     return;
@@ -822,11 +959,11 @@ void main() {
     return;
   }
   // effective dose after induction, with a soft knee (softplus) uInkKnee wide
-  float e0 = uYears * dose * m.a * local;
+  float e0 = yrs * dose * m.a * local;
   float e = uInkKnee * (log(1.0 + exp((e0 - uInduction) / uInkKnee)) - log(1.0 + exp(-uInduction / uInkKnee)));
   e = max(e, 0.0);
   // the skin fade under any light: linear in the baked dose, no induction
-  float fDiff = uDiffuseMax * (1.0 - exp(-uKDiffuse * uYears * doseLin * m.a));
+  float fDiff = uDiffuseMax * (1.0 - exp(-uKDiffuse * yrs * doseLin * m.a));
 
   // albedo and optical density per channel
   vec3 a = clamp(lin / S, 0.004, 1.0);
@@ -859,8 +996,13 @@ void main() {
   // loss approaches, not one it hits: the sun takes its share of what lies
   // above it, so a wall keeps fading through the back half of the years
   float resid = min(max(uResidual, uResidualMin / max(C0, 1e-4)), 1.0);
+  // a pale coat's tint turns toward rose as its yellow goes (a pale warm
+  // coat: a pink; the grey-green and the stone have no earth red to keep)
+  float hDeg = degrees(h0);
+  float pale = (1.0 - smoothstep(0.75 * uPaleChroma, uPaleChroma, C0)) * held * smoothstep(10.0, 25.0, hDeg) * (1.0 - smoothstep(62.0, 76.0, hDeg));
+  float hr = h0 - uRoseTurn * pale * (1.0 - exp(-uKInk.z * e));
   vec3 oi = oklab(aInk);
-  float hi = capHue(oi.yz, h0);
+  float hi = capHue(oi.yz, hr);
   float Ci = mix(min(length(oi.yz), C0), C0, resid);
   oi.yz = mix(oi.yz, Ci * vec2(cos(hi), sin(hi)), held);
   aInk = oklabToLin(oi);
@@ -879,7 +1021,7 @@ void main() {
   // dark in the photo is mostly not render at all (a window's void, the
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
   float ya = dot(a, LUMA);
-  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.92) * smoothstep(0.02, 0.2, ya) * render;
+  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear) * (1.0 + uPaleChalk * pale), 0.92) * smoothstep(0.02, 0.2, ya) * render;
   if (uDebug > 3.5 && uDebug < 4.5) {
     // R: how worn the coat is, G: the chalk, B: the ink's clock
     outColor = vec4(0.5 + 0.5 * wear, c, 1.0 - exp(-0.1 * e), 1.0);
@@ -894,7 +1036,7 @@ void main() {
   float Ca = length(oa.yz);
   vec2 abMix = mix(oa.yz, ol.yz, c);
   float Cc = mix(Ca, min(Ca, length(ol.yz) + resid * C0), c);
-  float hc = capHue(abMix, h0);
+  float hc = capHue(abMix, hr);
   vec2 abHeld = Cc * vec2(cos(hc), sin(hc));
   aged = oklabToLin(vec3(mix(oa.x, max(oa.x, ol.x), c), mix(abMix, abHeld, held)));
 
@@ -905,8 +1047,9 @@ void main() {
   float chalked = smoothstep(0.0, 0.3, c);
   float Y0 = dot(lin, LUMA);
   float Y1 = dot(outLin, LUMA);
-  float knee = 0.7 * uChalkCap;
-  float Yc = Y1 < knee ? Y1 : knee + (uChalkCap - knee) * (1.0 - exp(-(Y1 - knee) / (uChalkCap - knee)));
+  float cap = uChalkCap + uPaleCap * pale;
+  float knee = 0.7 * cap;
+  float Yc = Y1 < knee ? Y1 : knee + (cap - knee) * (1.0 - exp(-(Y1 - knee) / (cap - knee)));
   outLin *= mix(1.0, min(max(Y0, Yc) / max(Y1, 1e-5), 1.0), chalked);
   // and the plate's own grain, cracks and drip lines go back on top of the
   // lime, harder the more it has chalked: a powdered coat is matte and shows
@@ -919,6 +1062,13 @@ void main() {
   dt = min(dt - log(shade), max(dt, 0.0));
   dt = uDetailClip * tanh(dt / uDetailClip);
   outLin *= exp(uDetailGain * c * dt);
+  // the sweep's light over every surface: warm where the sun stands on it,
+  // the cool of the lane's sky where it does not, at a low amplitude that
+  // goes back to the photograph when the clock rests
+  if (uSweepAmp > 0.001) {
+    vec3 lit = mix(uShadeTint, uSunTint, sunlit);
+    outLin *= mix(vec3(1.0), lit, uSweepAmp * smoothstep(0.1, 0.6, sw.a));
+  }
   // the sky is inert to the clock (A = 0), so its grade is the same every year
   // what stands in the sky outside the matte (the bars, the cables) keeps its
   // own dark, its edge pixels shared with the sky by how far they fall below
@@ -1009,6 +1159,132 @@ void main() {
     wsum += w;
   }
   outColor = vec4(vec3(sum / wsum), 1.0);
+}`;
+
+// The sweep, live, at half the plate (light.webp's grid): the light of one
+// of the bake's suns on every surface. geo.webp and slab.webp (sweep.py) hold
+// the scene dose.py marched: each pixel's camera depth and normal, the thin
+// occluders as slabs off their walls, and the slot of sky above each pixel.
+// The march is dose.py's: toward the sun through the depth map in screen
+// space (a hit is a sample that lands behind the visible surface by up to the
+// houses' thickness), then through the occluders' slabs (a shutter leaf or a
+// lantern stops the ray, a cord a few % of it), then the far wall of the
+// lane, analytically: a wall LANE m from its own, as high above the pixel as
+// the slot says, takes every sun lower than its top. Out: R the beam's cosine
+// on the surface where it reaches it, G the visibility, A the surface.
+const SUN = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uGeo;
+uniform sampler2D uSlab;
+uniform vec3 uSun;
+uniform vec3 uUp;
+uniform vec3 uK;
+uniform float uLane;
+const float ZMAX = ${GEO_ZMAX.toFixed(1)};
+const float SPAN = ${SLAB_SPAN.toFixed(1)};
+const float SLOT = ${SLOT_SPAN.toFixed(1)};
+ivec2 gSize;
+float depthAt(ivec2 p) {
+  vec4 g = texelFetch(uGeo, p, 0);
+  return (g.r * 65280.0 + g.g * 255.0) / 65535.0 * ZMAX;
+}
+float a7(float a) { return clamp((a * 255.0 - 128.0) / 127.0, 0.0, 1.0); }
+vec3 octa(vec2 e) {
+  e = e * 2.0 - 1.0;
+  vec3 v = vec3(e, 1.0 - abs(e.x) - abs(e.y));
+  if (v.z < 0.0) v.xy = (1.0 - abs(v.yx)) * (step(0.0, v.xy) * 2.0 - 1.0);
+  return normalize(v);
+}
+// the texel a camera-space point projects to, or -1 off the frame
+ivec2 project(vec3 Q, out float qz) {
+  qz = -Q.z;
+  if (qz < 0.3) return ivec2(-1);
+  vec2 uv = vec2(uK.y + uK.x * Q.x / qz, uK.z - uK.x * Q.y / qz);
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > float(gSize.x - 1) || uv.y > float(gSize.y - 1)) return ivec2(-1);
+  return ivec2(floor(uv + 0.5));
+}
+void main() {
+  gSize = textureSize(uGeo, 0);
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 g = texelFetch(uGeo, p, 0);
+  float z = depthAt(p);
+  if (z <= 0.0) {
+    outColor = vec4(0.0);
+    return;
+  }
+  vec3 n = octa(vec2(g.b, a7(g.a)));
+  vec2 xy = vec2(p);
+  vec3 P = vec3((xy.x - uK.y) / uK.x * z, -(xy.y - uK.z) / uK.x * z, -z);
+  float cosi = dot(n, uSun);
+  if (cosi <= 0.0) {
+    outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  vec3 O = P + n * 0.03;
+  float vis = 1.0;
+  float qz;
+  for (int i = 1; i <= 28; i++) {
+    float t = 0.02 * pow(3000.0, float(i) / 28.0);
+    ivec2 q = project(O + uSun * t, qz);
+    if (q.x < 0) continue;
+    float ds = depthAt(q);
+    if (ds <= 0.0) continue;
+    float behind = qz - ds;
+    if (behind > 0.05 + 0.004 * qz && behind < 8.0 + 0.01 * qz) {
+      vis = 0.0;
+      break;
+    }
+  }
+  vec4 own = texelFetch(uSlab, p, 0);
+  // a wall pixel within reach of a leaf, a lantern, a sign or a cord
+  if (vis > 0.0 && own.b > 0.5 / 255.0 && own.b < 1.5 / 255.0) {
+    float hit = 0.0;
+    for (int i = 0; i < 32; i++) {
+      ivec2 q = project(O + uSun * (0.02 + 2.98 * float(i) / 31.0), qz);
+      if (q.x < 0) continue;
+      vec4 sl = texelFetch(uSlab, q, 0);
+      if (sl.b < 1.5 / 255.0) continue;
+      float zs = depthAt(q);
+      if (qz > zs + (sl.r - 0.5) * SPAN && qz < zs + (sl.g - 0.5) * SPAN) hit = max(hit, sl.b);
+    }
+    vis *= 1.0 - hit;
+  }
+  // the far wall of the lane, which the frame leaves out
+  float slot = a7(own.a) * SLOT;
+  vec3 nh = n - dot(n, uUp) * uUp;
+  float lh = length(nh);
+  if (vis > 0.0 && slot > 0.0 && lh > 0.5) {
+    float sn = dot(uSun, nh / lh);
+    if (sn > 0.02) vis *= smoothstep(-0.5, 0.5, uLane * dot(uSun, uUp) / sn - slot);
+  }
+  outColor = vec4(cosi * vis, vis, 0.0, 1.0);
+}`;
+
+// And the years each pixel has received: they follow the clock's, faster
+// where the sweep's sun stands on it, so the fade lands behind the light as
+// it passes; going back, and once the clock rests, all at once.
+const RECV = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uPrev;
+uniform sampler2D uSweep;
+uniform float uTarget;
+uniform float uDt;
+uniform float uSunGain;
+uniform vec4 uRates;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 rv = texelFetch(uPrev, p, 0).rg;
+  float r = rv.x + rv.y / 255.0;
+  vec4 sw = texelFetch(uSweep, p, 0);
+  float lit = clamp(sw.r * 2.4 * sqrt(uSunGain), 0.0, 1.0);
+  // x: the lit rate, y: the shaded, z: going back
+  float k = uTarget < r ? uRates.z : uRates.y + uRates.x * lit;
+  r += (uTarget - r) * (1.0 - exp(-uDt * k));
+  float v = clamp(r, 0.0, 1.0) * 255.0;
+  float h = floor(v);
+  outColor = vec4(h / 255.0, v - h, 0.0, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -1121,7 +1397,9 @@ export async function createFade(host, { embedded = false } = {}) {
   const still = held || q.get("still") === "1";
   const raw = q.get("film") === "0";
   const debugQ = q.get("debug");
-  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear" || debugQ === "cloud" || debugQ === "render";
+  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear" || debugQ === "cloud" || debugQ === "render" || debugQ === "sun" || debugQ === "recv";
+  // ?sun=0..144 holds the sweep at that sun, at full amplitude
+  const sunQ = num(q, "sun");
   const polar = q.get("sky") === "0" ? 0 : 1;
   const zenith = hsvLin(SKY_ZENITH);
   const rim = hsvLin(SKY_RIM);
@@ -1134,11 +1412,15 @@ export async function createFade(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("webgl2 unavailable");
 
-  const [plateImg, matImg, lightImg, renderImg] = await Promise.all(["plate.webp", "mat.webp", "light.webp", "render.webp"].map((f) => loadImage(BASE + f)));
+  const [plateImg, matImg, lightImg, renderImg, geoImg, slabImg] = await Promise.all(
+    ["plate.webp", "mat.webp", "light.webp", "render.webp", "geo.webp", "slab.webp"].map((f) => loadImage(BASE + f)),
+  );
   const plate = imageTexture(gl, plateImg, true);
   const mat = imageTexture(gl, matImg, true);
   const light = imageTexture(gl, lightImg, false);
   const renderMask = imageTexture(gl, renderImg, false);
+  const geo = imageTexture(gl, geoImg, false);
+  const slab = imageTexture(gl, slabImg, false);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -1157,6 +1439,8 @@ export async function createFade(host, { embedded = false } = {}) {
     local: program(gl, VERT, LOCAL),
     detail: program(gl, VERT, DETAIL),
     jbu: program(gl, VERT, JBU),
+    sun: program(gl, VERT, SUN),
+    recv: program(gl, VERT, RECV),
   };
 
   // the sky-only plate, once: render, then mipmap; first on the soft matte,
@@ -1293,6 +1577,12 @@ export async function createFade(host, { embedded = false } = {}) {
   }
   gl.deleteTexture(skyEdgeA);
   const film = createFilm(gl, { width: 2, height: 2 });
+  // the sweep's light and the years received, at light.webp's grid
+  const SW = PW / 2;
+  const SH = PH / 2;
+  const sweepT = target(gl, SW, SH);
+  const recvT = [target(gl, SW, SH), target(gl, SW, SH)];
+  let recvI = 0;
 
   // The view fills the box: looking up from the cobbles reads at full size,
   // not as a print on a mount. The 4:3 plate covers the box about its centre
@@ -1389,6 +1679,54 @@ export async function createFade(host, { embedded = false } = {}) {
   };
   host.addEventListener("keydown", onKey);
 
+  // The sweep: its amplitude rises while the clock moves and falls back to
+  // the photograph when it rests; the received years run while it shows and
+  // for a moment after, then hand back to the clock's own.
+  const sweepOn = !reduce && !held && !raw;
+  let amp = sunQ != null ? 1 : 0;
+  let sunK = SWEEP_START;
+  let sunGain = 0;
+  let lastK = NaN;
+  let useRecv = false;
+  let settle = 0;
+  const fullPass = (prog, dst) => {
+    gl.useProgram(prog.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dst.w, dst.h);
+  };
+  const runSweep = (dt) => {
+    gl.bindVertexArray(vao);
+    gl.disable(gl.BLEND);
+    const sun = sunAt(sunK);
+    sunGain = sun.beam;
+    if ((amp > 0 || debugQ === "sun") && sunK !== lastK) {
+      lastK = sunK;
+      const u = P.sun.u;
+      fullPass(P.sun, sweepT);
+      bindTex(0, geo, u.uGeo);
+      bindTex(1, slab, u.uSlab);
+      gl.uniform3fv(u.uSun, sun.dir);
+      gl.uniform3fv(u.uUp, WORLD_UP);
+      gl.uniform3fv(u.uK, GEO_K);
+      gl.uniform1f(u.uLane, LANE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    if (useRecv) {
+      const u = P.recv.u;
+      const src = recvT[recvI];
+      recvI = 1 - recvI;
+      fullPass(P.recv, recvT[recvI]);
+      bindTex(0, src.tex, u.uPrev);
+      bindTex(1, sweepT.tex, u.uSweep);
+      gl.uniform1f(u.uTarget, clamp(years, 0, 32) / 32);
+      gl.uniform1f(u.uDt, Math.min(dt, 0.1));
+      gl.uniform1f(u.uSunGain, sunGain);
+      gl.uniform4f(u.uRates, K_LIT, K_SETTLE + (K_DARK - K_SETTLE) * amp, K_BACK, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  };
+
   const draw = (expoStops, fade) => {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
@@ -1434,7 +1772,18 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uDetailGain, DETAIL_GAIN);
     gl.uniform1f(u.uDetailClip, DETAIL_CLIP);
     gl.uniform1f(u.uChalkCap, CHALK_CAP);
-    gl.uniform1f(u.uDebug, debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
+    gl.uniform1f(u.uRoseTurn, (ROSE_TURN * Math.PI) / 180);
+    gl.uniform1f(u.uPaleCap, PALE_CAP);
+    gl.uniform1f(u.uPaleChroma, PALE_CHROMA);
+    gl.uniform1f(u.uPaleChalk, PALE_CHALK);
+    bindTex(9, sweepT.tex, u.uSweep);
+    bindTex(10, recvT[recvI].tex, u.uRecv);
+    gl.uniform1f(u.uSweepAmp, amp);
+    gl.uniform1f(u.uSunGain, sunGain);
+    gl.uniform3fv(u.uSunTint, SUN_TINT);
+    gl.uniform3fv(u.uShadeTint, SHADE_TINT);
+    gl.uniform1f(u.uUseRecv, useRecv ? 1 : 0);
+    gl.uniform1f(u.uDebug, debugQ === "recv" ? 8 : debugQ === "sun" ? 7 : debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
     gl.uniform3fv(u.uRim, rim);
@@ -1553,6 +1902,31 @@ export async function createFade(host, { embedded = false } = {}) {
       }
     }
 
+    // the sun stands where the shown years put it along its path
+    sunK = sunQ != null ? sunQ : SWEEP_START + (years / YEARS) * sunPath.length;
+    if (sunQ == null) {
+      const want = sweepOn && (dragging || moving) ? 1 : 0;
+      amp += (want - amp) * (1 - Math.exp(-dt / (want > amp ? 0.12 : 0.5)));
+      if (!want && amp < 0.004) amp = 0;
+      if (amp > 0 && !useRecv) {
+        // every pixel starts from the clock's years
+        const v = (clamp(years, 0, 32) / 32) * 255;
+        const hi = Math.floor(v);
+        gl.clearColor(hi / 255, v - hi, 0, 1);
+        for (const t of recvT) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        useRecv = true;
+        settle = 0;
+      }
+      if (useRecv) {
+        settle = amp > 0 ? 0 : settle + dt;
+        if (settle > 1.2) useRecv = false;
+      }
+    }
+
     let tick = false;
     if (!reduce && !held) {
       grainClock += dt;
@@ -1563,8 +1937,9 @@ export async function createFade(host, { embedded = false } = {}) {
       }
     }
     const revealing = !still && age < REVEAL + 0.1;
-    if (!dirty && !moving && !tick && !revealing) return;
+    if (!dirty && !moving && !tick && !revealing && !(amp && sunQ == null) && !useRecv) return;
     dirty = false;
+    runSweep(dt);
     draw(expo, fade);
   });
 
@@ -1573,7 +1948,8 @@ export async function createFade(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [plate, mat, light, doseTex, renderMask, skyPlate, skyEdge, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
+      [sweepT, ...recvT].forEach((t) => freeTarget(gl, t));
+      [plate, mat, light, doseTex, renderMask, geo, slab, skyPlate, skyEdge, seedTex, localTex, detailTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
