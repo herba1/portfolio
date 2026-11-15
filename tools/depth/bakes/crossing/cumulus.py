@@ -80,6 +80,9 @@ Reads the bake's pristine p0..p6.webp, photo.webp and mattes.png from
 <bakedir> (run bake.py to a work dir, or keep a copy of its output: this step
 is not idempotent in place), writes p0.webp, clouds.webp, photo.webp and
 mattes.png to <outdir> and prints the clouds card's rect for the engine.
+The card is finished by cloudlight.py (after the later steps): opaque down
+past the roofline, the lower body's lobes at full contrast, the sunward crown
+lit.
 """
 import os
 import sys
@@ -89,7 +92,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import dilate, disk, erode, pushpull, smoothstep  # noqa: E402
+from common import dilate, disk, erode, lobed, pushpull, smoothstep  # noqa: E402
 from skygrad import _enc, _lin, sky_gradient  # noqa: E402
 
 BAKE, HDR, OUT = sys.argv[1:4]
@@ -453,50 +456,6 @@ if WORK:
 m = ((ae > 0.5) & ~cut).astype(np.uint8)
 m = cv2.morphologyEx(m, cv2.MORPH_OPEN, disk(10))
 del tex, edge_d, cut
-
-
-def lobed(m, w, lobes, jit=0.0):
-    """Rebuild the outer edge of m (uint8) where w is high as a chain of round
-    lobes (lobes: radius, inset, seed per scale; jit: how far each lobe's
-    seat wanders deeper in or out, as a share of its radius)."""
-    for R, inset, seed in lobes:
-        rng = np.random.default_rng(seed)
-        hs = cv2.GaussianBlur(m.astype(np.float32), (0, 0), R / 2)
-        nx_ = cv2.Sobel(hs, cv2.CV_32F, 1, 0, ksize=3)
-        ny_ = cv2.Sobel(hs, cv2.CV_32F, 0, 1, ksize=3)
-        nn = np.sqrt(nx_ * nx_ + ny_ * ny_) + 1e-6
-        # (the pockets of sky inside the cloud keep their own shape: only the
-        # outer edge is rebuilt)
-        fl = np.pad(m, 1).copy()
-        cv2.floodFill(fl, np.zeros((fl.shape[0] + 2, fl.shape[1] + 2), np.uint8), (0, 0), 2)
-        pocket = fl[1:-1, 1:-1] == 0
-        lob = cv2.erode((m | pocket).astype(np.uint8), disk(int(R * 0.9)))
-        cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        for c in cs:
-            c = c[:, 0, :]
-            if len(c) < 8:
-                continue
-            seg = np.sqrt((np.diff(c, axis=0, append=c[:1]) ** 2).sum(1))
-            arc = np.concatenate([[0.0], np.cumsum(seg)[:-1]])
-            nxt = rng.uniform(0, R)
-            for i in range(len(c)):
-                if arc[i] < nxt:
-                    continue
-                nxt = arc[i] + R * rng.uniform(1.0, 1.6)
-                x, y = int(c[i, 0]), int(c[i, 1])
-                r = R * rng.uniform(0.7, 1.25)
-                k = inset + (jit * rng.uniform(-1.0, 1.0) if jit else 0.0)
-                dx, dy = nx_[y, x] / nn[y, x], ny_[y, x] / nn[y, x]  # into the cloud
-                cv2.circle(lob, (int(round(x + dx * k * r)), int(round(y + dy * k * r))), int(round(r)), 1, -1, cv2.LINE_AA)
-        lob[pocket] = 0
-        # blend in signed distance, so the lobed and the native outline meet
-        # without a seam where w turns
-        sd_m = cv2.distanceTransform(m, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - m, cv2.DIST_L2, 5)
-        sd_l = cv2.distanceTransform(lob, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - lob, cv2.DIST_L2, 5)
-        m = ((sd_m * (1 - w) + sd_l * w) > 0).astype(np.uint8)
-    return m
-
-
 m = lobed(m, lobe_w, LOBES)
 # The tower's lower right is the straight cut where its puff was parted off
 # at the neck (and, under it, the HDRI's own flank, nearly plumb): it faces

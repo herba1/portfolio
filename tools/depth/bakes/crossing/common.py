@@ -65,3 +65,45 @@ def pushpull(col, w, levels=12):
 def smoothstep(a, b, x):
     t = np.clip((x - a) / (b - a), 0, 1)
     return t * t * (3 - 2 * t)
+
+
+def lobed(m, w, lobes, jit=0.0):
+    """Rebuild the outer edge of m (uint8) where w is high as a chain of round
+    lobes (lobes: radius, inset, seed per scale; jit: how far each lobe's
+    seat wanders deeper in or out, as a share of its radius)."""
+    for R, inset, seed in lobes:
+        rng = np.random.default_rng(seed)
+        hs = cv2.GaussianBlur(m.astype(np.float32), (0, 0), R / 2)
+        nx_ = cv2.Sobel(hs, cv2.CV_32F, 1, 0, ksize=3)
+        ny_ = cv2.Sobel(hs, cv2.CV_32F, 0, 1, ksize=3)
+        nn = np.sqrt(nx_ * nx_ + ny_ * ny_) + 1e-6
+        # (the pockets of sky inside the cloud keep their own shape: only the
+        # outer edge is rebuilt)
+        fl = np.pad(m, 1).copy()
+        cv2.floodFill(fl, np.zeros((fl.shape[0] + 2, fl.shape[1] + 2), np.uint8), (0, 0), 2)
+        pocket = fl[1:-1, 1:-1] == 0
+        lob = cv2.erode((m | pocket).astype(np.uint8), disk(int(R * 0.9)))
+        cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        for c in cs:
+            c = c[:, 0, :]
+            if len(c) < 8:
+                continue
+            seg = np.sqrt((np.diff(c, axis=0, append=c[:1]) ** 2).sum(1))
+            arc = np.concatenate([[0.0], np.cumsum(seg)[:-1]])
+            nxt = rng.uniform(0, R)
+            for i in range(len(c)):
+                if arc[i] < nxt:
+                    continue
+                nxt = arc[i] + R * rng.uniform(1.0, 1.6)
+                x, y = int(c[i, 0]), int(c[i, 1])
+                r = R * rng.uniform(0.7, 1.25)
+                k = inset + (jit * rng.uniform(-1.0, 1.0) if jit else 0.0)
+                dx, dy = nx_[y, x] / nn[y, x], ny_[y, x] / nn[y, x]  # into the cloud
+                cv2.circle(lob, (int(round(x + dx * k * r)), int(round(y + dy * k * r))), int(round(r)), 1, -1, cv2.LINE_AA)
+        lob[pocket] = 0
+        # blend in signed distance, so the lobed and the native outline meet
+        # without a seam where w turns
+        sd_m = cv2.distanceTransform(m, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - m, cv2.DIST_L2, 5)
+        sd_l = cv2.distanceTransform(lob, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - lob, cv2.DIST_L2, 5)
+        m = ((sd_m * (1 - w) + sd_l * w) > 0).astype(np.uint8)
+    return m

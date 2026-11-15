@@ -42,7 +42,10 @@ p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline,
 and townmatte.py keys the old sky out of the town card's top (p1.webp and
 its matte), ends it on the ridge tiles and refills what the signal hides
 there from the town alone, and lamphood.py takes the bristly fringe off the
-signal lamps' outline on p5.webp (and its matte).
+signal lamps' outline on p5.webp (and its matte), and cloudlight.py makes
+the clouds card one solid, lit mass (opaque down past the roofline, its
+lower body's lobes at full contrast, a soft glow on the sunward crown) and
+rewrites its matte.
 """
 import sys
 import os
