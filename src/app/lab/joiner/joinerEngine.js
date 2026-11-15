@@ -31,7 +31,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // given that sky's sun: the overcast haze taken off, the walls and glass
 // printed down to crisp dark silhouettes, the sunlit faces warmed (see
 // STRUCT_GRADE). Last comes the finish (see FINISH):
-// a thin red-orange halation ring where bright sky meets a structure, a
+// a thin warm halation ring where open sky meets a structure's silhouette, a
 // little scan softness and the print's own grain, so the film survives the
 // grade.
 //
@@ -816,11 +816,14 @@ void main() {
 // grain-free luminance, so whatever grain the film laid down is gone from the
 // sky by the time it is graded; the emulsion's character goes back on here,
 // after it, in three steps:
-//   - halation: light from a bright cloud or open sky that crosses into a
-//     dark structure on the matte scatters back off the film base and blooms
-//     as a thin red-orange ring just inside the structure's edge; on the
-//     bright side the same edge loses its cold paper white to a warm one, so
-//     the rim round a roofline reads as the film's ring, not a matte fringe;
+//   - halation: light from open sky that crosses into a dark structure on the
+//     matte scatters back off the film base and blooms as a thin warm ring
+//     just inside the structure's silhouette, and the white on the bright
+//     side of the same edge warms a touch. Only open sky does it: the sky
+//     matte is read over a wide footprint (about 14 texels) and the ring fades
+//     out where sky covers less than about 40% of it, so sky in a window, a
+//     gap between balconies or a cloud fleck against a facade gets none (a
+//     ring there reads as a sticker's outline, not film);
 //   - scan MTF: a slight, isotropic softening (the same kernel for every
 //     channel, so no RGB split), the way edges bleed in an SX-70 print;
 //   - grain: the print's own seed, clumped over a couple of texels, a
@@ -828,14 +831,15 @@ void main() {
 //     chroma speckle) and is strongest in the midtones: about four code
 //     values in open sky, less in the deepest cobalt and on the cloud tops.
 const FINISH = {
-  halation: 0.55, // ring strength on the dark side (share of the bright edge's light)
-  halationEdge: 0.5, // warming of the bright side of the same edge
-  halationRadius: 0.009, // ring radius, share of the print width (about 3.5 texels)
+  halation: 0.2, // ring strength on the dark side (share of the bright edge's light)
+  halationEdge: 0.15, // warming of the bright side of the same edge
+  halationRadius: 0.004, // ring radius, share of the print width (about 1.5 texels)
+  halationGate: 14, // radius of the open-sky footprint that gates the ring, texels
   mtf: 0.55, // share of the scan blur mixed in
   mtfRadius: 0.0022, // scan blur radius, share of the print width
   grainAmp: 9, // code values of grain at the midtone peak
 };
-const HALO = [1, 0.3, 0.07]; // halation colour, linear: red-orange off the base
+const HALO = [1, 0.5, 0.3]; // halation colour, linear: a warm glow off the base
 
 const FIN = `#version 300 es
 precision highp float;
@@ -844,6 +848,7 @@ out vec4 outColor;
 uniform sampler2D uImg;  // the graded print (sRGB)
 uniform sampler2D uRaw;  // the camera's view; alpha = sky matte
 uniform vec3 uHal;       // dark-side strength, bright-side warming, radius (uv)
+uniform float uHalGate;  // open-sky footprint radius, texels
 uniform vec2 uMtf;       // strength, radius (uv)
 uniform float uGrain;    // code values at the midtone peak
 uniform float uSeed;
@@ -902,16 +907,27 @@ void main() {
     }
   }
   sSky /= sw;
+  // Is this the outer silhouette? How much of a wide footprint round the
+  // pixel (two rings, about 7 and 14 texels out) is open sky. On a roofline
+  // it is about half or more; in a window, a gap between balconies or round
+  // a fleck of cloud against a facade it is a small share, and the ring goes.
+  vec2 tx = uHalGate / vec2(textureSize(uRaw, 0));
+  float wSky = 0.0;
+  for (int i = 0; i < 12; i++) {
+    float a = float(i) * 0.523599;
+    vec2 d = vec2(cos(a), sin(a));
+    wSky += texture(uRaw, vUv + d * tx * 0.5).a + texture(uRaw, vUv + d * tx).a;
+  }
+  wSky /= 24.0;
+  float open = smoothstep(0.36, 0.5, wSky);
   // the brightness of the sky across the edge, and how near the edge is
   float glow = smoothstep(0.08, 0.6, sGlow / max(sSky * sw, 1e-4));
-  float edgeIn = (1.0 - m0) * smoothstep(0.02, 0.4, sSky) * glow;
-  float edgeOut = m0 * smoothstep(0.04, 0.4, 1.0 - sSky) * smoothstep(0.25, 0.7, Y0);
-  // structure side: the ring. On a dark wall it is light added, red-orange;
-  // on a pale rim (the plate's own edge, which would read as a white matte
-  // fringe) the same ring is a filter that takes the white over to it.
+  float edgeIn = (1.0 - m0) * smoothstep(0.02, 0.4, sSky) * glow * open;
+  float edgeOut = m0 * smoothstep(0.04, 0.4, 1.0 - sSky) * smoothstep(0.25, 0.7, Y0) * open;
+  // structure side: the ring, light added on a dark wall only (a pale wall
+  // or a cloud fleck the matte calls structure is left its own colour).
   float darkW = 1.0 - smoothstep(0.04, 0.35, Y0);
   lin += uHal.x * edgeIn * darkW * glow * 0.8 * HALO;
-  lin *= mix(vec3(1.0), vec3(1.0, 0.7, 0.5), clamp(uHal.x * edgeIn * (1.0 - darkW) * 1.6, 0.0, 1.0));
   // sky side: the white along the same edge warms a little
   lin *= mix(vec3(1.0), vec3(1.0, 0.85, 0.72), clamp(uHal.y * edgeOut, 0.0, 1.0));
 
@@ -1508,6 +1524,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform1i(fu.uImg, 0);
     gl.uniform1i(fu.uRaw, 1);
     gl.uniform3f(fu.uHal, fin0.halation, fin0.halationEdge, fin0.halationRadius);
+    gl.uniform1f(fu.uHalGate, fin0.halationGate);
     gl.uniform2f(fu.uMtf, fin0.mtf, fin0.mtfRadius);
     gl.uniform1f(fu.uGrain, fin0.grainAmp);
     gl.uniform1f(fu.uSeed, p.grain);
