@@ -47,6 +47,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 const PLATE = "/lab/polariser/plate.jpg";
 const AUX = "/lab/polariser/aux.png";
+// The clear sky behind the clouds, a smooth field baked from the plate
+// (tools/depth/bakes/polariser/clearsky.py), in the plate's encoding.
+const CLEAR = "/lab/polariser/clearsky.png";
 
 // Camera of the plate (plate.py renders at 17, 89, 119; turn.py re-aims it):
 // stereographic, so a plane point p = 2 d⊥ / (1 + d·f), with the plate's
@@ -81,8 +84,10 @@ const HERO = 0.193;
 // Effective maximum degree of polarisation. A clean Rayleigh sky reaches about
 // 0.75, but a March cumulus sky is multiply scattered off bright cloud and a
 // real circular polariser does not extinguish fully, so the band 90° from the
-// sun deepens to cobalt rather than to navy.
-const P_MAX = 0.55;
+// sun deepens to cobalt rather than to navy. Since the filter acts only on the
+// clear sky each pixel lets through (see the sky in the shader), the veils no
+// longer go slate as it rises, so it sits near the clean-sky end.
+const P_MAX = 0.68;
 // Clear-sky dye (linear, per unit of the plate's blue) and the white balance
 // that takes the 5400 K capture's cloud to warm-neutral. The zenith the plate
 // now looks at is the darkest blue in the dome, so the dye is lifted to keep
@@ -93,9 +98,11 @@ const SKY_DYE = [0.03 * 2, 0.37 * 2, 2];
 // base fog greys it. A share of the dyed blue's luminance comes back as grey,
 // lifting the band toward a soft grey-cobalt instead of a poster blue.
 const SKY_GREY = 0.15;
-// Share of a thin veil's neutral light that is the open sky behind it and
-// takes the dye (see the veil in the shader).
-const VEIL_BLUE = 0.6;
+// Cloud white against the clear sky behind it: an open-sky pixel this many
+// times as bright as the local clear sky is opaque cloud. Measured on the
+// plate (clearsky.py's field), the cumulus bodies sit at a median 3.3x it,
+// the thin veils at 1.3-2x and the clear sky at 0.95-1.05x.
+const CLOUD_WHITE = 3.0;
 // Halation: a thin warm bleed on the dark side of an edge against bright
 // sky (the mast, the tower outlines), the light that went through the
 // emulsion and came back off the base. It is measured in print pixels, so it
@@ -206,7 +213,8 @@ uniform float uExpo;
 uniform float uLinearOut;
 uniform vec3 uSkyDye;
 uniform float uSkyGrey;
-uniform float uVeilBlue;
+uniform sampler2D uClear; // the clear sky behind the clouds (clearsky.py)
+uniform float uCloudWhite; // cloud white, in units of the local clear sky
 uniform float uHaloPx;   // halation ring radius, print px
 uniform float uHalo;
 uniform vec3 uHaloTint;
@@ -289,40 +297,46 @@ void main() {
   float cg = dot(d, uSun);
   float gam = acos(clamp(cg, -1.0, 1.0));
 
-  // Sky: the clear-blue (Rayleigh) part of the pixel, unmixed from the
-  // neutral (Mie, cloud) part by chroma, carries the polarisation.
+  // Sky: every open-sky pixel is cloud laid over clear sky. The clear sky
+  // behind it, S, is the plate's clear-sky-only field (clearsky.py: the
+  // cloud-free pixels spread under the clouds and blurred to the dome's own
+  // gradient), and the cloud's opacity is how far the pixel's light rises
+  // above it toward cloud white: alpha = (L - Ls) / (Lw - Ls). Only the sky
+  // the cloud lets through is polarised:
+  //   out = cloudLight * alpha + (1 - alpha) * polarisedSky.
+  // The cloud's own light is what the pixel has over the sky it lets through,
+  // L - (1 - alpha) Ls, in the pixel's own colour, so a veil stays a white
+  // veil, its sky goes cobalt under it, and it darkens toward the band round
+  // it in proportion to how transparent it is instead of freezing as grey
+  // slate where a chroma unmix read it as neutral. The bodies step forward
+  // whole. A pixel darker than the field is all sky, and keeps its own
+  // darkness as a ratio of the polarised sky, so the deep band is the field's
+  // one continuous sweep and the plate's mottle is not dyed into bruises.
   float P = uPmax * (1.0 - cg * cg) / (1.0 + cg * cg);
   float psi = imageAngle(d, normalize(cross(uSun, d)));
-  // The Rayleigh part is re-dyed toward the cobalt a Fuji negative gives a
-  // clear sky; cloud and everything neutral keep their own colour.
-  // Near paper white the plate's encoding is too flat to unmix: a few code
-  // values of difference decode to a tenfold chroma, so the aureole's
-  // near-clipped sky round the sun would dye electric cyan once burned in.
-  // It is glare and cloud there, not clear Rayleigh sky.
+  // Near paper white the plate's encoding is too flat to read: a few code
+  // values of difference decode to a tenfold change, so the aureole's
+  // near-clipped sky round the sun is glare and cloud, not clear sky.
   float clipped = smoothstep(0.88, 0.96, max(enc.r, max(enc.g, enc.b)));
-  float A = clamp((0.85 * C.b - C.r) / 0.56, 0.0, C.b) * aux.r * (1.0 - clipped);
-  // Cloud or veil. Measured on the plate, the cumulus bodies sit at a
-  // non-Rayleigh share past 0.9 and their shaded flanks at 0.8-0.9; the
-  // translucent veils between them land at 0.6-0.8 and the clear sky under 0.3.
-  float share = clamp(1.0 - A / max(C.b, 1e-4), 0.0, 1.0);
-  float body = smoothstep(0.7, 0.97, share);
-  float veil = aux.r * (1.0 - body) * smoothstep(0.05, 0.3, share);
-  // A veil is thin cloud in front of the open sky, but the plate's unmix by
-  // chroma reads most of it as neutral, so under the dye it stayed a mid grey
-  // while the sky round it went cobalt: a slate smear. Part of its neutral
-  // share is the sky behind it; lend that back to the Rayleigh part so the
-  // filter's blue shows through the veil. It is lent as grey light, all three
-  // channels: taken out along the clear sky's own spectrum it stripped the blue
-  // and left the red, and the veil stayed grey.
-  // Only a dim veil, its grey no brighter than the open sky's blue, reads as
-  // slate; a bright one is cloud and stays white (lent there, it dyed the
-  // cumulus near the sun electric cyan).
-  float grey = max(C.b - A, 0.0);
-  float lend = uVeilBlue * veil * (1.0 - smoothstep(0.5, 1.6, grey)) * (1.0 - clipped) * grey;
-  A += lend;
-  vec3 dyed = A * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
+  vec3 S = decode(texture(uClear, puv).rgb);
+  float Ls = dot(S, LUMA);
+  float L = dot(C, LUMA);
+  float alpha = clamp((L - Ls) / max((uCloudWhite - 1.0) * Ls, 1e-3), 0.0, 1.0);
+  // The clear sky's Rayleigh part, by its chroma (the field is smooth, so the
+  // unmix is too), re-dyed toward the cobalt a Fuji negative gives a clear
+  // sky and turned by the filter; its neutral, unpolarised haze stays.
+  float As = clamp((0.85 * S.b - S.r) / 0.56, 0.0, S.b);
+  vec3 dyed = As * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
   dyed = mix(dyed, vec3(dot(dyed, LUMA)), uSkyGrey);
-  vec3 Cout = C - A * vec3(0.29, 0.58, 1.0) + lend * vec3(0.29 - 1.0, 0.58 - 1.0, 0.0) + dyed;
+  vec3 polSky = S - As * vec3(0.29, 0.58, 1.0) + dyed;
+  vec3 cloudPart = C * (max(L - (1.0 - alpha) * Ls, 0.0) / max(L, 1e-4));
+  vec3 skyOut = cloudPart + (1.0 - alpha) * min(L / max(Ls, 1e-4), 1.0) * polSky;
+  // Open sky only: the towers, the mast and the glare round the sun keep
+  // their own light.
+  float gate = aux.r * (1.0 - clipped);
+  vec3 Cout = mix(C, skyOut, gate);
+  // The share of the pixel that is open sky seen through the cloud.
+  float t = (1.0 - alpha) * gate;
 
   // Halation: the surround's light, a few print pixels wide, where it is
   // brighter than the pixel itself (the dark side of an edge against sky).
@@ -383,19 +397,19 @@ void main() {
   // grading half its Rayleigh share on its brightest channel.
   float mc = max(Cout.r, max(Cout.g, Cout.b));
   vec3 held = Cout * (printCurve(vec3(mc)).r / max(mc, 1e-5));
-  float rayleigh = clamp(A / max(C.b, 1e-4), 0.0, 1.0) * aux.r;
-  // The veils' lent blue is held too (rayleigh counts it): let off the hold,
-  // the lent veils at the cloud edges swung to a cyan fringe.
+  // The veils' sky is held too: let off the hold, the thin cloud edges over
+  // the dyed sky swung to a cyan fringe.
+  float rayleigh = t * As / max(S.b, 1e-4);
   print = mix(print, held, 0.5 * rayleigh);
 
   // Split tone the cumulus. A cloud's sunlit top is lit by the low sun; its
   // shadowed underside only by the open sky around it, so it goes blue-grey
   // (hue ~205) while the tops roll off warm. Only the neutral, non-Rayleigh
   // share of an open-sky pixel is cloud; the quay and the mast are left alone.
-  // The gate opens only on the cloud bodies and their shaded flanks:
-  // a linear gate pressed the dark shade into every part-sky pixel too, so a
-  // translucent veil came out a straight-edged slate smear between sky and cloud.
-  float cloud = aux.r * body;
+  // The gate opens only on near-opaque cloud: a linear gate pressed the dark
+  // shade into every part-sky pixel too, so a translucent veil came out a
+  // straight-edged slate smear between sky and cloud.
+  float cloud = aux.r * smoothstep(0.45, 0.9, alpha);
   float lit = smoothstep(0.4, 0.85, dot(print, LUMA));
   print *= mix(vec3(1.0), mix(uShade, uSunlit, lit), cloud);
   // Paper white: the print's base never scans as a full 255.
@@ -539,9 +553,10 @@ export async function createPolariser(host, { embedded = false } = {}) {
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
   stage.canvas.style.cursor = "grab";
 
-  const [plateImg, auxImg] = await Promise.all([loadImage(PLATE), loadImage(AUX)]);
+  const [plateImg, auxImg, clearImg] = await Promise.all([loadImage(PLATE), loadImage(AUX), loadImage(CLEAR)]);
   const plate = imageTexture(gl, plateImg, true);
   const aux = imageTexture(gl, auxImg, true);
+  const clear = imageTexture(gl, clearImg, false);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -729,7 +744,10 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform2f(u.uBurn, BURN, rad(BURN_DEG));
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform1f(u.uSkyGrey, SKY_GREY);
-    gl.uniform1f(u.uVeilBlue, VEIL_BLUE);
+    gl.uniform1f(u.uCloudWhite, CLOUD_WHITE);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, clear);
+    gl.uniform1i(u.uClear, 2);
     gl.uniform1f(u.uHaloPx, HALO_PX);
     gl.uniform1f(u.uHalo, HALO);
     gl.uniform3fv(u.uHaloTint, HALO_TINT);
@@ -853,6 +871,7 @@ export async function createPolariser(host, { embedded = false } = {}) {
       freeTarget(gl, filmT);
       gl.deleteTexture(plate);
       gl.deleteTexture(aux);
+      gl.deleteTexture(clear);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);
