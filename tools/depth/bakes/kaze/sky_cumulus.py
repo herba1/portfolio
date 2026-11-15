@@ -27,9 +27,11 @@ y ahead, z up):
   smaller billows, the children biased upward so the domes boil up and the
   base stays flat; joined by a smooth minimum into one signed distance on a
   grid, so the billows flow into each other instead of meeting as spheres.
-- Eroded by noise at two scales, the large into the grid, the fine read
-  live at every sample, so every edge is soft by its own detail and no
-  billow is a perfect circle.
+- Eroded by billow noise at three scales, the large (a few hundred metres)
+  and the middle (about a hundred) into the grid, the fine (tens of metres
+  down to a few) read live at every sample, all laid cauliflower-way out:
+  round knuckles stand proud and sharp clefts cut in between them, so every
+  dome's edge breaks into small bumps and no billow is a perfect circle.
 
 It is rendered as a volume: each pixel's ray through the lens is marched
 through the density (sphere-traced through the empty air), the light read
@@ -37,11 +39,13 @@ from a grid of optical depth toward the sun (SUN, the frame's top left
 corner, as in kazeEngine.js) and toward the zenith:
 
 - sun: warm-neutral white, with the multiple scattering of a dense cloud
-  (four octaves, each with half the extinction, half the contribution and
-  half the forward lobe of the last; Wrenninge et al. 2013), and deeper
-  still a diffusion term (1 / (1 + tau)), so the whole body is lit from
-  within and glows instead of shading as grey clay; the light rolls round
-  the domes' shoulders, warm on the faces toward the sun;
+  (four octaves, each with half the extinction, under half the contribution
+  (MSO) and half the forward lobe of the last; Wrenninge et al. 2013), and
+  deeper still a diffusion term (1 / (1 + tau)), so the body is lit from
+  within; both held low (KM, MSO), so the sunlit faces are not one flat
+  cream but shade lobe by lobe, each knuckle's lee a step down from its
+  lit crown; the light rolls round the domes' shoulders, warm on the faces
+  toward the sun;
 - skylight: the zenith's pale cyan (hue about 200), from above, dimmed by
   the cloud over the sample, with high floors (inside a cumulus the sky's
   light is scattered round too), so the flanks turned from the sun print a
@@ -53,19 +57,23 @@ corner, as in kazeEngine.js) and toward the zenith:
   than the flanks' cyan (about half the tops' value), low near the frame's
   edge under every mass;
 - a little warm bounce from the summer ground on the undersides;
-- forward scattering (Henyey-Greenstein, g 0.6) where a thin edge stands
+- forward scattering (Henyey-Greenstein, g 0.72) where a thin edge stands
   between you and the sun: the silver lining; and the powder (the skin
   looking away from the sun a little darker than the cloud just inside it);
-- a soft skin: the density eases in (smoothstep) over its last metres, and
-  the finest billows carry about half their old amplitude, so silhouettes
-  fade into the sky over a few pixels and the domes read as soft billows;
+- a skin and a fringe: the density eases in (smoothstep) over its last
+  metres, and outside it a thin torn veil (FRW, a few tens of metres, at a
+  twentieth of the body's density) scatters once through a tighter forward
+  lobe (g 0.85), so an edge toward the sun glows silver into the cobalt
+  instead of cutting against it;
 - a little air between: the far masses lean toward the sky behind them.
 
 The open sky and the sun's bloom are sky_tower.py's (open_sky). The cloud
 is exposed by its sunlit tops (WHITE at PCT 90), so the shade below them
 keeps its own value instead of being lifted toward the median, and its
-brightest domes roll off under the clip through a shoulder that whitens as
-it rolls (DESAT), as film does near its white; the engine's grade and the
+brightest domes roll off under the clip through a long shoulder (KNEE to
+TOP, rational, so the sunlit faces keep their lobe-by-lobe steps rather
+than flattening into one cream) that whitens as it rolls (DESAT), as film
+does near its white; the engine's grade and the
 film's shoulder carry them the rest of the way. Last, the cloud's whites
 bleed a little into the cobalt round them (sky_tower.py's bleed), as light
 diffuses in the emulsion, so no lit edge meets the blue at a digital cut.
@@ -107,19 +115,25 @@ BASE_C = np.array([0.66, 0.81, 1.0], np.float32)
 BASE_C /= float(BASE_C @ np.array([0.2126, 0.7152, 0.0722], np.float32))
 KS = float(os.environ.get("KS", 4.0))    # sun
 KA = float(os.environ.get("KA", 2.4))   # skylight
-KM = float(os.environ.get("KM", 0.8))   # the deep multiple scattering (diffusion)
+KM = float(os.environ.get("KM", 0.4))   # the deep multiple scattering (diffusion)
 KG = float(os.environ.get("KG", 0.05))   # ground bounce
-MSK = float(os.environ.get("MSK", 0.1))   # how fast the deep diffusion falls off with the sun's depth
+MSK = float(os.environ.get("MSK", 0.16))  # how fast the deep diffusion falls off with the sun's depth
+MSO = float(os.environ.get("MSO", 0.38))  # each scattering octave's contribution after the last
 SKYF = float(os.environ.get("SKYF", 0.4))  # the skylight's floor under the cloud over a sample
 BASEK = float(os.environ.get("BASEK", 0.35))  # how far the flat base darkens
 BASEH = float(os.environ.get("BASEH", 0.12))  # km: how deep up the tower the base's shade reaches
-G0 = float(os.environ.get("G0", 0.6))    # forward lobe of the first octave
+G0 = float(os.environ.get("G0", 0.72))   # forward lobe of the first octave
 OCT = int(os.environ.get("OCT", 4))      # scattering octaves
 POW = float(os.environ.get("POW", 0.5))  # the powder: how dark the sun-averted skin
 SIGMA = float(os.environ.get("SIGMA", 70.0))  # /km at full density
 RAMP = float(os.environ.get("RAMP", 0.014))   # km: the soft skin, where density climbs to full
-FINE = float(os.environ.get("FINE", 0.010))   # km: the fine billows' depth
-WHITE = float(os.environ.get("WHITE", 3.3))
+FINE = float(os.environ.get("FINE", 0.022))   # km: the fine billows' depth
+MID = float(os.environ.get("MID", 0.04))      # km: the middle erosion's depth (lumps of about 100 m)
+FRW = float(os.environ.get("FRW", 0.022))     # km: the translucent fringe outside the skin
+FRD = float(os.environ.get("FRD", 0.05))      # its density, against the body's
+FRG = float(os.environ.get("FRG", 0.85))      # its forward lobe
+FRK = float(os.environ.get("FRK", 1.2))       # and how much of it
+WHITE = float(os.environ.get("WHITE", 3.0))
 DESAT = float(os.environ.get("DESAT", 0.5))  # how far the shoulder whitens
 PCT = float(os.environ.get("PCT", 90.0))  # the cloud's 90th percentile is exposed to WHITE (linear)
 
@@ -131,7 +145,7 @@ TOWERS = [
     # the hero, right: front-lit (the sun is behind it, over your left
     # shoulder), its flat base low on the right edge, its domes climbing
     # toward the zenith
-    dict(az=57, dist=1.55, zb=1.3, zt=4.65, rb=0.5, rt=0.32, lean=0.3, seed=1),
+    dict(az=57, dist=1.55, zb=1.3, zt=4.65, rb=0.5, rt=0.32, lean=0.3, seed=1, foot=0.8),
     # low in the middle: side-lit from the left, its domes rising toward
     # the frame's centre
     dict(az=-6, dist=2.05, zb=1.6, zt=3.65, rb=0.5, rt=0.3, lean=0.25, seed=2),
@@ -177,14 +191,24 @@ def tower(T):
         k = np.clip((z - zb) / hgt, 0, 1)
         return np.array([ax + toward[0] * T["lean"] * k, ay + toward[1] * T["lean"] * k])
 
+    # the foot's width against the crown's: a mass may be cut back low
+    # (foot < 1), its skirt and lower column narrowed toward the axis, the
+    # cut easing out by half its height (it scales the radii and offsets,
+    # never the number of lobes, so the mass keeps its own shape above)
+    foot = T.get("foot", 1.0)
+
+    def wk(z):
+        k = np.clip((z - zb) / (0.5 * hgt), 0, 1)
+        return foot + (1 - foot) * k * k * (3 - 2 * k)
+
     S = []
     # the skirt: lobes round the foot, sunk into the base plane; more and
     # smaller than one smooth ring of them, so the foot's flanks step too
     skirt = []
     for i in range(11):
         ang = 2 * np.pi * i / 11 + rng.uniform(-0.25, 0.25)
-        rr = T["rb"] * rng.uniform(0.42, 0.6)
-        off = T["rb"] * rng.uniform(0.5, 0.85)
+        rr = T["rb"] * rng.uniform(0.42, 0.6) * foot
+        off = T["rb"] * rng.uniform(0.5, 0.85) * foot
         c = axis(zb) + off * np.array([np.cos(ang), np.sin(ang)])
         S.append([c[0], c[1], zb + rr * rng.uniform(-0.1, 0.2), rr, 0])
         skirt.append(len(S) - 1)
@@ -200,7 +224,7 @@ def tower(T):
         k = (i + 0.5) / n
         z = zb + T["rb"] * 0.6 + (hgt - T["rb"] * 0.6 - T["rt"] * 0.8) * k
         rr = T["rb"] * (1 - k) ** 1.2 + T["rt"] * (1 - (1 - k) ** 1.2)
-        rr *= (1.1 if i % 2 == 0 else 0.86) * rng.uniform(0.94, 1.04)
+        rr *= (1.1 if i % 2 == 0 else 0.86) * rng.uniform(0.94, 1.04) * wk(z)
         phi += np.pi + rng.uniform(-0.7, 0.7)
         c = axis(z) + rr * rng.uniform(0.16, 0.26) * np.array([np.cos(phi), np.sin(phi)])
         S.append([c[0], c[1], z, rr, 0])
@@ -313,22 +337,27 @@ def billow(x, y, z, f0, octs, seed, gain=0.5):
     return s / tot
 
 
-# The fine billows, read live: the crinkle at a few metres. Its octaves fall
-# off faster than pink (gain 0.35, so the finest two carry about half the
-# amplitude they did), so the domes read as soft billows, not a stippled
-# crust; the larger of them still model each dome.
-FGAIN = 0.35
+# The fine billows, read live: the cauliflower at tens of metres down to a
+# few. Billow noise (1 - 2|n|) is round where |n| peaks and creased where n
+# crosses zero, so it is laid on the surface that way out: the round bumps
+# stand proud and the creases cut in (it is added to the distance: high
+# along the creases, low on the bumps), and a silhouette breaks into small
+# round knuckles parted by sharp clefts. The other way round, the creases stood out as ridges and
+# the bumps sank as smooth dents, which read as melted foam. Pink octaves
+# (gain 0.5), so the finest still carry a crisp crinkle at the skin.
+FGAIN = 0.5
+BMEAN = 0.4   # the billow noise's mean, so the erosion neither grows nor shrinks a mass
 
 
 @nb.njit(cache=True, inline="always")
 def fine(x, y, z, seed):
-    return 0.45 - billow(x, y, z, 26.0, 4, seed + 3, FGAIN)
+    return billow(x, y, z, 24.0, 4, seed + 3, FGAIN) - BMEAN
 
 
 # ---- the grids ----
 
 @nb.njit(cache=True, parallel=True)
-def build_sdf(S, lo, nx, ny, nz, vox, zb, seed):
+def build_sdf(S, lo, nx, ny, nz, vox, zb, seed, mid):
     # a lower bound on the distance everywhere (FAR where no sphere is
     # within FAR of it), so the march may sphere-trace through the air
     FAR = 0.15
@@ -363,8 +392,11 @@ def build_sdf(S, lo, nx, ny, nz, vox, zb, seed):
                 v = sdf[k, j, ii]
                 if v < 0.15:
                     # the large erosion: lumps of a few hundred metres down to
-                    # tens, cutting into the surface more than raising it
-                    v += 0.055 * (0.35 - billow(x, y, z, 3.2, 4, seed))
+                    # tens, and a middle one of about a hundred, both laid
+                    # cauliflower-way out (as fine() is): round lumps stand
+                    # proud, sharp clefts cut in between them
+                    v += 0.055 * (billow(x, y, z, 3.2, 4, seed) - BMEAN + 0.05)
+                    v += mid * (billow(x, y, z, 9.0, 3, seed + 1) - BMEAN)
                 # the base: cut flat at the condensation level, faintly
                 # rippled so its edge is not a ruled line
                 v = max(v, zb - z + 0.012 * vnoise(x * 6.0, y * 6.0, 0.0, seed + 5))
@@ -467,9 +499,15 @@ def hg(c, g):
 def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, seed,
            sunc, skyc, gndc, basec, P, out, trans, zhit):
     """P: ks, ka, km, kg, g0, octaves, powder, fine depth, the diffusion's
-    falloff, the skylight's floor, the base's darkening and its depth."""
+    falloff, the skylight's floor, the base's darkening and its depth, each
+    scattering octave's share, and the fringe's width, density, forward
+    lobe and strength."""
     ks, ka, km, kg, g0, noct, powk, fd = P[0], P[1], P[2], P[3], P[4], int(P[5]), P[6], P[7]
-    msk, skyf, bk, bh = P[8], P[9], P[10], P[11]
+    msk, skyf, bk, bh, mso = P[8], P[9], P[10], P[11], P[12]
+    frw, frd, frg, frk = P[13], P[14], P[15], P[16]
+    # how far out of the grid's surface a sample may still be cloud: the
+    # skin, the fine billows standing proud of it, and the fringe beyond
+    reach = max(ramp * 1.6, ramp * 0.5 + 0.7 * fd + frw)
     Hh, Ww = DX.shape
     for py in nb.prange(Hh):
         for px in range(Ww):
@@ -503,6 +541,9 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
             for o in range(noct):
                 PH[o] = (0.85 * hg(cosv, gg) + 0.15 * hg(cosv, -0.25 * gg)) * 4 * math.pi
                 gg *= 0.5
+            # the fringe's own, tighter forward lobe: its droplets are few
+            # and scatter once, so toward the sun it glows silver
+            phf = hg(cosv, frg) * 4 * math.pi
             # the powder: looking away from the sun, the skin of a dome has
             # had no depth yet to scatter light toward you and prints a
             # little darker than the cloud a few metres in (the dark-edged,
@@ -523,16 +564,29 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                 y = dy * t
                 z = dz * t
                 s = tri(sdf, lo, vox, x, y, z)
-                if s > ramp * 1.6:
-                    t += max(st, (s - ramp * 1.2) * 0.6)
+                if s > reach:
+                    t += max(st, (s - reach + ramp * 0.4) * 0.6)
                     continue
                 # the fine billows, read live
                 s += fd * fine(x, y, z, seed)
                 dn = min(max(-s / ramp + 0.5, 0.0), 1.0)
                 # the skin: density eases in over its last few metres
-                # (smoothstep, not linear), so a silhouette fades into the
-                # sky over a few pixels rather than cutting against it
+                # (smoothstep, not linear)
                 dn = dn * dn * (3.0 - 2.0 * dn)
+                # and outside it the fringe: a thin, torn veil of a few
+                # tens of metres at a twentieth of the body's density, so a
+                # silhouette does not cut against the cobalt but thins
+                # into it, and lit nearly unshaded, it glows
+                fr = 0.0
+                if s > -ramp * 0.5 and s < frw:
+                    q = 1.0 - max(s + ramp * 0.5, 0.0) / (frw + ramp * 0.5)
+                    wsp = min(max(0.5 + 1.6 * (billow(x, y, z, 70.0, 2, seed + 21, 0.5) - BMEAN), 0.0), 1.0)
+                    fr = frd * q * q * wsp
+                    if fr > dn:
+                        fr = fr - dn
+                    else:
+                        fr = 0.0
+                    dn += fr
                 if dn <= 0.0:
                     t += st
                     continue
@@ -547,7 +601,7 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                     qy = y + L[1] * q * NDS
                     qz = z + L[2] * q * NDS
                     sq = tri(sdf, lo, vox, qx, qy, qz)
-                    if sq < ramp * 1.6:
+                    if sq < reach:
                         sq += fd * fine(qx, qy, qz, seed)
                         tau_s += sigma * min(max(-sq / ramp + 0.5, 0.0), 1.0) * NDS
                 tau_s += tri0(ts, lo, lvox, x + L[0] * (NEAR + 0.5) * NDS, y + L[1] * (NEAR + 0.5) * NDS, z + L[2] * (NEAR + 0.5) * NDS)
@@ -563,7 +617,11 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                 for o in range(noct):
                     sun += eb * math.exp(-ea * tau_s) * PH[o]
                     ea *= 0.5
-                    eb *= 0.5
+                    eb *= mso
+                # the fringe's share of the sample scatters once, through
+                # its own forward lobe
+                if fr > 0.0:
+                    sun += frk * (fr / dn) * math.exp(-tau_s) * phf
                 # the powder on the single scattering (only the view's first
                 # few metres in, and only looking away from the sun)
                 sun *= 1.0 - pw_on * math.exp(-2.0 * tv)
@@ -654,7 +712,7 @@ def main():
     DX, DY, DZ = [np.ascontiguousarray(D[..., i]) for i in range(3)]
     del D
     L = unit(ray_at(*SUN)).astype(np.float64)
-    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE, MSK, SKYF, BASEK, BASEH], np.float64)
+    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE, MSK, SKYF, BASEK, BASEH, MSO, FRW, FRD, FRG, FRK], np.float64)
     skyl = open_sky(U, V).astype(np.float32)
 
     # the masses, far to near (by the axis' distance)
@@ -663,12 +721,20 @@ def main():
     tr = np.ones((H, W), np.float32)        # what of the sky shows through
     lab = np.full((H, W), -1, np.int8)
     isb = np.zeros((H, W), bool)
+    # VOLCACHE=path.npz keeps the rendered volume, so the exposure and the
+    # print below can be tuned without marching it again
+    cache = os.environ.get("VOLCACHE")
+    if cache and os.path.exists(cache):
+        z = np.load(cache)
+        rad, tr, lab, isb = z["rad"], z["tr"], z["lab"], z["isb"]
+        print(f"volume from {cache}", flush=True)
+        order = []
     for ti in order:
         T = TOWERS[ti]
         t0 = time.time()
         S, lo, hi = tower(T)
         nx, ny, nz = [int(np.ceil((hi[i] - lo[i]) / VOX)) for i in range(3)]
-        sdf = build_sdf(S, lo, nx, ny, nz, VOX, T["zb"], SEED + T["seed"] * 31)
+        sdf = build_sdf(S, lo, nx, ny, nz, VOX, T["zb"], SEED + T["seed"] * 31, MID)
         hi2 = lo + np.array([nx, ny, nz]) * VOX
         ts, tu = build_light(sdf, lo, hi2, VOX, LVOX, L, RAMP, SIGMA)
         o = np.zeros((H, W, 3), np.float32)
@@ -687,6 +753,8 @@ def main():
         isb[tt < 0.05] = zh[tt < 0.05] < T["zb"] + 0.06
         tr = tt * tr
         print(f"tower {ti}: {len(S)} spheres, grid {nx}x{ny}x{nz}, {time.time() - t0:.1f}s", flush=True)
+    if cache and order:
+        np.savez(cache, rad=rad, tr=tr, lab=lab, isb=isb)
 
     # the exposure: the brightest domes (the top few thousandths of the
     # cloud) land at WHITE, linear
@@ -699,15 +767,22 @@ def main():
     gain = WHITE / pk
     print(f"exposure gain {gain:.3f}")
     rad *= gain
-    # a print's shoulder on the cloud: the brightest roll off to warm white
+    # a print's shoulder on the cloud: the brightest roll off to warm white.
+    # A long one (rational, x / (1 + x), not exponential): an exponential
+    # shoulder reached its white within a stop past the knee, so every
+    # sunlit face over it printed one flat cream; this one keeps a step
+    # between each lit knuckle and its lee all the way up, and only the
+    # very crowns come near TOP
     m = rad.max(-1)
-    K, TOP = float(os.environ.get("KNEE", 0.5)), float(os.environ.get("TOP", 0.92))
-    sm = np.where(m < K, m, K + (TOP - K) * (1 - np.exp(-(m - K) / (TOP - K))))
+    K, TOP = float(os.environ.get("KNEE", 0.4)), float(os.environ.get("TOP", 0.95))
+    x = np.maximum(m - K, 0) / (TOP - K)
+    roll = x / (1 + x)   # how far up the shoulder, 0 at the knee, 1 at TOP
+    sm = np.where(m < K, m, K + (TOP - K) * roll)
     rad = rad * (sm / np.maximum(m, 1e-6))[..., None]
     # and as it rolls off it loses its colour, as film's does near its white:
     # the brightest domes print a clean white, the sunlit ones a touch warm
     # (their light is the sun's), and only the shade keeps the sky's cyan
-    w = DESAT * np.where(m < K, 0.0, 1 - np.exp(-(m - K) / (TOP - K)))[..., None]
+    w = DESAT * roll[..., None]
     rad = rad * (1 - w) + (rad @ LUM)[..., None] * w
     acc = rad + tr[..., None] * skyl
     # and the cloud's whites bleed a little into the cobalt round them
