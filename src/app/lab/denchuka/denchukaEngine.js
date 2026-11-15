@@ -188,13 +188,15 @@ vec3 skyGrade(vec3 c, float zen) {
 // under this camera) graded into the same light, so it glows and carries the
 // frame: the bright subject the dark pole cuts across. Its upper half is
 // sunlit: from the foot of the roll-off (~0.6 in the bake) to the crowns it
-// runs ~0.87-0.985 in the sun's own warm neutral (the crowns at ~245-250 on
+// runs ~0.89-0.975 in the sun's own warm neutral (the crowns at ~240-250 on
 // screen), each billow keeping its drawing, none of it clipped. Its body, in
-// its own shade, is lit by a whole bright summer sky and is still a lit white
-// (~0.82-0.88, ~190-215 on screen), only faintly skylight blue (~205): its
-// billows stretched about the bake's shade (x1.6) so the folds between them
-// go down to ~0.75 and no further (a deeper stretch reads as an overcast grey
-// mass, and mottles), a little deeper and bluer the higher up the sky it is
+// its own shade, is lit by a whole bright summer sky: its pockets a clear,
+// saturated skylight blue (hue ~205, sat ~0.3), its lit lobes paling toward
+// white, so the tower has volume (sunlit crowns against blue shade) and is
+// never a milky grey: its billows stretched about the bake's shade (x1.8) so
+// the folds between them go down to ~0.75 and no further (a deeper stretch
+// reads as an overcast mass, and mottles), the blue carrying the depth more
+// than the value does, a little deeper and bluer the higher up the sky it is
 // (the cobalt ramp, zen). One lightness curve runs through shade and sun, so
 // no lobe's edge steps or rings. The sun on the crowns is the same
 // sun as the concrete, a warm neutral (#fff9f3) that the film's own warmth
@@ -203,17 +205,17 @@ const vec3 SUN = vec3(1.0, 0.978, 0.952);
 vec3 cloudGrade(vec3 c, float zen) {
   float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // one lightness curve through shade and sun, so a lobe's edge never steps:
-  // the shade's billows stretched (x1.6 about the bake's ~0.58, the folds
-  // between them down to ~0.75, its lit lobes up to ~0.86), then a gentler
-  // run up through the sunlit flanks to the crowns (~0.985)
-  float L = v < 0.58 ? 0.86 + (v - 0.58) * 1.6 : 0.86 + (v - 0.58) * 0.4;
-  L = clamp(L, 0.62, 0.985);
+  // the shade's billows stretched (x1.8 about the bake's ~0.6, the folds
+  // between them down to ~0.75, its lit lobes up to ~0.89), then a gentler
+  // run up through the sunlit flanks to the crowns (~0.975)
+  float L = v < 0.6 ? 0.89 + (v - 0.6) * 1.8 : 0.89 + (v - 0.6) * 0.42;
+  L = clamp(L, 0.72, 0.975);
   // how much of the sun this face sees: its colour only, wide and soft
-  float top = smoothstep(0.56, 0.86, v);
-  // skylight: a faint clear blue (hue ~206) in the shade pockets, deeper and
-  // a touch bluer up the sky, its saturation falling as a billow catches more
-  // light; never pale cyan, never a dead grey
-  float ss = mix(0.17, 0.07, smoothstep(0.8, 0.95, L)) * mix(0.95, 1.1, zen);
+  float top = smoothstep(0.6, 0.84, v);
+  // skylight: a clear saturated blue (hue ~205) in the shade pockets, deeper
+  // and a touch bluer up the sky, its saturation falling as a billow catches
+  // more light; never pale cyan, never a dead grey
+  float ss = mix(0.32, 0.08, smoothstep(0.78, 0.93, L)) * mix(0.95, 1.08, zen);
   vec3 shadeC = hsv2rgb(vec3((205.0 + 3.0 * zen) / 360.0, ss, L * mix(1.0, 0.97, zen)));
   vec3 sunC = SUN * L;
   return mix(shadeC, sunC, top);
@@ -223,16 +225,16 @@ vec3 cloudGrade(vec3 c, float zen) {
 // frame's one firm dark silhouette, cut across the glowing tower behind it.
 // The scan has it lit and pale (its sunlit two thirds at ~0.66-0.86, the
 // shade third ~0.27-0.37, both close to the cumulus's ~0.8-0.98). Its value
-// is pulled down and compressed: the shade third to ~0.25, the body to a
-// neutral-warm dark grey (~0.28-0.35, ~70-90 on screen), and only the last
-// sliver on the lit side, where the scan is brightest, rises to ~0.5-0.6. Its darks (bolts, wires across
+// is pulled down and compressed: the shade third to ~0.2, the body to a
+// deep neutral-warm grey (~0.21-0.27, ~25-30% luma on screen), and only the
+// last sliver on the lit side, where the scan is brightest, rises to ~0.5. Its darks (bolts, wires across
 // it, the transformers' undersides) keep their own value. Colour: a neutral
 // warm grey (hue ~35, chroma near zero), with a trace of the scan's own so
 // its stains and seams stay in it. The hardware's lit faces take the same.
 vec3 solidGrade(vec3 c) {
   float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float body = 0.25 + 0.1 * smoothstep(0.22, 0.8, v);
-  float g = min(body, v + 0.03) + 0.2 * smoothstep(0.85, 0.91, v);
+  float body = 0.21 + 0.06 * smoothstep(0.22, 0.8, v);
+  float g = min(body, v + 0.02) + 0.26 * smoothstep(0.87, 0.93, v);
   vec3 tint = vec3(1.022, 0.998, 0.968);
   vec3 chroma = (c - vec3(v)) * (g / max(v, 0.05));
   return clamp(g * tint + 0.12 * chroma, 0.0, 1.0);
