@@ -20,7 +20,7 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/canary_wharf_8k.hdr",
       "author": "Andreas Mischok",
       "licence": "CC0",
-      "note": "8K HDR, the street and towers. Its sky is replaced inside the sky matte by the cumulus below; baked to a 2048 sRGB cubemap storing scene light / 1.35."
+      "note": "8K HDR, the street and towers. Its sky is replaced inside the sky matte by the cumulus below; baked to a 2048 sRGB cubemap storing scene light / 1.35. A neighbour's ragged shadow up One Canada Square is relit by cloning its sunlit floors down by whole floors (deshadow.py)."
     },
     {
       "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",

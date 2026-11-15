@@ -1,6 +1,7 @@
 import numpy as np, cv2, sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grade import grade, align_sky2, P, CAP, smooth
+from deshadow import deshadow_px
 from PIL import Image
 # usage: bake.py street.npy sky.npy outdir [json overrides]
 # Both npy files come from load.py: the street (Poly Haven canary_wharf_8k.hdr)
@@ -62,6 +63,10 @@ for face, N in sizes.items():
         cx = ((lon + CAP) * ppd - 0.5).astype(np.float32); cy = ((CAP - lat) * ppd - 0.5).astype(np.float32)
         fc = cv2.remap(cap, cx, cy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         f = f + (fc - f) * wr[..., None]
+    if face == 'px':
+        # a neighbour's ragged shadow up One Canada Square read as a dark
+        # smoky ghost at the frame's right edge; clone the lit floors down
+        f = deshadow_px(f)
     if face == 'ny':
         f = cv2.GaussianBlur(f, (0, 0), 3)
     v = np.clip(f / ENC, 0, 1)
