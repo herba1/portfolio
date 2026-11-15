@@ -20,6 +20,8 @@
 #     && python3 swap.py <copy of scene.webp> <copy of trees.webp> <stone_pines_8k.hdr>
 #                (the source swapped to Poly Haven's Stone Pines, nearly straight up: yaw 15 / pitch +83 / field 118 / roll +10;
 #                 open sky laid fresh as the dome, pines and cumulus solved from the new HDR; this is the shipped bake)
+#     && python3 wisps.py <copy of scene.webp> <copy of trees.webp> <copy of optics.png>
+#                (once, after polarise.py --relay and defringe.py: the upper sky's flecks taken out, the few wisps feathered back)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image
