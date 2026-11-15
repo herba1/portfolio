@@ -13,8 +13,13 @@ is the plate's own tone, read as a height over the card: a billow bulges
 toward us where it is brightest, its shaded flank falls away from the light,
 and the crease where it tucks under the next is the photograph's own darker
 tone, never a drawn outline. Two scales of it: the billows (TONE_FINE) on the
-lobes they make up (TONE_BROAD). The whole rolls off to the silhouette with
-the blurred coverage. It is seen only through two blurs, weighted 60/40
+lobes they make up (TONE_BROAD). The whole rolls off only gently to the
+silhouette (EDGE_HEIGHT over the blurred coverage): the height is never
+dragged to zero across the cut, and every blur is weighted by the coverage,
+so the cut itself makes no slope. Read as a steep face all the way round,
+the cut lit as an even band down every sunward flank, a cut-out's outline
+rather than billows; now the edge's light is the billows' own. It is seen
+only through two blurs, weighted 60/40
 toward the big one (about 34 and 10 plate px across), and stored as its slope:
 G across the card, B down it, 0.5 flat, +-SLOPE/2 card px per px. Written
 lossless: the lossy codec's chroma subsampling would bleed the slope into R.
@@ -31,7 +36,7 @@ W = sys.argv[2] if len(sys.argv) > 2 else None
 # the tone as a height: the billows on their lobes (card px of blur, weights)
 TONE_FINE, TONE_BROAD = (6, 0.55), (36, 0.45)
 TONE_HEIGHT = 280  # card px of height per unit of tone
-EDGE_HEIGHT = 140  # card px the body stands above its edge
+EDGE_HEIGHT = 36  # card px the body stands above its edge (a gentle limb)
 BLUR_BIG, BLUR_SMALL = 24, 7
 SLOPE = 4.0  # the slope channels span -SLOPE/2..SLOPE/2
 
@@ -47,8 +52,8 @@ def wblur(x, w, s):
 
 cov = cv2.GaussianBlur(A, (0, 0), 24)
 tone = TONE_FINE[1] * wblur(T, A, TONE_FINE[0]) + TONE_BROAD[1] * wblur(T, A, TONE_BROAD[0])
-hgt = TONE_HEIGHT * tone * np.clip(cov * 1.4, 0, 1) + EDGE_HEIGHT * cov
-hgt = 0.6 * cv2.GaussianBlur(hgt, (0, 0), BLUR_BIG) + 0.4 * cv2.GaussianBlur(hgt, (0, 0), BLUR_SMALL)
+hgt = TONE_HEIGHT * tone + EDGE_HEIGHT * cov
+hgt = 0.6 * wblur(hgt, A, BLUR_BIG) + 0.4 * wblur(hgt, A, BLUR_SMALL)
 gy, gx = np.gradient(hgt)
 gx = np.clip(0.5 + gx / SLOPE, 0, 1)
 gy = np.clip(0.5 + gy / SLOPE, 0, 1)

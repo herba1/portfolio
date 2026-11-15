@@ -469,7 +469,14 @@ void main() {
   // 0 on the crowns, 1 low in a tower's body, where its own mass and the
   // towers round it shade it; and the lobes' undersides (faces turned down,
   // toward the street) see neither the sun nor the open dome
-  float deep = smoothstep(1.2, 5.0, tup);
+  // Measured only by the coverage above, that boundary runs at one depth
+  // under the whole silhouette, a lit band of even width down every flank.
+  // The billows decide it instead: a lobe that bulges out of the outline (the
+  // fine coverage over the coarse) and the photograph's bright billows stand
+  // out as crowns deeper in, the notches between lobes and its darker tone go
+  // into the body almost at the edge.
+  float cvx = textureLod(uCloud, cuv, 2.5).a - textureLod(uCloud, cuv, 5.5).a;
+  float deep = smoothstep(1.2, 5.0, tup - 2.5 * (tn - 0.45) - 3.0 * mid - 5.0 * cvx + 0.6);
   float down = clamp(cn.y * 2.2, 0.0, 1.0);
   // Each billow takes the sun on the face turned toward it; its far side and
   // the photograph's own shaded creases stay in the shade. The reach through
@@ -503,14 +510,25 @@ void main() {
   // it (lighter in the crowns, whose tone already draws them)
   float fine = textureLod(uCloud, cuv, 1.0).r - textureLod(uCloud, cuv, 4.0).r;
   vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + (0.55 * fine + 0.35 * mid) * (0.4 + 0.6 * deep)), vec3(1.07));
-  // A thin bright rim just inside the silhouette, where the cloud thins to
-  // its edge and the light comes through it: warm on the side toward the
-  // sun, the dome's pale blue-white on the far side.
-  vec2 ge = vec2(g5.x * rc + g5.y * rs, -g5.x * rs + g5.y * rc);
-  float edgeSun = smoothstep(-0.1, 0.7, dot(normalize(-ge + 1e-6), sdir));
+  // Where the cloud thins to its edge the sun comes through it, so a sunlit
+  // billow's top ends in a bright fringe. That is only true where the sun
+  // stands: the edge has to face it (squared, so it fades fast as the edge
+  // turns away), face up the tower (a billow's top, never an underside or a
+  // flank turned down toward the street) and stand high, where the sun
+  // reaches. Everywhere else there is no rim at all: the shaded flanks and
+  // the foot end in the dome's grey-blue, thinning softly into the sky with
+  // the plate's own alpha, never in a bright band.
+  vec2 en = normalize(-g5 + 1e-6);   // outward, on the card (y down the tower)
+  vec2 ge = vec2(en.x * rc + en.y * rs, -en.x * rs + en.y * rc);
+  float edgeSun = smoothstep(-0.1, 0.7, dot(ge, sdir));
+  float edgeUp = smoothstep(-0.1, 0.6, -en.y);
   float thin = clamp((1.0 - textureLod(uCloud, cuv, 2.2).a) * 3.2, 0.0, 1.0) * smoothstep(0.25, 0.9, cl.a);
-  vec3 rimC = mix(vec3(0.9, 0.95, 1.0), litC * vec3(1.02, 1.0, 0.97), edgeSun);
-  cloud = mix(cloud, max(cloud, rimC), thin * (0.55 + 0.4 * edgeSun));
+  float rimW = thin * edgeSun * edgeSun * edgeUp * smoothstep(0.35, 0.85, reach) * (1.0 - deep) * 0.8;
+  cloud = mix(cloud, max(cloud, litC * vec3(1.02, 1.0, 0.97)), rimW);
+  // the shade side's edge: the dome's light through thin cloud, a touch
+  // bluer and no brighter than the shade it bounds
+  float shEdge = thin * (1.0 - edgeSun) * 0.5;
+  cloud = mix(cloud, min(cloud, mix(shadeC, clear, 0.35)), shEdge);
   // The same air as the sky: a few percent of the sky's own colour veils the
   // cloud, a little more low in the towers where there is more air in between.
   cloud = mix(cloud, clear, 0.04 + 0.04 * deep);
@@ -519,7 +537,7 @@ void main() {
   // sun is low, so the edge never sits in a dull grey band.
   float ring = max(textureLod(uCloud, cuv, 1.8).a - cl.a, 0.0);
   vec3 ringC = mix(vec3(0.72, 0.85, 1.0), vec3(1.0, 0.84, 0.7), low * low);
-  clear = mix(clear, ringC, clamp(ring * edgeSun * 0.3, 0.0, 0.16));
+  clear = mix(clear, ringC, clamp(ring * edgeSun * edgeSun * edgeUp * 0.3, 0.0, 0.16));
   float ca = cl.a;
   vec3 skyS = mix(clear, cloud, ca);
   // back through the scan grade below, so the sky lands where it was drawn;

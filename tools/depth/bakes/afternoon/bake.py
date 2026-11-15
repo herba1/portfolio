@@ -38,7 +38,8 @@ Outputs (public/lab/afternoon), the formats afternoonEngine.js decodes:
   normal.png   R,G octahedral normal (engine camera space: x right, y up,
                z forward), B occluder thickness log2(m) over -2..4
   depth.png    R,G log2(metres)/12 in 16 bits, B the photo's sun mask m0
-  matte.png    half size: R sky, G cloud density
+  matte.png    half size: R sky (the hairline wires right of the pole taken
+               out by dewire.py), G cloud density
 and W/meta.json: camera, up, the fitted sun, and the pole and mast-arm
 capsules in camera space for the engine's exact thin-occluder shadows.
 """
@@ -52,6 +53,8 @@ import cv2
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 import kit  # noqa: E402
+sys.path.insert(0, HERE)
+from dewire import dewire  # noqa: E402
 
 W = sys.argv[1] if len(sys.argv) > 1 else "/tmp/claude-0/climb/afternoon/work/r1"
 OUT = sys.argv[2] if len(sys.argv) > 2 else "public/lab/afternoon"
@@ -349,6 +352,9 @@ dep8 = np.stack([q >> 8, q & 255, np.round(m0 * 255).astype(np.uint32)], -1).ast
 cv2.imwrite(OUT + "/depth.png", dep8[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])
 mat8 = np.stack([sky * ~wire, cl, np.zeros_like(cl)], -1).astype(np.float32)
 mat8 = cv2.resize(mat8, (Wd // 2, H // 2), interpolation=cv2.INTER_AREA)
+# the hairline wires right of the pole survive the half size only as dashed
+# partial coverage: made sky (dewire.py)
+mat8[..., 0] = dewire(mat8[..., 0] * 255) / 255
 cv2.imwrite(OUT + "/matte.png", np.round(np.clip(mat8, 0, 1) * 255).astype(np.uint8)[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
 meta = {
