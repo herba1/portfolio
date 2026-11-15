@@ -69,14 +69,17 @@ const PLANES = [
   { file: "p0", rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
   // The cumulus (cumulus.py): real cloud from a summer HDRI, its own card
   // between the sky and the town so a swing slides it against the roofs.
-  // Its foot runs on far below the roofline (the card reaches v 1.2), so a
-  // swing never uncovers a base hanging in the sky. A cut-out on a wide transparent margin, feathered to 0 well inside every
-  // edge, so it need not cover the window; it throws no shadow on the sky
-  // behind it (a cloud is not paper). It is far off, almost at infinity: it
+  // It stands far off over the town, its base down behind the roofs, the
+  // eave and the lamps and its foot running on below the roofline, so a
+  // swing never uncovers a base hanging in the sky; it sits back near the
+  // sky card, so it barely slides against the sky and the street slides
+  // across it. A cut-out on a wide transparent margin, feathered to 0 well
+  // inside every edge, so it need not cover the window; it throws no shadow
+  // on the sky behind it (a cloud is not paper). Almost at infinity, it
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
   // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [-0.11816, 0.09587, 0.89844, 1.20059], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  { file: "clouds", rect: [0.06348, 0.19174, 0.73438, 1.20059], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
