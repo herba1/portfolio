@@ -25,8 +25,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //     cumulus disagree across the borders while walls and lamp posts do not.
 // Each frame is developed through the shared film kit (summer preset, a
 // polariser deepening the open blue, blacks barely lifted), then its sky is
-// graded to a June print: the cumulus on a warm shoulder just under paper
-// white with skylight-blue shade, and a clear sky that deepens to cobalt
+// graded to a June print: the cumulus on a warm shoulder whose sunlit tops
+// sit above the print's own paper, with skylight-blue shade, and a clear sky that deepens to cobalt
 // towards the zenith (see SKY_GRADE). Last comes the finish (see FINISH):
 // a thin red-orange halation ring where bright sky meets a structure, a
 // little scan softness and the print's own grain, so the film survives the
@@ -276,9 +276,9 @@ const SKY_GRADE = {
   grade: 1, // overall strength
   // the sun relight gives the cumulus their light: sun-facing tops up into
   // the warm shoulder, far sides down into skylight blue
-  sunGain: 0.6, // stops into the shoulder on the side of a cloud that faces the sun
+  sunGain: 1.1, // stops into the shoulder on the side of a cloud that faces the sun
   sunShade: 2, // stops out of the shoulder on the far side, at most, towards skylight blue
-  relief: 0.14, // facing per unit of slope (stops of plate radiance per print width)
+  relief: 0.2, // facing per unit of slope (stops of plate radiance per print width)
   feather: 12, // cloud-to-sky matte blur radius, plate pixels
   sunAz: -52, // sun azimuth, degrees in the disk frame (table right = 0, up = -90)
   sunEl: 52, // sun elevation, degrees
@@ -472,16 +472,19 @@ void main() {
   // warm one: the warmth is the sun's
   vec3 top = mix(vec3(dot(hiL, LUMA)) * vec3(0.975, 0.99, 1.02), hiL, sunlit);
   // shade to top along the cloud's light, mixed on a perceptual scale so a
-  // flank half way round reads half way between them
-  float u = smoothstep(-1.5, 1.6, lx - uEv.x * uEv.y * uModel.z);
+  // flank half way round reads half way between them; on the faces turned to
+  // the sun the climb finishes sooner, so they land on the warm white
+  // instead of stalling a step short of it in the blue-white
+  float u = smoothstep(-1.5, 1.6 - 0.5 * sunlit, lx - uEv.x * uEv.y * uModel.z);
   vec3 tint = mix(sqrt(shL), sqrt(top), u);
   tint *= tint;
   // the deepest undersides go a little below the skylight blue, never grey
   tint *= mix(0.8, 1.0, smoothstep(-0.1, 0.3, u));
   // the print's own dye cast stays in the body, but the sunlit tops lose
-  // most of it, so they land on the warm white instead of a cool grey; the
-  // grain rides back on as a ratio
-  vec3 own = mix(vec3(1.0), (lin + 0.002) / (Y + 0.002), uCloud.w * (1.0 - 0.7 * sunlit));
+  // all of it (a blue cast there would trip the cap below and pull the whole
+  // top down to a cool grey), so they land on the warm white; the grain
+  // rides back on as a ratio
+  vec3 own = mix(vec3(1.0), (lin + 0.002) / (Y + 0.002), uCloud.w * (1.0 - sunlit));
   vec3 cloud = tint * own * pow(clamp((Y + 0.004) / (Yb + 0.004), 0.75, 1.33), 1.1);
   // never past the warm white, and never by clipping one channel (that
   // turns blue shade cyan): the whole colour comes down together
@@ -708,8 +711,10 @@ void main() {
   float sd = sdBox(q, half_, img * 0.02);
   float cov = clamp(0.5 - sd / px, 0.0, 1.0);
 
-  // Paper: the white frame, a hair cooler under the light when lifted.
-  vec3 paper = vec3(0.972, 0.968, 0.952) + 0.006 * h;
+  // Paper: the frame, a warm off-white kept a step under the sunlit cloud
+  // tops (#F4F1EA) so the borders never outshine the cumulus; a hair cooler
+  // under the light when lifted.
+  vec3 paper = vec3(0.93, 0.92, 0.89) + 0.006 * h;
   vec2 qi = q - vec2(0.0, IMG_OFF * img);
   float sdi = sdBox(qi, vec2(img * 0.5), img * 0.006);
   float inImg = clamp(0.5 - sdi / px, 0.0, 1.0);
