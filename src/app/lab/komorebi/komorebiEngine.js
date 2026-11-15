@@ -45,21 +45,22 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // print, so no needle cuts the disc with an edge sharper than the crown.
 // One tuft of needles hangs over it on a twig of its own, its stiff limb
 // steady round the sun: at rest it covers the disc, the needles thinned
-// over it by the sun's own glare, so the sun is a star through them; a
-// breath swings it clear (its drag grows with the square of a breeze) onto
-// the thinner crown behind, a gust swings it further, and it swings back
-// and closes. Everything the sun puts on the film follows from the energy
-// that gets through (E) and how wide the hole round it stands (open, from
-// the tuft's swing): shut, a pinpoint and a few sharp rays and glints in
-// the needles' pinholes, the ink round them full; opening, the white core
-// widens and a broad warm-white bloom fills the hole, rolled off under the
-// clip, with a thin broken ring of red-orange halation, the needles' rims
-// and pinholes round the hole glinting, and the cumulus beside it lit on
-// their sun-facing edges by the light they scatter forward. The glare lands
-// through the same soft matte, as a veil on the crown only close in, so
-// the body of the crown keeps its own dark green. The disc itself goes onto
-// the film capped, so the film's long diffusion wings put no grey veil
-// round a star.
+// over it by the sun's own glare, so the sun burns through them as a
+// point; a breath swings it clear (its drag grows with the square of a
+// breeze) onto the thinner crown behind, a gust swings it further, and it
+// swings back and closes. Everything the sun puts on the print is light
+// behind the needles that gets through their gaps: a small, very hot disc
+// and the sky's own aureole round it, steep by the limb, white and then
+// warm, seen through the mattes as they are drawn, so the needles round it
+// stay dark and sharp, silhouettes against the glare. How much of it there
+// is follows from the energy that gets through (E) and how wide the hole
+// round it stands (open, from the tuft's swing): shut, a hot point glowing
+// in the needles' pinholes, the ink round it full; open, the disc at full
+// heat, a thin red-orange ring of the film's halation hugging it, the rims
+// of the needles beside a gap close to it lit warm by the light they
+// scatter forward, the pinholes round it glinting, and the cumulus beside
+// it lit on their sun-facing edges. Nothing is laid over the body of a
+// crown, so no grey veil ever lifts the needles round the sun.
 //
 // The crowns are backlit: the sun is behind them, so from below they show
 // their shaded undersides, dark and cool in the skylight, never tinted by
@@ -150,54 +151,45 @@ const GAIN = 1 / 16;
 // crown 100 px (DPR 2) away.
 const SUN_ND = 0.001;
 // The sun on the film, in scene light (before GAIN). Two things drive it:
-// E, the share of the disc that reaches the lens through the needles (the
-// pinhole of a star .. the whole disc), and open, how far the tuft has swung
-// clear of it (0 at rest .. 1 in a full gust), which is how wide the hole in
-// the crown round the sun stands, so how much of the sun's aureole and the
-// lit needles round it the lens sees.
-// The disc itself goes onto the film capped (cap: its brightest, scene
-// light): past the clip it is white either way, and a capped disc puts no
-// grey veil of diffused light round a star.
-// At rest the sun is a star: a pinpoint and a few sharp rays (star: peak,
-// e-folding length and half-width in frame heights, the long rays' extra
-// length, the angle of the first ray, the share that lands on a needle),
-// the light diffracted by the needle edges, which glint where they cross a
-// gap and stay at full ink over the needles. They fade as the sun opens.
-// Swung clear, a white-hot core (glare: peak, warm white, e-folding width in
-// frame heights, through a pinhole .. open) and a broad warm-white bloom
-// (bloom: peak, colour, width shut .. open, falloff power) fill the hole;
-// the bloom adds to what is under it rolled off towards top, so it never
-// clips: only the core does, a few pixels across. It lands through the
-// crown's soft matte, in full on a gap, a share (body) on the body of a
-// crown, the bloom's share fading within its own width, so the crown keeps
-// its own dark green.
-const SUN_CAP = 8;
-const STAR = { peak: 7, length: 0.0085, width: 0.0006, angle: 0.42, gap: 0.12, fade: 0.85, rays: [1.6, 0.75, 1.15, 0.55, 1.3, 0.7], specks: 6, speckReach: 0.008 };
-const GLARE = {
-  peak: 9,
-  color: [1, 0.95, 0.86],
-  width: [0.0012, 0.0045],
-  bloom: 2.4,
-  bloomColor: [1, 0.88, 0.7],
-  tailColor: [1, 0.64, 0.34],
-  bloomWidth: [0.006, 0.07],
-  falloff: 1.8,
-  top: 2.45,
-  body: 0.65,
-};
-// The thin red-orange ring of halation round the open sun, just outside the
-// brightest of the bloom (radius in bloom widths, half-width in frame
-// heights), as the sun opens: none round the star. It comes through the
-// gaps (body: its share over a needle), so it is a broken ring of arcs, not
-// a drawn circle.
-const HALO = { peak: 1.2, color: [1, 0.4, 0.12], radius: 0.6, width: 0.004, body: 0.3 };
-// Light spilt from the open sun onto what stands round the hole: the rims
-// of the needles beside a gap glow warm, backlit (rim: peak, colour,
-// gaussian reach in frame heights); and the cumulus by the sun scatter it
-// forward, their thin edges and the sides that face the sun lit warm
-// (cloud: always, more as the sun opens; reach in asset widths; probe: how
-// far towards the sun the facing edge is judged, asset widths).
-const SPILL = { rim: 1.8, rimColor: [1, 0.7, 0.4], rimReach: 0.045, cloud: [0.3, 1.1], cloudColor: [1, 0.8, 0.54], cloudReach: 0.17, probe: 0.014 };
+// E, the share of the disc that reaches the lens through the needles, and
+// open, how far the tuft has swung clear of it (0 at rest .. 1 in a full
+// gust), which is how wide the hole in the crown round the sun stands.
+// Everything the sun puts on the print is light behind the needles that
+// gets through their gaps; nothing is laid over a crown.
+// The disc goes onto the film capped (cap: its brightest, scene light):
+// white past the clip, and hot enough that the film's halation rings it.
+// Round it the sky's own aureole (aureole: steep, the glare by the limb,
+// falling with the square of the distance in disc radii, its peak at the
+// limb; whiten, how many disc radii it stays white before it warms to
+// color; broad, a warm shoulder, peak and e-folding width in frame
+// heights). With the disc covered the steep part is held to its covered
+// share and the broad part to its shut share, so at rest the sun is a
+// source glowing in the needles' pinholes, not a sticker over them.
+const SUN_CAP = 40;
+// The film's halation, as a share of FILM.halation: the disc covered .. the
+// hole open.
+const HALATION_OPEN = [0.2, 1];
+const AUREOLE = { steep: 24, power: 2.6, whiten: 2, broad: 0.3, width: 0.02, covered: 0.15, shut: 0.2, color: [1, 0.66, 0.36] };
+// The film's halation round the disc: a thin red-orange ring hugging it
+// (peak, colour, radius and half-width in disc radii, share over a needle).
+const RING = { peak: 2, color: [1, 0.3, 0.09], radius: 5.5, width: 1.1, body: 0.2 };
+// Faint diffraction spikes, only once the disc is actually uncovered, and
+// only where they cross a gap (peak, e-folding length and half-width in
+// frame heights, the long rays' extra length, the first ray's angle).
+const STAR = { peak: 1.2, length: 0.006, width: 0.0005, angle: 0.42, rays: [1.6, 0.75, 1.15, 0.55, 1.3, 0.7] };
+// The needles round the sun, backlit: their rims beside a gap glow warm with
+// the light they scatter forward (rim: peak, colour, gaussian reach in frame
+// heights; mip: the scale the gaps beside a needle are judged at, gap: the
+// band of open sky beside it that lights it; covered: share with the disc
+// covered). The cumulus by the sun scatter it forward too, their thin edges
+// and the sides that face the sun lit warm (cloud: always, more as the sun
+// opens; reach in asset widths; probe: how far towards the sun the facing
+// edge is judged, asset widths).
+// The pinholes in the crown round the sun glint (peak, e-folding reach in
+// frame heights, share with the hole shut, the density round a gap past
+// which it counts as a pinhole).
+const GLINT = { peak: 1.6, reach: 0.03, rest: 0.12, dense: 0.4 };
+const SPILL = { rim: 3, rimColor: [1, 0.55, 0.22], rimReach: 0.016, rimMip: 2.0, rimGap: [0.05, 0.45], rimCovered: 0.1, cloud: [0.3, 1.1], cloudColor: [1, 0.8, 0.54], cloudReach: 0.17, probe: 0.014 };
 // The crown's diffusion: the mip of the canopy's matte the sun is seen
 // through. The crowns are this soft on the print (about 3 asset px), so the
 // disc is never cut by an edge sharper than the needles round it.
@@ -395,19 +387,18 @@ uniform vec2 uSun;
 uniform float uSunR;
 uniform vec3 uSunL;
 uniform float uGain;
-uniform vec3 uGlare;         // core peak
-uniform vec3 uBloom;         // the warm bloom, peak
-uniform vec3 uBloomTail;     // its colour where it thins, per unit luminance
-uniform vec4 uGlareW;        // core width shut, open; bloom width shut, open
-uniform vec4 uGlareB;        // bloom falloff power, roll-off top, share on the body of a crown, disc cap
-uniform vec4 uHalo;          // halation ring: rgb peak, a radius (bloom widths)
-uniform vec2 uHaloW;         // its half-width (frame heights), share over a needle
-uniform vec3 uStar;          // rays: peak, length, half-width (frame heights)
-uniform float uStarL[6];     // each ray's length, in lengths
-uniform vec3 uStarB;         // first ray's angle, share landing on a needle, fade as the sun opens
-uniform vec2 uSpeck;         // glints in the needles' pinholes by the disc: peak, reach (frame heights)
+uniform vec4 uAur;           // aureole: steep peak at the limb, whitening (disc radii), broad peak, broad width (frame heights)
+uniform vec4 uAurB;          // steep share (and disc cap share) with the disc covered, broad share with the hole shut, steep power, disc cap
+uniform vec3 uAurC;          // the aureole's warm colour, per unit luminance
+uniform vec4 uRing;          // halation ring: rgb peak, radius (disc radii)
+uniform vec2 uRingW;         // its half-width (disc radii), share over a needle
+uniform vec3 uStar;          // spikes: peak, length, half-width (frame heights)
+uniform float uStarL[6];     // each spike's length, in lengths
+uniform vec2 uStarB;         // first spike's angle, share once the disc is uncovered
 uniform float uOpen;         // how far the tuft has swung clear, 0..1
-uniform vec4 uRim;           // needle rims by the hole: rgb peak, a reach (frame heights)
+uniform vec4 uRim;           // needle rims by the sun: rgb peak, a reach (frame heights)
+uniform vec4 uGlint;         // pinholes by the sun: peak, reach (frame heights), share at rest, density they key on
+uniform vec4 uRimB;          // mip the gaps beside a needle are judged at, gap band, share with the disc covered
 uniform vec4 uSpillC;        // cumulus by the sun: always, as it opens; reach; probe (asset widths)
 uniform vec3 uSpillK;        // the colour it lights them
 uniform vec2 uSil;           // how far the lower canopy sinks into silhouette, knee
@@ -750,85 +741,79 @@ void main() {
   // How much of the print is tree here: the film's toe lifts it (blit).
   float trees = 1.0 - (1.0 - a0) * (1.0 - a1) * (1.0 - a2);
 
-  // The sun is a source behind the crown, never switched by it: sky with
-  // sun times what the canopy lets through, the canopy's matte taken at its
+  // The sun is a source behind every needle, never laid over them: a small,
+  // very hot disc and the sky's own aureole round it, both seen only through
+  // the gaps in the mattes. The disc goes through the crown's matte at its
   // own diffusion (the crown is soft at this scale, so a needle never cuts
-  // the disc with an edge sharper than the needles round it). Everything
-  // the sun puts on the film follows from the light that gets through.
+  // the disc with an edge sharper than the needles round it); the aureole
+  // through the mattes as they are drawn, so the needles round the sun stay
+  // dark and sharp, silhouettes against the glare. Nothing is added over
+  // the body of a crown: what the film makes of the light that gets through
+  // (its halation, a thin red-orange ring hugging the disc) is the bloom.
   float rh = length(dv) / px / uRes.y;
+  float Rh = r / px / uRes.y;
   float T = 1.0;
-  if (rh < 0.4) T = 1.0 - coverAt(uv, uDiff);
-  // The disc, capped: white past the clip either way, and no veil of
-  // diffused light round a star.
+  if (d < 1.0 + 2.0 * edge) T = 1.0 - coverAt(uv, uDiff);
+  // The disc, capped: white past the clip either way, hot enough that the
+  // film's halation rings it.
   vec3 sv = sun * T * (1.0 - cl.a);
-  sv *= uGlareB.w / (dot(sv, LUMA) + uGlareB.w);
-
-  // Glare from that energy, landing where the light can reach the lens,
-  // through the same soft matte: it pours through the gaps and leaves the
-  // body of a crown at its own dark green.
-  float lands = mix(uGlareB.z, 1.0, T);
-  vec2 q = dv / px / uRes.y;
-  // Through the needles the sun is a star: thin rays diffracted off their
-  // edges, glinting where they cross a gap and dark over a needle, so the
-  // ink round it stays full. They fade as the hole opens.
-  float rays = 0.0;
-  float speck = 0.0;
-  float shut = smoothstep(0.0, 0.08, E) * (1.0 - uStarB.z * uOpen);
-  if (rh < 0.08 && shut > 0.0) {
-    for (int k = 0; k < 6; k++) {
-      float th = uStarB.x + float(k) * 1.0471976;
-      vec2 dir = vec2(cos(th), sin(th));
-      float al = dot(q, dir);
-      if (al < 0.0) continue;
-      float pe = abs(dot(q, vec2(-dir.y, dir.x)));
-      float len = uStar.y * uStarL[k];
-      float w = uStar.z * (1.0 + 0.6 * al / len);
-      rays += exp(-al / len) * exp(-(pe / w) * (pe / w));
+  float cap = uAurB.w * mix(uAurB.x, 1.0, Eo);
+  sv *= cap / (dot(sv, LUMA) + cap);
+  vec3 sl = vec3(0.0);
+  if (rh < 0.2) {
+    float gapS = 1.0 - trees;
+    float x = max(rh, Rh) / Rh;
+    // The aureole: steep by the limb (the disc's own glare in the air), a
+    // warm broad shoulder further out, and hotter the more of the disc the
+    // gaps let through (the hole stands wider).
+    float hot = mix(uAurB.x, 1.0, Eo);
+    float steep = uAur.x * hot * pow(x, -uAurB.z);
+    float broad = uAur.z * mix(uAurB.y, 1.0, Eo) * exp(-rh / uAur.w);
+    vec3 tint = mix(uAurC, vec3(1.0), exp(-(x - 1.0) / uAur.y));
+    sl = withLuma(tint, steep + broad) * gapS * (1.0 - 0.6 * cl.a);
+    // The film's halation: the disc's light that went through the emulsion,
+    // off the base and back through the red layer, a thin red-orange ring
+    // hugging the disc. Mostly where the light came through a gap, a share
+    // over a needle (it is in the film, not the air), so it reads as a
+    // broken ring of arcs, not a drawn circle.
+    float hr = (x - uRing.w) / uRingW.x;
+    sl += uRing.rgb * exp(-hr * hr) * mix(uRingW.y, 1.0, gapS) * Eo;
+    // The needles' edges by the sun, backlit: where a needle borders a gap
+    // the light it scatters forward lights its rim warm. Only close in, and
+    // only on an edge: the needles' bodies keep their own dark.
+    if (rh < 3.0 * uRim.a) {
+      float gapN = 1.0 - coverAt(uv, uRimB.x);
+      float edge = smoothstep(0.25, 0.9, trees) * smoothstep(uRimB.y, uRimB.z, gapN);
+      float k = exp(-(rh / uRim.a) * (rh / uRim.a));
+      sl += uRim.rgb * edge * k * mix(uRimB.w, 1.0, Eo);
+      // ...and the pinholes in the crown round it glint: a gap with needles
+      // all round it is lit far brighter than open sky the same distance
+      // off (the sun's light eats the thin needles at its rim), so the
+      // glare is broken into sparks by the needles, not poured into the
+      // hole. They glint at rest too: the source is behind the needles.
+      float dense = smoothstep(uGlint.w, 0.9, coverAt(uv, 3.0));
+      sl += withLuma(mix(uAurC, vec3(1.0), 0.5), uGlint.x * smoothstep(0.35, 0.9, gapS) * dense * exp(-rh / uGlint.y) * mix(uGlint.z, 1.0, Eo));
     }
-    // ...and the needles' own pinholes right by the disc light up, each a
-    // sharp glint: open here, needles all round.
-    if (rh < 0.05) {
-      speck = smoothstep(0.65, 0.95, 1.0 - trees) * smoothstep(0.6, 0.92, coverAt(uv, 2.5)) * exp(-rh / uSpeck.y);
-      // the pinholes of sky in the needles' own light, inside their matte
-      float pin = smoothstep(0.8, 1.5, lumAt(ub, 0.5) - lumAt(ub, 3.0)) * a2 * (1.0 - T);
-      speck = max(speck, pin * exp(-(rh / uSpeck.y) * (rh / uSpeck.y) / 4.0));
+    // Faint diffraction spikes, only when the disc itself is uncovered,
+    // and only where they cross a gap.
+    float on = uStarB.y * smoothstep(0.35, 0.9, Eo);
+    if (on > 0.0 && rh < 0.08) {
+      vec2 q = dv / px / uRes.y;
+      float rays = 0.0;
+      for (int k = 0; k < 6; k++) {
+        float th = uStarB.x + float(k) * 1.0471976;
+        vec2 dir = vec2(cos(th), sin(th));
+        float al = dot(q, dir);
+        if (al < 0.0) continue;
+        float pe = abs(dot(q, vec2(-dir.y, dir.x)));
+        float len = uStar.y * uStarL[k];
+        float w = uStar.z * (1.0 + 0.6 * al / len);
+        rays += exp(-al / len) * exp(-(pe / w) * (pe / w));
+      }
+      sl += uStar.x * on * rays * gapS * vec3(1.0, 0.96, 0.9);
     }
   }
-  float gap = mix(uStarB.y, 1.0, 1.0 - trees);
-  vec3 star = uGlare / dot(uGlare, LUMA) * (uStar.x * rays * gap + uSpeck.x * speck) * shut;
-
-  // Swung clear: a white-hot core that clips, a few pixels across, and the
-  // broad warm-white bloom that fills the hole, rolled off under the clip.
-  float cw = mix(uGlareW.x, uGlareW.y, E);
-  float bw = mix(uGlareW.z, uGlareW.w, uOpen);
-  vec3 core = uGlare * E * exp(-rh / cw) * lands;
-  float bf = exp(-pow(rh / bw, uGlareB.x));
-  // On the body of a crown the bloom is a veil only close in: the needles
-  // a hand's width off keep their own dark green.
-  float landsB = mix(uGlareB.z * exp(-rh / (0.8 * bw)), 1.0, T);
-  // Its tail is warm over the needles and the cloud; over the open blue it
-  // is the sky's own aureole, a paler blue (a warm veil on blue only greys
-  // it).
-  vec3 aur = mix(skyTint / dot(skyTint, LUMA), vec3(1.0), 0.55);
-  vec3 tail = mix(uBloomTail, aur / dot(aur, LUMA), T * (1.0 - cl.a));
-  vec3 g = mix(tail * dot(uBloom, LUMA), uBloom, bf) * bf * Eo * landsB;
-  // the thin red-orange ring of halation just outside the brightest of it
-  float hr = (rh - uHalo.a * bw) / uHaloW.x;
-  g += uHalo.rgb * Eo * Eo * exp(-hr * hr) * mix(uHaloW.y, 1.0, T);
-  // the needles round the hole, backlit, glint: their rims along the
-  // opening (needle here, the light coming through just beside it) and the
-  // pinholes of sky in the crown round it (brighter than the needles round
-  // them, inside the crown's matte).
-  if (rh < 3.0 * uRim.a && Eo > 1e-3) {
-    float pin = smoothstep(0.2, 1.2, lumAt(ub, 0.5) - lumAt(ub, 3.0)) * (1.0 - T) * a2;
-    float rim = max(pin, trees * smoothstep(0.08, 0.45, T) * (1.0 - smoothstep(0.6, 0.95, T)));
-    g += uRim.rgb * rim * Eo * exp(-(rh / uRim.a) * (rh / uRim.a));
-  }
-  float yc = dot(col, LUMA);
-  float yg = dot(g, LUMA);
-  float room = max(uGlareB.y - yc, 0.05);
-  col += g * (room * (1.0 - exp(-yg / room)) / max(yg, 1e-5));
-  col += sv + core + star;
+  col += sv + sl;
   outColor = vec4(col * uGain, trees);
 }`;
 
@@ -1465,18 +1450,17 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSunR, SUN.r);
     gl.uniform3f(u.uSunL, SUN.L * SUN_ND * SUN.color[0], SUN.L * SUN_ND * SUN.color[1], SUN.L * SUN_ND * SUN.color[2]);
     gl.uniform1f(u.uGain, sceneT.ok ? GAIN : GAIN / 64);
-    gl.uniform3fv(u.uGlare, GLARE.color.map((c) => c * GLARE.peak));
-    gl.uniform3fv(u.uBloom, GLARE.bloomColor.map((c) => c * GLARE.bloom));
-    gl.uniform3fv(u.uBloomTail, GLARE.tailColor.map((c, i, a) => c / (a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722)));
-    gl.uniform4f(u.uGlareW, GLARE.width[0], GLARE.width[1], GLARE.bloomWidth[0], GLARE.bloomWidth[1]);
-    gl.uniform4f(u.uGlareB, GLARE.falloff, GLARE.top, GLARE.body, SUN_CAP);
-    gl.uniform4f(u.uHalo, HALO.peak * HALO.color[0], HALO.peak * HALO.color[1], HALO.peak * HALO.color[2], HALO.radius);
-    gl.uniform2f(u.uHaloW, HALO.width, HALO.body);
+    gl.uniform4f(u.uAur, AUREOLE.steep, AUREOLE.whiten, AUREOLE.broad, AUREOLE.width);
+    gl.uniform4f(u.uAurB, AUREOLE.covered, AUREOLE.shut, AUREOLE.power, SUN_CAP);
+    gl.uniform3fv(u.uAurC, AUREOLE.color.map((c, i, a) => c / (a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722)));
+    gl.uniform4f(u.uRing, ...RING.color.map((c) => c * RING.peak), RING.radius);
+    gl.uniform2f(u.uRingW, RING.width, RING.body);
     gl.uniform3f(u.uStar, STAR.peak, STAR.length, STAR.width);
     gl.uniform1fv(u.uStarL, STAR.rays);
-    gl.uniform3f(u.uStarB, STAR.angle, STAR.gap, STAR.fade);
-    gl.uniform2f(u.uSpeck, STAR.specks, STAR.speckReach);
+    gl.uniform2f(u.uStarB, STAR.angle, 1);
     gl.uniform4f(u.uRim, ...SPILL.rimColor.map((c) => c * SPILL.rim), SPILL.rimReach);
+    gl.uniform4f(u.uGlint, GLINT.peak, GLINT.reach, GLINT.rest, GLINT.dense);
+    gl.uniform4f(u.uRimB, SPILL.rimMip, SPILL.rimGap[0], SPILL.rimGap[1], SPILL.rimCovered);
     gl.uniform4f(u.uSpillC, SPILL.cloud[0], SPILL.cloud[1], SPILL.cloudReach, SPILL.probe);
     gl.uniform3fv(u.uSpillK, SPILL.cloudColor);
     const tx = tuft.x - tuft.sx + tuft.fx;
@@ -1488,7 +1472,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform4f(u.uTuftH, TUFT.limb, TUFT.hold, TUFT.heart, TUFT.behind);
     const swing = Math.hypot(tx, ty) / TUFT.r;
     gl.uniform3f(u.uTuftS, TUFT.cell, 0.5 + (0.5 - TUFT.stay) / 1.6, smooth(0.3, 0.9, swing));
-    gl.uniform1f(u.uOpen, smooth(TUFT.open[0], TUFT.open[1], swing));
+    const open = smooth(TUFT.open[0], TUFT.open[1], swing);
+    gl.uniform1f(u.uOpen, open);
     gl.uniform2f(u.uLog, LOG[0], LOG[1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.pw, L.ph);
@@ -1503,6 +1488,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
         ...FILM,
         input: sceneT.ok ? "linear" : "srgb",
         exposure: BASE_EXPOSURE + expoStops + Math.log2(1 / GAIN) + (sceneT.ok ? 0 : 6),
+        // The sun's halation grows as the needles part off the disc.
+        halation: FILM.halation * (HALATION_OPEN[0] + (HALATION_OPEN[1] - HALATION_OPEN[0]) * open),
         grainSeed,
       },
       filmT.fbo,
