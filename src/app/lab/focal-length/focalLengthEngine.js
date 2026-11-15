@@ -129,6 +129,173 @@ void main() {
   outColor = vec4(mix(texelFetch(uSoft, p, 0).rgb, texelFetch(uCrisp, p, 0).rgb, m), 1.0);
 }`;
 
+// ---- Film response: the print's own optics, after the develop and before
+// display, on the developed (display-referred) frame. Three things the
+// negative does to the light that the develop above only models in scene
+// terms:
+//
+//   halation  light past about 0.8 of paper white goes through the emulsion,
+//             bounces off the base and comes back through the red layer, so
+//             a thin warm ring (a Gaussian of 0.4% of the diagonal) forms
+//             wherever bright cumulus meets dark glass. Kernel red 1, green
+//             .35, blue .05, screened in linear light. Its source is the
+//             highlights' linear light (about 0.65 for a sunlit top), so 0.25
+//             lands at about 0.15 of that light; more and the cobalt beside
+//             the clouds turns lavender (the ring's sky stays at 209 degrees,
+//             the zenith at 210).
+//   Pro-Mist  a low share (0.1) of the whole frame, spread wide (a Gaussian
+//             of 1.5% of the diagonal), screened back over it, so cloud
+//             whites glow into the cobalt instead of stopping at a hard edge.
+//   grain     luminance only, about 1.5 px at DPR 2, strongest in the
+//             midtones, reseeded at 24 fps with the develop.
+//
+// The crisp mask (the street trees) keeps them out of both diffusions.
+const RESPONSE = {
+  halation: 0.25,
+  halationThreshold: 0.8,
+  halationRadius: 0.004, // of the diagonal
+  halationKernel: [1, 0.35, 0.05],
+  mist: 0.1,
+  mistRadius: 0.015, // of the diagonal
+  grain: 0.08,
+  grainPx: 0.75, // css px: 1.5 device px at DPR 2
+};
+
+const RVERT = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const RCOMMON = `
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 toLin(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toEnc(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}`;
+
+// Full res -> a coarser level: four bilinear taps, a box over the footprint.
+// r: the halation source (linear light of the developed frame past the
+// threshold, soft knee), gba: the frame itself for the mist.
+const RPREP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;    // source texel
+uniform float uSpan;    // half the footprint, in source texels
+uniform float uThr;     // display luminance where halation starts
+uniform float uPrep;    // 1: from the developed frame, 0: a plain downsample
+${RCOMMON}
+void main() {
+  vec2 o = uTexel * uSpan;
+  vec4 a = texture(uSrc, vUv + vec2(-o.x, -o.y));
+  vec4 b = texture(uSrc, vUv + vec2(o.x, -o.y));
+  vec4 c = texture(uSrc, vUv + vec2(-o.x, o.y));
+  vec4 d = texture(uSrc, vUv + vec2(o.x, o.y));
+  if (uPrep < 0.5) {
+    outColor = 0.25 * (a + b + c + d);
+    return;
+  }
+  float h = 0.0;
+  for (int i = 0; i < 4; i++) {
+    vec3 s = i == 0 ? a.rgb : i == 1 ? b.rgb : i == 2 ? c.rgb : d.rgb;
+    float y = dot(s, LUMA);
+    h += dot(toLin(s), LUMA) * smoothstep(uThr - 0.1, uThr + 0.06, y);
+  }
+  outColor = vec4(h * 0.25, 0.25 * (a.rgb + b.rgb + c.rgb + d.rgb));
+}`;
+
+// One axis of a Gaussian, sigma in texels of this level.
+const RBLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uStep;     // one texel along the axis
+uniform float uSigma;
+void main() {
+  float s2 = 2.0 * uSigma * uSigma;
+  vec4 acc = texture(uSrc, vUv);
+  float wsum = 1.0;
+  // pairs of texels in one bilinear tap
+  for (int i = 1; i < 40; i += 2) {
+    float x = float(i);
+    if (x > 3.0 * uSigma + 1.0) break;
+    float w0 = exp(-x * x / s2);
+    float w1 = exp(-(x + 1.0) * (x + 1.0) / s2);
+    float w = w0 + w1;
+    float off = x + w1 / w;
+    acc += (texture(uSrc, vUv + uStep * off) + texture(uSrc, vUv - uStep * off)) * w;
+    wsum += 2.0 * w;
+  }
+  outColor = acc / wsum;
+}`;
+
+const RFINAL = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uDev;   // the developed frame
+uniform sampler2D uHalo;  // r: the halation spread
+uniform sampler2D uMist;  // gba: the frame spread wide
+uniform sampler2D uScene; // a: the crisp mask
+uniform vec2 uHaloTexel;
+uniform vec2 uMistTexel;
+uniform float uHal;
+uniform vec3 uHalKernel;
+uniform float uMistAmt;
+uniform float uGrain;
+uniform float uGrainPx;
+uniform float uSeed;
+${RCOMMON}
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+// 3x3 tent from four bilinear taps, so the coarse levels never show texels.
+vec4 tent(sampler2D t, vec2 uv, vec2 texel) {
+  vec2 o = texel * 0.5;
+  return 0.25 * (texture(t, uv + vec2(-o.x, -o.y)) + texture(t, uv + vec2(o.x, -o.y)) + texture(t, uv + vec2(-o.x, o.y)) + texture(t, uv + vec2(o.x, o.y)));
+}
+// Grain: a hashed field of crystals about uGrainPx across, smoothly
+// interpolated, two octaves.
+float grainAt(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash12(i), b = hash12(i + vec2(1, 0)), c = hash12(i + vec2(0, 1)), d = hash12(i + vec2(1, 1));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+void main() {
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  vec3 c = texelFetch(uDev, px, 0).rgb;
+  float diff = 1.0 - texelFetch(uScene, px, 0).a;
+
+  // Halation, in linear light: screened, so it warms what is dark beside a
+  // highlight and only creams the highlight itself, never clips it.
+  float h = tent(uHalo, vUv, uHaloTexel).r;
+  vec3 lin = toLin(c);
+  lin = 1.0 - (1.0 - lin) * (1.0 - clamp(uHal * diff * h * uHalKernel, 0.0, 1.0));
+  c = toEnc(lin);
+
+  // Pro-Mist: the frame spread wide and screened back over itself.
+  vec3 m = tent(uMist, vUv, uMistTexel).gba;
+  c = 1.0 - (1.0 - c) * (1.0 - uMistAmt * diff * m);
+
+  // Grain on luminance only, strongest in the midtones.
+  vec2 gp = gl_FragCoord.xy / uGrainPx + uSeed * vec2(17.13, 31.71);
+  float g = grainAt(gp) * 0.6 + grainAt(gp * 1.93 + 5.3) * 0.4 - 0.5;
+  float y = dot(c, LUMA);
+  float mid = 4.0 * y * (1.0 - y);
+  c += g * uGrain * (0.15 + 0.85 * mid * mid);
+  outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
 const FILM = {
   input: "linear",
   headroom: 0,
@@ -143,7 +310,8 @@ const FILM = {
   softness: 0.2,
   saturation: 1.04,
   blueDepth: 0.3,
-  grain: 0.34,
+  // grain is the response stage's, luminance only
+  grain: 0,
   vignette: 0.2,
   // sunlit cloud lands warm-neutral, never blue-white
   highlightTint: [1.02, 1, 0.965],
@@ -278,6 +446,9 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const scene = compile(gl, VERT, SCENE);
   const mixer = compile(gl, VERT, MIX);
+  const rPrep = compile(gl, RVERT, RPREP);
+  const rBlur = compile(gl, RVERT, RBLUR);
+  const rFinal = compile(gl, RVERT, RFINAL);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -304,6 +475,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     if (tex) gl.deleteTexture(tex);
     if (fbo) gl.deleteFramebuffer(fbo);
     freeDev();
+    buildResp();
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     fbo = gl.createFramebuffer();
@@ -326,6 +498,113 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     film.resize(w, h);
     dirty = true;
+  };
+
+  // The film response's targets: the developed frame at full res, the
+  // halation source and the frame at half res, then the mist at 1/4 and 1/8.
+  let resp = null;
+  const rTarget = (w, h, float) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const f = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    if (float && gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteTexture(t);
+      gl.deleteFramebuffer(f);
+      return rTarget(w, h, false);
+    }
+    return { tex: t, fbo: f, w, h };
+  };
+  const freeResp = () => {
+    if (!resp) return;
+    for (const r of Object.values(resp)) {
+      gl.deleteTexture(r.tex);
+      gl.deleteFramebuffer(r.fbo);
+    }
+    resp = null;
+  };
+  const buildResp = () => {
+    freeResp();
+    const w = canvas.width;
+    const h = canvas.height;
+    const lv = (n) => [Math.max(2, Math.ceil(w / n)), Math.max(2, Math.ceil(h / n))];
+    resp = {
+      out: rTarget(w, h, false),
+      hA: rTarget(...lv(2), half),
+      hB: rTarget(...lv(2), half),
+      q: rTarget(...lv(4), half),
+      eA: rTarget(...lv(8), half),
+      eB: rTarget(...lv(8), half),
+    };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  };
+  const rPass = (prog, t) => {
+    gl.useProgram(prog.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null);
+    gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height);
+  };
+  const bindTex = (unit, t) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+  };
+  const blur = (src, tmp, sigma) => {
+    rPass(rBlur, tmp);
+    bindTex(0, src.tex);
+    gl.uniform1i(rBlur.u.uSrc, 0);
+    gl.uniform1f(rBlur.u.uSigma, sigma);
+    gl.uniform2f(rBlur.u.uStep, 1 / src.w, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    rPass(rBlur, src);
+    bindTex(0, tmp.tex);
+    gl.uniform2f(rBlur.u.uStep, 0, 1 / tmp.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  const down = (src, dst, span, prep) => {
+    rPass(rPrep, dst);
+    bindTex(0, src.tex);
+    gl.uniform1i(rPrep.u.uSrc, 0);
+    gl.uniform2f(rPrep.u.uTexel, 1 / src.w, 1 / src.h);
+    gl.uniform1f(rPrep.u.uSpan, span);
+    gl.uniform1f(rPrep.u.uThr, RESPONSE.halationThreshold);
+    gl.uniform1f(rPrep.u.uPrep, prep ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  // The developed frame in resp.out -> the canvas.
+  const respond = (seed) => {
+    const R = RESPONSE;
+    const diag = Math.hypot(canvas.width, canvas.height);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(vao);
+    // half res: halation source and the frame; the frame on down to 1/8
+    down(resp.out, resp.hA, 1, true);
+    down(resp.hA, resp.q, 1, false);
+    down(resp.q, resp.eA, 1, false);
+    // the radii are the Gaussians' sigma
+    blur(resp.eA, resp.eB, (R.mistRadius * diag) / 8);
+    blur(resp.hA, resp.hB, (R.halationRadius * diag) / 2);
+    rPass(rFinal, null);
+    [resp.out.tex, resp.hA.tex, resp.eA.tex, tex].forEach((t, n) => bindTex(n, t));
+    const u = rFinal.u;
+    gl.uniform1i(u.uDev, 0);
+    gl.uniform1i(u.uHalo, 1);
+    gl.uniform1i(u.uMist, 2);
+    gl.uniform1i(u.uScene, 3);
+    gl.uniform2f(u.uHaloTexel, 1 / resp.hA.w, 1 / resp.hA.h);
+    gl.uniform2f(u.uMistTexel, 1 / resp.eA.w, 1 / resp.eA.h);
+    gl.uniform1f(u.uHal, R.halation);
+    gl.uniform3fv(u.uHalKernel, R.halationKernel);
+    gl.uniform1f(u.uMistAmt, R.mist);
+    gl.uniform1f(u.uGrain, R.grain);
+    gl.uniform1f(u.uGrainPx, R.grainPx * dpr);
+    gl.uniform1f(u.uSeed, seed % 997);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
   };
 
   const freeDev = () => {
@@ -352,13 +631,14 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   };
   const develop = (params, crisp) => {
     if (!crisp) {
-      film.render(tex, params);
+      film.render(tex, params, resp.out.fbo);
+      respond(params.grainSeed);
       return;
     }
     ensureDev();
     film.render(tex, params, dev[0].fbo);
     film.render(tex, { ...params, ...NO_DIFFUSION }, dev[1].fbo);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, resp.out.fbo);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.disable(gl.BLEND);
     gl.useProgram(mixer.p);
@@ -372,6 +652,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     gl.uniform1i(mixer.u.uScene, 2);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
+    respond(params.grainSeed);
   };
 
   // Full bleed: the frame is the box, so the towers run off every edge. The
@@ -636,6 +917,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       freeDev();
+      freeResp();
       if (tex) gl.deleteTexture(tex);
       if (fbo) gl.deleteFramebuffer(fbo);
       gl.deleteTexture(outer);
@@ -644,6 +926,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
       gl.deleteVertexArray(vao);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(mixer.p);
+      for (const r of [rPrep, rBlur, rFinal]) gl.deleteProgram(r.p);
       print.remove();
       mark.remove();
     },
