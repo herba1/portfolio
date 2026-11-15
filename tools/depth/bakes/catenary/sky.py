@@ -35,7 +35,12 @@
 #     flat body; the brightest tops about 236-240 here, nothing at 255).
 #     Where the source's pole and its soft, veiled base were, lines drawn
 #     around the tower (CUTS) give the cloud back to sky on its own light,
-#     so it ends on lobes and nothing is carried on by reflection.
+#     so it ends on lobes and nothing is carried on by reflection; one more
+#     trims the flank's thin hooked tail, so the flank ends on its last lobe.
+#     At the scale of the whole tower its value falls from the sunlit crown
+#     to a skylight blue-grey lower body, each lobe sitting on a shaded base
+#     (VOL, LOBES), and its matte goes from crisp on the crown to a hazy
+#     falloff of 1/60 of the frame's width down the lower half (HAZE).
 #     Above a cut near 1/40 of the frame's width its texture is not the
 #     magnified photograph's: the crown's own band at its native resolution
 #     is quilted in (the detail, below), crisp on the sunlit turrets, soft
@@ -96,6 +101,10 @@ CUTS = [
     ((2399, 940), (975, 1300), 200.0, 6.0),  # the base
     ((1130, 150), (980, 1000), 60.0, 12.0),  # the left side
     ((1170, 110), (1000, 380), 40.0, 0.0),  # the crown's left shoulder
+    # The flank's last step. Past its lowest full lobe (source x ~2240) the
+    # source's edge ran on into a thin, hooked tail that the base line left
+    # standing on its own, a sticker's edge; the flank now ends on that lobe.
+    ((2250, 780), (2215, 1010), 50.0, 8.0),
 ]
 INSIDE = (1400, 380)  # a source point well inside the crown
 # Developed brighter: linear gain on the cloud, premultiplied.
@@ -556,6 +565,89 @@ yc_ = col @ LUMA
 KNEE = 0.78
 ys_ = np.where(yc_ > KNEE, KNEE + (0.9 - KNEE) * np.tanh((yc_ - KNEE) / (0.9 - KNEE)), yc_)
 col *= (ys_ / np.maximum(yc_, 1e-4))[..., None]
+
+# The tower's volume. With all of the above the cloud still read, whole
+# frame, as one flat pale sheet: the form term and the detail work at the
+# scale of billows, and nothing carried the scale of the tower itself, the
+# sunlit crown over a body in its own shade, each cauliflower lobe sitting
+# on a darker base. So the value is graded once more at the scale of the
+# cloud. Down the tower (source rows VOL), it falls from the crown's sunlit
+# paper to a skylight blue-grey lower body (VOL_DARK of its light gone,
+# VOL_TINT of the way to BASE's colour). And it is laid out as lobes: a
+# field of domes (two sizes, LOBES, as a fraction of the frame width) inside
+# the matte, over the matte's own outline inflated, lit from the sun the form
+# term uses, high (LOBE_ELEV); where a dome turns from the sun, under each
+# lobe and in the seams between them, it loses LOBE_SHADE of its light
+# (crown, lower body) and goes to BASE, so every lobe sits on a shaded base
+# and the underside is dark. The crown keeps its light and its crisp edge.
+VOL = (280, 1050)
+VOL_DARK = 0.3
+VOL_TINT = 0.7
+BASE = (210, 0.42)  # hue, saturation of the lower body's skylight grey-blue
+LOBES = ((0.07, 1.0), (0.035, 0.55))  # spacing (of W), relative height
+LOBE_ELEV = 38
+LOBE_SHADE = (0.18, 0.28)
+hW, hH = h2
+yy_, xx_ = np.mgrid[0:hH, 0:hW].astype(np.float32)
+Ah = cv2.resize(af, h2, interpolation=cv2.INTER_AREA)
+inside = gauss(smooth(0.3, 0.9, Ah), 3)
+rng_l = np.random.default_rng(11)
+dome = np.zeros((hH, hW), np.float32)
+for frac, rel in LOBES:
+    sp = frac * hW
+    layer = np.zeros_like(dome)
+    for cy0 in np.arange(-sp / 2, hH + sp, sp):
+        for cx0 in np.arange(-sp / 2, hW + sp, sp):
+            cx_, cy_ = cx0 + rng_l.uniform(0, sp), cy0 + rng_l.uniform(0, sp)
+            r_ = sp * rng_l.uniform(0.6, 0.9)
+            x0_, x1_ = int(max(cx_ - r_, 0)), int(min(cx_ + r_ + 1, hW))
+            y0_, y1_ = int(max(cy_ - r_, 0)), int(min(cy_ + r_ + 1, hH))
+            if x1_ <= x0_ or y1_ <= y0_ or Ah[int(np.clip(cy_, 0, hH - 1)), int(np.clip(cx_, 0, hW - 1))] < 0.2:
+                continue
+            d2 = (xx_[y0_:y1_, x0_:x1_] - cx_) ** 2 + (yy_[y0_:y1_, x0_:x1_] - cy_) ** 2
+            np.maximum(layer[y0_:y1_, x0_:x1_], np.sqrt(np.maximum(r_ * r_ - d2, 0)) * rel / sp * LOBES[0][0] * hW,
+                       out=layer[y0_:y1_, x0_:x1_])
+    dome += layer
+R0 = 0.06 * hW
+dist = cv2.distanceTransform((Ah > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
+dist = np.minimum(dist, R0)
+hfield = gauss(np.sqrt(dist * (2 * R0 - dist)) * 0.8 + dome * 0.5 * inside, 4)
+hgy, hgx = np.gradient(hfield)
+hgm = np.sqrt(hgx * hgx + hgy * hgy)
+hgx, hgy = hgx / (1 + hgm / 2.5), hgy / (1 + hgm / 2.5)
+el_ = np.radians(LOBE_ELEV)
+ndl_v = (-hgx * su[0] * np.cos(el_) - hgy * su[1] * np.cos(el_) + np.sin(el_)) / np.sqrt(hgx * hgx + hgy * hgy + 1)
+lit_v = smooth(np.sin(el_) - 0.55, np.sin(el_) + 0.15, ndl_v)
+# Off the body, where the haze below lies, it takes the light of the lobe it
+# leaves: a flat field there read as lit, a pale rim round every shaded base.
+w_in = cv2.erode(smooth(0.6, 0.95, Ah), np.ones((5, 5), np.uint8)).astype(np.float32)
+lit_v = lit_v * inside + fill(np.dstack([lit_v] * 3), w_in, 7)[..., 0] * (1 - inside)
+down = smooth(VOL[0], VOL[1], cv2.resize(sy_, h2, interpolation=cv2.INTER_AREA))
+lobe_k = LOBE_SHADE[0] + (LOBE_SHADE[1] - LOBE_SHADE[0]) * down
+vval = (1 - VOL_DARK * down) * (1 - lobe_k * (1 - lit_v))
+vtint = np.clip(VOL_TINT * down + 0.8 * lobe_k * (1 - lit_v), 0, 1)
+vval = cv2.resize(gauss(vval, 2), (W, H), interpolation=cv2.INTER_CUBIC)
+vtint = cv2.resize(gauss(vtint, 2), (W, H), interpolation=cv2.INTER_CUBIC)
+base = srgb_to_lin(hsv_rgb(BASE[0], BASE[1], 1.0))
+base /= float(base @ LUMA)
+yv = (col @ LUMA) * vval
+col = col * vval[..., None] + (base * yv[..., None] - col * vval[..., None]) * vtint[..., None]
+if os.environ.get("DEBUG"):
+    cv2.imwrite(WORK + "/vol-lit.png", (np.clip(lit_v, 0, 1) * 255).astype(np.uint8))
+    cv2.imwrite(WORK + "/vol-val.png", (np.clip(vval, 0, 1) * 255).astype(np.uint8))
+
+# The matte, by height. A congestus is crisp where its crown boils up in sun
+# and goes to haze down its body: over the lower half of the tower (source
+# rows HAZE) the matte widens from the crown's two px to a soft falloff of
+# HAZE_W of the frame width (sky to full cloud), and leans outward (the
+# haze lies off the body, it does not eat into it).
+HAZE = (560, 820)
+HAZE_W = 1 / 60
+hz = smooth(HAZE[0], HAZE[1], sy_)
+sig_h = HAZE_W * W / 3.3
+k_h = 2 * int(0.5 * sig_h) + 1
+af_haze = gauss(cv2.dilate(af, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_h, k_h))), sig_h)
+af = (1 - hz) * af + hz * af_haze
 if os.environ.get("DEBUG"):
     print("detail: source hp std", round(float(hpN[okN > 0].std()), 4), "laid std", round(float(D[af > 0.5].std()), 4),
           "guide std", round(float(guide[af > 0.5].std()), 4), "patches", n_laid)
