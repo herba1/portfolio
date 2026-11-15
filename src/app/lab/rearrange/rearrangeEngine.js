@@ -13,10 +13,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // travels with it; where a cable crossed it, it is completed underneath),
 // and the clean plate behind them was filled with LaMa, tile by tile at
 // close to native resolution, the cables drawn back through each hole along
-// their own lines. LaMa smoothed the whole plate on the way, so every sky
-// pixel it did not have to invent is the photograph's own again (sky.py:
-// the 6000 px original downsampled and lightly sharpened, the fills given
-// its grain), and the cumulus keep their real texture through the grade. The plate is split into a front layer (mast, girder,
+// their own lines. The plate is split into a front layer (mast, girder,
 // cables, with their disparity) and the sky behind.
 //
 // What ties an object to the things that stay moves with it. Every cable
@@ -73,14 +70,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    frame is the photograph exactly.
 // The sky is regraded on its own (gradeSky): a dense cyan-cobalt that
 // deepens with elevation toward the zenith (the top-left corner), cloud warm-neutral with skylight-blue
-// undersides, its edges feathered on the cloud's density into paler blues
-// of the local sky's own hue, its density held back in the midtones. Then the whole
+// undersides, its density held back in the midtones. Then the whole
 // composited frame, moved objects and live cables included, is developed
 // as one print: local contrast taken out of the surfaces (the photo was a
 // sharpened digital file), a thin red-leaning halation ring wherever bright
 // sky meets dark steel, film.js (summer: Pro-Mist diffusion, dye-cloud
 // softness, a soft shoulder that rolls cloud off warm-neutral), a lifted
-// teal black, and fine luma-only grain at 24 fps. Last, before the lifted black, one grade over the
+// teal black, and grain at 24 fps whose clumps are filtered by the
+// emulsion's MTF. Last, before the lifted black, one grade over the
 // developed print (COBALT), gated by the scene's sky matte so plate and
 // cut-outs take it alike: the upper sky's clear blue pulled down to a deep
 // cobalt, the horizon side left paler; cloud's lit tops onto a warm-neutral
@@ -98,8 +95,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // overexposure; 3.4: the demo held up). &sunAz / &sunEl (deg) override the sun.
 // &grade=0 shows the plate's own sky. &flatten, &halation, &grain override
 // the print's (PRINT); 0 turns each off. &cobalt scales the last grade and
-// &diffuse its cloud-edge diffusion and &veil the lit cloud's diffusion
-// onto the steel (0: off).
+// &diffuse its cloud-edge diffusion (0: off).
 
 const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -140,23 +136,17 @@ const SKY = {
   low: hex("#82BADA"),
   curve: 1.0,
   // the cloud/sky unmix, a soft alpha: [cloud is solid this far (linear
-  // luminance) above the clear sky, the gamma of its opacity (1: linear in
-  // the photograph's own luminance; below 1 it climbs steeply off the
-  // clear sky and keyed every veil to a grey-white cut-out), the clear-sky
-  // map's scale]. The plate's clear blue sits near 0.25-0.3, its veils at
-  // 0.35-0.55 and its cumulus tops 0.7-0.9: solid only from ~0.82, so a
-  // veil stays translucent, the blue showing through it in proportion, and
-  // only the thick cores go opaque. The map is a low percentile, so the
-  // open blue between wisps sits ~6-10% above it; scaled to meet it, the
-  // open blue is w ~ 0 and keeps its density.
-  cloud: [0.55, 1.0, 1.06],
-  // #F4EFE6, warmed against the film's cool highlight tint (.95, 1, 1.05)
-  warm: lin(hex("#F4EFE6")).map((v, i) => v * [1.06, 1, 0.93][i]),
+  // luminance) above the clear sky, smoothstep contrast on the alpha (0:
+  // linear, so a translucent wisp stays partly cloud over the cobalt rather
+  // than keyed out to it), the clear-sky map's scale]. The map is a low
+  // percentile, so the open blue between wisps sits ~6-10% above it; scaled
+  // to meet it, the open blue is w ~ 0 and keeps its density.
+  cloud: [0.13, 0, 1.06],
+  // #F2F0EA, warmed against the film's cool highlight tint (.95, 1, 1.05)
+  warm: lin(hex("#F2F0EA")).map((v, i) => v * [1.06, 1, 0.93][i]),
   // skylight blue, saturated past what should print: the diffusion and the
   // shoulder take most of it back off the cloud's shaded midtones
-  // (hue ~205, the clear sky's own, not the violet-leaning 212+ that
-  // printed as grey once the shoulder took its saturation)
-  under: lin(hex("#5FA8DC")),
+  under: lin(hex("#64A2DE")),
   // (the plate's thin cloud is dim: below ~0.8 the brightest core still
   // took the blue and smeared grey-violet; this rolls it off warm)
   underRange: [0.35, 0.8, 1.0],
@@ -165,28 +155,14 @@ const SKY = {
   // toward a phone's mid-blue). The ramp is aimed at the density wanted.
   density: 1.0,
   // the cloud's re-exposure (linear luminance): [ceiling its lit top is
-  // brought up under, power of the lift (1: none), the knee it comes in over],
-  // all on the cloud's local mean (its own texture rides back on top). The
-  // plate's thin cumulus tops sit near 0.7 and its thick ones near 0.92;
-  // under 0.95 at 2.1 they land 0.89 and 0.95, so every top glows near white
+  // brought up under, power of the lift (1: none), the knee it comes in over].
+  // The plate's thin cumulus tops sit near 0.7 and its thick ones near 0.92;
+  // under 0.95 at 1.6 they land 0.84 and 0.95, so every top glows near white
   // and none clips.
-  top4: [0.95, 2.1, 0.3, 0.65],
+  top4: [0.95, 1.7, 0.35, 0.7],
   // the light that lifts it (linear, luminance 1): warm, so the print's
   // shoulder rolls the top off warm-neutral, R a few levels over B, not grey
   sun: [1.1, 1, 0.82],
-  // the feather (see gradeSky): a thin edge's luminance as a share of the
-  // solid cloud's, and how far the local clear blue's hue is paled toward
-  // white in it (1: grey-white, 0: the sky's own saturation): a wisp keeps
-  // its share of the sky's blue, so it reads as vapour over the cobalt and
-  // not as a pale shape laid on it
-  feather: [0.62, 0.4],
-  // the clear blue round a cloud: vapour too thin to key, and the light
-  // the cloud scatters into the air round it, so the dense cobalt eases in
-  // across a soft distance (~30-60 px) instead of starting dark and
-  // saturated right at the cloud's edge: [amount, the broad opacity (the
-  // sky through two coarse mips) at which it is full, how far over the
-  // clear blue's luminance it lifts], in the feather's paled hue
-  near: [0.5, 0.3, 0.45],
 };
 
 // The print: what happens to the whole composited frame (plate, moved
@@ -208,7 +184,7 @@ const PRINT = {
   lift: [0.1, 0.12, 0.135],
   // grain, after everything (see FINAL_FS)
   grain: 0.17,
-  grainSize: 0.7, // x 1/1100 of the frame height: ~1 device px on a 1600 px canvas
+  grainSize: 1.15, // x 1/1100 of the frame height
 };
 
 // The last grade, on the developed print (see FINAL_FS): ref 3's sky and
@@ -227,42 +203,19 @@ const COBALT = {
   mid: [52, 118, 172],
   span: [0.42, 0.92, 0.08],
   deep: 0.88,
-  // and eased off round a cloud, by how much brighter than the target the
-  // print's broad mean is there (~20 and ~50 px): [from, to] (sRGB luma
-  // over the target) and how much of the pull it takes back, so the
-  // cobalt deepens with distance from a wisp instead of being pulled down
-  // right up to its feather, a dark saturated ring round each one
-  near: [0.03, 0.2, 0.8],
   // a cloud's lit top onto a warm-neutral shoulder: [knee luminance (above
-  // the shaded sides), the power it is lifted by, the width of the soft
-  // roll into the peak] and the peak it rolls into, warming as it climbs.
-  // The peak sits at ~250: the sunlit tops of the thick cumulus glow up to
-  // 248-252, a few tenths of a percent of the frame, R a dozen levels over
-  // B (the summer refs' overexposed light), and are never reached exactly,
-  // so a top keeps its texture, compressed, instead of a flat clipped cap
-  // (the curve bends the print's local mean, baseRadius of the frame
-  // height, and the cloud's own texture rides back on top of it)
-  shoulder: [0.72, 2.2, 0.05],
-  peak: [0xff, 0xfb, 0xee],
-  baseRadius: 0.012,
-  // its shaded sides toward skylight blue (hue ~200 here, ~205 once it
-  // mixes with the clear blue round it), keeping their luminance, right up
-  // to the knee, where the warm top takes over
-  shade: [118, 176, 207],
-  shadeAmount: 0.55,
-  // a thin diffusion off the lit tops: into the blue round them, and a
-  // little onto the tops themselves (bloomSelf, of the rings' light), so the
-  // brightest cumulus bleed and glow rather than sit as a hard white:
+  // the shaded sides), the power it is lifted by] and the peak it rolls
+  // into, warming as it climbs (never quite reached, so the grain still has
+  // room under 250)
+  shoulder: [0.78, 1.5],
+  peak: [250, 246, 238],
+  // its shaded sides toward skylight blue, keeping their luminance
+  shade: [150, 175, 205],
+  shadeAmount: 0.62,
+  // a thin diffusion off the lit tops into the blue round them only:
   // strength and radius (of the frame height)
-  bloom: 0.8,
-  bloomSelf: 0.35,
+  bloom: 0.6,
   bloomRadius: 0.005,
-  // and a wider, fainter diffusion off them onto the dark truss and mast
-  // in front: strength, radius (of the frame height), colour (sRGB: the
-  // peak leaning toward the halation's red)
-  veil: 0.4,
-  veilRadius: 0.015,
-  veilColor: [255, 226, 206],
 };
 
 const FILM = {
@@ -348,8 +301,6 @@ uniform float uGrade;
 uniform float uDensity;      // exponent on the graded sky's midtones
 uniform vec4 uCloudTop;       // the cloud's re-exposure: ceiling, power, knee from, to
 uniform vec3 uCloudSun;       // and the warmth its sunlit top takes on
-uniform vec2 uFeather;        // the thin edge: its luminance (of the solid cloud's), how far its sky hue is paled
-uniform vec3 uNear;           // the clear blue round a cloud: amount, the broad opacity it is full at, its lift
 uniform sampler2D uWire;      // the live cables: a coverage, r disparity x coverage
 uniform vec3 uCable;          // their colour, linear
 uniform vec4 uPinA[${MAXK}];  // pinned member: mast end at rest (photo px), its axis at rest
@@ -419,35 +370,43 @@ vec3 toSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// cloud opacity of the clean sky at uv + d (photo px), against the clear
+// sky's luminance ySky and the dimmest cloud's yCl at the centre
+float cloudAt(vec2 uv, vec2 d, float ySky, float yCl) {
+  float y = dot(texture(uSky, uv + d / uSize).rgb, vec3(0.2126, 0.7152, 0.0722));
+  return clamp((y - ySky) / (yCl - ySky), 0.0, 1.0);
+}
+
 vec3 gradeSky(vec3 c, vec2 uv) {
   float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  // How much of the pixel is cloud: an unmix on luminance between the
-  // plate's own clear blue here and the cloud solid enough to hide it, read
-  // as the cloud's opacity. (Luminance, not chroma: the plate's colour is
-  // coarser than its drawing, and a chroma key blotches.) The range is wide
-  // and the opacity eased up (uCloudY.y, a gamma) so a translucent veil is
-  // partly cloud over the cobalt, its density following the photograph's
-  // own pixel by pixel: a narrow key cut the soft cumulus into flat,
-  // posterized blobs with a cyan rim where the key turned over. Measured on
-  // a lightly smoothed luminance (half the clean sky at half size), so the photograph's
-  // grain does not flicker the opacity at an edge; the colour is the
-  // pixel's own.
+  // How much of the pixel is cloud: a linear unmix on luminance between the
+  // plate's own clear blue here and the dimmest cloud, read as the cloud's
+  // opacity. (Luminance, not chroma: the plate's colour is coarser than its
+  // drawing, and a chroma key blotches.) Kept linear and the range narrow, so
+  // a translucent wisp is partly cloud rather than keyed out to sky.
   vec4 cl = texture(uClear, uv);
   vec3 cSky = 0.5 * cl.rgb * uCloudY.z;
   float ySky = dot(cSky, vec3(0.2126, 0.7152, 0.0722));
   float yCl = ySky + uCloudY.x;
-  float Ys = mix(Y, dot(textureLod(uSky, uv, 0.0).rgb, vec3(0.2126, 0.7152, 0.0722)), 0.5);
-  float wp = pow(clamp((Ys - ySky) / (yCl - ySky), 0.0, 1.0), uCloudY.y);
-  // The feather. The same opacity read off the cloud's density (the clean
-  // sky through two of its mips, ~2 and ~5 px), not the pixel: where that
-  // density is thin, the edge is the density's, so a cumulus thins out into
-  // the blue over a few px instead of breaking up along every speck of the
-  // photograph's texture and noise; inside the body the pixel's own opacity
-  // (its drawing) comes back.
-  float Yd = dot(0.5 * (textureLod(uSky, uv, 1.2).rgb + textureLod(uSky, uv, 2.2).rgb), vec3(0.2126, 0.7152, 0.0722));
-  float wd = pow(clamp((Yd - ySky) / (yCl - ySky), 0.0, 1.0), uCloudY.y);
-  float feather = 0.85 * (1.0 - smoothstep(0.2, 0.65, wd));
-  float w = mix(wp, wd, feather);
+  float w = clamp((Y - ySky) / (yCl - ySky), 0.0, 1.0);
+  // A pocket where the plate dips to the clear sky's luminance inside a
+  // cloud body is the cloud thinning, not a hole through it: it would punch
+  // to full cobalt. Closed: the least cloud on a ring round the pixel (two
+  // radii, eight directions each), so a pixel ringed by cloud takes the
+  // ring's cloud, while one at a cloud's edge (open sky on part of the
+  // ring) keeps its own and the outline stays where it is.
+  float ring = 0.0;
+  for (int j = 0; j < 2; j++) {
+    float rr = 4.0 + 5.0 * float(j);
+    float m = 1.0;
+    for (int i = 0; i < 8; i++) {
+      float a = 0.7854 * float(i) + 0.39 * float(j);
+      m = min(m, cloudAt(uv, rr * vec2(cos(a), sin(a)), ySky, yCl));
+    }
+    ring = max(ring, m);
+  }
+  w = max(w, ring);
+  w = mix(w, w * w * (3.0 - 2.0 * w), uCloudY.y);
   // clear sky: the ramp by elevation, not by frame row. The camera is
   // rolled, so the zenith end is the top-left corner (~50 deg up) and the
   // horizon end the bottom-right (~6 deg): cobalt overhead relaxing to a
@@ -462,53 +421,29 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   vec3 tgt = toLin(mix(uSkyLow, uSkyTop, pow(t, uSkyCurve)));
   vec3 S = tgt * clamp(pow(max(cl.a, 1e-3), 0.15), 0.9, 1.0);
   S = toLin(toSrgb(S) + (hash(gl_FragCoord.xy + 3.7) + hash(gl_FragCoord.yx + 11.1) - 1.0) / 255.0);
-  vec3 hueS = S / max(dot(S, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-  // and round a cloud the clear blue is not yet clear: how much cloud is
-  // near, read through two coarse mips of the clean sky (~8 and ~22 px of
-  // it), lifts it toward the feather's paled blue, so the cobalt deepens
-  // away from a wisp across that distance rather than starting dark at the
-  // edge of its opacity (which drew a saturated rim round every veil)
-  float Yn = dot(0.5 * (textureLod(uSky, uv, 3.0).rgb + textureLod(uSky, uv, 4.5).rgb), vec3(0.2126, 0.7152, 0.0722));
-  float near = smoothstep(0.0, uNear.y, clamp((Yn - ySky) / (yCl - ySky), 0.0, 1.0)) * uNear.x;
-  vec3 hazeS = mix(hueS, vec3(1.0), uFeather.y);
-  hazeS *= dot(S, vec3(0.2126, 0.7152, 0.0722)) * (1.0 + uNear.z) / dot(hazeS, vec3(0.2126, 0.7152, 0.0722));
-  S = mix(S, hazeS, near);
   // the cloud itself, unmixed: the pixel is w of cloud over (1 - w) of the
   // plate's clear blue, so taking that blue back out leaves the cloud in its
-  // own colour and luminance, texture and all. Its fuller body turns
-  // warm-neutral where lit, skylight blue in its shadowed undersides, at
-  // its own luminance, so the cumulus keep their modelling.
+  // own colour, at the dimmest cloud's luminance (yCl) until it is solid.
+  // Its thin edges keep that (thin cloud is lit through, and stays feathered
+  // over the new blue); the fuller cloud rolls over to warm-neutral where
+  // lit, skylight blue in its shadowed undersides.
   vec3 own = max(c - (1.0 - w) * cSky, 0.0) / max(w, 1e-3);
-  float yc = max(dot(own, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+  float yc = max(Y, yCl);
   float under = (1.0 - smoothstep(uUnder.x, uUnder.y, yc)) * uUnder.z;
   vec3 tint = mix(uWarmCloud, uUnderBlue, under);
   tint *= yc / dot(tint, vec3(0.2126, 0.7152, 0.0722));
-  vec3 C = mix(own, tint, smoothstep(0.0, 0.6, w));
-  // Re-exposed, with a highlight shoulder: the cloud's lit side brought up
-  // under a ceiling, so a thin cumulus's top glows near a thick one's. The
-  // curve goes on the cloud's local mean (the clean sky's mip, ~20 px) and
-  // the photograph's own detail round that mean rides back on top as it
-  // came (boosted, it printed crunchy, a dark rim in every hollow of a lit
-  // top, where film cumulus bleed soft): a shoulder on
-  // each pixel alone flattens exactly the bright texture it lifts, and the
-  // tops printed as smooth enamel. What is added is sunlight (warm, not
-  // more of the pixel's blue), so a lit top bleaches warm-neutral.
-  float yb = max(dot(textureLod(uSky, uv, 2.5).rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
-  float dd = clamp(Ys / yb, 0.6, 1.5);
-  float base = yc / dd;
-  float bt = min(base, uCloudTop.x);
-  float lb = uCloudTop.x * (1.0 - pow(1.0 - bt / uCloudTop.x, uCloudTop.y)) + max(base - uCloudTop.x, 0.0);
-  float lifted = lb * dd;
-  float lit = smoothstep(uCloudTop.z, uCloudTop.w, base) * smoothstep(0.3, 1.0, w);
-  C = C * mix(1.0, min(lifted / yc, 1.0), lit) + uCloudSun * max(lifted - yc, 0.0) * lit;
-  // and where it is thin, the cloud is not its pixel (that is mostly the
-  // photograph's blue and its noise, unmixed) but vapour lit by the sky
-  // round it: the local clear blue's own hue, paled, at a thin cloud's
-  // luminance, so the feather shades from the cobalt into the body through
-  // lighter blues of the same hue, with no grey or cyan rim
-  vec3 edgeC = mix(hueS, vec3(1.0), uFeather.y);
-  edgeC *= uFeather.x * yCl / dot(edgeC, vec3(0.2126, 0.7152, 0.0722));
-  C = mix(edgeC, C, smoothstep(0.15, 0.6, wd));
+  vec3 C = mix(own, tint, smoothstep(0.0, 0.5, w));
+  // Re-exposed: the cloud's lit side brought up under a ceiling, so a thin
+  // cumulus's top (the plate's ~0.7) glows near a thick one's (~0.92)
+  // instead of printing a step of grey below it; the knee keeps the
+  // shadowed undersides where they were, so the lit top stands off them.
+  // What is added is sunlight (warm-neutral, luminance 1), not more of the
+  // pixel's own colour: a lit top bleaches toward warm white rather than
+  // its blue being pushed up into a cyan.
+  float yt = min(yc, uCloudTop.x);
+  float lifted = uCloudTop.x * (1.0 - pow(1.0 - yt / uCloudTop.x, uCloudTop.y)) + max(yc - uCloudTop.x, 0.0);
+  float lit = smoothstep(uCloudTop.z, uCloudTop.w, yc);
+  C += uCloudSun * max(lifted - yc, 0.0) * lit * smoothstep(0.5, 1.0, w) * (Y / yc);
   // C over S, in linear light, w its opacity
   vec3 g = mix(S, C, w);
   // density held back in the midtones (the clear blue and the cloud's
@@ -747,12 +682,12 @@ void main() {
 
 // After film.js: the scan's lifted black, then grain, the last thing to
 // touch the print, so it lies over the moved objects and the plate alike.
-// The grain is fine and luma only: value noise at about a device pixel
-// (three offset layers at 1x, 1.4x and 2x that frequency, nothing coarser:
-// octaves below the clump size printed as low-frequency mottle, and a dye
-// term put colour into it, both read as a digital sensor's noise), the
-// same offset on every channel. Strongest in the mids, thinner in the
-// highlights and the black. It is redrawn at 24 fps.
+// The grain is clumps of silver at about 1/1100 of the frame height, three
+// octaves of value noise weighted by the emulsion's MTF (a Lorentzian,
+// 1 / (1 + (f / f50)^2), f50 at the clump size): the coarse clumps pass,
+// the finest roll off, so no single device pixel sparkles the way a
+// digital noise does. Strongest in the mids, thinner in the highlights,
+// mostly monochrome with a little dye. It is redrawn at 24 fps.
 const FINAL_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -769,18 +704,12 @@ uniform float uCobalt; // the grade's strength (0: off)
 uniform vec3 uZenith;  // sRGB: where the upper sky is pulled
 uniform vec3 uMidSky;  // and the target where that pull starts
 uniform vec4 uDeep;    // from, to (frame height, from the bottom), tilt left, amount
-uniform vec3 uNearC;   // the pull eased off round a cloud: from, to, amount
-uniform vec3 uShoulder;  // knee, power, the roll's width into the peak
+uniform vec2 uShoulder;
 uniform vec3 uPeak;
 uniform vec3 uShade;
 uniform float uShadeAmt;
 uniform float uBloom;
-uniform float uBloomSelf;
 uniform float uBloomR; // device px
-uniform float uBaseLod; // the print's local mean for the shoulder (~20 px)
-uniform float uVeil;    // the diffusion off the lit cloud onto the steel before it
-uniform float uVeilR;   // device px
-uniform vec3 uVeilColor;
 out vec4 o;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 vec3 toLin(vec3 c) {
@@ -798,19 +727,9 @@ float satOf(vec3 c) {
 float litTop(vec3 c) {
   return smoothstep(0.7, 0.93, dot(c, LUMA)) * (1.0 - smoothstep(0.18, 0.4, satOf(c)));
 }
-// bright cloud, as the share of it the diffusion onto the steel spreads
-// (read through the print's mips, where the steel it is next to has
-// already dimmed it, so its threshold is lower than litTop's)
-float brightCloud(vec3 c) {
-  return smoothstep(0.5, 0.82, dot(c, LUMA)) * (1.0 - smoothstep(0.22, 0.45, satOf(c)));
-}
 // The grade, in the print's own values (sRGB). m is how much of the pixel
-// is sky (the scene's matte): nothing else is touched. b is the print's
-// local mean here (its mip, ~20 px), mb how much of that neighbourhood is
-// sky. Every gate is wide: the cumulus now carry the photograph's own
-// texture, and a narrow threshold on a textured gradient prints it as
-// contour steps.
-vec3 cobalt(vec3 f, float m, vec3 b, float mb) {
+// is sky (the scene's matte): nothing else is touched.
+vec3 cobalt(vec3 f, float m) {
   float sat = satOf(f);
   float Y = dot(f, LUMA);
   // 1. The clear blue, deepened toward the zenith end. What decides clear
@@ -820,66 +739,32 @@ vec3 cobalt(vec3 f, float m, vec3 b, float mb) {
   //    blue only a little.
   float t = clamp((vUv.y - uDeep.x) / (uDeep.y - uDeep.x) + uDeep.z * (0.5 - vUv.x), 0.0, 1.0);
   t = t * t * (3.0 - 2.0 * t);
-  //    The colour is read half off the neighbourhood (where it is all
-  //    sky): per pixel, every bluish hollow in a cloud's texture counted as
-  //    clear and was pulled down to cobalt, a dark blue-grey speck inside
-  //    the cumulus.
-  float skyN = smoothstep(0.85, 1.0, mb);
-  float satN = mix(sat, max(satOf(b), sat * 0.7), 0.6 * skyN);
-  float clear = smoothstep(0.38, 0.72, satN) * (1.0 - smoothstep(0.55, 0.85, Y));
-  //    (and not the cloud's feather: the scene paled it in the sky's own
-  //    hue, so it is as saturated as the blue but well above it, and pulled
-  //    down to cobalt every soft edge came back hard)
-  vec3 tgtS = mix(uMidSky, uZenith, t);
-  clear *= 1.0 - smoothstep(0.12, 0.3, Y - dot(tgtS, LUMA));
-  //    (nor the air round it: the pull fades in with distance from the
-  //    cloud, read off the print's broad mean, not the pixel's own edge)
-  float yw = dot(0.5 * (b + textureLod(uFilm, vUv, uBaseLod + 1.3).rgb), LUMA);
-  clear *= 1.0 - uNearC.z * smoothstep(uNearC.x, uNearC.y, yw - dot(tgtS, LUMA));
+  float clear = smoothstep(0.44, 0.66, sat) * (1.0 - smoothstep(0.62, 0.8, Y));
   vec3 L = toLin(f);
-  vec3 tgt = toLin(tgtS);
+  vec3 tgt = toLin(mix(uMidSky, uZenith, t));
   L = mix(L, tgt, clear * t * uDeep.w * m);
   // 2. The cloud's shaded sides (dim, nearly neutral) toward skylight blue,
-  //    at their own luminance, below where the lit top begins. Which side
-  //    a pixel is on is read off the neighbourhood (the local mean, where it
-  //    is all sky), not the pixel: gated per pixel, the cloud's own texture
-  //    flipped it between blue-grey and white and the bodies printed
-  //    mottled, a dark blue-grey speck in every hollow of a lit top.
-  float ym = mix(Y, dot(b, LUMA), 0.75 * skyN);
-  float cloudy = 1.0 - smoothstep(0.2, 0.5, sat);
-  //    The shade runs right up to the sunlit top (the knee), so the
-  //    body's midtones keep the blue instead of rolling grey-white.
-  float shadeW = cloudy * smoothstep(0.36, 0.56, ym) * (1.0 - smoothstep(uShoulder.x - 0.06, uShoulder.x + 0.12, ym));
+  //    at their own luminance, below where the lit top begins.
+  float cloudy = 1.0 - smoothstep(0.26, 0.44, sat);
+  float shadeW = cloudy * smoothstep(0.42, 0.58, Y) * (1.0 - smoothstep(uShoulder.x - 0.08, uShoulder.x + 0.04, Y));
   vec3 sb = toLin(uShade);
   vec3 Ls = sb * (dot(L, LUMA) / dot(sb, LUMA));
   L = mix(L, Ls, shadeW * uShadeAmt * m);
-  // 3. Its lit top onto a soft warm-neutral shoulder that rolls into the
+  // 3. Its lit top lifted onto a warm-neutral shoulder that rolls into the
   //    peak and never quite reaches it: the thin tops come up to glow beside
   //    the thick ones, the clipped cores come down off 255, and all of it
-  //    turns from neutral white to warm. The curve bends the local mean,
-  //    not the pixel: the cloud's own detail round that mean rides back on
-  //    top, so the tops keep their texture under the shoulder instead of
-  //    flattening into enamel (only where the neighbourhood is all sky, so
-  //    steel near a cloud's edge never lends it a dark mean and a halo).
+  //    turns from neutral white to warm.
   vec3 s = toSrgb(L);
   float Ys = dot(s, LUMA);
-  float Yb = mix(Ys, dot(b, LUMA), smoothstep(0.85, 1.0, mb));
-  float dd = clamp(Ys / max(Yb, 1e-3), 0.8, 1.2);
   float P = dot(uPeak, LUMA) * 0.993;
   float k0 = uShoulder.x;
-  float u = clamp((Yb - k0) / (1.0 - k0), 0.0, 1.0);
-  float Yc = mix(Yb, k0 + (P - k0) * (1.0 - pow(1.0 - u, uShoulder.y)), step(k0, Yb)) * dd;
-  // and the last of it rolled softly into the peak (an exponential
-  // shoulder, the film's own), not cut at it: a hard min() printed the
-  // brightest texture as a flat cap
-  float k1 = P - uShoulder.z;
-  float Yh = Yc < k1 ? Yc : k1 + uShoulder.z * (1.0 - exp(-(Yc - k1) / uShoulder.z));
+  float u = clamp((Ys - k0) / (1.0 - k0), 0.0, 1.0);
+  float Yh = k0 + (P - k0) * (1.0 - pow(1.0 - u, uShoulder.y));
   // warm-neutral at the knee, the peak's own warmth only as it nears it,
   // so the lit top shades into its cooler edge instead of sitting on it
-  vec3 hue = mix(vec3(1.0), uPeak / dot(uPeak, LUMA), smoothstep(k0, 0.95, Yb));
+  vec3 hue = mix(vec3(1.0), uPeak / dot(uPeak, LUMA), smoothstep(k0, 1.0, Ys));
   vec3 warm = hue * Yh;
-  // (gated on the neighbourhood too, so a whole lit top comes up together)
-  float hiW = (1.0 - smoothstep(0.2, 0.48, sat)) * smoothstep(k0 - 0.06, k0 + 0.14, mix(Ys, Yb, 0.75));
+  float hiW = (1.0 - smoothstep(0.25, 0.45, sat)) * smoothstep(k0 - 0.04, k0 + 0.1, Ys);
   return mix(s, warm, hiW * m);
 }
 float hash(vec2 p) {
@@ -916,35 +801,10 @@ void main() {
       float r = uBloomR * (i % 2 == 0 ? 0.6 : 1.3);
       spill += litTop(textureLod(uFilm, vUv + vec2(cos(a), sin(a)) * r * uTexel, lod).rgb);
     }
-    spill /= 12.0;
-    spill = max(spill - litTop(f), 0.0) + uBloomSelf * spill * litTop(f);
-    vec3 b = textureLod(uFilm, vUv, uBaseLod).rgb;
-    float sb = textureLod(uScene, vUv, uBaseLod).a;
-    float mb = sb > 0.25 ? clamp(2.0 * (1.0 - sb), 0.0, 1.0) : 0.0;
-    vec3 g = cobalt(f, m, b, mb);
+    spill = max(spill / 12.0 - litTop(f), 0.0);
+    vec3 g = cobalt(f, m);
     vec3 glow = uPeak * spill * uBloom * m;
     f = 1.0 - (1.0 - g) * (1.0 - glow);
-  }
-  // The diffusion off the lit cloud onto the dark steel in front of it, as
-  // a Pro-Mist and the emulsion's own scatter lay it: the lit tops within
-  // ~1.5% of the frame height (two rings, through the print's mips) veil
-  // whatever of the pixel is not sky and is dark, warm-neutral leaning a
-  // little red (the halation's colour), strongest where the truss crosses
-  // the brightest cumulus and nothing where it stands against clear blue.
-  float mPix = sa > 0.25 ? clamp(2.0 * (1.0 - sa), 0.0, 1.0) : 0.0;
-  if (uVeil > 0.0 && mPix < 0.98) {
-    float veil = 0.0;
-    float vlod = log2(max(uVeilR * 0.35, 1.0));
-    for (int i = 0; i < 12; i++) {
-      float a = float(i) * 0.5235988 + (i % 2 == 0 ? 0.0 : 0.26);
-      float r = uVeilR * (i % 2 == 0 ? 0.45 : 1.0);
-      veil += brightCloud(textureLod(uFilm, vUv + vec2(cos(a), sin(a)) * r * uTexel, vlod).rgb);
-    }
-    veil /= 12.0;
-    float yv = dot(f, LUMA);
-    float onDark = (1.0 - mPix) * (1.0 - smoothstep(0.08, 0.5, yv));
-    vec3 vg = uVeilColor * veil * uVeil * onDark * pow(1.0 - uOpen, 4.0);
-    f = 1.0 - (1.0 - f) * (1.0 - vg);
   }
   // a toe, not a veil: the black comes up, the sky's midtones barely move
   float yf = clamp(dot(f, LUMA), 0.0, 1.0);
@@ -956,15 +816,13 @@ void main() {
   f = mix(f, vec3(yo), 0.85 * uOpen);
   f = mix(f, vec3(0.9, 0.945, 1.0), 0.5 * uOpen * uOpen);
 
-  // fine grain, luma only: two value-noise layers at about a device pixel
-  // (offset, not octaves below the clump size, which printed as blotches),
-  // the same offset on all three channels so it never carries colour,
-  // strongest in the mids and thin in the highlights and the black
   vec2 gp = gl_FragCoord.xy / uGrainPx + uSeed * vec2(17.13, 31.71);
-  float g = (vnoise(gp) + 0.7 * vnoise(gp * 1.37 + vec2(5.3, 9.1)) + 0.35 * vnoise(gp * 2.11 + 7.7)) / 0.86;
+  // octaves at 0.5x, 1x, 2x the clump frequency; MTF weights 0.8, 0.5, 0.2
+  float g = (0.8 * vnoise(gp * 0.5 + 3.1) + 0.5 * vnoise(gp) + 0.2 * vnoise(gp * 2.0 + 7.7)) / 0.97;
+  vec3 gc = vec3(vnoise(gp * 0.7 + 41.0), vnoise(gp * 0.7 + 83.0), vnoise(gp * 0.7 + 127.0));
   float ly = dot(f, LUMA);
-  float amp = uGrain * 0.11 * (0.35 + 0.65 * smoothstep(0.04, 0.25, ly) * (1.0 - 0.7 * smoothstep(0.55, 0.97, ly)));
-  f += vec3(g * amp);
+  float amp = uGrain * 0.22 * (0.3 + 0.7 * smoothstep(0.05, 0.3, ly) * (1.0 - 0.6 * smoothstep(0.5, 0.95, ly)));
+  f += (vec3(g) + gc * 0.35) * amp;
   f += (hash(gl_FragCoord.xy + uSeed) - 0.5) / 255.0;
   o = vec4(mix(uPaper, clamp(f, 0.0, 1.0), cov), 1.0);
 }`;
@@ -1116,16 +974,10 @@ function clearSky(px, w, h) {
     }
     g = o;
   };
-  // (spread four cells deep, ~100 px of the plate: one cell left the
-  // middle of a big cumulus at its own dim end, and smoothed out, that
-  // raised the clear sky round it, so the veils and the open blue there
-  // read as clear and were keyed against it, a cut-out in a cobalt ring)
-  for (let i = 0; i < 4; i++) {
-    pass((n) => {
-      const m = n.reduce((a, b) => (lum(b) < lum(a) ? b : a));
-      return lum(n[4]) > 1.1 * lum(m) ? m : n[4];
-    });
-  }
+  pass((n) => {
+    const m = n.reduce((a, b) => (lum(b) < lum(a) ? b : a));
+    return lum(n[4]) > 1.1 * lum(m) ? m : n[4];
+  });
   for (let i = 0; i < 3; i++) pass((n) => [0, 1, 2].map((k) => n.reduce((a, b) => a + b[k], 0) / n.length));
   // The plate's own modulation of the clear blue, for gradeSky to keep a
   // little of: each pixel's luminance over the map's clear sky there (as the
@@ -1267,7 +1119,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
   };
   const plateTex = tex2d(plateBm, gl.SRGB8_ALPHA8, true);
   const frontTex = tex2d(frontBm, gl.RGBA8, false);
-  const skyTex = tex2d(skyBm, gl.SRGB8_ALPHA8, true);
+  const skyTex = tex2d(skyBm, gl.SRGB8_ALPHA8, false);
   const clearTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, clearTex);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -2018,8 +1870,6 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1f(U.uDensity, SKY.density);
     gl.uniform4fv(U.uCloudTop, SKY.top4);
     gl.uniform3fv(U.uCloudSun, SKY.sun);
-    gl.uniform2fv(U.uFeather, SKY.feather);
-    gl.uniform3fv(U.uNear, SKY.near);
     const texs = [
       [gl.TEXTURE_2D, plateTex, U.uPlate],
       [gl.TEXTURE_2D, frontTex, U.uFront],
@@ -2091,18 +1941,12 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform3fv(fin.u.uZenith, c255(COBALT.zenith));
     gl.uniform3fv(fin.u.uMidSky, c255(COBALT.mid));
     gl.uniform4f(fin.u.uDeep, ...COBALT.span, COBALT.deep);
-    gl.uniform3fv(fin.u.uNearC, COBALT.near);
-    gl.uniform3fv(fin.u.uShoulder, COBALT.shoulder);
+    gl.uniform2fv(fin.u.uShoulder, COBALT.shoulder);
     gl.uniform3fv(fin.u.uPeak, c255(COBALT.peak));
     gl.uniform3fv(fin.u.uShade, c255(COBALT.shade));
     gl.uniform1f(fin.u.uShadeAmt, COBALT.shadeAmount);
     gl.uniform1f(fin.u.uBloom, num("diffuse") ?? COBALT.bloom);
-    gl.uniform1f(fin.u.uBloomSelf, COBALT.bloomSelf);
     gl.uniform1f(fin.u.uBloomR, Math.max(2, COBALT.bloomRadius * stage.canvas.height));
-    gl.uniform1f(fin.u.uBaseLod, Math.log2(Math.max(1, COBALT.baseRadius * stage.canvas.height)));
-    gl.uniform1f(fin.u.uVeil, num("veil") ?? COBALT.veil);
-    gl.uniform1f(fin.u.uVeilR, Math.max(3, COBALT.veilRadius * stage.canvas.height));
-    gl.uniform3fv(fin.u.uVeilColor, c255(COBALT.veilColor));
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
     gl.activeTexture(gl.TEXTURE0);

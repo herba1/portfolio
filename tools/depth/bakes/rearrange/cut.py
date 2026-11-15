@@ -13,9 +13,6 @@ Against the sky the matte is solved per pixel: each edge pixel is a mix of
 the local sky colour S and the local object colour F, and alpha is where the
 pixel falls on the line from S to F. That keeps a cable's sub-pixel edge and
 the sky between the platform floor's slats, and leaves no blue fringe on the cutout.
-(The 2400 px solve here takes the small windows of pale cloud between the
-deck's slats as steel and leaves a rim on every edge; matte.py, run last,
-re-solves the mattes against the sky from the 6000 px original.)
 Where the object meets something solid (the platform's box against the
 mast) the matte is a colour guided filter of the hard cut, and it stops
 where the thing that stays (keep_k: the mast, the girder's chords) begins.
