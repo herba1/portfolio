@@ -8,6 +8,7 @@
 #     && python3 redome.py <copy of scene.webp> <copy of optics.png>    (once, on the shipped bake: the broad-dome sky field, the drawn leader out)
 #     && python3 crown.py <copy of scene.webp> <copy of optics.png> <donor.webp>  (once: the top crown re-keyed from real needles, radial aureole)
 #     && python3 clouds.py <copy of scene.webp> <copy of optics.png> <tree_lined_driveway_8k.hdr>  (cumulus re-shaded from the HDR's own radiance)
+#     && python3 rekey.py <copy of scene.webp>   (once: the pines as ink on a hard matte -> trees.webp, the plate under them refilled with sky)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image

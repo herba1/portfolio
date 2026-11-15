@@ -109,6 +109,14 @@ export const FILM = {
   needleBloomCap: 0.85,
   needleHalCap: 0.6,
   needleCapEV: 2,
+  // The pines are their own layer (rekey.py): ink on a hard matte, laid over the
+  // sky after the Pro-Mist and the halation, so no glow washes blue into the
+  // foliage and the sky shows only through real gaps between the branches. At
+  // 0 EV the ink takes inkVeil of the veil and inkHal of the halation; both ease
+  // up to the full amounts by needleCapEV, where the overexposure is meant to
+  // lift and soften the shadows.
+  inkVeil: 0,
+  inkHal: 0.1,
   bloom: 0.08,
   halation: 0.15,
   halationColor: [1.0, 0.3, 0.08],
@@ -133,6 +141,8 @@ const FS = `#version 300 es
 precision highp float;
 uniform sampler2D uScene;   // linear radiance (or log-encoded when uLogIn)
 uniform sampler2D uOptics;  // left half: diffusion, right half: halation source
+uniform sampler2D uTrees;   // the pines: rgb log radiance of the ink, alpha its matte
+uniform vec2 uInk;          // the ink's share of the veil and of the halation
 uniform float uLogIn;
 uniform vec4 uRect;         // square in device px: x, y, size, size
 uniform float uExp;         // norm * 2^ev
@@ -183,6 +193,14 @@ void main(){
   // Halation: light bounced off the base comes back through the red layer,
   // landing just outside bright areas (a ring, not a fill).
   L += uHalColor * max(Yb - dot(L, LUMA), 0.0) * uHal * (1.0 - uNeedleCap.y * needle);
+  // The pines, composited over the diffused sky (rekey.py): solid ink, the sky only
+  // in their real gaps, the edge a 1 px ramp from the matte.
+  vec4 tr = texture(uTrees, uv);
+  vec3 ink = dec(tr.rgb);
+  ink = mix(ink, D, uBloom * uInk.x);
+  ink += uHalColor * max(Yb - dot(ink, LUMA), 0.0) * uHal * uInk.y;
+  L = mix(L, ink, tr.a);
+  Ys = mix(Ys, dot(ink, LUMA), tr.a);
   // The printer holds all but the cloud back (after the optics, so the hold does not
   // read as a dark gap for the halation to fill).
   float open = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0); // 1 - the bake's cloud share
@@ -315,7 +333,11 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const still = fixed != null || params.has("still");
 
-  const [sceneImg, opticsImg] = await Promise.all([bitmap("/lab/overexpose/scene.webp"), bitmap("/lab/overexpose/optics.png")]);
+  const [sceneImg, opticsImg, treesImg] = await Promise.all([
+    bitmap("/lab/overexpose/scene.webp"),
+    bitmap("/lab/overexpose/optics.png"),
+    bitmap("/lab/overexpose/trees.webp"),
+  ]);
 
   // Warm white paper around the print, whatever the site theme.
   host.style.background = "#f2f0eb";
@@ -341,6 +363,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   const prog = compile(gl, VS, FS);
   const logTex = upload(gl, sceneImg, false);
   const opticsTex = upload(gl, opticsImg, false);
+  const treesTex = upload(gl, treesImg, true);
 
   // Decode the radiance once into a half-float texture so the minified print
   // averages light, not logarithms. Without a renderable float format, sample
@@ -380,6 +403,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   const sceneW = sceneImg.width;
   sceneImg.close?.();
   opticsImg.close?.();
+  treesImg.close?.();
 
   // Paper constants: grey lands on printGrey, slope paperGamma at the middle.
   const F = FILM;
@@ -486,6 +510,9 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, opticsTex);
     gl.uniform1i(u.uOptics, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, treesTex);
+    gl.uniform1i(u.uTrees, 2);
     gl.uniform1f(u.uLogIn, logIn);
     gl.uniform4f(u.uRect, x, y, s, s);
     const e = ev.v;
@@ -506,6 +533,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform2fv(u.uNeedleY, F.needleY);
     const capK = 1 - smoothstep(0, F.needleCapEV, e);
     gl.uniform2f(u.uNeedleCap, F.needleBloomCap * capK, F.needleHalCap * capK);
+    gl.uniform2f(u.uInk, 1 - (1 - F.inkVeil) * capK, 1 - (1 - F.inkHal) * capK);
     gl.uniform1f(u.uLod, logIn ? 0 : Math.max(0, Math.log2(sceneW / s)));
     gl.uniform1f(u.uSat, F.saturation);
     gl.uniform1f(u.uBlueSat, F.blueDepth);
@@ -587,6 +615,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
       gl.deleteTexture(logTex);
       if (sceneTex !== logTex) gl.deleteTexture(sceneTex);
       gl.deleteTexture(opticsTex);
+      gl.deleteTexture(treesTex);
       gl.deleteProgram(prog.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
