@@ -489,6 +489,12 @@ def write_sky_key(path, sky_key, key_r8):
 # rewritten cleaned), and the new plate is that over the new sky. The sky key
 # is measured again from the new cloud.
 #
+# The sky it ships is laid as plates (SKY_PLATES, _sky_plates): congestus
+# photographed against a deep sky, put in by a homography so every curd keeps
+# its own detail, its light kept as photographed and only toned
+# (_plate_tone). The modes below are the older ones, used only when
+# SKY_PLATES is empty or its photographs are not at hand.
+#
 # The cloud is graded as cumulus in sun is lit, as volumes (_cumulus_light):
 # each tower split by a large-radius optical depth towards the zenith and by
 # the plate's own shading into sunlit tops, a warm neutral rolled off on a
@@ -498,7 +504,7 @@ def write_sky_key(path, sky_key, key_r8):
 # clear sky between takes the cobalt in log light, so the photograph's own
 # grain and drawing ride on it.
 #
-# Without the source photographs at hand (SKY_SRCS missing), --sky re-grades
+# Without the source photographs at hand (SKY_PLATES and SKY_SRCS missing), --sky re-grades
 # the sky the last bake shipped instead (WK/base-sky.webp, copied from OUT's
 # fill.webp the first time), the older flat grade taken back out of it first
 # (_ungrade_cumulus).
@@ -718,6 +724,209 @@ def _sky_lookup(spec):
     S = (sacc / np.maximum(wsum, 1e-6)[..., None]).astype(np.float32)
     clear = S
     return np.clip(out * keep + clear * (1 - keep), 0, 1).astype(np.float32), np.maximum(S, 1e-4)
+
+
+# --- the sky as plates: congestus photographed against deep sky ------------
+# The radial re-wind above (_sky_lookup) wound two horizon photographs round
+# the zenith: every curd was resampled along circles, so the towers came out
+# radially smeared and soft, and their tops, cleared past a fixed height,
+# stood in a ring round an open disc of cobalt at the zenith, a stencilled
+# hole. So the sky is now laid as plates (SKY_PLATES): each a CC0 photograph
+# of congestus, the towers sharp against a deep summer sky, put in by a
+# homography, never a resampling that bends it: placed and turned so its
+# towers lean in on the vanishing point (ZEN) the pole runs into, with a
+# gentle keystone (LEAN) so its verticals converge on it a little, as a
+# Panini-ish lean would, the photograph's own detail kept at its own
+# resolution (taken down to the print's scale by area first, so it neither
+# aliases nor softens). The plates are laid one over another, each by its
+# cloud only: its own clear sky is swapped for the print's cobalt (by the
+# cloud's share of each pixel, against that photograph's clear sky pushed in
+# under the cloud), so where a later plate is clear the one under it shows,
+# and nothing frames the zenith but where the towers happen to reach.
+#   SKY_PLATES  ";"-separated: path:ax,ay,px,py,rot,size[,bottom[,flip]]
+#               (ax, ay): the anchor in the photograph, 0..1; (px, py): where
+#               it lands on the print (px); rot: degrees, + turns the
+#               photograph's top clockwise; size: the photograph's width on
+#               the print (px); bottom: the photograph's rows used, 0..1 (its
+#               land and haze below are cut off, feathered); flip: mirrored.
+#   The plates: Gåseberg 2 (left, its shaded bases cut off) and Gåseberg 4
+#   (right, its top leaning in past the zenith), W.carter, CC0, Wikimedia
+#   Commons (see experiment.json), at Commons' 3840 px thumbnail size, so
+#   each is taken down (0.68x) to the print, never up
+_PL = "/tmp/claude-0/climb/develop/work/r1sky/dl/"
+SKY_PLATES = os.environ.get("SKY_PLATES", _PL + "g2_3840.jpg:0.4,0.5,300,1100,40,2600,0.72;" + _PL + "g4_3840.jpg:0.45,0.55,2000,840,-34,2600")
+LEAN = float(os.environ.get("LEAN", "0.35"))  # 0 a flat turn, 1 verticals all through ZEN
+PLATE_FEATHER = float(os.environ.get("PLATE_FEATHER", "90"))  # a plate's edge, print px
+PL_EXP = float(os.environ.get("PL_EXP", "0.66"))
+PL_EDGE = int(os.environ.get("PL_EDGE", "4"))  # a cloud's edge, print px, lit from inside it
+PL_WHITE = float(os.environ.get("PL_WHITE", "0.55"))  # whiteness that is all cloud
+PL_CLOUD_GAIN = float(os.environ.get("PL_CLOUD_GAIN", "0.0"))  # share of the sky's light gain the cloud takes (none: its exposure is PL_EXP)
+
+
+def _plate_quad(w0, h0, ax, ay, px, py, rot, size):
+    """Where a photograph's corners land on the print: placed by its anchor,
+    turned and scaled, then its top edge pulled along the lines from its
+    bottom corners towards ZEN by LEAN, so its verticals converge."""
+    s = size / w0
+    c, sn = np.cos(np.radians(rot)), np.sin(np.radians(rot))
+    src = np.array([[0, 0], [w0, 0], [w0, h0], [0, h0]], np.float64)  # TL TR BR BL
+    d = (src - [ax * w0, ay * h0]) * s
+    dst = np.stack([d[:, 0] * c - d[:, 1] * sn, d[:, 0] * sn + d[:, 1] * c], 1) + [px, py]
+    zen = np.array(ZEN, np.float64)
+    for top, bot in ((0, 3), (1, 2)):
+        v = dst[top] - dst[bot]
+        L = np.linalg.norm(v)
+        u = zen - dst[bot]
+        u /= max(np.linalg.norm(u), 1e-6)
+        dirn = v / L * (1 - LEAN) + u * LEAN
+        dst[top] = dst[bot] + dirn / np.linalg.norm(dirn) * L
+    return src.astype(np.float32), dst.astype(np.float32)
+
+
+def _plate_clear(P, ok):
+    """What lies behind a photograph's white cloud (linear): every pixel of
+    it that is blue (whiteness under 0.3), the open sky and the bases in deep
+    shade alike, pushed in under the white in log light, at half size and
+    blurred only a little, so it follows the edge where a lit tower meets a
+    shaded base. Measured against it, that edge is the tower over the base,
+    and the base itself goes with the sky (a slab of slate, swapped as cloud,
+    drew a dark rim round every tower, or a hole in the cobalt)."""
+    h, w = P.shape[:2]
+    q = 2
+    sm = cv2.resize(P, (w // q, h // q), interpolation=cv2.INTER_AREA)
+    okq = cv2.resize(ok, (w // q, h // q), interpolation=cv2.INTER_AREA)
+    wh = sm.min(2) / np.maximum(sm.max(2), 1e-4)
+    m = ((wh < 0.3) & (okq > 0.99)).astype(np.float32)
+    m = cv2.erode(m, disk(2))
+    lg = np.log(np.maximum(sm, 1e-4)) * m[..., None]
+    c = np.exp(pushpull(lg, m))
+    c = cv2.GaussianBlur(c, (0, 0), 4)
+    return cv2.resize(c, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+
+
+def _sky_plates(spec):
+    """The sky laid as plates over the print's clear cobalt (linear), and
+    the cloud's share of each pixel."""
+    h, w = H, W
+    T = _sky_target(h, w)
+    out = T.copy()
+    op_all = np.zeros((h, w), np.float32)
+    for item in (s_.strip() for s_ in spec.split(";") if s_.strip()):
+        path, prm = item.rsplit(":", 1)
+        v = prm.split(",")
+        ax, ay, px, py, rot, size = (float(x) for x in v[:6])
+        bottom = float(v[6]) if len(v) > 6 else 1.0
+        flip = len(v) > 7 and v[7] == "flip"
+        bgr = cv2.imread(path, cv2.IMREAD_COLOR)
+        if flip:
+            bgr, ax = bgr[:, ::-1], 1 - ax
+        h0, w0 = bgr.shape[:2]
+        src = s2l(bgr[:, :, ::-1].astype(np.float32) / 255)
+        # balanced so its brightest cloud is neutral, and exposed so that
+        # cloud lands at PL_EXP (linear): the print's shoulder lifts it from
+        # there, and its folds stay under the knee
+        Ys = src[: int(h0 * bottom)] @ LUMA
+        top = src[: int(h0 * bottom)][Ys > np.percentile(Ys, 99.5)].mean(0)
+        src = src * (float(top @ LUMA) / top) * (PL_EXP / float(top @ LUMA))
+        # its rows below `bottom` (land, haze) cut off, feathered
+        s = size / w0
+        rows = np.arange(h0, dtype=np.float32)[:, None] / h0
+        fw = PLATE_FEATHER / s / h0
+        cut = (1 - smoothstep(bottom - fw, bottom, rows)) * np.ones((1, w0), np.float32)
+        # taken down to the print's scale by area first (a homography from
+        # the full photograph would alias), then put in
+        if s < 1:
+            src = cv2.resize(src, (int(round(w0 * s)), int(round(h0 * s))), interpolation=cv2.INTER_AREA)
+            cut = cv2.resize(cut, (src.shape[1], src.shape[0]), interpolation=cv2.INTER_AREA)
+        sh, sw = src.shape[:2]
+        q_src, q_dst = _plate_quad(sw, sh, ax, ay, px, py, rot, size)
+        M = cv2.getPerspectiveTransform(q_src, q_dst)
+        P = np.maximum(cv2.warpPerspective(src, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101), 0)
+        # its footprint, feathered at the photograph's own edges
+        edge = np.zeros((sh, sw), np.uint8)
+        edge[1:-1, 1:-1] = 1
+        edge = smoothstep(0, max(2.0, PLATE_FEATHER * min(1.0, sw / size)), cv2.distanceTransform(edge, cv2.DIST_L2, 5)) * cut
+        foot = cv2.warpPerspective(edge.astype(np.float32), M, (w, h), flags=cv2.INTER_LINEAR, borderValue=0)
+        # what is behind its white cloud, and the cloud's share against it:
+        # how far a pixel has gone from that blue towards a neutral
+        S = _plate_clear(P, foot)
+        wh = P.min(2) / np.maximum(P.max(2), 1e-4)
+        wS = S.min(2) / np.maximum(S.max(2), 1e-4)
+        op = smoothstep(0.0, 1.0, np.clip((wh - wS) / np.maximum(PL_WHITE - wS, 1e-3), 0, 1)).astype(np.float32)
+        # its sky graded to the print's: a gain (T / S) per channel where it
+        # is clear, so the photograph's own grain and drawing ride on the
+        # cobalt. The cloud over it by its share (op, choked a little), and
+        # at its edge in the light of the cloud just inside it, pushed out
+        # (an edge pixel is part cloud and part whatever was behind it, a
+        # slate base as often as sky: unmixed, it drew a dark rim round the
+        # towers), untinted, at its own exposure (PL_EXP) times the light's
+        # gain to PL_CLOUD_GAIN
+        g_sky = T / S
+        g_lum = ((T @ LUMA) / np.maximum(S @ LUMA, 1e-5))[..., None] ** PL_CLOUD_GAIN
+        inner = cv2.erode((op > 0.9).astype(np.float32), disk(PL_EDGE + 2))
+        lgP = np.log(np.maximum(P, 1e-4)).astype(np.float32)
+        Cin = np.exp(cv2.GaussianBlur(pushpull(lgP * inner[..., None], inner), (0, 0), 1.5))
+        wi = smoothstep(0.6, 1.0, cv2.GaussianBlur(cv2.erode(op, disk(PL_EDGE)), (0, 0), PL_EDGE / 2))[..., None]
+        C = (P * wi + Cin * (1 - wi)) * g_lum
+        ac = smoothstep(0.12, 1.0, op)[..., None]
+        k = smoothstep(0.0, 0.3, op)[..., None]
+        G = P * g_sky * (1 - k) + (T * (1 - ac) + C * ac) * k
+        # laid over what is there by its cloud (its clear sky is the
+        # print's own, so only its cloud need cover)
+        a = (foot * smoothstep(0.0, 0.5, cv2.GaussianBlur(op, (0, 0), 2)))[..., None]
+        out = out * (1 - a) + G * a
+        op_all = 1 - (1 - op_all) * (1 - foot * op)
+        print("plates:", os.path.basename(path), "at", (px, py), "rot", rot, "size", size, "scale", round(s, 3),
+              "cloud px", round(float((foot * op > 0.5).mean()), 3), "sky gain", np.round(np.median(g_sky[foot > 0.9], 0), 2))
+    return np.clip(out, 0, 1).astype(np.float32), op_all
+
+
+# The plates' light, kept as photographed: the towers' own sunlit tops and
+# shaded undersides and all their local contrast, only toned for the print.
+# The sunlit tops (sRGB luma past PL_HI) turn a warm neutral (HI_COL) on a
+# shoulder that peaks at TOP, under paper white; the shaded undersides
+# (cloud under PL_SH) take the skylight's hue (SHADE_COL) at their own light,
+# a blue-grey rather than a slate; nothing is blurred and nothing relit.
+PL_HI = float(os.environ.get("PL_HI", "0.62"))
+PL_SH = float(os.environ.get("PL_SH", "0.6"))
+PL_SH_MIX = float(os.environ.get("PL_SH_MIX", "0.55"))
+PL_CONTRAST = float(os.environ.get("PL_CONTRAST", "1.5"))
+PL_FLOOR = float(os.environ.get("PL_FLOOR", "0.6"))
+
+
+def _plate_tone(L, op):
+    # the cloud's own modelling steepened in log light about its sunlit
+    # level (PL_CONTRAST), so the print's shoulder, which lifts everything
+    # past its knee, lifts the tops and not the folds between them
+    opb = cv2.GaussianBlur(op, (0, 0), 1.5)
+    Y0 = np.maximum(L @ LUMA, 1e-5)
+    ref = 0.85 * PL_EXP
+    f = np.minimum(Y0 / ref, 1.0) ** (PL_CONTRAST - 1)
+    L = L * (1 + (f - 1) * smoothstep(0.3, 0.9, opb))[..., None]
+    # a base in deep shade is lit by the whole dome of blue round it: lifted
+    # to no less than PL_FLOOR of the clear sky's light beside it (a slate
+    # slab darker than the cobalt read as a hole in the sky)
+    Y1 = np.maximum(L @ LUMA, 1e-5)
+    YT = _sky_target(*op.shape) @ LUMA
+    lift = np.maximum(PL_FLOOR * YT - Y1, 0) * smoothstep(0.2, 0.9, cv2.GaussianBlur(op, (0, 0), 12))
+    L = L * ((Y1 + lift) / Y1)[..., None]
+    g = l2s(L)
+    Y = g @ LUMA
+    knee = TOP - 0.22
+    Yt = np.where(Y < knee, Y, knee + (TOP - knee) * np.tanh((Y - knee) / (TOP - knee)))
+    g = g * (Yt / np.maximum(Y, 1e-4))[..., None]
+    Y = Yt
+    hl = HI_COL / float(HI_COL @ LUMA)
+    w_hi = (smoothstep(PL_HI, TOP, Y) * opb)[..., None]
+    g = g * (1 - w_hi) + (Y[..., None] * hl) * w_hi
+    sl = SHADE_COL / float(SHADE_COL @ LUMA)
+    w_sh = (PL_SH_MIX * (1 - smoothstep(PL_SH * 0.6, PL_SH, Y)) * smoothstep(0.4, 0.9, opb))[..., None]
+    g = g * (1 - w_sh) + (Y[..., None] * sl) * w_sh
+    cl = op > 0.6
+    if cl.any():
+        print("plates: cloud px", round(float(cl.mean()), 3), "top sRGB max", np.round(g[cl].max(0) * 255, 1),
+              "p99.9", np.round(np.percentile(g[cl], 99.9, axis=0) * 255, 1))
+    return s2l(np.clip(g, 0, 1)).astype(np.float32)
 
 
 def _sky_target(h=H, w=W):
@@ -1367,7 +1576,13 @@ if "--sky" in sys.argv:
     save8(os.path.join(OUT, "alpha.png"), alpha)
     a3 = alpha[..., None]
     srcs = [s_.split(":")[0] for s_ in SKY_SRCS.split(",")] if SKY_SRCS else [SKY_SRC]
-    if all(os.path.exists(p_) for p_ in srcs):
+    plates = [s_.strip().rsplit(":", 1)[0] for s_ in SKY_PLATES.split(";") if s_.strip()]
+    if plates and all(os.path.exists(p_) for p_ in plates):
+        raw, op_pl = _sky_plates(SKY_PLATES)
+        save8(os.path.join(WK, "p-sky-raw.png"), l2s(raw)[:, :, ::-1])
+        save8(os.path.join(WK, "p-op.png"), cv2.resize(op_pl, (W // 2, H // 2)))
+        sky = _plate_tone(raw, op_pl)
+    elif all(os.path.exists(p_) for p_ in srcs):
         raw, S_known = _sky_lookup(SKY_SRCS) if SKY_SRCS else (_sky_window(SKY_SRC), None)
         save8(os.path.join(WK, "p-sky-raw.png"), l2s(raw)[:, :, ::-1])
         sky = regrade_cumulus(raw, S_known)
