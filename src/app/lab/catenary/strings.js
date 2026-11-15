@@ -6,14 +6,19 @@ import { clamp } from "../_kit/stage";
 export const NODES = 96; // segments; the offline polyline has NODES + 1 points
 
 // Per wire: fundamental (Hz), pluck reach (css px at a 1280 box), breeze sway
-// (device px at mid span), coupling into its structure.
+// (device px at mid span), coupling into its structure, and give: how much of
+// TAUT it takes. The feeder's long run gave it a bend you can see; the low
+// and east wires are short, thin spans seen from far below, and at the same
+// TAUT a full pull moved them some 20 device px, lost under the truss. They
+// are drawn further (give) and hold the hand longer (reach), so a drag
+// visibly bends every wire, not only the feeder.
 export const TUNE = {
-  feeder: { f1: 1.05, reach: 36, sway: 2.6, coup: 1 },
-  low: { f1: 1.35, reach: 32, sway: 1.8, coup: 1 },
-  east1: { f1: 1.7, reach: 24, sway: 1.1, coup: 1 },
-  east2: { f1: 1.8, reach: 24, sway: 1.1, coup: 1 },
-  east3: { f1: 1.55, reach: 24, sway: 1.3, coup: 1 },
-  east4: { f1: 1.6, reach: 24, sway: 1.3, coup: 1 },
+  feeder: { f1: 1.05, reach: 36, sway: 2.6, coup: 1, give: 1 },
+  low: { f1: 1.35, reach: 54, sway: 1.8, coup: 1, give: 2.6 },
+  east1: { f1: 1.7, reach: 44, sway: 1.1, coup: 1, give: 2.4 },
+  east2: { f1: 1.8, reach: 44, sway: 1.1, coup: 1, give: 2.4 },
+  east3: { f1: 1.55, reach: 44, sway: 1.3, coup: 1, give: 2.2 },
+  east4: { f1: 1.6, reach: 44, sway: 1.3, coup: 1, give: 2.2 },
 };
 // Peak transverse give of a held wire, as a fraction of its visible run.
 export const TAUT = 0.035;
@@ -192,7 +197,7 @@ export function makeString(def, index) {
     pad: 1.2,
     // The most a hand can hold it aside, image px: a taut wire gives only a
     // few percent of its visible run before the tension wins.
-    give: TAUT * (jExit - j0) * ds,
+    give: TAUT * (tune.give ?? 1) * (jExit - j0) * ds,
     knot,
     shade,
     jExit,

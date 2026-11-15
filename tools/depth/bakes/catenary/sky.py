@@ -37,14 +37,17 @@
 #     around the tower (CUTS) give the cloud back to sky on its own light,
 #     so it ends on lobes and nothing is carried on by reflection; one more
 #     trims the flank's thin hooked tail, so the flank ends on its last lobe.
-#     At the scale of the whole tower its value falls from the sunlit crown
-#     to a skylight blue-grey lower body, each lobe sitting on a shaded base
-#     (VOL, LOBES), and its matte goes from crisp on the crown to a hazy
-#     falloff of 1/60 of the frame's width down the lower half (HAZE).
+#     The left flank is a stack of cauliflower lobes stepping out as the
+#     tower widens down (FLANK), not a straight cut. At the scale of the
+#     whole tower its value falls from the sunlit crown to a pale skylight
+#     blue lower body, lit by the sky and never as deep as the cobalt beside
+#     it, each lobe sitting on a shaded base (VOL, LOBES); its matte stays a
+#     lobe's edge all the way down, a touch softer on the lower half (HAZE).
 #     Above a cut near 1/40 of the frame's width its texture is not the
 #     magnified photograph's: the crown's own band at its native resolution
-#     is quilted in (the detail, below), crisp on the sunlit turrets, soft
-#     on the skylit body, and the plate is dithered once on its way to 8 bits.
+#     is quilted in (the detail, below), crisp on the sunlit turrets and
+#     carried on down through the skylit body, and the plate is dithered once
+#     on its way to 8 bits.
 #  4. The new sky goes in behind the steel by difference: each pixel adds
 #     (1 - steel) times the change of background under it, against the old
 #     background filled in under the steel, so a mast edge that was mixed
@@ -81,9 +84,9 @@ LEFT = 1234  # plate column of source column SRC_X0
 TOP = 52  # plate row of the source's row 0
 
 
-def at(x, y):
-    # source px -> plate px
-    return (LEFT + (x - SRC_X0) * SCALE, TOP + y * SCALE)
+def at(x, y, _top=TOP):
+    # source px -> plate px (TOP is bound here: the name is reused below)
+    return (LEFT + (x - SRC_X0) * SCALE, _top + y * SCALE)
 
 
 # Where the tower gives way to sky, as lines in source px, each with how far
@@ -98,8 +101,10 @@ def at(x, y):
 # the thin bright neck that joined the crown to the lobe beside its pole
 # would reach out past it as a wisp.
 CUTS = [
-    ((2399, 940), (975, 1300), 200.0, 6.0),  # the base
-    ((1130, 150), (980, 1000), 60.0, 12.0),  # the left side
+    # the base: given way to over 110 px, not the 200 px ramp it was, which
+    # with the haze matte gone left a soft grey airbrushed underside
+    ((2399, 940), (975, 1300), 110.0, 6.0),
+    # The left side is not a line any more (FLANK, below).
     ((1170, 110), (1000, 380), 40.0, 0.0),  # the crown's left shoulder
     # The flank's last step. Past its lowest full lobe (source x ~2240) the
     # source's edge ran on into a thin, hooked tail that the base line left
@@ -107,6 +112,50 @@ CUTS = [
     ((2250, 780), (2215, 1010), 50.0, 8.0),
 ]
 INSIDE = (1400, 380)  # a source point well inside the crown
+# The left flank. A straight cut there (it ran from the notch left of the
+# crown's peak down to the source's pole) read, under the crown, as a
+# pasted cutout's edge, one vertical line the whole height of the body. It is
+# now a stack of cauliflower lobes, stepping out to the left as the tower
+# widens down (a towering cumulus is a heap of rising cells, each bulging
+# past the one above): the cloud is the union of a half-plane held FLANK_IN
+# source px inside the old line and a column of round lobes along it, each
+# reaching past the line by its own step, with small sub-lobes boiling out of
+# the upper, sunlit side of each, and notches in between that go back in to
+# the half-plane. The lobes are domes in the volume (LOBES) too, so each
+# takes the sun on its upper left and sits on a shaded base.
+FLANK = ((1130, 150), (1050, 1000))
+FLANK_IN = 45
+FLANK_W = 26.0  # plate px over which a lobe's edge gives way
+FLANK_ROWS = (330, 1240)
+FLANK_TOP = (200, 380)  # source rows over which the half-plane steps in
+
+
+def flank_lobes():
+    (xa, ya), (xb, yb) = FLANK
+    rng_f = np.random.default_rng(5)
+    lobes, y, i = [], FLANK_ROWS[0], 0
+    while y < FLANK_ROWS[1]:
+        r = rng_f.uniform(48, 80) * (1 + 0.35 * (y - FLANK_ROWS[0]) / (FLANK_ROWS[1] - FLANK_ROWS[0]))
+        cy = y + 0.8 * r
+        lx = xa + (xb - xa) * (cy - ya) / (yb - ya) + FLANK_IN
+        # the step: how far past the half-plane this lobe reaches
+        reach = FLANK_IN + (rng_f.uniform(-12, 4) if i % 2 else rng_f.uniform(24, 42))
+        cx = max(lx - reach + r, SRC_X0 + 12 + r)  # nothing left of the source's own cloud
+        lobes.append((cx, cy, r))
+        # one or two sub-lobes on its upper left, cauliflower
+        for _ in range(int(rng_f.integers(1, 3))):
+            ang = np.radians(rng_f.uniform(115, 190))
+            rs = r * rng_f.uniform(0.32, 0.48)
+            d = r - rs * rng_f.uniform(0.15, 0.45)
+            sx_, sy_ = cx + d * np.cos(ang), cy - d * np.sin(ang)
+            if sx_ - rs > SRC_X0 + 12:
+                lobes.append((sx_, sy_, rs))
+        y += r * rng_f.uniform(1.15, 1.45)
+        i += 1
+    return lobes
+
+
+FLANK_LOBES = flank_lobes()
 # Developed brighter: linear gain on the cloud, premultiplied.
 GAIN = 1.2
 
@@ -261,6 +310,18 @@ for a_, b_, width, lobe_k in CUTS:
     s_in = ((gx - xa) * nx + (gy - ya) * ny) / np.hypot(nx, ny)
     s_in *= np.sign((ix - xa) * nx + (iy - ya) * ny)  # positive inside
     fade *= smooth(0.3, 0.7, s_in / width + lobe_k * lobe)
+# The flank: the half-plane inside the old line, or inside any of its lobes
+# (plate px, positive inside), given way to over FLANK_W, a lobe a little
+# further where its own light is brighter.
+(xa, ya), (xb, yb) = at(*FLANK[0]), at(*FLANK[1])
+nx, ny = ya - yb, xb - xa
+s_in = ((gx - xa) * nx + (gy - ya) * ny) / np.hypot(nx, ny)
+s_in = s_in * np.sign((ix - xa) * nx + (iy - ya) * ny) - FLANK_IN * SCALE * smooth(at(0, FLANK_TOP[0])[1], at(0, FLANK_TOP[1])[1], gy)
+for cx_, cy_, r_ in FLANK_LOBES:
+    px_, py_ = at(cx_, cy_)
+    np.maximum(s_in, r_ * SCALE - np.hypot(gx - px_, gy - py_), out=s_in)
+fade *= smooth(-0.5, 0.5, s_in / FLANK_W + 4.0 * lobe)
+del s_in
 fade = cv2.GaussianBlur((fade * (sy_ >= 0) * (sx >= SRC_X0)).astype(np.float32), (0, 0), 1.5)
 am *= fade
 Pm *= fade[..., None]
@@ -272,6 +333,7 @@ if n > 2:
     am *= keep
     Pm *= keep[..., None]
 
+del Pm
 # The matte, feathered. The red-to-blue unmix calls the cloud's edge opaque
 # a dozen px further out than it is: there the source's own sky is still in
 # the pixel, and that grey-blue band, hard against this sky and deepened by
@@ -303,6 +365,7 @@ a2 = np.clip(((Sm - Km) * dc).sum(-1) / np.maximum((dc * dc).sum(-1), 1e-4), 0, 
 a2 *= cv2.dilate(am, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
 af_soft = cv2.GaussianBlur(a2.astype(np.float32), (0, 0), AF_SOFT * W / 4)
 af = cv2.GaussianBlur(smooth(*EDGE_RAMP, cv2.GaussianBlur(a2.astype(np.float32), (0, 0), 0.8)), (0, 0), FEATHER * W / 4)
+del Sm, Km, dc, a2
 
 # The form. As photographed and developed, the cloud's body under the tower
 # came out one flat pale wash (behind the truss, a 16 px patch varies about
@@ -324,9 +387,9 @@ af = cv2.GaussianBlur(smooth(*EDGE_RAMP, cv2.GaussianBlur(a2.astype(np.float32),
 # loses BODY_SHADE of the sun, so the tower stands sunlit on top of a
 # skylight-blue lower body.
 FORM = 0.45
-FORM_BODY = 0.9
+FORM_BODY = 0.6
 BODY = (480, 1150)  # source rows: the crown's foot, the lowest body shown
-BODY_SHADE = 0.55
+BODY_SHADE = 0.3
 SUN = 125  # degrees, toward the sun (0 right, 90 up), as PLATE in the engine
 FORM_ELEV = 30
 FORM_RELIEF = (10.0, 4.0)  # normal gain on the lobes, on the matte
@@ -336,6 +399,10 @@ TOP = (0xF6, 0xF3, 0xEC)
 TOP_Y = 0.92  # linear luma of a fully lit billow
 SKYLIGHT = (207, 0.4, 0.72)  # its saturation set over, the print eases chroma off
 FORM_SHADE = 0.76
+# The lower body's skylight, lifted. Lit only by the sky, it is still a
+# cloud: a pale skylight blue, never as deep as the cobalt beside it (it read
+# as a blue-grey slab at sky value and below).
+BODY_LIFT = 0.45
 
 
 def gauss(x, s):
@@ -387,7 +454,7 @@ ao = np.clip(1 + 2.5 * (gauss(Ys, 4) - gauss(Ys, 32)), 0.75, 1.1)
 top = srgb_to_lin(np.array(TOP, np.float32) / 255)
 top *= TOP_Y / float(top @ LUMA)
 shade = srgb_to_lin(hsv_rgb(*SKYLIGHT)) * FORM_SHADE
-lo = shade * ao[..., None] * (1 - sunlit[..., None]) + top * sunlit[..., None]
+lo = shade * ao[..., None] * (1 - sunlit[..., None]) * (1 + BODY_LIFT * under[..., None]) + top * sunlit[..., None]
 lo = cv2.resize(lo, (W, H), interpolation=cv2.INTER_CUBIC)
 detail = np.clip(ylin / np.maximum(gauss(ylin, 4), 1e-4), 0.85, 1.15)
 form = (FORM + (FORM_BODY - FORM) * cv2.resize(under, (W, H), interpolation=cv2.INTER_LINEAR))[..., None]
@@ -423,14 +490,15 @@ if os.environ.get("DEBUG"):
 # shading kept from the low band). It is weighted by the low band's light:
 # the sunlit turrets take all of DETAIL (crisp, bright cauliflower edges,
 # the crown's billows being low in contrast as shot), the skylit lower body
-# DETAIL_FLOOR of it, so it stays soft.
+# DETAIL_FLOOR of it: softer than the crown, but the same billows, carried
+# down through the body (at 0.15 it went to an airbrushed slab).
 LP = 14.0
 NATIVE = 2048 / sW  # published source px per px of this copy
 PATCH, STEP = 64, 48
 TURN = (-30, 0, 30)
 DETAIL = 2.4
 FINE = 0.5
-DETAIL_FLOOR = 0.15
+DETAIL_FLOOR = 0.6
 DETAIL_LIT = (0.7, 0.9)  # low-band light (sRGB) over which it comes in
 
 
@@ -572,8 +640,9 @@ col *= (ys_ / np.maximum(yc_, 1e-4))[..., None]
 # sunlit crown over a body in its own shade, each cauliflower lobe sitting
 # on a darker base. So the value is graded once more at the scale of the
 # cloud. Down the tower (source rows VOL), it falls from the crown's sunlit
-# paper to a skylight blue-grey lower body (VOL_DARK of its light gone,
-# VOL_TINT of the way to BASE's colour). And it is laid out as lobes: a
+# paper to a pale skylight-blue lower body (VOL_DARK of its light gone,
+# VOL_TINT of the way to BASE's colour; at 0.3, with the form term's shade,
+# the body sank to the sky's own value and below). And it is laid out as lobes: a
 # field of domes (two sizes, LOBES, as a fraction of the frame width) inside
 # the matte, over the matte's own outline inflated, lit from the sun the form
 # term uses, high (LOBE_ELEV); where a dome turns from the sun, under each
@@ -581,12 +650,12 @@ col *= (ys_ / np.maximum(yc_, 1e-4))[..., None]
 # (crown, lower body) and goes to BASE, so every lobe sits on a shaded base
 # and the underside is dark. The crown keeps its light and its crisp edge.
 VOL = (280, 1050)
-VOL_DARK = 0.3
+VOL_DARK = 0.06
 VOL_TINT = 0.7
 BASE = (210, 0.42)  # hue, saturation of the lower body's skylight grey-blue
 LOBES = ((0.07, 1.0), (0.035, 0.55))  # spacing (of W), relative height
 LOBE_ELEV = 38
-LOBE_SHADE = (0.18, 0.28)
+LOBE_SHADE = (0.18, 0.25)
 hW, hH = h2
 yy_, xx_ = np.mgrid[0:hH, 0:hW].astype(np.float32)
 Ah = cv2.resize(af, h2, interpolation=cv2.INTER_AREA)
@@ -608,6 +677,17 @@ for frac, rel in LOBES:
             np.maximum(layer[y0_:y1_, x0_:x1_], np.sqrt(np.maximum(r_ * r_ - d2, 0)) * rel / sp * LOBES[0][0] * hW,
                        out=layer[y0_:y1_, x0_:x1_])
     dome += layer
+# The flank's lobes, each a dome of its own, so the stepped cells along the
+# left side are round, lit on top and shaded under, not a scalloped cut.
+for cx_, cy_, r_ in FLANK_LOBES:
+    px_, py_ = at(cx_, cy_)
+    px_, py_, rh = px_ / 2, py_ / 2, r_ * SCALE / 2
+    x0_, x1_ = int(max(px_ - rh, 0)), int(min(px_ + rh + 1, hW))
+    y0_, y1_ = int(max(py_ - rh, 0)), int(min(py_ + rh + 1, hH))
+    if x1_ <= x0_ or y1_ <= y0_:
+        continue
+    d2 = (xx_[y0_:y1_, x0_:x1_] - px_) ** 2 + (yy_[y0_:y1_, x0_:x1_] - py_) ** 2
+    np.maximum(dome[y0_:y1_, x0_:x1_], np.sqrt(np.maximum(rh * rh - d2, 0)) * 0.9, out=dome[y0_:y1_, x0_:x1_])
 R0 = 0.06 * hW
 dist = cv2.distanceTransform((Ah > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
 dist = np.minimum(dist, R0)
@@ -636,13 +716,13 @@ if os.environ.get("DEBUG"):
     cv2.imwrite(WORK + "/vol-lit.png", (np.clip(lit_v, 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(WORK + "/vol-val.png", (np.clip(vval, 0, 1) * 255).astype(np.uint8))
 
-# The matte, by height. A congestus is crisp where its crown boils up in sun
-# and goes to haze down its body: over the lower half of the tower (source
-# rows HAZE) the matte widens from the crown's two px to a soft falloff of
-# HAZE_W of the frame width (sky to full cloud), and leans outward (the
-# haze lies off the body, it does not eat into it).
+# The matte, by height. Over the lower half of the tower (source rows HAZE)
+# the matte softens a little past the crown's two px, to HAZE_W of the frame
+# width, and leans outward. It was a haze of 1/60 of the width, and the body
+# read as an airbrushed blob under a crisp crown: the lobes of the lower body
+# keep an edge, so the tower reads as one cumulus.
 HAZE = (560, 820)
-HAZE_W = 1 / 60
+HAZE_W = 1 / 700
 hz = smooth(HAZE[0], HAZE[1], sy_)
 sig_h = HAZE_W * W / 3.3
 k_h = 2 * int(0.5 * sig_h) + 1
