@@ -21,17 +21,18 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // HDRI at 16k, its native maximum (linear, unclipped; sun at az 38°, alt
 // 28.8°, found from its brightest point and checked against the time and
 // place of capture), 2x2 supersampled to 3840x4800 so the print always
-// downsamples it: a worm's-eye view 89° up, a degree off the zenith, rolled
-// so the towers wrap the frame: the big apartment block leans in across the
-// top left, the pointed tower from the left, the glass block from the bottom
-// left, the red mast stands up from the foot of the print and a second glass
-// block comes in from the bottom right, and the dark band 90° from the sun
-// arcs across the open sky in the middle of that canyon. The roll keeps the
-// quay's chevron hoarding off the print, and the orphaned fragments at the
-// edges (the construction block and red tower crane top right, lamp arms, the
-// far quay's office row) are filled with the plate's own sky
-// (tools/depth/bakes/polariser/clean.py), so each edge carries one whole
-// tower or open sky and the mast is the print's only warm colour.
+// downsamples it, then turned (tools/depth/bakes/polariser/turn.py) to a
+// worm's-eye view 84° up, six degrees off the zenith toward the lightship,
+// rolled so the towers wall three sides of the print: the big apartment block
+// leans in face-on across the whole top, the pointed tower and the glass
+// block come in from the left, the red mast stands up from the bottom left,
+// and the convention centre's glass drum and the far quay close the foot.
+// The dark band 90° from the sun arcs diagonally through the open sky those
+// walls leave, from the mast toward the top right. The orphaned fragments
+// the first framing had at its edges (the construction block and red tower
+// crane, lamp arms) are filled with the plate's own sky
+// (tools/depth/bakes/polariser/clean.py), so the mast is the print's only
+// strong warm colour.
 // Each pixel's view direction is rebuilt from the camera through the same
 // projection, so γ is exact.
 //
@@ -41,11 +42,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 const PLATE = "/lab/polariser/plate.jpg";
 const AUX = "/lab/polariser/aux.png";
 
-// Camera the plate was rendered with (tools/depth/bakes/polariser/plate.py):
+// Camera of the plate (plate.py renders at 17, 89, 119; turn.py re-aims it):
 // stereographic, so a plane point p = 2 d⊥ / (1 + d·f), with the plate's
 // horizontal edge at hfov / 2 from the axis. The 4:5 print crops 92% of it,
 // a 140° horizontal field on the page.
-const CAM = { yaw: 17, pitch: 89, roll: 119, hfov: 149.09834806856665, aspect: 4800 / 3840 };
+const CAM = { yaw: 120, pitch: 84, roll: 50, hfov: 149.09834806856665, aspect: 4800 / 3840 };
 // The print crops this share of the plate.
 const CROP = 0.92;
 // Mip bias on the plate and aux lookups. The print minifies the plate 1.6 to
@@ -62,7 +63,7 @@ const K = 0.6;
 // The filter angle that deepens this frame most (mean sky transmission is
 // lowest there, tools/depth/bakes/polariser/hero.py); the hero still and the
 // end of the reveal.
-const HERO = 0.05;
+const HERO = 0.257;
 // Effective maximum degree of polarisation. A clean Rayleigh sky reaches about
 // 0.75, but a March cumulus sky is multiply scattered off bright cloud and a
 // real circular polariser does not extinguish fully, so the band 90° from the
@@ -74,6 +75,17 @@ const P_MAX = 0.55;
 // the deepest frame in cobalt; its green is held back a touch so the washed
 // angle stays cerulean, not electric cyan.
 const SKY_DYE = [0.03 * 2, 0.37 * 2, 2];
+// Film does not hold a clear sky at full chroma: the dye clouds bleed and the
+// base fog greys it. A share of the dyed blue's luminance comes back as grey,
+// lifting the band toward a soft grey-cobalt instead of a poster blue.
+const SKY_GREY = 0.15;
+// Halation: a thin warm ring on the dark side of every edge against bright
+// sky (the mast, the tower outlines), the light that went through the
+// emulsion and came back off the base. It is measured in print pixels, so it
+// stays thin whatever the screen.
+const HALO = 1.2;
+const HALO_PX = 4;
+const HALO_TINT = [1.0, 0.42, 0.16];
 const WB = [1.1, 0.97, 0.97];
 // The print: 0.9 stops over the plate's old exposure, then a log-logistic
 // negative-to-print curve (contrast n, half-density exposure s, in plate units
@@ -138,6 +150,11 @@ uniform float uPmax;
 uniform float uExpo;
 uniform float uLinearOut;
 uniform vec3 uSkyDye;
+uniform float uSkyGrey;
+uniform float uHaloLod; // mip level about half HALO_PX print px wide
+uniform vec2 uHaloStep; // HALO_PX print px in plate uv
+uniform float uHalo;
+uniform vec3 uHaloTint;
 uniform vec3 uWB;
 uniform vec2 uPrint;     // print curve: contrast n, half-density exposure s
 uniform float uVignette; // lens cos^4 falloff, before the emulsion
@@ -210,7 +227,39 @@ void main() {
   // The Rayleigh part is re-dyed toward the cobalt a Fuji negative gives a
   // clear sky; cloud and everything neutral keep their own colour.
   float A = clamp((0.85 * C.b - C.r) / 0.56, 0.0, C.b) * aux.r;
-  vec3 Cout = C - A * vec3(0.29, 0.58, 1.0) + A * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
+  vec3 dyed = A * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
+  dyed = mix(dyed, vec3(dot(dyed, LUMA)), uSkyGrey);
+  vec3 Cout = C - A * vec3(0.29, 0.58, 1.0) + dyed;
+
+  // Halation: the surround's light, a few print pixels wide, where it is
+  // brighter than the pixel itself (the dark side of an edge against sky).
+  // Light reaches the base mostly through the red-sensitive layer, so the
+  // spill is read on red: the sunlit red mast halates onto the sky beside it
+  // as well as the bright sky onto the tower edges.
+  // Eight taps on a ring HALO_PX print px out, each a mip about half that
+  // wide, and a ring at twice the radius: a smooth surround, no mip blocks.
+  vec3 near = vec3(0.0);
+  vec3 wide = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    float t = float(i) * 0.785398 + 0.39;
+    vec2 o = vec2(cos(t), sin(t)) * uHaloStep;
+    near += decode(textureLod(uPlate, puv + o, uHaloLod).rgb);
+    wide += decode(textureLod(uPlate, puv + 2.0 * o, uHaloLod + 1.0).rgb);
+  }
+  near *= 0.125;
+  wide *= 0.125;
+  vec3 sur = 0.6 * near + 0.4 * wide;
+  float spill = max(sur.r - C.r, 0.0);
+  // Mostly on the dark side of the edge (the towers), a little over it onto
+  // the sky, where the ring shows as a warm seam.
+  float halo = min(spill, 3.0) * (1.0 - 0.7 * aux.r);
+  // The red mast is the one strongly red source in the frame: its own red
+  // excess spreads out over the sky round it as a warm glow.
+  // Only off the red itself, so the hull's own texture does not speckle.
+  float exSur = max(sur.r - sur.b, 0.0);
+  float exOwn = max(C.r - C.b, 0.0);
+  halo += 12.0 * exSur * (1.0 - smoothstep(0.0, 0.5, exOwn / max(exSur, 1e-3)));
+  Cout += uHaloTint * uHalo * halo;
 
   // Glass: the reflected share of the pixel, partially s-polarised.
   vec2 ga = glass(d, uNA);
@@ -578,6 +627,13 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uSunlit, SUNLIT);
     gl.uniform1f(u.uLodBias, LOD_BIAS);
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
+    gl.uniform1f(u.uSkyGrey, SKY_GREY);
+    // Plate px per print px, then the mip a HALO_PX-wide box sits on.
+    const perPx = (sx * plateImg.naturalWidth) / L.pw;
+    gl.uniform1f(u.uHaloLod, Math.max(0, Math.log2(Math.max(1, perPx * HALO_PX * 0.5))));
+    gl.uniform2f(u.uHaloStep, (sx / L.pw) * HALO_PX, (sy / L.ph) * HALO_PX);
+    gl.uniform1f(u.uHalo, HALO);
+    gl.uniform3fv(u.uHaloTint, HALO_TINT);
     gl.uniform3fv(u.uWB, WB);
     gl.uniform1f(u.uLinearOut, floatOk && sceneT.ok ? 1 : 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
@@ -601,11 +657,11 @@ export async function createPolariser(host, { embedded = false } = {}) {
         shoulder: 1,
         blueDepth: 0.25,
         highlightTint: [1, 0.99, 0.97],
-        saturation: 1.12,
+        saturation: 1.05,
         halation: 0.32,
-        halationThreshold: 0.8,
+        halationThreshold: 0.62,
         bloom: 0.1,
-        softness: 0.45,
+        softness: 0.6,
         toe: 0.04,
         grain: 0.32,
         vignette: 0,

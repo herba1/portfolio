@@ -1,6 +1,12 @@
 # Plate order (run from a scratch dir, with this dir on PYTHONPATH):
 #   plate.py 17 89 119 140 -> depth_hr.py on out/plate.jpg -> reproj.py -> assets.py
 #   -> clean.py out/plate.jpg out/aux.png (frame-edge fragments to sky) -> hero.py
+#   -> turn.py 120 84 50 out/plate.jpg out/aux.png turned/ (re-aims the cleaned
+#      plate: 84 deg up, six degrees off the zenith toward the lightship, rolled
+#      so the apartment block walls the top, the pointed tower and glass block
+#      the left, and the mast, drum and far quay the foot; the open sky and the
+#      dark band sit inside those three walls)
+#   -> hero.py turned/plate.jpg turned/aux.png 120 84 50 (engine HERO)
 # aux_old.png for reproj.py: git show 39c5ed8:public/lab/polariser/aux.png > aux_old.png
 # HDRI: Poly Haven docklands_01 at 16k, its native maximum (the 8k gave the
 # plate only about 11 px/deg at the frame centre, so facades and window grids
