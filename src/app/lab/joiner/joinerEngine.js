@@ -54,7 +54,13 @@ const FH = 107 / 79;
 const TOP = 6 / 79;
 const IMG_OFF = -FH / 2 + TOP + 0.5; // image centre from frame centre, in image widths (y down)
 
-const FIELD = 0.64; // radians across one print at the zenith (about 37 degrees, an SX-70's 116 mm on 79 mm)
+// Radians across one print at the zenith: about 49 degrees, the field of a
+// 40 mm lens on 35 mm film, the hand-held field of Hockney's own joiners. Wide
+// enough that a deck of two dozen prints reaches 80 degrees from the zenith,
+// into the ring of facades, so the towers converge on the middle from every
+// side instead of the deck spending itself on empty blue.
+const FIELD = 0.85;
+const AIM_MAX = (70 * Math.PI) / 180; // a pre-built joiner's furthest aim from the zenith
 const WIND = [0.79, 0.61]; // cloud-deck drift direction (disk frame)
 const GUST = 0.04; // cloud-deck displacement per unit of moment (x deck height)
 const MAX_PRINTS = 160;
@@ -1283,13 +1289,13 @@ export async function createJoiner(host, { embedded = false } = {}) {
   if (!gl) throw new Error("no webgl2");
 
   // The cloud deck is 8192 px, so a print's cumulus stay crisp at the
-  // largest print texture (over two deck px to a print px at the zenith).
-  // Where the GPU cannot hold that, or the prints are small enough (under
-  // about 320 device px) that a 4096 px deck already gives them two plate
-  // pixels each, it is taken down to 4096 on load, which saves 270 MB of
-  // video memory.
+  // largest print texture. Where the GPU cannot hold that, or the prints are
+  // small enough that a 4096 px deck already gives them two deck pixels to
+  // each print pixel (one print spans FIELD of the deck's 2 THMAX, so under
+  // about 415 device px), it is taken down to 4096 on load, which saves 270 MB
+  // of video memory.
   const cellGuess = Math.min(host.clientWidth || window.innerWidth, host.clientHeight || window.innerHeight) * 0.25 * Math.min(2, window.devicePixelRatio || 1);
-  const deckMax = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), cellGuess > 320 ? 8192 : 4096);
+  const deckMax = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), cellGuess > (4096 * FIELD) / (2 * THMAX) / 2 ? 8192 : 4096);
   const [sceneBm, maskBm, skyBm, cloudBm, overBm] = await Promise.all([
     loadBitmap(`${ASSET}scene.webp`),
     loadBitmap(`${ASSET}mask.webp`),
@@ -1685,26 +1691,52 @@ export async function createJoiner(host, { embedded = false } = {}) {
   // shot row by row so each print lies over the white bottom margin of the
   // one above and the side margin of the one before it, and the sky, not the
   // paper, fills the table. The image centres sit a hair above the zenith so
-  // the frames, not the images, are centred.
+  // the frames, not the images, are centred. No print is aimed further than
+  // AIM_MAX from the zenith: past that its outer half looks over the quay's
+  // edge, where the walls fold into the rim's flat silhouette. When the deck
+  // holds more prints than that ring has cells, the grid closes up (the
+  // prints overlap further, as Hockney's do) rather than spill outwards.
   const layout = (n, seed, centre = [0, IMG_OFF * FIELD]) => {
-    const rnd = mulberry(seed * 31 + 5);
     const s = img / f;
-    const sx = FW * s * 0.78;
-    const sy = FH * s * 0.74;
-    const cells = [];
-    for (let j = -5; j <= 5; j++)
-      for (let i = -7; i <= 7; i++) {
-        const x = centre[0] + i * sx + (j % 2 ? sx * 0.18 : 0);
-        const y = centre[1] + j * sy;
-        // near circular, so the ring stays in the sky and tall facades and
-        // never reaches the pavement towards the disk's rim
-        const dx = (x - centre[0]) / 1.1;
-        const dy = y - centre[1];
-        // a print shot mostly off the edge of the table is a print wasted:
-        // those cells only fill in once the table itself is covered
-        const off = Math.abs(x) > W / 2 / f - 0.05 * s || Math.abs(y) > H / 2 / f - 0.05 * s;
-        cells.push({ i, j, x, y, d: Math.hypot(dx, dy) + rnd() * sx * 0.35 + (off ? 100 : 0) });
-      }
+    const reach = 2 * Math.tan(AIM_MAX / 2); // AIM_MAX on the table, f units
+    // a little wider than tall on a wide table (and the other way on a tall
+    // one), so the pile follows the table without its far side reaching past
+    // the facades into the rim's silhouette
+    const wide = clamp((W / H) ** 0.3, 0.85, 1.15);
+    let rnd;
+    let sx;
+    let sy;
+    let cells;
+    for (let k = 1; ; k *= 0.96) {
+      rnd = mulberry(seed * 31 + 5);
+      sx = FW * s * 0.78 * k;
+      sy = FH * s * 0.74 * k;
+      // the rows are set symmetric about the table's middle: as many as it
+      // takes to cover the table top to bottom, so an even count straddles
+      // the zenith rather than leaving bare paper along the top and a row
+      // hanging off the bottom
+      const rows = Math.max(1, Math.ceil((H / f - FH * s) / sy - 1e-6) + 1);
+      const phase = ((rows - 1) / 2) % 1;
+      cells = [];
+      let fit = 0;
+      for (let j = -6; j <= 6; j++)
+        for (let i = -8; i <= 8; i++) {
+          const x = centre[0] + (i + (j % 2 ? 0.09 : -0.09)) * sx;
+          const y = centre[1] + (j + phase) * sy;
+          // a print shot mostly off the edge of the table is a print wasted:
+          // those cells only fill in once the table itself is covered
+          const fy = y - IMG_OFF * s; // the frame's centre
+          const off = Math.abs(x) > W / 2 / f - 0.05 * s || Math.abs(fy) > H / 2 / f - 0.38 * FH * s;
+          // round the table's middle (the zenith, give or take the frame's
+          // offset), so the ring of facades closes on every side and the
+          // pile sits square on the table
+          const r = Math.hypot(x / wide, fy);
+          const out = r > reach;
+          if (!off && !out) fit++;
+          cells.push({ i, j, x, y, d: r + rnd() * sx * 0.35 + (off ? 100 : 0) + (out ? 50 : 0) });
+        }
+      if (fit >= n || k < 0.62) break;
+    }
     cells.sort((a, b) => a.d - b.d);
     const pick = cells.slice(0, n);
     pick.sort((a, b) => a.j - b.j || (a.j % 2 ? b.i - a.i : a.i - b.i));
