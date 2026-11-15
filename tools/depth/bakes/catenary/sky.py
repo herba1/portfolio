@@ -32,7 +32,7 @@
 #     of either. Its body is re-lit as a volume from its own light (the form
 #     term: sunlit billows warm paper, the shaded side and the body under
 #     the crown skylight blue; the crown keeps more of its own light than the
-#     flat body; the brightest tops about 236-240 here, nothing at 255).
+#     flat body; the brightest tops about 246-249 here, nothing at 255).
 #     Where the source's pole and its soft, veiled base were, lines drawn
 #     around the tower (CUTS) give the cloud back to sky on its own light,
 #     so it ends on lobes and nothing is carried on by reflection; one more
@@ -41,8 +41,10 @@
 #     tower widens down (FLANK), not a straight cut. At the scale of the
 #     whole tower its value falls from the sunlit crown to a pale skylight
 #     blue lower body, lit by the sky and never as deep as the cobalt beside
-#     it, each lobe sitting on a shaded base (VOL, LOBES); its matte stays a
-#     lobe's edge all the way down, a touch softer on the lower half (HAZE).
+#     it, each lobe sitting on a shaded base (VOL, LOBES). Its edge follows
+#     its light (EDGE): crisp on the sunlit crown and turrets; on the shaded
+#     sides and the whole lower tower a wide transition that the cloud's own
+#     billows break into translucent, sky-tinted fringe and wisps.
 #     Above a cut near 1/40 of the frame's width its texture is not the
 #     magnified photograph's: the crown's own band at its native resolution
 #     is quilted in (the detail, below), crisp on the sunlit turrets and
@@ -649,13 +651,15 @@ col *= (ys_ / np.maximum(yc_, 1e-4))[..., None]
 # lobe and in the seams between them, it loses LOBE_SHADE of its light
 # (crown, lower body) and goes to BASE, so every lobe sits on a shaded base
 # and the underside is dark. The crown keeps its light and its crisp edge.
-VOL = (280, 1050)
-VOL_DARK = 0.06
+VOL = (250, 950)
+VOL_DARK = 0.12
 VOL_TINT = 0.7
 BASE = (210, 0.42)  # hue, saturation of the lower body's skylight grey-blue
 LOBES = ((0.07, 1.0), (0.035, 0.55))  # spacing (of W), relative height
 LOBE_ELEV = 38
-LOBE_SHADE = (0.18, 0.25)
+LOBE_SHADE = (0.2, 0.32)
+VOL_LIFT = 0.16  # the sunlit crown's gain over its own light
+VOL_CEIL = 0.955  # linear luma the lifted tops roll off under
 hW, hH = h2
 yy_, xx_ = np.mgrid[0:hH, 0:hW].astype(np.float32)
 Ah = cv2.resize(af, h2, interpolation=cv2.INTER_AREA)
@@ -704,7 +708,7 @@ w_in = cv2.erode(smooth(0.6, 0.95, Ah), np.ones((5, 5), np.uint8)).astype(np.flo
 lit_v = lit_v * inside + fill(np.dstack([lit_v] * 3), w_in, 7)[..., 0] * (1 - inside)
 down = smooth(VOL[0], VOL[1], cv2.resize(sy_, h2, interpolation=cv2.INTER_AREA))
 lobe_k = LOBE_SHADE[0] + (LOBE_SHADE[1] - LOBE_SHADE[0]) * down
-vval = (1 - VOL_DARK * down) * (1 - lobe_k * (1 - lit_v))
+vval = (1 + VOL_LIFT * (1 - down) * lit_v) * (1 - VOL_DARK * down) * (1 - lobe_k * (1 - lit_v))
 vtint = np.clip(VOL_TINT * down + 0.8 * lobe_k * (1 - lit_v), 0, 1)
 vval = cv2.resize(gauss(vval, 2), (W, H), interpolation=cv2.INTER_CUBIC)
 vtint = cv2.resize(gauss(vtint, 2), (W, H), interpolation=cv2.INTER_CUBIC)
@@ -712,23 +716,84 @@ base = srgb_to_lin(hsv_rgb(BASE[0], BASE[1], 1.0))
 base /= float(base @ LUMA)
 yv = (col @ LUMA) * vval
 col = col * vval[..., None] + (base * yv[..., None] - col * vval[..., None]) * vtint[..., None]
+# The lifted tops roll off under white again, over the old knee.
+yc_ = col @ LUMA
+ys_ = np.where(yc_ > KNEE, KNEE + (VOL_CEIL - KNEE) * np.tanh((yc_ - KNEE) / (VOL_CEIL - KNEE)), yc_)
+col *= (ys_ / np.maximum(yc_, 1e-4))[..., None]
 if os.environ.get("DEBUG"):
     cv2.imwrite(WORK + "/vol-lit.png", (np.clip(lit_v, 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(WORK + "/vol-val.png", (np.clip(vval, 0, 1) * 255).astype(np.uint8))
 
-# The matte, by height. Over the lower half of the tower (source rows HAZE)
-# the matte softens a little past the crown's two px, to HAZE_W of the frame
-# width, and leans outward. It was a haze of 1/60 of the width, and the body
-# read as an airbrushed blob under a crisp crown: the lobes of the lower body
-# keep an edge, so the tower reads as one cumulus.
-HAZE = (560, 820)
-HAZE_W = 1 / 700
-hz = smooth(HAZE[0], HAZE[1], sy_)
-sig_h = HAZE_W * W / 3.3
-k_h = 2 * int(0.5 * sig_h) + 1
-af_haze = gauss(cv2.dilate(af, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_h, k_h))), sig_h)
-af = (1 - hz) * af + hz * af_haze
+# The matte, by its light. One crisp matte all the way round read as a paper
+# cutout: a cumulus edge is sharp only where the sun is on it. On the sunlit
+# crown and turrets the matte stays as it is (a lobe's outline, two or three
+# px). Where the edge turns from the sun (its normal against SUN), and on
+# the whole lower tower below the crown (source rows EDGE_LOW), the left
+# flank under the crown, the underside and the right lobe's base among it,
+# the transition widens to EDGE_W plate px either side of the silhouette,
+# and it is not blurred: the cloud's own billow band (the quilted detail D,
+# at two scales) moves where the density gives out, so the edge breaks into
+# translucent fringe and wisps that let the sky through (the outermost at
+# EDGE_WISP of full opacity), the way a cumulus thins at its shaded base. The
+# fringe takes the colour of the body just inside it, mixed with this sky in
+# linear light, so it is sky-tinted, never grey.
+# (What the bake no longer needs goes first: the edge works at full size.)
+del hue, sat, val, close, thin, dark, hp, yg, canvas, filled, gm, D_lobe, lowT, ylow, wt, col_low, yk_, yc_, ys_, yv
+del vval, vtint, cy, lobe, edge, fade, dense, af_soft, ylin, detail, form, w, skyY, lab, am, R, bank, gpad
+EDGE_LOW = (430, 640)  # source rows over which the lower tower goes soft
+EDGE_W = (1.0, 13.0)  # half-width of the transition, plate px: lit, shaded
+EDGE_TEX = (0.85, 0.35)  # how far the billows move it (half-widths): lobes, fine
+EDGE_WISP = (0.45, 1.2)  # the outer fringe: its opacity, how far past it reaches
+EDGE_TOP = 0.5
+inb = (af > 0.5).astype(np.uint8)
+sd = (cv2.distanceTransform(inb, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+      - cv2.distanceTransform(1 - inb, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)).astype(np.float32)
+sd = gauss(sd, 1.5)
+# Which way the edge faces: the outward normal of the silhouette, held over
+# the band either side of it.
+sdg = gauss(sd, 8.0)
+ngy, ngx = np.gradient(sdg)
+nn = np.sqrt(ngx * ngx + ngy * ngy) + 1e-6
+facing = -(ngx * su[0] + ngy * su[1]) / nn
+# How lit the cloud is just inside its edge: the body's light filled out.
+yb_ = lin_to_srgb(np.clip(col @ LUMA, 0, 1))
+w_b = cv2.erode((af > 0.9).astype(np.uint8), np.ones((7, 7), np.uint8)).astype(np.float32)
+yb_ = gauss(fill(np.dstack([yb_] * 3), w_b, 8)[..., 0], 6.0)
+lit_e = smooth(-0.25, 0.5, facing) * smooth(0.72, 0.86, yb_)
+low = smooth(EDGE_LOW[0], EDGE_LOW[1], sy_)
+# Low on the tower a lobe's top still faces the sun: it keeps a firmer edge
+# (EDGE_TOP of the softening taken off), its underside none.
+soft = np.maximum(1 - lit_e, low * (1 - EDGE_TOP * smooth(0.6, 0.95, facing) * smooth(0.6, 0.8, yb_)))
+soft = gauss(np.clip(soft, 0, 1).astype(np.float32), 10.0)
+wE = EDGE_W[0] + (EDGE_W[1] - EDGE_W[0]) * soft
+
+
+def zn(x, s):
+    # the band at one scale, at unit contrast wherever it is laid
+    x = gauss(D, s)
+    return np.tanh(x / np.sqrt(gauss(x * x, 4 * s + 6) + 1e-6))
+
+
+lump = 0.65 * zn(D, 3.0) + 0.45 * zn(D, 7.0)
+fine = zn(D, 1.0)
+r_ = sd / wE
+# The body: given way to over the whole width, wherever its billows reach.
+af_w = smooth(-1.1, 1.0, r_ + EDGE_TEX[0] * lump + EDGE_TEX[1] * fine)
+# The outer fringe: thin, sky-tinted wisps past it, only where a billow
+# carries on out, and torn by the fine band.
+wisp = smooth(-1.1 - EDGE_WISP[1], 0.0, r_ + 0.6 * lump) ** 2 * smooth(-0.3, 0.7, lump + 0.5 * fine)
+af_w = np.maximum(af_w, EDGE_WISP[0] * wisp)
+af_w = gauss(af_w.astype(np.float32), 0.6)
+k_e = smooth(0.08, 0.35, soft)
+af = (1 - k_e) * af + k_e * af_w
+# Past the old silhouette the fringe takes the colour of the body just in.
+w_c = cv2.erode((sd > 3).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(np.float32)
+col_in = fill(col, w_c, 8)
+k_c = smooth(3.0, -1.0, sd)[..., None] * k_e[..., None]
+col = col * (1 - k_c) + col_in * k_c
+del sd, sdg, ngx, ngy, nn, r_, af_w, wisp, lump, fine, col_in, w_c, yb_, w_b
 if os.environ.get("DEBUG"):
+    cv2.imwrite(WORK + "/edge-soft.png", (np.clip(soft, 0, 1) * 255).astype(np.uint8))
     print("detail: source hp std", round(float(hpN[okN > 0].std()), 4), "laid std", round(float(D[af > 0.5].std()), 4),
           "guide std", round(float(guide[af > 0.5].std()), 4), "patches", n_laid)
     cv2.imwrite(WORK + "/detail.png", (np.clip(0.5 + D * 2, 0, 1) * 255).astype(np.uint8))

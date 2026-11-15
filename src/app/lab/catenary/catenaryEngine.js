@@ -89,7 +89,7 @@ const FILM = {
   input: "linear",
   // A plate that is already a soft film scan: less extra veil. The sunlit
   // cloud is developed up to just under white (about 0.96, nothing at 255);
-  // the print (PRINT_CURVE) then lays it down luminous, cores ~240-246.
+  // the print (PRINT_CURVE) then lays it down luminous, cores ~244-250.
   bloom: 0.2,
   softness: 0.4,
   // The kit's own halation is off. It reads the whole frame's light and has
@@ -167,7 +167,7 @@ const CLOUD_TOP = [0xf6, 0xf3, 0xec];
 const CLOUD_AIM = [1.02, 1, 0.95];
 // The cumulus behind the gantry is already a sculpted, sunlit tower as
 // photographed (tools/depth/bakes/catenary/sky.py): the lift and the S-curve
-// only lay a little warmth on its tops (about 240-246 after the print); at
+// only lay a little warmth on its tops (about 244-250 after the print); at
 // full strength they flattened its lobes to one creamy white.
 const CLOUD_LIFT = 0.2;
 // The cloud's modelling (see PLATE): where its range starts (blurred luma,
@@ -271,14 +271,15 @@ const VIB_V = 0.045;
 // densitometer reads a print), monotone cubic through PRINT_CURVE (film in,
 // print out, 0-255), pinned at PRINT_PIN (the cobalt's own luma, ~100) so
 // the sky keeps its mean and hue. Measured against herb ref 3:
-//  - Shoulder: the sunlit cloud tops glow, landing at about 240-246 (top
+//  - Shoulder: the sunlit cloud tops glow, landing at about 244-250 (top
 //    0.5% near #f6f3ec), lit white masses against the cobalt, never a grey
 //    wash. Near slope 1 from the pin up through the cloud bodies (so they
 //    stay bright, not compressed toward grey), a slope a little over 1
 //    through the cores (film 205-238) so the lobes the plate's veil had
-//    flattened come back, and only the last dozen levels roll off, to 250:
-//    nothing reaches 255. Above the pin each pixel is scaled by the curve's
-//    ratio (hue and saturation kept), then its chroma is clamped toward
+//    flattened come back, and only the last half-dozen levels roll off, to
+//    251: the sunlit turrets glow at 245-250 paper white, nothing at 255.
+//    Above the pin each pixel is scaled by the curve's ratio (hue and
+//    saturation kept), then its chroma is clamped toward
 //    paper white, PRINT_WHITE (warm-neutral, R >= G > B), from
 //    PRINT_NEUTRAL[0] to [1] of print luma, PRINT_NEUTRAL[2] of the way. The
 //    warm bias itself comes in only over the last of the shoulder.
@@ -302,11 +303,11 @@ const PRINT_CURVE = [
   [150, 146],
   [180, 172],
   [205, 198],
-  [225, 222],
-  [238, 238],
-  [245, 244],
-  [250, 247],
-  [255, 250],
+  [225, 223],
+  [238, 240],
+  [245, 246],
+  [250, 249],
+  [255, 251],
 ];
 const PRINT_PIN = 100;
 const PRINT_TOE = [0.94, 1, 1.06];
