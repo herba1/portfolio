@@ -163,22 +163,32 @@ vec3 hsv2rgb(vec3 c) {
   vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
-// The scan's sky is a pale cyan-azure (hue ~206, value ~0.8) and flat from the
-// bottom of the frame to the top. A summer sky is cobalt and deepens toward the
-// zenith: the clear blue is turned to ~210 and, going up the sky (zen: 0 at 30
-// degrees elevation, 1 at 85), toward ~216 and gains saturation and loses
-// value. The cloud is lit from high right: its shadow sides take the blue of
-// the sky that lights them, its sunlit tops go warm-neutral.
-vec3 skyGrade(vec3 c, float zen) {
+// The scan's sky is a pale cyan-azure (hue ~206, value ~0.8), flat from the
+// bottom of the frame to the top, and hazed toward its upper right, where its
+// own thin cloud stands (saturation down to ~0.35 there). A summer sky seen
+// almost straight up is a deep, clean cobalt that darkens toward the zenith,
+// so the clear sky is not moved from the scan's colour but laid down whole:
+// one hue (~207, turning a touch bluer going up), one saturation, and a value
+// set by how deep into the sky the pixel looks (deep: 0 at the frame's lower
+// edge, 1 at the zenith, over the top of the frame where the pole's verticals
+// converge), so after the film it runs from ~0.64 at the bottom to ~0.50 up
+// there, the depth that makes the cumulus's crowns glow against it. What of
+// the scan's sky is its own cloud is read off its saturation against the
+// clean scan sky's (~0.74), unmixed: thin haze (the grey veil round the
+// upper right, a < ~0.5) goes to the cobalt with the open sky, and only real cloud
+// keeps its own grade over it. Its cloud is lit from high right: its shadow
+// sides take the blue of the sky that lights them, its sunlit tops go
+// warm-neutral.
+const vec3 COBALT = vec3(207.0, 0.78, 0.69);
+vec3 skyGrade(vec3 c, float deep) {
   vec3 h = rgb2hsv(c);
   float deg = h.x * 360.0;
-  // clear sky: the azure band, turned
+  // the scan's clear sky is in the azure band; anything else is its cloud
   float band = smoothstep(168.0, 184.0, deg) * (1.0 - smoothstep(236.0, 250.0, deg));
-  float blue = smoothstep(0.12, 0.34, h.y) * band;
-  float hue = mix(deg, 209.0 + (deg - 206.0) * 0.5 + 5.0 * zen, band);
-  float sat = clamp(h.y * mix(0.96, 1.08, zen), 0.0, 0.9);
-  float val = h.z * mix(1.0, 0.86, zen);
-  vec3 sky = hsv2rgb(vec3(hue / 360.0, sat, val));
+  float a = mix(1.0, clamp(1.0 - h.y / 0.74, 0.0, 1.0), band);
+  // its cloud's share, with the thin haze over the sky (a < ~0.5) taken out
+  float cloudA = smoothstep(0.5, 0.95, a);
+  vec3 sky = hsv2rgb(vec3((COBALT.x + 3.0 * deep) / 360.0, COBALT.y, COBALT.z * mix(1.0, 0.77, deep)));
   // cloud: more range; shade sides to skylight blue, sunlit tops to warm white
   float v = clamp(0.86 + (h.z - 0.86) * 1.5, 0.0, 1.0);
   float shade = smoothstep(0.94, 0.76, h.z);
@@ -186,7 +196,7 @@ vec3 skyGrade(vec3 c, float zen) {
   vec3 shadeC = hsv2rgb(vec3(213.0 / 360.0, 0.1 + 0.14 * shade, v * mix(1.0, 0.94, shade)));
   vec3 sunC = hsv2rgb(vec3(36.0 / 360.0, 0.08, v));
   vec3 cloud = mix(shadeC, sunC, top);
-  return mix(cloud, sky, blue);
+  return mix(sky, cloud, cloudA);
 }
 // The towering cumulus (cloud.py: a photographed tower, unclipped, placed
 // under this camera) graded into the same light, so it glows and carries the
@@ -364,7 +374,11 @@ void main() {
   vec3 sk = texture(uSky, pp / uPlate).rgb;
   float skyA = sk.r * (1.0 - cov);
   vec3 behind = plate(3, pp, rk);
-  vec3 graded = skyGrade(behind, sk.g);
+  // how deep into the sky this pixel looks: its elevation (sky.png G, 1 near
+  // the zenith over the top of the frame), and toward the top edge as a whole,
+  // whose upper right the pole's verticals run up into as well
+  float deep = clamp(0.73 * sk.g + 0.5 * (1.0 - pp.y / uPlate.y), 0.0, 1.0);
+  vec3 graded = skyGrade(behind, deep);
   if (sk.b > 0.002) graded = mix(graded, cloudAir(cloudGrade(cloudTex(pp), sk.g), graded, sk.b), sk.b);
   if (skyA > 0.002) col = clamp(col + skyA * (graded - behind), 0.0, 1.0);
   // Light wrap: the sky behind a standing piece spills round its edge, so
