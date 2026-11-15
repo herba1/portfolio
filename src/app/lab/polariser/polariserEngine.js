@@ -93,6 +93,9 @@ const SKY_DYE = [0.03 * 2, 0.37 * 2, 2];
 // base fog greys it. A share of the dyed blue's luminance comes back as grey,
 // lifting the band toward a soft grey-cobalt instead of a poster blue.
 const SKY_GREY = 0.15;
+// Share of a thin veil's neutral light that is the open sky behind it and
+// takes the dye (see the veil in the shader).
+const VEIL_BLUE = 0.6;
 // Halation: a thin warm bleed on the dark side of an edge against bright
 // sky (the mast, the tower outlines), the light that went through the
 // emulsion and came back off the base. It is measured in print pixels, so it
@@ -203,6 +206,7 @@ uniform float uExpo;
 uniform float uLinearOut;
 uniform vec3 uSkyDye;
 uniform float uSkyGrey;
+uniform float uVeilBlue;
 uniform float uHaloPx;   // halation ring radius, print px
 uniform float uHalo;
 uniform vec3 uHaloTint;
@@ -297,9 +301,28 @@ void main() {
   // It is glare and cloud there, not clear Rayleigh sky.
   float clipped = smoothstep(0.88, 0.96, max(enc.r, max(enc.g, enc.b)));
   float A = clamp((0.85 * C.b - C.r) / 0.56, 0.0, C.b) * aux.r * (1.0 - clipped);
+  // Cloud or veil. Measured on the plate, the cumulus bodies sit at a
+  // non-Rayleigh share past 0.9 and their shaded flanks at 0.8-0.9; the
+  // translucent veils between them land at 0.6-0.8 and the clear sky under 0.3.
+  float share = clamp(1.0 - A / max(C.b, 1e-4), 0.0, 1.0);
+  float body = smoothstep(0.7, 0.97, share);
+  float veil = aux.r * (1.0 - body) * smoothstep(0.05, 0.3, share);
+  // A veil is thin cloud in front of the open sky, but the plate's unmix by
+  // chroma reads most of it as neutral, so under the dye it stayed a mid grey
+  // while the sky round it went cobalt: a slate smear. Part of its neutral
+  // share is the sky behind it; lend that back to the Rayleigh part so the
+  // filter's blue shows through the veil. It is lent as grey light, all three
+  // channels: taken out along the clear sky's own spectrum it stripped the blue
+  // and left the red, and the veil stayed grey.
+  // Only a dim veil, its grey no brighter than the open sky's blue, reads as
+  // slate; a bright one is cloud and stays white (lent there, it dyed the
+  // cumulus near the sun electric cyan).
+  float grey = max(C.b - A, 0.0);
+  float lend = uVeilBlue * veil * (1.0 - smoothstep(0.5, 1.6, grey)) * (1.0 - clipped) * grey;
+  A += lend;
   vec3 dyed = A * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
   dyed = mix(dyed, vec3(dot(dyed, LUMA)), uSkyGrey);
-  vec3 Cout = C - A * vec3(0.29, 0.58, 1.0) + dyed;
+  vec3 Cout = C - A * vec3(0.29, 0.58, 1.0) + lend * vec3(0.29 - 1.0, 0.58 - 1.0, 0.0) + dyed;
 
   // Halation: the surround's light, a few print pixels wide, where it is
   // brighter than the pixel itself (the dark side of an edge against sky).
@@ -361,15 +384,18 @@ void main() {
   float mc = max(Cout.r, max(Cout.g, Cout.b));
   vec3 held = Cout * (printCurve(vec3(mc)).r / max(mc, 1e-5));
   float rayleigh = clamp(A / max(C.b, 1e-4), 0.0, 1.0) * aux.r;
+  // The veils' lent blue is held too (rayleigh counts it): let off the hold,
+  // the lent veils at the cloud edges swung to a cyan fringe.
   print = mix(print, held, 0.5 * rayleigh);
 
   // Split tone the cumulus. A cloud's sunlit top is lit by the low sun; its
   // shadowed underside only by the open sky around it, so it goes blue-grey
   // (hue ~205) while the tops roll off warm. Only the neutral, non-Rayleigh
   // share of an open-sky pixel is cloud; the quay and the mast are left alone.
-  // The gate opens across the cloud bodies' mid-tones, so the blue-grey reaches
-  // up into the shaded flanks of each lobe rather than only the darkest base.
-  float cloud = aux.r * clamp(1.0 - A / max(C.b, 1e-4), 0.0, 1.0);
+  // The gate opens only on the cloud bodies and their shaded flanks:
+  // a linear gate pressed the dark shade into every part-sky pixel too, so a
+  // translucent veil came out a straight-edged slate smear between sky and cloud.
+  float cloud = aux.r * body;
   float lit = smoothstep(0.4, 0.85, dot(print, LUMA));
   print *= mix(vec3(1.0), mix(uShade, uSunlit, lit), cloud);
   // Paper white: the print's base never scans as a full 255.
@@ -703,6 +729,7 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform2f(u.uBurn, BURN, rad(BURN_DEG));
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform1f(u.uSkyGrey, SKY_GREY);
+    gl.uniform1f(u.uVeilBlue, VEIL_BLUE);
     gl.uniform1f(u.uHaloPx, HALO_PX);
     gl.uniform1f(u.uHalo, HALO);
     gl.uniform3fv(u.uHaloTint, HALO_TINT);
