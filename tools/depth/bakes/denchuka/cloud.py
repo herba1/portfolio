@@ -48,7 +48,7 @@
 # then feathered from its signed distance over ~10-16 plate px reaching into
 # the silhouette (~30 on the anvil, its thin outflow), its light losing its
 # contrast toward it, and the comp turns the falloff to the sky's hue (the
-# edge, below; COMP cloudEdge). The anvil's shelf, a flat shade with a hard
+# edge, below; COMP cloudAir). The anvil's shelf, a flat shade with a hard
 # base under the anvil's lobe, dissolves up from its base into the blue (the
 # anvil, below). A small pocket of the HDRI's sky caught in the tower's foot
 # is filled (HOLE_MAX), even where it runs out of the frame.
@@ -409,47 +409,6 @@ print("light t: " + "  ".join(f"p{p} {np.percentile(t[a > 0.9], p):.3f}" for p i
 sm = lambda e0, e1, v: np.clip((v - e0) / (e1 - e0), 0, 1) ** 2 * (3 - 2 * np.clip((v - e0) / (e1 - e0), 0, 1))
 fill = lambda v, w: push_pull(np.repeat(v.astype(np.float32)[..., None], 3, -1), w.astype(np.float32))[..., 0]
 
-# ---------------------------------------------------------------- the shelf
-# The tower's flat left shelf, under the anvil's lit lobes, is the HDRI's
-# faintest cloud: a near-uniform shade whose own drawing is a few broad,
-# rounded swells. Run through the relief above (its fine detail lifted
-# ~3 times in the shade, out of the unmixed colour, whose thin sky-blue
-# coverage there amplifies the HDRI's sensor grain) it came out as fine
-# streaks and grain over a milky wash: smeared, not a volume. So its texture
-# is taken again from the source radiance itself (the HDRI's luminance Y,
-# not unmixed; the shelf is solid cloud), in three bands, its finest grain
-# (under SHELF_S px) left out and its swells (SHELF_BANDS: 2-8, 8-24 and
-# 24-80 px) drawn up, and laid on the shelf's own light at the old tone (t's
-# wide local mean over the shade alone, so the lit lobes beside it lend it no
-# halo). Only the shade of the shelf (SHELF_REG: plate x, y where it fades
-# out and in); the lit lobes above it keep their light.
-SHELF_REG = ((1300.0, 1650.0), (850.0, 1000.0))
-SHELF_S, SHELF_GAIN = 2.0, (1.0, 3.0, 2.0)
-SHELF_DIM = (0.38, 0.55)  # t: the shade the retexture takes, out to the lit lobes
-t_relief = t  # (the anvil's dissolve, below, keeps reading the relief's light: the shelf's silhouette is not moved)
-lY = np.log(np.maximum(Y / ref, 1e-4)).astype(np.float32)
-lyb = [cv2.GaussianBlur(lY, (0, 0), s) for s in (SHELF_S, 8, 24, 80)]
-tex = sum(g * (lyb[i] - lyb[i + 1]) for i, g in enumerate(SHELF_GAIN))
-# (t is log radiance over its range, log(1 / xlo) nats: the texture in t's units)
-tex = tex / np.log(1 / xlo)
-dimw = (1 - sm(*SHELF_DIM, cv2.GaussianBlur(t, (0, 0), 8))).astype(np.float32)
-tmean = cv2.GaussianBlur(t * dimw, (0, 0), 24) / np.maximum(cv2.GaussianBlur(dimw, (0, 0), 24), 1e-3)
-shelf = ((1 - sm(*SHELF_REG[0], xs)) * sm(*SHELF_REG[1], ys) * dimw).astype(np.float32)
-t = (t + (np.clip(tmean + tex, 0, 1) - t) * shelf).astype(np.float32)
-print(f"shelf: {np.mean(shelf > 0.5) * 100:.2f}% of the frame retextured from the radiance")
-
-# ---------------------------------------------------------------- the pockets
-# The deep shade pockets carry the relief's lift at its strongest, and with
-# it the HDRI's grain: at 1:1 they were blotchy, mottled blue patches. In the
-# shade (POCKET: t's local level, fading out by the lit billows) the light is
-# smoothed edge-preservingly (a bilateral filter, POCKET_S px, a range of
-# POCKET_R in t), so a pocket is one soft fall of skylight and the edges of the
-# billows round it stay drawn.
-POCKET, POCKET_S, POCKET_R = (0.28, 0.48), 3.0, 0.08
-tbl = cv2.GaussianBlur(cv2.bilateralFilter(t, -1, POCKET_R, POCKET_S), (0, 0), 0.8)
-pocket = (1 - sm(*POCKET, cv2.GaussianBlur(t, (0, 0), 5))).astype(np.float32)
-t = (t + (tbl - t) * pocket).astype(np.float32)
-
 # ---------------------------------------------------------------- the anvil
 # The tower's lower-left flank, its anvil shelf and the lobes under it, is
 # the HDRI's flattest cloud: a uniform shade with a hard, flat base on the
@@ -483,8 +442,8 @@ upf = cv2.GaussianBlur(sm(0.1, 0.5, gy / np.maximum(np.hypot(gx, gy), 1e-5)).ast
 lut = np.zeros(lab_.max() + 1, np.float32)
 lut[lab_[ey, ex]] = 1 - upf[ey, ex]
 facing = cv2.GaussianBlur(lut[lab_], (0, 0), 12)
-tl = cv2.GaussianBlur(t_relief, (0, 0), 14)
-lift = np.clip(t_relief - tl, -0.15, 0.3)
+tl = cv2.GaussianBlur(t, (0, 0), 14)
+lift = np.clip(t - tl, -0.15, 0.3)
 diss = sm(0.0, DISS, np.maximum(sd, 0) + DISS_LIT * lift)
 basew = np.clip(facing * reg, 0, 1).astype(np.float32)
 keep_a = (1 - basew * (1 - diss)).astype(np.float32)
@@ -508,7 +467,7 @@ print(f"anvil: {np.mean((keep_a < 0.7) & (a_shape > 0.5)) * 100:.2f}% of the fra
 # - Its light loses its contrast toward the edge: within HAZE_D px of it, it
 #   is pulled (HAZE at the edge) toward its own wide local mean, so no
 #   billow's light or shade runs out to the silhouette; outside the contour
-#   it takes the margin's own value. The live comp (COMP cloudEdge) then turns
+#   it takes the margin's own value. The live comp (COMP cloudAir) then turns
 #   what is left of it there to the sky's hue at the coverage's falloff.
 FEATHER_OUT, FEATHER_IN = 3.0, (10.0, 16.0)  # plate px: up/side-facing edge, underside
 ANVIL_X, ANVIL_OUT, ANVIL_IN = (900.0, 1350.0), 8.0, 30.0
