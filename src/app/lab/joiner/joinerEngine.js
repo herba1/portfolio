@@ -250,9 +250,10 @@ void main() {
 //     turned to the sun the warm near-white, flanks a mix of the two, so the
 //     cumulus are modelled by light rather than cut out;
 //   - cloud to sky: keyed on a feathered matte (the blue-against-white key
-//     blurred over about twelve plate pixels, the cloud's share taken down
-//     the fringe on a curve), so cloud edges thin out into the blue instead
-//     of reading as cut-outs pasted on it;
+//     blurred over about three plate pixels, the cloud's share taken down
+//     the fringe on a curve): just enough to take the deck's compression
+//     out of the edge, so the cumulus keep their crisp, scalloped rims and
+//     still thin out into the blue rather than reading as cut-outs;
 //   - clear sky: recoloured along a zenith gradient, a dome: deep saturated
 //     cobalt straight up (#0C55AC, then skyDeep stops down and skySat more
 //     chroma at the centre of the disk, about #0A4FA0 on the print), falling
@@ -276,17 +277,18 @@ const SKY_GRADE = {
   grade: 1, // overall strength
   // the sun relight gives the cumulus their light: sun-facing tops up into
   // the warm shoulder, far sides down into skylight blue
-  sunGain: 0.6, // stops into the shoulder on the side of a cloud that faces the sun
-  sunShade: 2, // stops out of the shoulder on the far side, at most, towards skylight blue
-  relief: 0.14, // facing per unit of slope (stops of plate radiance per print width)
-  feather: 12, // cloud-to-sky matte blur radius, plate pixels
+  sunGain: 2, // stops into the shoulder on the side of a cloud that faces the sun
+  sunShade: 3, // stops out of the shoulder on the far side, at most, towards skylight blue
+  relief: 0.1, // facing per unit of slope (stops of plate radiance per print width)
+  feather: 3, // cloud-to-sky matte blur radius, 4096 px plate pixels (6 of the 8192 px deck's)
   sunAz: -52, // sun azimuth, degrees in the disk frame (table right = 0, up = -90)
   sunEl: 52, // sun elevation, degrees
   skyDeep: 0.7, // stops the clear sky is taken down at the zenith, falling off towards the rim
   skySat: 0.3, // extra chroma at the zenith (share of the sky's own), falling off the same way
   skyFall: 1.6, // zenith angle (radians) where the sky has opened fully to the rim colour
 };
-// The plate is 4096 px across 2 x THMAX of zenith angle.
+// The structures plate is 4096 px across 2 x THMAX of zenith angle (the
+// cloud deck is 8192 px, two of its pixels to one of these).
 const PLATE_RAD = (2 * THMAX) / 4096;
 const CLOUD_HI = srgbHex("#F4F1EA");
 const CLOUD_SHADE = srgbHex("#8FB4D8"); // skylight: shade under an open blue sky
@@ -349,11 +351,12 @@ void main() {
   m = smoothstep(0.0, 0.6, m) * uSky.y;
   if (m < 0.002) { outColor = dev; return; }
 
-  // The cloud-to-sky matte, feathered. The plate's blue-against-white key is
-  // hard and wobbly (compressed chroma, and the shear warp bends it), so it
-  // is blurred over a disk about twelve plate pixels across before it is
-  // used: a cloud's edge then thins out into the cobalt over the width a real
-  // cumulus fringe has, instead of a paper cutout with a pale rim.
+  // The cloud-to-sky matte, feathered. The deck's blue-against-white key
+  // carries a little compressed chroma and the shear warp bends it, so it is
+  // blurred over a disk about three plate pixels across before it is used:
+  // enough to smooth the chroma blocks out of the edge, not so much that the
+  // cumulus go to cotton wool. A cloud's edge stays crisp and still thins out
+  // into the cobalt over the width a real cumulus fringe has.
   float aPix = clearKey(rawLin(vUv));
   float ak = aPix;
   float aw = 1.0;
@@ -753,10 +756,16 @@ function compile(gl, vs, fs) {
   return { p, u };
 }
 
-async function loadBitmap(src) {
+async function loadBitmap(src, max = Infinity) {
   const res = await fetch(src);
   if (!res.ok) throw new Error(`${src}: ${res.status}`);
-  return createImageBitmap(await res.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+  const opts = { colorSpaceConversion: "none", premultiplyAlpha: "none" };
+  const bm = await createImageBitmap(await res.blob(), opts);
+  if (bm.width <= max && bm.height <= max) return bm;
+  const k = max / Math.max(bm.width, bm.height);
+  const small = await createImageBitmap(bm, { ...opts, resizeWidth: Math.round(bm.width * k), resizeHeight: Math.round(bm.height * k), resizeQuality: "high" });
+  bm.close();
+  return small;
 }
 
 function mulberry(seed) {
@@ -836,11 +845,19 @@ export async function createJoiner(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
 
+  // The cloud deck is 8192 px, so a print's cumulus stay crisp at the
+  // largest print texture (over two deck px to a print px at the zenith).
+  // Where the GPU cannot hold that, or the prints are small enough (under
+  // about 320 device px) that a 4096 px deck already gives them two plate
+  // pixels each, it is taken down to 4096 on load, which saves 270 MB of
+  // video memory.
+  const cellGuess = Math.min(host.clientWidth || window.innerWidth, host.clientHeight || window.innerHeight) * 0.25 * Math.min(2, window.devicePixelRatio || 1);
+  const deckMax = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), cellGuess > 320 ? 8192 : 4096);
   const [sceneBm, maskBm, skyBm, cloudBm, overBm] = await Promise.all([
     loadBitmap(`${ASSET}scene.webp`),
     loadBitmap(`${ASSET}mask.webp`),
     loadBitmap(`${ASSET}sky.webp`),
-    loadBitmap(`${ASSET}cloud.webp`),
+    loadBitmap(`${ASSET}cloud.webp`, deckMax),
     loadBitmap(`${ASSET}overcast.webp`),
   ]);
 
