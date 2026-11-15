@@ -38,8 +38,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // in front), to a summer cobalt that deepens with elevation (sky.png G: how far
 // up the sky each pixel looks, from the camera), with skylight-blue shade and
 // warm sunlit tops on the cloud; the film then adds only its optics: a thin
-// diffusion and a warm halation ring keyed on luminance (GLOW), the ring the
-// only glow round the cumulus's edge, then its curve. The shaft, hardware and
+// diffusion and a warm halation ring keyed on luminance (GLOW), laid in the
+// sky's own hue where it lands on the open cobalt round the cumulus, then its
+// curve. The shaft, hardware and
 // wires are graded as their own element (solidGrade): the concrete stands in
 // the same sun as the cloud, its lit flank a warm grey, its shade side the
 // skylight blue of the cloud's own shade, a bright rim where the sun grazes
@@ -91,7 +92,7 @@ const STREAK_SAMPLES = 14;
 // so the concrete takes a thin warm ring and no white glow; cloudDiff,
 // cloudRing: the same two off the cumulus. Its spread white light on the
 // cobalt reads as a pale matte fringe round the tower, so it is kept low, and
-// the glow at its edge is the warm ring.
+// what lands on the open sky takes the sky's hue (GLOW: SKY_LIT).
 const OPTIC = { diffusion: 0.2, halation: 0.75, halationThin: 0.05, halationColor: [1, 0.66, 0.32], solid: [0.05, 0.3], cloudRing: 0.55, cloudDiff: 0.3 };
 
 // The pole's rebuilt top meets its clean run at plate row SEAM; the run below
@@ -234,16 +235,23 @@ vec3 cloudGrade(vec3 c, float zen) {
 // The cumulus's edge, in the air (cloud.py: the edge). Its coverage (sky.png
 // B) falls off over ~10-14 plate px, reaching into its silhouette, and what
 // is left of the cloud in that falloff is thin cloud lit by the same air as
-// the cobalt round it: it takes the sky's hue, and loses its own contrast and
-// saturation toward the sky's, so the edge passes from cloud through
-// sky-tinted haze into the blue, never as a pale rim of the cloud's own
-// skylight shade on the cobalt (a cut-out sticker's fringe).
-vec3 cloudAir(vec3 c, vec3 sky, float b) {
-  float air = 1.0 - smoothstep(0.0, 0.9, b);
+// the cobalt round it. Laid over the cobalt as a straight mix of the two, the
+// falloff passed through their average, a darker, greyed blue (as dark as the
+// cobalt, half its saturation): a navy rim all along the crowns, the cloud
+// cut out and pasted. So the falloff is built in the sky's own hue instead,
+// its light leading its colour: as the coverage rises the edge first
+// brightens (value, most of the way by b ~0.6) in the local sky's hue at
+// nearly the sky's saturation, and only then pales toward the cloud's own
+// colour, which takes over from b ~0.5 to 1. The edge is lit air, a lighter
+// blue of the sky round it brightening into the crown, never darker or
+// greyer than either side of it.
+vec3 cloudEdge(vec3 c, vec3 sky, float b) {
   vec3 ch = rgb2hsv(c);
   vec3 sh = rgb2hsv(sky);
-  vec3 thin = hsv2rgb(vec3(sh.x, mix(ch.y, sh.y, 0.5), mix(ch.z, sh.z, 0.35)));
-  return mix(c, thin, air * 0.85);
+  float lightUp = smoothstep(0.0, 0.8, b);
+  float pale = smoothstep(0.15, 1.0, b);
+  vec3 air = hsv2rgb(vec3(sh.x, mix(sh.y, ch.y, pale), mix(sh.z, ch.z, lightUp)));
+  return mix(air, c, smoothstep(0.5, 1.0, b));
 }
 // The concrete, in the same light as the cumulus. The scan has the shaft and
 // its cans in sun from the right (their lit flanks ~0.66-0.90, the shade
@@ -443,7 +451,7 @@ void main() {
   // whose upper right the pole's verticals run up into as well
   float deep = clamp(0.73 * sk.g + 0.5 * (1.0 - pp.y / uPlate.y), 0.0, 1.0);
   vec3 graded = skyGrade(behind, deep);
-  if (sk.b > 0.002) graded = mix(graded, cloudAir(cloudGrade(cloudTex(pp), sk.g), graded, sk.b), sk.b);
+  if (sk.b > 0.002) graded = cloudEdge(cloudGrade(cloudTex(pp), sk.g), graded, sk.b);
   float skyA;
   if (hwUp || shUp) {
     // Over the hardware and the shaft the pixel is built again from its
@@ -688,7 +696,7 @@ void main() {
 //   in front) turns its spread light down (uCloudDiff) and its ring partly
 //   (uCloudRing): white light spread off the tower's edge onto the cobalt
 //   reads as a pale matte fringe, so what is left round it is mostly the
-//   warm ring.
+//   ring, and on the open sky both take the sky's own hue (SKY_LIT).
 const LIN = `
 vec3 toLin(vec3 c) {
   c = clamp(c, 0.0, 1.0);
@@ -764,6 +772,8 @@ vec3 toSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
+// how much of the optics' light on the open sky takes the sky's hue
+const float SKY_LIT = 0.9;
 float lumAt(vec2 uv) {
   return dot(toLin(texture(uTex, uv).rgb), vec3(0.2126, 0.7152, 0.0722));
 }
@@ -783,12 +793,24 @@ void main() {
     hair = max(hair, min(lumAt(vUv + o), lumAt(vUv - o)) - y);
   }
   float keep = 1.0 - smoothstep(0.04, 0.25, hair);
-  float sx = shares(t.a).x;
+  vec2 sh = shares(t.a);
+  float sx = sh.x;
+  // What the optics lay on the open sky round the cumulus (its spread light
+  // and its ring) is light in the sky's own air: added as the crowns' white
+  // and the sun's orange, it greyed the cobalt beside every crown (orange on
+  // blue is grey), a dull slate-navy band between the deep blue and the white
+  // that cut the tower out. On the open sky it is laid in the sky's own hue
+  // instead (the pixel's colour at unit luminance, at the added light's
+  // luminance), so the cobalt brightens into the crown and the edge stays the
+  // sky's. Inside the cloud's coverage, and on anything solid, it keeps its
+  // own colour.
+  float onSky = sx * (1.0 - smoothstep(0.0, 0.6, sh.y)) * SKY_LIT;
+  vec3 tone = min(l / max(y, 1e-4), vec3(4.0));
   // diffusion: the highlights' own light, spread; it lands off them, so the
   // billows inside a crown keep their shadows, and hardly at all on the
   // concrete, whose edge against the crowns stays cut (a white veil there
   // reads as a halo round a pasted layer)
-  l += g.rgb * uDiff * (1.0 - self) * mix(1.0, keep, 0.6) * mix(0.12, 1.0, sx);
+  l += mix(g.rgb, tone * dot(g.rgb, vec3(0.2126, 0.7152, 0.0722)), onSky) * uDiff * (1.0 - self) * mix(1.0, keep, 0.6) * mix(0.12, 1.0, sx);
   // halation: the ring outside the bright edge, in the sun's warm colour, on
   // what is darker than the cloud's shade (the cobalt), never filling the
   // cloud's own folds. On the shaft, the hardware and the wires (not sky) the
@@ -810,7 +832,7 @@ void main() {
     }
     thin *= (1.0 - sx) * (1.0 - smoothstep(0.1, 0.35, y));
   }
-  l += uHalC * (wide * uHal + thin * uHalThin);
+  l += mix(uHalC, tone * dot(uHalC, vec3(0.2126, 0.7152, 0.0722)), onSky) * wide * uHal + uHalC * thin * uHalThin;
   outColor = vec4(toSrgb(l), 1.0);
 }`;
 
@@ -1340,8 +1362,8 @@ export async function createDenchuka(host, { embedded = false } = {}) {
           // brightest crowns: anything more lays a thick orange bloom over the
           // dark hardware in front of them and warms the shaft's edge, a second
           // warm accent on what should be the frame's one cool dark anchor.
-          // The ring that shows is the optics' own (GLOW): warm off the
-          // cumulus into the cobalt, a texel or two on the concrete.
+          // The ring that shows is the optics' own (GLOW): off the cumulus
+          // into the cobalt in the sky's hue, a warm texel or two on the concrete.
           halation: 0.06,
           halationThreshold: 0.92,
           halationColor: [1, 0.52, 0.24],
