@@ -2,7 +2,8 @@
 towers -> a looping viewfinder video, a time pyramid of block means for the
 long exposure, and a sharp still plate with a stillness matte.
 
-    python3 -I tools/depth/bakes/shutter/drift.py <photo.jpg> <tower masks...> --out <work>/drift.mp4
+    python3 -I tools/depth/bakes/shutter/matte.py <tower masks...> --out-dir <work>/mattes
+    python3 -I tools/depth/bakes/shutter/drift.py <photo.jpg> <work>/mattes/t*.png --out <work>/drift.mp4
     python3 -I tools/depth/bakes/shutter/bake.py <work>/drift.mp4 <out_dir> --work <work>
         [--block-size 960x540] [--blocks-from <work>/blocks-lin.npy]
     sh tools/depth/bakes/shutter/encode.sh <work>/plate-master.mp4 public/lab/shutter
@@ -25,7 +26,21 @@ The tower masks: SAM 2.1 (tools/depth/segment.py prompt) on the photo turned
   t4 --box 0.25,0.52,0.56,1 --point 0.44,0.78 --point 0.47,0.58 --point 0.52,0.9
   t5 --box 0.54,0.51,1,1 --point 0.74,0.73 --point 0.9,0.92 --point 0.6,0.6
   t6 --box 0,0.2,0.21,0.32 --point 0.05,0.25 --point 0.15,0.27 --neg 0.1,0.33
-drift.py joins them into mask-tower.png (the frame's 1920x1080 band).
+  t2b (the top-right tower again, its roofline: the pale glass of its low
+      facade reflects the sky and SAM's first cut was ragged and notched
+      there; joined with t2) --box 0.495,0,1,0.31 and t2's four points plus
+      --point 0.7708,0.2292 --point 0.8333,0.1910 --point 0.8854,0.1583
+      --point 0.9375,0.1458 --point 0.6510,0.2743 (just inside the roofline)
+      --neg 0.7812,0.2639 --neg 0.8594,0.2153 --neg 0.9375,0.1806
+      --neg 0.6771,0.3194 --neg 0.5990,0.3264 (the clear sky just past it)
+  t2c (a box bolted to the same tower's left edge, 1080p ~960-975, 92-103,
+      that SAM cut in half: half frozen, half erased, it printed as a dark
+      nub in the sky) --box 0.4970,0.1830,0.5110,0.1975 --point 0.5031,0.1931
+Then matte.py (t1 t2+t2b+t2c t3 t4 t5 t6 -> mattes/t1..t6.png) cuts each edge
+straight and anti-aliased, and drift.py joins them into mask-tower.png (the
+frame's 1920x1080 band) and composites its clouds behind the join grown 1 px.
+Its four sunlit triangular fins at the roofline's step (1080p ~1630-1745,
+38-60) are the building's, in the photograph: the matte keeps them whole.
 
 Steps
 1. Stabilisation: corners on the towers tracked from the first frame to
@@ -56,12 +71,13 @@ Steps
      low-resolution tower light bleeds into the smeared sky as a glow at its
      edge. (towerfill.py alone re-applies the fill to shipped atlases.)
    - still.webp: 1920x1080, the linear mean of the whole loop (the towers
-     carry their light, noise-free), with the stillness matte in alpha: the
-     SAM 2.1 tower masks (mask-tower.png, see above), snapped to the mean
-     plate's own edges with a guided filter, eroded 1 px, feathered ~1 px.
-     It is not grown into the sky. (CROWN, for a plate whose tower has an
-     open strut lattice SAM takes as solid, cuts the matte inside a polygon
-     by the sky's own motion; this plate has none.)
+     carry their light, noise-free), with the stillness matte in alpha:
+     mask-tower.png as drift.py wrote it (the SAM 2.1 masks cleaned by
+     matte.py and joined), cracks closed. (CROWN, for a plate
+     whose tower has an open strut lattice SAM takes as solid, cuts the matte
+     inside a polygon by the sky's own motion, snapped to the mean plate's
+     own edges with a guided filter, eroded 1 px and feathered ~1 px; this
+     plate has none.)
 """
 import argparse
 import json
@@ -303,6 +319,14 @@ if CROWN is not None:
     skel[y0:y1, x0:x1] = thin(solid[y0:y1, x0:x1])
 core |= skel & zone
 matte = np.maximum(core.astype(np.float32), cv2.GaussianBlur(core.astype(np.float32), (0, 0), 0.8))  # the feather falls outward
+if CROWN is None:
+    # No crown: the mask is already the edge. matte.py cut it straight and
+    # anti-aliased on the photograph the plate is drawn from, and drift.py
+    # composited the deck strictly behind it grown a pixel, so its edge
+    # pixels hold no cloud. Snapped again to the mean plate's texture it
+    # wobbles back into stair-steps, and eroded it lets the silk lap the
+    # facade's outermost row.
+    matte = mask.astype(np.float32)
 # The struts' own light. A crown pixel the matte keeps is still part sky (a
 # truss is open work, and its edge pixels straddle the sky): its mean is
 # (1 - f) strut + f mean sky, and printed whole that sky is frozen in it, a

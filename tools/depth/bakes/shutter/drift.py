@@ -1,7 +1,7 @@
 """Shutter plate: one worm's-eye photograph -> a locked-off cumulus time-lapse.
 
-    python3 -I tools/depth/bakes/shutter/drift.py <photo.jpg> <tower masks...> --out <work>/drift.mp4
-        [--mask-out tools/depth/bakes/shutter/mask-tower.png] [--preview <work>/drift-sheet.jpg]
+    python3 -I tools/depth/bakes/shutter/drift.py <photo.jpg> <matte.py mattes...> --out <work>/drift.mp4
+        [--grow 1] [--mask-out tools/depth/bakes/shutter/mask-tower.png] [--preview <work>/drift-sheet.jpg]
 
 Source: Harshit Joshi (@hpj1992), "a group of tall buildings standing next to
 each other", Unsplash trGhiLiRgsI, Hudson Yards, Manhattan, 3000x4000,
@@ -19,8 +19,9 @@ clouds:
    of a wide frame), area-downscaled in linear light to 1920x1440, the middle
    1920x1080 band kept.
 2. Towers: the SAM 2.1 masks (tools/depth/segment.py prompt, one per tower,
-   see the bake README in bake.py) joined -> mask-tower.png, the stillness
-   matte's source.
+   see the bake README in bake.py), cleaned by matte.py (straight, notch-free,
+   anti-aliased), joined -> mask-tower.png, the stillness matte; grown a
+   pixel and feathered, the matte the deck is composited behind.
 3. The sky taken apart: the clear sky S (push-pull of the pixels with a
    clear sky's chroma, smoothed: it carries the photo's own gradient, darker
    away from the sun) and the cloud as a premultiplied layer: alpha from
@@ -89,6 +90,7 @@ ap.add_argument("--at", type=int, default=24 + 96, help="the frame the photograp
 ap.add_argument("--speed", type=float, default=17.0, help="px per frame at 1920 wide")
 ap.add_argument("--wind", type=float, default=-30.0, help="degrees from +x (frame y down; negative = up the frame)")
 ap.add_argument("--seed", type=int, default=11)
+ap.add_argument("--grow", type=float, default=1.0, help="px the joined tower matte is grown (and feathered) for the composite")
 args = ap.parse_args()
 
 CW, CH = 1920, 1080
@@ -101,11 +103,28 @@ src = Image.open(args.photo).convert("RGB").transpose(Image.ROTATE_270)
 full = srgb2lin(np.asarray(src).astype(np.float32) / 255)
 lin = cv2.resize(full, (FW, FH), interpolation=cv2.INTER_AREA)
 
-# 2. Towers.
+# 2. Towers: matte.py's clean anti-aliased mattes, area-downscaled to the
+# frame (the edge stays anti-aliased) and joined -> mask-tower.png, the
+# bake's stillness matte, as cut. For the composite the joined matte is grown
+# by --grow px and feathered (a grey dilation by a disc, then a light blur,
+# so the edge keeps its one-pixel ramp): the deck's clouds are laid strictly
+# behind the tower and never reach into its anti-aliased edge pixels, so the
+# frames the viewfinder and the still plate take the tower's edge from carry
+# only the tower and the photograph's own clear sky, never a cloud. The grown
+# rim lies outside the stillness matte, where the engine reads the sky from
+# further out anyway (SKY_GAP); printed as tower it drew a blue halo along
+# every edge against the silk. The sky analysis below reads the matte as cut.
 tow = np.zeros((FH, FW), np.float32)
 for p in args.masks:
     m = cv2.imread(p, cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
     tow = np.maximum(tow, cv2.resize(m, (FW, FH), interpolation=cv2.INTER_AREA))
+if args.grow > 0:
+    r = int(np.ceil(args.grow))
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    disc = (np.hypot(yy, xx) <= args.grow + 0.01).astype(np.uint8)
+    towc = np.maximum(tow, cv2.GaussianBlur(cv2.dilate(tow, disc), (0, 0), 0.6))
+else:
+    towc = tow
 cv2.imwrite(args.mask_out, np.clip(np.round(tow[Y0:Y0 + CH] * 255), 0, 255).astype(np.uint8))
 sky = 1 - tow
 
@@ -354,7 +373,7 @@ for cl in DECK:
 # 6. Frames: S, the deck composited over it, the towers over that (their
 # edge pixels have their own photographed sky swapped for the frame's).
 Sf = S[Y0:Y0 + CH]
-towf = tow[Y0:Y0 + CH][..., None]
+towf = towc[Y0:Y0 + CH][..., None]
 linf = lin[Y0:Y0 + CH]
 bg = pushpull(lin, (sky > 0.97).astype(np.float32))[Y0:Y0 + CH]
 
