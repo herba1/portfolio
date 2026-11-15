@@ -60,7 +60,10 @@ signalmatte.py takes the maintenance ladder (a thin pale rail and its
 rungs, which read as a translucent ghost pole) off the signal card (p5.webp)
 and its streak off the town card's gable (p1.webp), and chokes the signal's
 alpha a px and carries its own colour out to the new edge, so no dark keyed
-rim stays round the lamps and the clamps.
+rim stays round the lamps and the clamps. billows.py (after cloudlight.py)
+breaks the cumulus's regular lobes into sub-billows of uneven size, in its
+tone and along its silhouette, and rebuilds the far-left turret's squared,
+faceted top as round billows, and rewrites the cloud's matte.
 """
 import sys
 import os
