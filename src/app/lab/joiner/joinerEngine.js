@@ -244,7 +244,9 @@ void main() {
 // on how blue the scene light is there:
 //   - cloud: keeps the deck's own modelling. Its log luminance is read
 //     against a local mean (two rings a turret across, cloud only), the
-//     fine contrast is barely opened and the whole lot runs through a soft filmic
+//     fine contrast is eased off rather than opened (log contrast against a
+//     local mean is an unsharp mask: opened, it carves a dark ring outside
+//     every cloud's edge) and the whole lot runs through a soft filmic
 //     shoulder that only reaches a warm near-white (#FAF4E6, never past it)
 //     on the sunlit tops;
 //   - sun: the cloud is read as a height field (the slope of its log
@@ -265,12 +267,18 @@ void main() {
 //     a cloud's edge and a firm one inside its body, so the deck's own
 //     silhouettes, wisps and soft fringes come through exactly and only
 //     their tone and colour change. The blue's deepening fades out under
-//     the cloud by the same density (no dark moat), a gentle bloom of the
-//     cloud's light spills into the blue just round it, and on top of that
-//     the SX-70's diffusion: the brightest tops throw a thin, soft glow
-//     into the blue round them, a lit pale cyan (#D2E6F6) so the blue pales
-//     rather than going lilac. The print's grain rides back on only after
-//     the two are composited;
+//     the cloud by the same density (no dark moat), a bloom of the cloud's
+//     light lifts the blue round it, climbing from a few turrets out right
+//     up to the edge, and on top of that the SX-70's diffusion: the
+//     brightest tops throw a soft glow further into the blue round them.
+//     Both pale the blue towards a lit pale cyan (#D2E6F6), and the cloud is
+//     laid into the blue, on a perceptual scale (square roots of the
+//     light), not in linear light: mixed linearly, the first few per cent
+//     of near-white over a cobalt with almost no red put the red up first
+//     and every cloud's fringe went a dull lilac navy, a dark ring that cut
+//     the cloud out of the sky. This way a cloud's edge pales and brightens
+//     along the blue's own hue and dissolves into it. The print's grain
+//     rides back on only after the two are composited;
 //   - clear sky: recoloured along a zenith gradient, a dome: deep saturated
 //     cobalt straight up (#0B4DA8, then skyDeep stops down and skySat more
 //     chroma at the centre of the disk, about #0A428A on the print, with a
@@ -283,12 +291,12 @@ void main() {
 const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const SKY_GRADE = {
   cloudGain: 0.5, // stops into the shoulder at a mid cloud of the deck (x = 1 is the knee)
-  cloudToe: 2.1, // log contrast of the cloud's broad modelling (the deck's cumulus have their own)
-  detail: 1.6, // log contrast of the fine detail against the local mean (turret scale)
+  cloudToe: 1.2, // log contrast of the cloud's broad modelling (the deck's cumulus have their own; more cuts them out)
+  detail: 0.6, // log contrast of the fine detail against the local mean (turret scale; above 1 it is an unsharp mask)
   depth: 2, // stops the shade side can fall below the knee, at most
   cloudSlope: 0.3, // film's slope in the clouds (log out per log exposure), to take the meter out
   cloudKeep: 1, // stops of the print's own exposure put back on the cloud, per stop
-  knee: 3, // hardness of the shoulder: higher holds the mids lower and the tops whiter
+  knee: 1.8, // hardness of the shoulder: higher holds the mids lower and flattens the tops to a plateau
   splitTone: 1, // 0 leaves cloud neutral, 1 is the full skylight split
   keep: 0.2, // share of the print's own dye cast kept in the cloud (more turns the shade grey-lilac)
   skyKeep: 0.7, // power of the print's own exposure ratio kept in the clear sky
@@ -298,16 +306,16 @@ const SKY_GRADE = {
   sunGain: 2, // stops into the shoulder on the side of a cloud that faces the sun
   sunShade: 1.5, // stops out of the shoulder on the far side, at most, towards the skylight-blue shade
   relief: 0.1, // facing per unit of slope (stops of plate radiance per print width)
-  feather: 3, // cloud density blur radius, 4096 px plate pixels (6 of the 8192 px deck's)
+  feather: 8, // cloud density blur radius, 4096 px plate pixels (16 of the 8192 px deck's)
   densLo: 0.08, // cloud density ramp: share of the blue's chroma taken away where cloud starts
   densHi: 0.9, // ... and where it is solid cloud, at a cloud's edge (wide: wisps stay wisps)
   densLight: 2.5, // light above the clear blue (in multiples of it) that also reads as solid cloud there
   fillHi: 0.6, // the same two inside a cloud's body, where a shade side lit by the blue keeps
   fillLight: 1.2, // some of its chroma and must not go to lacy holes
-  bloom: 0.15, // how much of the cloud's light the blue just round it takes on
+  bloom: 0.4, // how far the blue round a cloud pales towards it (share of the perceptual mix, at the edge)
   sunAz: -52, // sun azimuth, degrees in the disk frame (table right = 0, up = -90)
   sunEl: 52, // sun elevation, degrees
-  glow: 0.65, // diffusion bloom off the cloud tops into the blue round them (linear light per unit of top)
+  glow: 0.65, // diffusion bloom off the cloud tops into the blue round them (share of the perceptual mix per unit of top)
   sunSplit: 1.0, // stops a cloud's side turned away from the sun is pulled down towards the skylight shade
   skyDeep: 0.95, // stops the clear sky is taken down at the zenith, falling off towards the rim
   skySat: 0.45, // extra chroma at the zenith (share of the sky's own), falling off the same way
@@ -628,6 +636,7 @@ void main() {
   float glowL = 0.0;
   float vs = 0.0;
   float wv = 0.0;
+  float nearC = 0.0;
   for (int j = 0; j < 4; j++) {
     float r = j == 0 ? 0.014 : (j == 1 ? 0.04 : (j == 2 ? 0.08 : 0.14));
     vec2 gj = vec2(0.0);
@@ -653,6 +662,7 @@ void main() {
         float yq = dot(lq, LUMA);
         glowL += cl * yq * yq * (j == 0 ? 0.6 : 0.4);
       }
+      nearC += cl * (j == 0 ? 0.35 : (j == 1 ? 0.3 : (j == 2 ? 0.2 : 0.15)));
       float ws = rw.a * (1.0 - dq) * (1.0 - dq);
       vs += ws * max(lq.r, max(lq.g, lq.b));
       wv += ws;
@@ -669,6 +679,7 @@ void main() {
   onSky /= 32.0;
   bloom /= 8.0;
   glowL /= 8.0;
+  nearC /= 8.0;
   // A cloud's edge is read on the wide ramp, so its fringe and wisps thin
   // out into the blue as the deck has them; inside its body (all cloud just
   // round it) on the firm one, so a shade side lit by the blue, which keeps
@@ -764,20 +775,31 @@ void main() {
   float Vb = max(linb.r, max(linb.g, linb.b));
   float Vs = mix(Vb, wv > 0.5 ? vs / wv : Vb, smoothstep(0.0, 0.5, dens));
   vec3 sky = tgt * pow(clamp(Vs / VREF, 0.55, 1.25), uSky.x);
-  // the gentle bloom where cloud meets blue: the blue just round a cloud
-  // takes on a little of the cloud's light, falling off over the inner rings
-  float halo = max(bloom - dens, 0.0) * (1.0 - dens);
-  sky = mix(sky, mix(sky, cloud, 0.5), uDens.w * halo);
-  // and the diffusion of an SX-70: the sunlit tops' light spreads a little
-  // into the blue round them as a soft warm-white glow (added light, so the
-  // blue under it pales towards a lit cyan rather than greying, and never
-  // goes lilac: warm light added to cobalt would). A small hole inside a
-  // cloud's body takes less of it, or it fogs over.
-  sky += uTop.x * glowL * (1.0 - dens) * (1.0 - 0.6 * smoothstep(0.55, 0.95, bloom)) * toLin(GLOW);
+  // The bloom where cloud meets blue: the blue round a cloud lifts towards
+  // it, so a cloud's edge dissolves into the sky instead of being cut out of
+  // it. How near the cloud is comes from all four rings (how much of each is
+  // cloud), so the lift climbs smoothly from a few turrets out right up to
+  // the edge. On top of it the diffusion of an SX-70: the sunlit tops' light
+  // spreads a little further into the blue round them (a small hole inside
+  // a cloud's body takes less of it, or it fogs over). Both pale the blue
+  // towards the lit cyan of the glow (#D2E6F6), mixed on a perceptual scale
+  // (square roots of the light): added linearly, any near-white light puts
+  // the cobalt's red up first and the fringe goes a dull lilac navy that
+  // reads as a dark ring. This way it pales along the blue's own hue.
+  float near = (0.55 * bloom + 0.45 * nearC) * smoothstep(0.6, 0.95, onSky);
+  float fringe = uDens.w * smoothstep(0.0, 0.45, near)
+    + uTop.x * glowL * (1.0 - 0.6 * smoothstep(0.55, 0.95, bloom));
+  fringe = min(fringe, 0.85) * (1.0 - dens);
+  sky = mix(sqrt(sky), sqrt(toLin(GLOW)), fringe);
+  sky *= sky;
 
   // one field: the blue, with the cloud laid into it by its density; the
-  // print's grain only goes back on after, as a ratio on the whole
-  vec3 g = mix(sky, cloud, dens);
+  // print's grain only goes back on after, as a ratio on the whole. It is
+  // laid in on the same perceptual scale, with the density eased so the
+  // fringe climbs at least as fast as it would in linear light.
+  float dm = 1.0 - (1.0 - dens) * (1.0 - dens);
+  vec3 g = mix(sqrt(sky), sqrt(cloud), dm);
+  g *= g;
   g *= clamp((Y + 0.004) / (Yb + 0.004), 0.85, 1.18);
   // Low over the roofs the deck goes to haze and its cumulus are
   // foreshortened to streaks; ease the grade off a little towards the
