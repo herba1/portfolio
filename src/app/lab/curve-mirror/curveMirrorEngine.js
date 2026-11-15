@@ -895,15 +895,11 @@ vec3 cobalt(vec3 c, vec3 T0, vec3 T1) {
   return max(mix(over, c * T1 / T0, 1.0 - smoothstep(0.0, 0.3, a)), 0.0);
 }
 
-// spread: the angular footprint of a pixel in the reflection; aa: of the face
-// in metres; both taken in main, where every pixel of the quad runs them
-vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
-  vec3 Ng = normalize(P - S);
-  vec3 q = toLocal(P);
-  // acrylic is thermoformed, never perfect: a slow waviness of the normal
-  vec2 w = vec2(sin(q.x * 31.0 + q.y * 7.0) + 0.6 * sin(q.y * 47.0 - q.x * 13.0), sin(q.y * 29.0 - q.x * 11.0) + 0.6 * sin(q.x * 53.0 + q.y * 5.0));
-  vec3 Nn = normalize(Ng + (uX * w.x + uU * w.y) * 0.0009);
-  vec3 r = reflect(d, Nn);
+// The world the glass shows along one reflected ray r from the point P of
+// the face: marched through the panorama to its first true surface, read
+// with the ray's footprint (k: its share of the pixel's), and printed as
+// the plate is.
+vec3 seen(vec3 P, vec3 r, float smudge, float k) {
   // parallax: the panorama is centred on the mirror at rest, the face is
   // 0.8 m wide, and the far side's crossbuck stands 3 to 4 m off it, so a
   // point of the face sees it some six degrees from where the centre does.
@@ -921,9 +917,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // finest edge spread over a couple of pixels, and a reflection drawn any
   // sharper than the photograph round it reads as an inset, not as glass in
   // this street. (A wire is still one dark line, as the plate's own are.)
-  float dust = dustAt(q.xy);
-  float smudge = smudgeAt(q.xy);
-  vec3 c = hid ? envGradB(dir, exp2(0.35 + 2.5 * smudge)) : envGrad(dir, exp2(0.35 + 2.5 * smudge));
+  vec3 c = hid ? envGradB(dir, k * exp2(0.35 + 2.5 * smudge)) : envGrad(dir, k * exp2(0.35 + 2.5 * smudge));
   // The 360 behind the lens is developed in the bake (develop.py): under the
   // photo's sun, colour-transferred band by band to the plate's sunlit walls
   // and paving, its road's highlights rolled off warm, its greens taken to
@@ -1019,6 +1013,49 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   c = max(mix(vec3(dot(c, LUMA)), c, 1.06 + 0.14 * surf), 0.0);
   c = mix(c, cCloud, cTopG);
 
+  return c;
+}
+
+// The face's normal at P: the cap's, and acrylic is thermoformed, never
+// perfect: a slow waviness of the normal.
+vec3 faceN(vec3 P, vec3 S) {
+  vec3 q = toLocal(P);
+  vec2 w = vec2(sin(q.x * 31.0 + q.y * 7.0) + 0.6 * sin(q.y * 47.0 - q.x * 13.0), sin(q.y * 29.0 - q.x * 11.0) + 0.6 * sin(q.x * 53.0 + q.y * 5.0));
+  return normalize(normalize(P - S) + (uX * w.x + uU * w.y) * 0.0009);
+}
+
+// The pixel's footprint on the face (metres per pixel, x and y, from the
+// exact cap in main), and whether this pixel supersamples the glass.
+vec3 gFaceX = vec3(0.0), gFaceY = vec3(0.0);
+bool gGlassSS = true;
+
+// spread: the angular footprint of a pixel in the reflection; aa: of the face
+// in metres; both taken in main, where every pixel of the quad runs them
+vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
+  vec3 Ng = normalize(P - S);
+  vec3 q = toLocal(P);
+  vec3 Nn = faceN(P, S);
+  vec3 r = reflect(d, Nn);
+  float dust = dustAt(q.xy);
+  float smudge = smudgeAt(q.xy);
+  // The image is optics, not a texture read: a convex face shows the world
+  // some four times smaller than the panorama holds it, and one ray per
+  // pixel decided the far side's crossbuck, its pole and the parallax
+  // silhouette between them texel by texel, a stair-stepped, broken board.
+  // So four rays across the pixel's own patch of the face (a rotated grid),
+  // each from its own point, along its own normal, marched to its own first
+  // surface and read with its quarter of the footprint, and averaged: the
+  // board's edge, and where a ray slips past it, are resolved by coverage.
+  vec3 c = vec3(0.0);
+  if (gGlassSS) {
+    const vec2 GJ[4] = vec2[4](vec2(-0.125, -0.375), vec2(0.375, -0.125), vec2(0.125, 0.375), vec2(-0.375, 0.125));
+    for (int s = 0; s < 4; s++) {
+      vec3 Pj = S + normalize(P + gFaceX * GJ[s].x + gFaceY * GJ[s].y - S) * RC;
+      vec3 rj = reflect(normalize(Pj), faceN(Pj, S));
+      c += seen(Pj, rj, smudge, 0.5);
+    }
+    c *= 0.25;
+  } else c = seen(P, r, smudge, 1.0);
   // The mirror sees its own head. A reflected ray that runs up under the
   // visor (or, from the very rim, back across the frame's face) meets paint,
   // not sky: traced against the frame and hood, anti-aliased by its closest
@@ -1320,6 +1357,12 @@ void main() {
   vec3 rCap = reflect(d, normalize(Pf - S));
   float spread = max(length(dFdx(rCap)), length(dFdy(rCap)));
   float capAA = max(fwidth(capRho), 1e-5);
+  // the pixel's patch of the face, never wider than a couple of centimetres
+  // (off the cap's rim the differences mean nothing)
+  gFaceX = dFdx(Pf);
+  gFaceY = dFdy(Pf);
+  gFaceX *= min(1.0, 0.02 / max(length(gFaceX), 1e-6));
+  gFaceY *= min(1.0, 0.02 / max(length(gFaceY), 1e-6));
   vec2 euv = envUv(rCap);
   gEnvGx = dFdx(euv);
   gEnvGy = dFdy(euv);
@@ -1420,6 +1463,8 @@ void main() {
     const vec2 SS[8] = vec2[8](vec2(1, -3), vec2(-1, 3), vec2(5, 1), vec2(-3, -5), vec2(-5, 5), vec2(-7, -1), vec2(3, 7), vec2(7, -7));
     float k = uView.z / uRes.x;
     gHoodK = 0.3;
+    // (eight rays already: each reads the glass once)
+    gGlassSS = false;
     for (int s = 0; s < 8; s++) {
       vec2 ps = p + SS[s] / 16.0 * k;
       vec3 ds = uR * normalize(vec3((ps.x - uC.x) / uF, -(ps.y - uC.y) / uF, -1.0));

@@ -51,6 +51,9 @@ rebuilds everything above the road toward the crossing from the plate alone:
 
     REPROJECT_CACHE=/path/march.npz keeps the march between runs.
 
+Then farside.py, on its output, redraws the turned crossing (its crossbuck,
+poles and lamps) at twice the resolution, and envd and envb at twice ENVD.
+
 The distances (envd's red) are the ray's own, so the engine's parallax across
 the 0.8 m face holds: it marches each reflected ray through them, read
 unfiltered, to its first true surface, so they are taken down by the nearest
