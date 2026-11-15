@@ -255,7 +255,7 @@ void main() {
 //     faces it is pushed up into the warm shoulder, the far side down out
 //     of it by a stop and a half at most and then a stop more (sunSplit),
 //     so every cloud splits into a lit half and a shaded one, and the tone
-//     is laid as colour: shade is the skylight blue (#9DB8D8, hue 210: white
+//     is laid as colour: shade is the skylight blue (#8CB0DC, hue 213: white
 //     vapour lit only by the open sky), the faces turned to the sun the
 //     warm near-white, a bright side turned away a pale skylight white
 //     (#E3EAF1), flanks a mix along the cloud's light, so the cumulus are
@@ -307,19 +307,19 @@ const SKY_GRADE = {
   // the sun relight gives the cumulus their light: sun-facing tops up into
   // the warm shoulder, far sides down into skylight blue
   sunGain: 1.2, // stops into the shoulder on the side of a cloud that faces the sun (more jumps the lit side straight to the top, with no midtones on the way)
-  sunShade: 1, // stops out of the shoulder on the far side, at most, towards the skylight-blue shade
+  sunShade: 1.6, // stops out of the shoulder on the far side, at most, towards the skylight-blue shade
   relief: 0.1, // facing per unit of slope (stops of plate radiance per print width)
-  feather: 20, // cloud density blur radius, 4096 px plate pixels (40 of the 8192 px deck's): wide, so a cloud's edge thins into the blue
+  feather: 6, // cloud density blur radius, 4096 px plate pixels (12 of the 8192 px deck's): tight, so a cloud's edge stays crisp against the cobalt (20 smeared every print into a watercolour)
   densLo: 0.03, // cloud density ramp: share of the blue's chroma taken away where cloud starts
   densHi: 1, // ... and where it is solid cloud, at a cloud's edge (wide: wisps stay wisps)
   densLight: 2.5, // light above the clear blue (in multiples of it) that also reads as solid cloud there
-  fillHi: 0.75, // the same two inside a cloud's body, where a shade side lit by the blue keeps
+  fillHi: 0.55, // the same two inside a cloud's body, where a shade side lit by the blue keeps
   fillLight: 1.2, // some of its chroma and must not go to lacy holes
-  bloom: 0.55, // how far the blue round a cloud pales towards it (share of the perceptual mix, at the edge; it falls away over a cumulus mass, so the blue beside a cloud is never deeper than the open sky)
+  bloom: 0.3, // how far the blue round a cloud pales towards it (share of the perceptual mix, at the edge; it falls away over a cumulus mass, so the blue beside a cloud is never deeper than the open sky)
   sunAz: -52, // sun azimuth, degrees in the disk frame (table right = 0, up = -90)
   sunEl: 52, // sun elevation, degrees
   glow: 0.8, // diffusion bloom off the cloud tops into the blue round them (share of the perceptual mix where bright cumulus fills the wide blur)
-  sunSplit: 0.5, // stops a cloud's side turned away from the sun is pulled down towards the skylight shade
+  sunSplit: 0.9, // stops a cloud's side turned away from the sun is pulled down towards the skylight shade
   topStops: 3.4, // stops above the knee where the tone reaches the top: higher keeps the bright side climbing through its midtones
   skyDeep: 0.95, // stops the clear sky is taken down at the zenith, falling off towards the rim
   skySat: 0.45, // extra chroma at the zenith (share of the sky's own), falling off the same way
@@ -331,7 +331,7 @@ const PLATE_RAD = (2 * THMAX) / 4096;
 const CLOUD_HI = srgbHex("#FAF4E6"); // a sunlit top: warm near-white, just under paper
 const CLOUD_FAR = srgbHex("#E3EAF1");
 const CLOUD_GLOW = srgbHex("#D2E6F6"); // the diffusion glow off the tops, seen in the blue: a lit pale cyan // a bright side turned away from the sun: pale skylight white
-const CLOUD_SHADE = srgbHex("#9DB8D8"); // a cumulus shade side lit by the open blue: skylight blue (hue 210)
+const CLOUD_SHADE = srgbHex("#8CB0DC"); // a cumulus shade side lit by the open blue: a saturated skylight blue (hue 213; #9DB8D8 read as a flat lavender wash)
 const SKY_ZENITH = srgbHex("#0B4DA8");
 const SKY_RIM = srgbHex("#4499D6");
 const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at the zenith
@@ -815,7 +815,7 @@ void main() {
   float yc = xs / pow(1.0 + pow(xs, uModel.y), 1.0 / uModel.y); // 0..1, 1 = the top of the shoulder
   // The tone is laid as colour, not as darkness: a cloud is lit by the sun
   // from one side and by the open blue everywhere else, so its shade is the
-  // sky's light on white vapour, the skylight blue (#9DB8D8), and only the
+  // sky's light on white vapour, the skylight blue (#8CB0DC), and only the
   // faces turned to the sun climb to the warm near-white (#FAF4E6). In
   // between the two mix in light, the pale blue-white of a cumulus flank.
   vec3 hiL = toLin(HI);
@@ -829,7 +829,7 @@ void main() {
   // from the sun is pulled down towards the skylight shade, so every cloud
   // splits into a lit and a shaded half rather than greying all over
   float away = 1.0 - smoothstep(-0.5, 0.3, facing);
-  float u = smoothstep(-2.8, uTop.z, lx - uEv.x * uEv.y * uModel.z - uTop.y * away * smoothstep(0.0, 0.6, onSky));
+  float u = smoothstep(-2.2, uTop.z, lx - uEv.x * uEv.y * uModel.z - uTop.y * away * smoothstep(0.0, 0.6, onSky));
   vec3 tint = mix(sqrt(shL), sqrt(top), u);
   tint *= tint;
   // the deepest undersides go a touch below the skylight blue, never grey-lilac
