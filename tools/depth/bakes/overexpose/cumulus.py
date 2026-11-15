@@ -60,6 +60,28 @@ REACH_PX = 6                 # the plate is rebuilt this far round the old cloud
 D_DEAD = (0.02, 0.08)        # depth under this is the sky's own noise
 FILL_PX = 3.0                # under the needles the cloud is read from the open pixels round them (px)
 SOFT_TOP = 0.35              # the brightest tops roll into Y_MAX over this many stops
+# Relief. Seen from underneath, the bank printed as a flat grey-white sheet: clouds.py's
+# shade eases the HDR's stops under the top into SHADE_M with a knee at SHADE_K, and the
+# body (1.7 stops under the rims in the photograph) all landed on the flat end of that
+# ease, a stop and a bit under the top, where at +1.33 the print's shoulder left it
+# 197..225 and barely tinted. Here the HDR's stops under the top are eased far more
+# gently (RELIEF_M, RELIEF_K), and the depth matte's own lobe structure is laid over
+# them: each pixel's distance in from the bank's edge (the matte's turrets and lobes)
+# takes the body down by BODY_STOPS as it thickens (at BODY_PX) and lifts the thin
+# rim of every turret by RIM_STOPS (over RIM_PX, most on the side facing the hidden
+# sun, RIM_BASE of it all round). The colour follows the light itself, not only its
+# slow shade: from UNDER_C, skylight blue, at the shaded body (LIT_REL[0] stops under
+# the top) to TOP_C, a warm cream, on the lit rims (LIT_REL[1]). At +1.33 the shaded
+# body prints about rgb(140,165,195) and the rims about rgb(238,232,220), just under
+# the paper-white cap; at +3 the body climbs to a pale blue-white and the rims to
+# cream, still about 1.5 print stops apart, so the bank keeps its modelling.
+RELIEF_M, RELIEF_K = 5.5, 3.3
+BODY_PX, BODY_STOPS = 40.0, 0.75
+RIM_PX, RIM_STOPS, RIM_BASE = 5.0, 0.9, 0.45
+RIM_FACE_PX = 4.0            # the matte blur the rim's sun-facing side is read at (px)
+LIT_REL = (-2.45, -0.15)     # stops under Y_TOP over which the colour goes from UNDER_C to TOP_C
+TOP_C = np.array([1.85, 1.0, 0.45])
+UNDER_C = np.array([0.75, 1.0, 1.45])
 
 def smooth(a, lo, hi):
     t = np.clip((a - lo) / (hi - lo), 0, 1)
@@ -106,8 +128,11 @@ def cumulus(pix, a8, ta, raw, rng):
     d0 = d
     ds = d + EDGE_K * (d - ndi.gaussian_filter(d, EDGE_SIG))
     d = np.clip(ds, ndi.grey_erosion(d, size=(3, 3)), ndi.grey_dilation(d, size=(3, 3)))
-    # 3. the light: clouds.py's shade at low frequency, the photograph's above it
-    lr, face, top = clouds.shade(C, d, seen)
+    # 3. the light: the HDR's shade (eased by RELIEF_M / RELIEF_K) at low frequency,
+    # the photograph's above it
+    _, face, top = clouds.shade(C, d, seen)
+    x = np.maximum(-np.log2(np.maximum(C @ LUMA, 1e-6) / top), 0)
+    lr = -RELIEF_M * (1 - np.exp(-x / RELIEF_K))
     w = smooth(d, 0.2, 0.6) * (1 - wd) + 1e-4
     lr_lo = mblur(lr, w, DETAIL_PX)
     face_lo = mblur(face, w, DETAIL_PX)
@@ -121,14 +146,27 @@ def cumulus(pix, a8, ta, raw, rng):
     w_pos = smooth(d0, *DETAIL_W)
     w_neg = ndi.minimum_filter(smooth(d0, 0.45, 0.85), size=EDGE_IN)
     det = np.where(det < 0, DETAIL_KD / DETAIL_K * det * w_neg, det * w_pos)
-    ly = np.log2(clouds.Y_TOP) + lr_lo + clouds.FACE_STOPS * face_lo + DETAIL_K * det
+    # the matte's lobes: distance in from the bank's edge, under the needles too (the
+    # depth there is filled from round them, so a crown is not an edge)
+    dist = ndi.distance_transform_edt(d0 > 0.5)
+    body = 1 - np.exp(-dist / BODY_PX)
+    n = d.shape[0]
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float64)
+    sx, sy = deepen.U * n - xx, deepen.V * n - yy
+    sl = np.maximum(np.hypot(sx, sy), 1e-6)
+    by, bx = np.gradient(ndi.gaussian_filter(d0, RIM_FACE_PX))
+    toward = -(bx * sx + by * sy) / sl / np.maximum(np.hypot(bx, by), 1e-6)   # 1: the rim faces the sun
+    rim = np.exp(-dist / RIM_PX) * (RIM_BASE + (1 - RIM_BASE) * np.clip(toward, 0, 1))
+    rel = lr_lo + clouds.FACE_STOPS * face_lo - BODY_STOPS * body + RIM_STOPS * rim + DETAIL_K * det
+    ly = np.log2(clouds.Y_TOP) + rel
     # roll the brightest tops into Y_MAX instead of clipping them flat
     lmax = np.log2(clouds.Y_MAX)
     over = ly - (lmax - SOFT_TOP)
     ly = np.where(over > 0, lmax - SOFT_TOP + SOFT_TOP * (1 - np.exp(-np.maximum(over, 0) / SOFT_TOP)), ly)
     Yn = 2.0 ** ly
-    lit = np.clip(smooth(lr_lo, *clouds.LIT) + clouds.FACE_LIT * face_lo, 0, 1)
-    top_c, und_c = clouds.TOP / (clouds.TOP @ LUMA), clouds.UNDER / (clouds.UNDER @ LUMA)
+    # the colour follows the light, lobe by lobe (lightly smoothed so grain is not tinted)
+    lit = np.clip(smooth(mblur(rel, w, 1.0), *LIT_REL) + clouds.FACE_LIT * face_lo, 0, 1)
+    top_c, und_c = TOP_C / (TOP_C @ LUMA), UNDER_C / (UNDER_C @ LUMA)
     col = np.exp(np.log(und_c) * (1 - lit[..., None]) + np.log(top_c) * lit[..., None])
     col /= (col @ LUMA)[..., None]
     Cn = Yn[..., None] * col
@@ -150,7 +188,7 @@ def cumulus(pix, a8, ta, raw, rng):
     a8n = np.clip(np.round(a8 + m * (a_new - a8)), 0, 255).astype(np.uint8)
     print('cumulus: top %.3f, depth>0.5 %.3f, solid %.3f, rebuilt %.3f of frame' % (
         top, float((d > 0.5).mean()), float((d > 0.97).mean()), float((m > 0.01).mean())))
-    return out, a8n, dict(d=d, det=det, m=m, lr_lo=lr_lo)
+    return out, a8n, dict(d=d, det=det, m=m, lr_lo=lr_lo, rel=rel, lit=lit)
 
 if __name__ == '__main__':
     s = np.asarray(Image.open(sys.argv[1]).convert('RGBA'))

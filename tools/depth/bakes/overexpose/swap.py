@@ -67,6 +67,16 @@ UNDER = np.array([0.76, 1.0, 1.32])
 # the crowns once the exposure lifts. The ink's blue-over-red is held to BLUE_MAX
 # stops over the solid needles' median, luminance kept.
 BLUE_MAX = 0.5
+# Two cypress tops (and a sliver of a third in the corner) poke up from the bottom edge
+# as clipped dark stubs that break the edge and pull the eye. They are taken out of the
+# HDR's render before anything is solved, so the pines' matte never sees them and the
+# cumulus is solved through them as open cloud: in each box the dark pixels (under
+# STUB_Y, grown by STUB_GROW px) are cloned from the offset whose ring round them best
+# matches (STUB_SEARCH), its slow light matched to the ring's (STUB_SIG px).
+STUBS = ((1400, 1536, 1100, 1300), (1460, 1536, 200, 345), (1478, 1536, 1462, 1536))   # rows, cols
+STUB_Y, STUB_GROW, STUB_RING = 0.12, 6, 12
+STUB_SEARCH = (range(-320, 321, 8), range(-320, 1, 8))   # dx, dy (px)
+STUB_SIG = 30.0
 
 def tame_ink(I, a):
     LY = I @ LUMA
@@ -77,6 +87,38 @@ def tame_ink(I, a):
     out[..., 2] *= 2.0 ** (-e / 2); out[..., 0] *= 2.0 ** (e / 2)
     out *= (LY / np.maximum(out @ LUMA, 1e-12))[..., None]
     print('ink: %.4f of the matte held back from blue' % float(((e > 0) & (a > 0)).sum() / max((a > 0).sum(), 1)))
+    return out
+
+def unstub(raw):
+    n = raw.shape[0]
+    Y = raw @ LUMA
+    lr = np.log(np.maximum(raw, 1e-6))
+    out = raw.copy()
+    for r0, r1, c0, c1 in STUBS:
+        m = np.zeros((n, n), bool)
+        m[r0:r1, c0:c1] = Y[r0:r1, c0:c1] < STUB_Y
+        m = ndi.binary_dilation(m, iterations=STUB_GROW) & (Y < 4 * STUB_Y) | ndi.binary_dilation(m, iterations=2)
+        m &= np.pad(np.ones((r1 - r0, c1 - c0), bool), ((r0, n - r1), (c0, n - c1)))
+        ring = ndi.binary_dilation(m, iterations=STUB_RING + 3) & ~ndi.binary_dilation(m, iterations=3)
+        rr, cc = np.nonzero(m | ring)
+        best = None
+        for dy in STUB_SEARCH[1]:
+            for dx in STUB_SEARCH[0]:
+                sr, sc = rr + dy, cc + dx
+                if sr.min() < 0 or sc.min() < 0 or sr.max() >= n or sc.max() >= n:
+                    continue
+                if (Y[sr, sc] < 2 * STUB_Y).any():      # the source must be clear of needles
+                    continue
+                rm = ring[rr, cc]
+                e = np.abs(lr[sr[rm], sc[rm]] - lr[rr[rm], cc[rm]]).mean()
+                if best is None or e < best[0]:
+                    best = (e, dy, dx)
+        e, dy, dx = best
+        src = np.roll(raw, (-dy, -dx), (0, 1))
+        corr = cumulus.mblur(lr - np.log(np.maximum(src, 1e-6)), ring.astype(float), STUB_SIG)
+        fw = ndi.gaussian_filter(ndi.binary_dilation(m, iterations=3).astype(float), 1.5)[..., None]   # whole over the stub
+        out = out + fw * (src * np.exp(corr) - out)
+        print('stub rows %d-%d cols %d-%d: %d px cloned from (%+d, %+d), ring error %.3f' % (r0, r1, c0, c1, m.sum(), dy, dx, e))
     return out
 
 def sun_uv():
@@ -118,7 +160,7 @@ def main():
     a8 = np.clip(np.round(3 + 252 * (1 - sunburst.KEY_A * np.exp(-g / sunburst.KEY_DEG))), 0, 255).astype(np.uint8)
 
     # 2. the pines and the cumulus, solved from the HDR through the new camera
-    raw = foliage.render(hdr) * SCALE
+    raw = unstub(foliage.render(hdr) * SCALE)
     ink0 = np.broadcast_to(ink_med, (n, n, 3)).copy()
     plate, a8f, I, a, diag = foliage.foliage(pix, a8, ink0, np.ones((n, n)), raw, np.random.default_rng(41), crown_w=np.ones((n, n)))
     I = tame_ink(I, a)
