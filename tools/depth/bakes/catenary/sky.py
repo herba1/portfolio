@@ -18,13 +18,18 @@
 #     deepens to at the top stay the photograph's; a fine, luma-only grain
 #     measured off the plate's sky goes back on top of it.
 #  3. One towering cumulus is taken from a second photograph (the clean side
-#     of the tower in cumulus-pole.jpg, left of it a pole and wires), mirrored
-#     so its billowed, sun-facing flank looks toward the gantry, and set
-#     behind the truss and the far pole on the right. Its own sky is unmixed
-#     out of it (cloud opacity from the red-to-blue ratio, premultiplied), so
-#     its thin edges take this sky, not that one, with no rim of either. It is
-#     developed a little brighter (the brightest tops about 240-244 here,
-#     nothing at 255) and its cut sides lie past the turned frame.
+#     of the tower in cumulus-pole.jpg, left of it a pole and wires) and set
+#     the way it was shot, lit from the left like the steel: its crown just
+#     under the frame top on the left, behind the gantry apex and the near
+#     pole's upper half, its billowed flank stepping down to the right behind
+#     the truss, the side cut at the source's pole lying past the frame's left
+#     edge. Its own sky is unmixed out of it (cloud opacity from the
+#     red-to-blue ratio, premultiplied), so its thin edges take this sky, not
+#     that one, with no rim of either. It is developed a little brighter (the
+#     brightest tops about 240-244 here, nothing at 255). Below a base line
+#     drawn from where the flank leaves the source the cloud gives way to sky
+#     on its own light, so the source's flat lower haze and its cut right
+#     edge never show and nothing is carried on by reflection.
 #  4. The new sky goes in behind the steel by difference: each pixel adds
 #     (1 - steel) times the change of background under it, against the old
 #     background filled in under the steel, so a mast edge that was mixed
@@ -46,12 +51,22 @@ for name in ("plate", "key"):
 
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 # The cumulus: the source columns kept (left of them the pole), the scale
-# (plate px per source px) and where the source's top-left lands. Mirrored,
-# so source x = SRC_X1 meets the plate's right edge.
-SRC_X0, SRC_X1 = 1000, 2400
-SCALE = 1.45
-TOP = 300  # plate row of the source's row 0
-EXTEND = 110.0  # source px the cut base is carried on and frays over
+# (plate px per source px) and the plate point the source's (SRC_X0, 0) lands
+# on. Not mirrored: SRC_X0 sits on the plate's left edge, the crown (source
+# row ~142) lands ~40px under the frame top, and the flank leaves the source's
+# right edge at source row ~940. The scale is what puts the flank behind most
+# of the truss; below ~1.9 the truss's far half stands on bare sky.
+SRC_X0 = 1000
+SCALE = 2.0
+LEFT = 0  # plate column of source column SRC_X0
+TOP = -244  # plate row of the source's row 0
+# The base line, plate px: from where the flank leaves the source (source
+# (2399, 940)) down to the frame's left edge. BASE_FADE is how far inside the
+# line the cloud starts to give way; LOBE how far its own light moves that.
+BASE_A = (LEFT + (2399 - SRC_X0) * SCALE, TOP + 940 * SCALE)
+BASE_B = (0.0, 2300.0)
+BASE_FADE = 260.0
+LOBE = 6.0
 # Developed brighter: linear gain on the cloud, premultiplied.
 GAIN = 1.2
 
@@ -157,9 +172,18 @@ sH, sW = src.shape[:2]
 sl = srgb_to_lin(src)
 sy = lin_to_srgb(sl @ LUMA)
 shue, ssat, _ = hsv(src)
-# Its own wires: thin and dark, painted out.
-sclose = cv2.morphologyEx(sy, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+# Its own wires, painted out: the thin and dark ones, and the long cable that
+# crosses the crown lit paler than the cloud behind it (thin and bright, and
+# long; a bright puff is neither), which otherwise leaves a dotted trail of
+# its highlights across the cloud.
+disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+sclose = cv2.morphologyEx(sy, cv2.MORPH_CLOSE, disk)
 wire = cv2.dilate(((sclose - sy) > 0.05).astype(np.uint8), np.ones((5, 5), np.uint8))
+lit = ((sy - cv2.morphologyEx(sy, cv2.MORPH_OPEN, disk)) > 0.02).astype(np.uint8)
+n, lab, st, _ = cv2.connectedComponentsWithStats(lit, connectivity=8)
+long_ = np.hypot(st[:, cv2.CC_STAT_WIDTH], st[:, cv2.CC_STAT_HEIGHT]) > 120
+long_[0] = False
+wire |= cv2.dilate(long_[lab].astype(np.uint8), np.ones((7, 7), np.uint8))
 wire[:, : SRC_X0 - 40] = 0
 src8 = cv2.inpaint((src * 255).astype(np.uint8), wire, 6, cv2.INPAINT_TELEA)
 src = src8.astype(np.float32) / 255
@@ -175,29 +199,29 @@ a = smooth(0.0, 1.0, np.clip((rb - rbs) / np.maximum(0.86 - rbs, 0.05), 0, 1))
 a = np.maximum(a, smooth(0.04, 0.3, (sl @ LUMA) / np.maximum(ssky @ LUMA, 1e-4) - 1))
 P = sl - (1 - a[..., None]) * ssky  # premultiplied cloud
 
-# Mirror and place: build the plate->source map.
+# Place: build the plate->source map.
 gy, gx = np.mgrid[0:H, 0:W].astype(np.float32)
-sx = SRC_X0 + (W - 1 - gx) / SCALE
-sy_ = (gy - TOP) / SCALE
-# Past the source's own right edge (here the cloud's left, mirrored) that
-# frame cut the base of the tower. It is carried on by reflection and let
-# dissolve on its own light: the thinnest of it goes first, the dense lobes
-# last, over EXTEND source px, so the base frays off the way a cumulus base
-# does instead of stopping on a line.
-d = np.maximum(sx - (sW - 1), 0)
-sxr = np.where(sx > sW - 1, 2 * (sW - 1) - sx, sx).astype(np.float32)
-Pm = cv2.remap(P, sxr, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-am = np.clip(cv2.remap(a, sxr, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE), 0, 1)
-dens = cv2.GaussianBlur(am * np.clip(Pm @ LUMA, 0, 1) ** 0.5, (0, 0), 6)
-dens /= max(float(dens.max()), 1e-4)
-fray = smooth(-0.12, 0.12, dens - d / EXTEND)
-# Above the source's top it is sky; its cut right side (source x = SRC_X0)
-# lies on the plate's own edge.
-fade = (fray * (sy_ >= 0) * (sx >= SRC_X0) * (sy_ <= sH - 1)).astype(np.float32)
-fade = cv2.GaussianBlur(fade, (0, 0), 2)
+sx = (SRC_X0 + (gx - LEFT) / SCALE).astype(np.float32)
+sy_ = ((gy - TOP) / SCALE).astype(np.float32)
+Pm = cv2.remap(P, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+am = np.clip(cv2.remap(a, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE), 0, 1)
+# The base. The source's lower third is flat, veiled haze and its right edge
+# cuts the base off, so past the base line the cloud goes back to sky. Its
+# own light decides where: a lobe brighter than its surroundings reaches past
+# the line, the shadowed hollows between lobes give way first, so the base
+# ends on lobes, not on a line or a ramp. Nothing outside the source is used.
+cy = lin_to_srgb(np.clip(Pm @ LUMA, 0, 1) / np.maximum(am, 1e-3)) * am
+lobe = cv2.GaussianBlur(cy, (0, 0), 5) - cv2.GaussianBlur(cy, (0, 0), 40)
+(xa, ya), (xb, yb) = BASE_A, BASE_B
+nx, ny = ya - yb, xb - xa
+s_in = ((gx - xa) * nx + (gy - ya) * ny) / np.hypot(nx, ny)
+s_in *= np.sign(-xa * nx - ya * ny)  # positive on the frame's top-left side
+edge = np.minimum(sW - 1 - sx, sH - 1 - sy_)
+fade = smooth(0.3, 0.7, s_in / BASE_FADE + LOBE * lobe) * smooth(0.0, 24.0, edge)
+fade = cv2.GaussianBlur((fade * (sy_ >= 0) * (sx >= SRC_X0)).astype(np.float32), (0, 0), 1.5)
 am *= fade
 Pm *= fade[..., None]
-# One mass: a scrap the fray left apart from the tower is let go.
+# One mass: a scrap the base left apart from the tower is let go.
 n, lab, st, _ = cv2.connectedComponentsWithStats((am > 0.04).astype(np.uint8), connectivity=8)
 if n > 2:
     keep = cv2.dilate((lab == 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))).astype(np.uint8), np.ones((9, 9), np.uint8))
