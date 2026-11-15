@@ -29,7 +29,7 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // white with skylight-blue shade, and a clear sky that deepens to cobalt
 // towards the zenith (see SKY_GRADE), and in the same pass its structures are
 // given that sky's sun: the overcast haze taken off, the walls and glass
-// printed down to crisp dark silhouettes, the sunlit faces warmed (see
+// printed down to sunlit faces and skylit shade, the sunlit faces warmed (see
 // STRUCT_GRADE). Last comes the finish (see FINISH):
 // a thin warm halation ring where open sky meets a structure's silhouette, a
 // little scan softness and the print's own grain, so the film survives the
@@ -340,24 +340,29 @@ const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at 
 // The Docklands plate was shot under a broken overcast, so its walls are a
 // flat, hazy grey that belongs to another day than the sunny cumulus over
 // them. They are given the deck's sun:
-//   - haze: the overcast's veil (a pale grey-blue lift on every channel) is
-//     taken off before anything else, so the darks can go dark;
-//   - contrast and toe: log luminance steepened hard (a slope of 1.7)
-//     about the plate's brighter facade, the side the sun would light, and
-//     the walls printed a stop under (exposed for the sunny sky they stand
-//     in, as a real worm's-eye frame would be), so the walls split in two:
-//     the recesses, the shade sides and the glass collapse on to a deep
-//     blue (about 0.11 on the print) that they never fall through, still
-//     light enough to hold the window grids and mullions, and the facades
-//     and poles read as crisp, dark shapes converging on the sky;
+//   - haze: a little of the overcast's veil (a pale grey-blue lift on every
+//     channel) is taken off before anything else, so the darks can go
+//     down; only a little, as the plate's glazing sits barely above it;
+//   - contrast and toe: log luminance steepened (a slope of 1.3) about the
+//     plate's brighter facade, the side the sun would light, and the walls
+//     printed half a stop under (exposed for the sunny sky they stand in,
+//     as a real worm's-eye frame would be), so the walls split into lit
+//     faces and shade while both still carry light: the recesses, the
+//     shade sides and the glass settle on to a skylit blue-grey (about 0.2
+//     on the print) that they never fall through, light enough to hold the
+//     window grids and mullions, so the towers read as photographed
+//     architecture converging on the sky, not as cut-outs;
 //   - light: the overcast's own cast (its grey-green, the blue stains and
-//     sky reflections on the concrete) comes off every face, and the faces
-//     above the shade take a clear warm ochre key, the colour of the 52
-//     degree sun that warms the cumulus tops; the shade keeps the skylight
-//     blue-black. Glass is found over a patch, not per pixel: a flat pane
-//     clearly blue all over (its local chroma high, its light barely
-//     varying) takes on the cobalt it would be reflecting, while concrete
-//     with a blue tint keeps none. What is pale and cool over a patch is no
+//     sky reflections on the concrete and glass) comes off every face, and
+//     the faces above the shade take a warm key, half strength, the colour
+//     of the 52 degree sun that warms the cumulus tops, a warm neutral
+//     rather than ochre; the shade takes the skylight's blue-grey. Glass is
+//     found over a patch, not per pixel: a flat pane clearly blue all over
+//     (its local chroma high, its light barely varying) is tinted a little
+//     towards the blue it reflects over the plate's own reflection, while
+//     concrete with a blue tint keeps none. (The panes the matte once
+//     called sky, which took the deck's blue as flat tiles, are given back
+//     to the walls in the bake: tools/depth/bakes/joiner/glass.py.) What is pale and cool over a patch is no
 //     face but the plate's own overcast among the far roofs, where the matte
 //     could not find the sky, and it goes to the pale blue of the sky's rim;
 //   - edge: the plate's rim against the old sky (its anti-aliased edge still
@@ -371,7 +376,7 @@ const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at 
 //     is printed down to just above that wall, so the far facades keep
 //     their grid without white flecks in it. Only the last sliver, below
 //     about 4 degrees, where the plate is smeared nearly edge on, folds into
-//     one clean silhouette at the shade's own deep blue. (The matte's
+//     one clean silhouette at the floor, in the deep blue. (The matte's
 //     pinholes, specks of sky wholly inside a structure, are closed in the
 //     bake: tools/depth/bakes/joiner/seal.py.)
 // One warm accent: the Docklands red crane on the quay stays; the red and
@@ -379,14 +384,14 @@ const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at 
 // they stop competing with it across the cobalt.
 const STRUCT_GRADE = {
   structGrade: 1, // overall strength
-  structSlope: 1.7, // log contrast about the pivot: hard, so the walls split by the sun into lit faces and shade
+  structSlope: 1.3, // log contrast about the pivot: firm enough that the sun splits the walls into lit faces and shade, soft enough that the shade keeps its window grid
   structPivot: 0.32, // pivot (linear print value) the contrast turns about: the plate's brighter facade, the side the sun would light
-  structHaze: 0.06, // overcast veil taken off (linear print value)
-  structEv: -1.0, // stops the walls are printed under: exposed for the sunny sky they stand against, not for themselves
-  structFloor: 0.11, // deep blue-black the shadows and glass are pulled on to (print value, sRGB)
-  structWarm: 0.8, // strength of the warm key on the sunlit faces
+  structHaze: 0.02, // overcast veil taken off (linear print value): no more, or the glazing, barely above it on the plate, is subtracted to black
+  structEv: -0.5, // stops the walls are printed under: exposed for the sunny sky they stand against, but only half a stop, so they still carry light
+  structFloor: 0.2, // the skylit blue-grey the shadows and glass are pulled on to (print value, sRGB): a shade face keeps its mullions
+  structWarm: 0.5, // strength of the warm key on the sunlit faces: a clean warm neutral, not sepia
   structLow: 4, // elevation (degrees) below which the walls start to fold into one dark silhouette (fully by two thirds of it)
-  structGlass: 0.75, // cobalt mixed into the glass
+  structGlass: 0.3, // the sky's blue tinted into the glass, over the plate's own reflection
   structEdge: 1, // strength of the rim choke
   structSpeck: 1, // how far the far skyline's pale glints (old sky through a lattice or a window) are printed down
   structSpeckLow: 16, // elevation (degrees) below which they are (fully by 60% of it)
@@ -608,17 +613,23 @@ vec3 structGrade(vec3 lin, vec3 d) {
   Yo = Yo / pow(1.0 + pow(Yo / 0.95, 3.0), 1.0 / 3.0);
   float fl = uStructKey.x;
   Yo = sqrt(Yo * Yo + fl * fl);
-  // colour: shade to the blue-black, glass to the cobalt it reflects, the
-  // sunlit faces warm
+  // colour: shade to the skylight's blue-grey (the deep blue-black's hue,
+  // a third of its chroma: a face the sun misses is lit by the blue sky,
+  // not swallowed by it), glass tinted by the blue it reflects, the sunlit
+  // faces warm. The shade's ramp starts just above the floor and keeps its
+  // width, so a raised floor never turns it into a step.
   vec3 deep = DEEP / dot(DEEP, LUMA);
+  vec3 skyl = mix(vec3(1.0), deep, 0.35);
   vec3 zen = toLin(ZEN);
   zen /= dot(zen, LUMA);
-  float shade = 1.0 - smoothstep(fl * 2.0, 0.07, Yo);
+  float shade = 1.0 - smoothstep(fl * 1.2, fl + 0.07, Yo);
   // the overcast's cast comes off every face first: its grey-green, and the
-  // blue of the stains and the sky reflections on the concrete, so the
-  // light alone decides the colour from here and nothing mottles
-  ch = mix(ch, vec3(1.0), 0.85 * (1.0 - pane) * (1.0 - paint));
-  ch = mix(ch, deep, 0.8 * shade * (1.0 - paint));
+  // blue of the stains and the sky reflections on the concrete and the
+  // glass, so the light alone decides the colour from here and nothing
+  // mottles (a dark pane's own faint blue, divided by its light, would
+  // print as violet flecks); the glass then takes the sky's tint below
+  ch = mix(ch, vec3(1.0), 0.85 * (1.0 - paint));
+  ch = mix(ch, skyl, 0.8 * shade * (1.0 - paint));
   ch = mix(ch, mix(vec3(1.0), zen, 0.35), pane * uStructKey.z * (1.0 - 0.6 * shade));
   // Pale and cool over a whole patch is not a face: it is the plate's own
   // hazy overcast low on the horizon, where the matte could not find the
@@ -629,7 +640,7 @@ vec3 structGrade(vec3 lin, vec3 d) {
   float haze = cool * smoothstep(0.25, 0.55, Yc) * (1.0 - paint);
   vec3 rim = toLin(RIM);
   ch = mix(ch, rim / dot(rim, LUMA), 0.6 * haze);
-  float lit = smoothstep(0.02, 0.1, Yo) * (1.0 - pane) * (1.0 - haze) * (1.0 - paint);
+  float lit = smoothstep(0.02, 0.1, Yo) * (1.0 - shade) * (1.0 - pane) * (1.0 - haze) * (1.0 - paint);
   ch *= mix(vec3(1.0), WARM, lit * uStructKey.y);
   c = Yo * ch * grain;
   float Ym = dot(c, LUMA);
