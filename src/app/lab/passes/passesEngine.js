@@ -183,7 +183,10 @@ void main(){
   // tower is solid painted steel: where its coarse matte says so, neither key
   // opens at all, and the pixels they gave up show the steel unmixed.
   float head = 1.0 - smoothstep(DECK_FOOT - 15.0, DECK_FOOT + 15.0, uv.y * TEX.y);
-  float solid = head * smoothstep(0.6, 0.9, textureLod(uMatte, uv, 2.0).g);
+  // The coarse read only closes what the tower's own sharp matte holds: a
+  // mip 2 matte reaches two plate px past the silhouette, and there it
+  // closed open sky onto the plate's haze, a grey rim round the deck.
+  float solid = head * tower * smoothstep(0.6, 0.9, textureLod(uMatte, uv, 2.0).g);
   float gapK = smoothstep(0.4, 0.8, gap) * (1.0 - solid);
   sky = max(sky * (1.0 - solid), gapK);
 
@@ -216,10 +219,19 @@ void main(){
                                 + textureGrad(uSky, st + r * vec2(-0.92, -0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(0.38, -0.92), sx, sy).rgb), 4.0);
   cloud = max(cloud + 0.8 * (cloud - cloudB), 0.0);
   float beta = skyDecode(textureGrad(uSkyBlue, st, sx, sy).rrr, 1.0).r;
-  // The blue layer's own variation, against its wide average: kept as a
-  // texture inside the gradient, never allowed to flatten it.
-  float betaSoft = skyDecode(textureLod(uSkyBlue, st, 7.0).rrr, 1.0).r;
-  float mottle = clamp(beta / max(betaSoft, 1e-3), 0.85, 1.15);
+  // The blue layer's own variation, against its average a few degrees
+  // round: kept as a texture inside the gradient, never allowed to flatten
+  // it. Only in clear sky. The layer is dark wherever cloud stands, so near
+  // the bank any wide average sinks and the clear sky round it read as
+  // paler: against a 7th-mip average, clamped, that was a disc of pale sky a
+  // quarter of the frame across sitting on the deck, its hard arc where the
+  // clamp let go and a dark band past it over the spire. So the reference is
+  // a near one, the excursion rolls off softly instead of clipping, and it
+  // fades out wherever cloud stands within a few degrees.
+  float betaSoft = skyDecode(textureLod(uSkyBlue, st, 4.0).rrr, 1.0).r;
+  float mr = log2(max(beta, 1e-4) / max(betaSoft, 1e-3));
+  float near = smoothstep(0.01, 0.12, density(D, 5.5));
+  float mottle = exp2(mr / (1.0 + abs(mr) / 0.12) * (1.0 - near));
   // Paler only with the ray's own elevation: the sky does not know where the
   // walls stand, and paling it toward them drew a lit band along every edge
   // and filled the gap under the balcony with haze.
@@ -431,8 +443,9 @@ void main(){
 }`;
 
 // The film the whole frame shares, plate and dome alike, so they read as one
-// exposure. First the light that scatters, at half size: what is brighter
-// than 0.8 in rgb, for the diffusion, and the near-white that halates in a.
+// exposure. First the light that scatters, at half size: only what is over
+// 0.78 in luma, for the diffusion (the open sky never reaches it), and the
+// near-white that halates in a.
 // Four bilinear taps cover the 4x4 block, so a bright hairline does not
 // shimmer in and out of it.
 const PREP = `#version 300 es
@@ -451,7 +464,7 @@ vec4 src(vec2 uv){
   vec4 s = texture(uScene, uv);
   float l = luma(s.rgb);
   vec3 lin = pow(s.rgb, vec3(2.2));
-  return vec4(lin * smoothstep(0.7, 0.95, l) * (1.0 - 0.7 * s.a), smoothstep(0.84, 0.97, l) * (1.0 - s.a));
+  return vec4(lin * smoothstep(0.78, 0.97, l) * (1.0 - 0.7 * s.a), smoothstep(0.84, 0.97, l) * (1.0 - s.a));
 }
 void main(){
   vec2 uv = gl_FragCoord.xy * 2.0 * uTexel;
@@ -492,23 +505,25 @@ void main(){
   vec3 lin = pow(c, vec3(2.2));
   float l = luma(c);
 
+  // Only the half and quarter size levels: a tight kernel, a few px at
+  // DPR 2. Read wider, the bright deck and the bank spread into the open
+  // sky round the tower as a pale glow.
   vec4 b0 = textureLod(uBright, uv, 0.0);
-  vec4 b1 = spread(uv, 0.5);
-  vec4 b2 = spread(uv, 1.5);
-  vec4 b3 = spread(uv, 2.6);
+  vec4 b1 = spread(uv, 0.0);
+  vec4 b2 = spread(uv, 1.0);
 
   // Diffusion: a share of the highlight leaves its pixel and lands spread
   // round it, so the cloud's white veils softly over the steel and the wall
   // edges in front of it, and the tops lose their paper-cut edge. It only
   // moves light, so a wide cloud keeps its level; what lands outside the
   // highlight is warmer than what left.
-  vec3 d = b1.rgb * 0.4 + b2.rgb * 0.35 + b3.rgb * 0.25 - b0.rgb;
+  vec3 d = b1.rgb * 0.5 + b2.rgb * 0.5 - b0.rgb;
   lin += 0.4 * (max(d, 0.0) * vec3(1.0, 0.93, 0.82) + min(d, 0.0));
 
   // Halation: light through the emulsion off the base and back through the
   // red layer. A ring, not a glow: the spread source minus what is already
   // white here, only where the pixel is darker than the source.
-  float ring = max(b2.a * 0.4 + b3.a * 0.6 - b0.a * 0.85, 0.0) * (1.0 - smoothstep(0.45, 0.9, l));
+  float ring = max(b1.a * 0.4 + b2.a * 0.6 - b0.a * 0.85, 0.0) * (1.0 - smoothstep(0.45, 0.9, l));
   lin += vec3(1.0, 0.3, 0.08) * ring * 0.32 * mix(0.75, 1.0, uDay);
 
   c = pow(max(lin, 0.0), vec3(1.0 / 2.2));
