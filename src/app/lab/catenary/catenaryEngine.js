@@ -39,7 +39,8 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape } fr
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1.5>, 1.5 the fullest give of a
 // taut wire], ?pull=<wire> holds the pull.
-// ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph).
+// ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph);
+// ?viewTop=<row>, ?viewZoom=, ?poleAt= move the crop (VIEW).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, dering, hal, halNarrow, halWide,
 // diffuse, diffuseR, diffuseSteel, diffuseCap, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
@@ -52,36 +53,41 @@ const WIDTH_TRIM = 0.6; // image px
 // The view: a worm's-eye. The photograph looks up at about 30 degrees (its
 // verticals meet some 7000 px above its centre); the virtual camera turns
 // PITCH further up about its own centre (pitchView in strings.js: a pure
-// rotation, so the homography H = K R K^-1 is exact without depth): the
-// worm's-eye of the genre, 57 degrees above the horizon in all. The mast and
-// the far pole then converge hard on a vanishing point about one frame
-// height above the top edge, the lower pole leans in across the frame, the
-// scene drops, and the droppers and hooks low in the photograph fall out of
-// the bottom. Everything drawn goes through the
-// same H: the plate (per pixel, in PLATE), the wires (each sample of the
-// fitted catenary plus its displacement, the profile across the projected
-// tangent), the insulators (their corners, perspective-correct). The strings
-// themselves stay in the photograph's plane: physics in image px.
-// The crop sits inside the turned photograph (a trapezoid, narrow at the
-// top, so no corner ever shows past the plate), VIEW.zoom past cover on a
-// 16:10 box, its top edge at the photograph's row VIEW.top (the mast cap's
-// headroom) and the mast top at poleAt of the width or, where the plate's
-// right edge binds at the top, as far left as the trapezoid allows; it zooms
-// further only if a corner would still leave the plate. The turn magnifies
-// the bottom of the frame, so at this pitch the zoom stays wide enough to
-// keep the truss's far end on the lower pole and the mast's whole lean in
-// frame (the transformer and the top of the caged platform come in on the
-// left). A box
-// narrower than 16:10 keeps the crop's width down to its height (4:3 shows
-// more sky below, not less mast); a portrait box covers at its height.
-const PITCH = 27; // degrees
+// rotation, so the homography H = K R K^-1, K from the bake's 24 mm on the
+// full frame, is exact without depth): some 72 degrees above the horizon in
+// all. Everything drawn goes through the same H: the plate (per pixel, in
+// PLATE), the wires (each sample of the fitted catenary plus its
+// displacement, the profile across the projected tangent), the insulators
+// (their corners, perspective-correct). The strings themselves stay in the
+// photograph's plane: physics in image px.
+// Turned that far, the frame looks past the top of the photograph: its top
+// edge sits at the photograph's row VIEW.top, above row 0, and the strip of
+// sky above the photograph is the plate's own fitted cobalt carried on
+// (ZEN, zenith.py). So the mast and the far pole converge on a zenith some
+// half a frame height above the top edge (it was a whole frame height at
+// the photograph's own crop), the gantry leans in hard across
+// the frame, and the cumulus and the steel stand in the lower two thirds
+// under open, deepening cobalt. The frame may run past the photograph's
+// sides only where its edge is clear sky (VIEW.clear: on the right the
+// photograph's own far wires leave it below row 900, on the left the cage
+// below row 2880), never past its bottom, so no corner shows past the plate;
+// VIEW.zoom past cover on a 16:10 box, the mast top at poleAt of the width
+// or as far left as the edges allow, zooming further only if a corner would
+// still leave the plate. A box narrower than 16:10 keeps the crop's width
+// down to its height; a portrait box covers at its height.
+const PITCH = 42; // degrees
 const VIEW = {
-  zoom: 1.3, // past cover, on a 16:10 box
-  top: 120, // the crop's top edge, a row of the photograph
+  zoom: 1, // on a 16:10 box, 1 is cover (the right edge binds the mast in)
+  top: -900, // the crop's top edge, a row of the photograph (above it: ZEN)
   mast: [1915, 360], // the mast top, image px
   poleAt: 0.11, // the furthest left it may sit, as a share of the width
   inset: 4, // image px kept clear of the plate's edge
+  clear: [2880, 900], // rows down to which the left and right edges are clear sky
 };
+// The sky past the photograph (zenith.py): its extent in image px, and the
+// plate's grain (gamma luma, high-passed) that the shader lays on it.
+const ZEN_BOX = [-2048, -4096, 10240, 4096];
+const ZEN_GRAIN = 0.0115;
 
 
 const FILM = {
@@ -346,19 +352,64 @@ vec3 graphite(vec3 c) {
 // The bloom's spread (see DIFFUSE): the wide key at the pixel, then two
 // rings of it further out. Sampled at the resting image position, so the
 // plate and the live wires take the same veil.
+// Past the photograph's edges (the turned camera looks above its top): the
+// sky zenith.py carried on from the plate's own fitted cobalt, its grain laid
+// on per plate px at the plate's own amount (ZEN_GRAIN), and none of the
+// key's steel or cloud, only its wide cloud light (A) faded out. Every read
+// of the plate and the key in the scene's shaders goes through these, so the
+// grade, the de-ring and the diffusion run on across the edge unbroken.
+const ZEN = `uniform sampler2D uZen; // rgb sky, a the key's B
+uniform vec4 uZenBox;   // its extent, image px: x0, y0, x1, y1
+uniform float uZenGrain;
+float onPlate(vec2 uv) {
+  vec2 q = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+  return q.x * q.y;
+}
+vec4 zenAt(vec2 uv) { return textureLod(uZen, (uv * uImg - uZenBox.xy) / (uZenBox.zw - uZenBox.xy), 0.0); }
+float zenHash(vec2 p, uint s) {
+  uvec2 q = uvec2(ivec2(floor(p)) + 65536);
+  uint h = (q.x * 1597334677u) ^ (q.y * 3812015801u) ^ s;
+  h *= 1597334677u;
+  h ^= h >> 16u;
+  h *= 2246822519u;
+  h ^= h >> 13u;
+  return float(h) * (1.0 / 4294967295.0);
+}
+// Zero-mean, unit-variance (triangular) noise on the plate's own pixels,
+// bilinear between them as the plate's grain is softened (sigma 0.6 px).
+float zenNoise(vec2 g) {
+  vec2 i = floor(g);
+  vec2 f = g - i;
+  vec4 n;
+  for (int k = 0; k < 4; k++) {
+    vec2 o = i + vec2(float(k & 1), float(k >> 1));
+    n[k] = zenHash(o, 0x9e3779b9u) + zenHash(o, 0x85ebca6bu) - 1.0;
+  }
+  return mix(mix(n.x, n.y, f.x), mix(n.z, n.w, f.x), f.y) * 2.449;
+}
+vec3 zenSky(vec2 uv, float lod) {
+  vec3 c = zenAt(uv).rgb;
+  float n = zenNoise(uv * vec2(textureSize(uPlate, 0)) - 0.5) * 1.3 * uZenGrain * exp2(-lod);
+  return pow(max(pow(c, vec3(1.0 / 2.2)) + n, 0.0), vec3(2.2));
+}
+vec3 plateAt(vec2 uv) { return mix(zenSky(uv, 0.0), texture(uPlate, uv).rgb, onPlate(uv)); }
+vec3 plateBiasAt(vec2 uv, float b) { return mix(zenSky(uv, b), texture(uPlate, uv, b).rgb, onPlate(uv)); }
+vec3 plateLodAt(vec2 uv, float l) { return mix(zenSky(uv, l), textureLod(uPlate, uv, l).rgb, onPlate(uv)); }
+vec3 keyAt(vec2 uv) { return mix(vec3(0.0, 0.0, zenAt(uv).a), texture(uKey, uv).rgb, onPlate(uv)); }`;
+
 const MIST = `uniform vec3 uMist;   // ring radius scale, steel share, steel cap
 float mist(sampler2D k, vec2 uv) {
   vec2 r = vec2(1.0, float(textureSize(k, 0).x) / float(textureSize(k, 0).y)) * uMist.x;
   float m1 = 0.0, m2 = 0.0;
   for (int i = 0; i < 12; i++) {
     float a = float(i) * 0.5235988;
-    m1 += texture(k, uv + vec2(cos(a), sin(a)) * r * 0.022).b;
+    m1 += keyAt(uv + vec2(cos(a), sin(a)) * r * 0.022).b;
   }
   for (int i = 0; i < 16; i++) {
     float a = float(i) * 0.3926991 + 0.19635;
-    m2 += texture(k, uv + vec2(cos(a), sin(a)) * r * 0.05).b;
+    m2 += keyAt(uv + vec2(cos(a), sin(a)) * r * 0.05).b;
   }
-  return 0.3 * texture(k, uv).b + 0.4 * m1 / 12.0 + 0.3 * m2 / 16.0;
+  return 0.3 * keyAt(uv).b + 0.4 * m1 / 12.0 + 0.3 * m2 / 16.0;
 }`;
 
 const VERT_FULL = `#version 300 es
@@ -389,6 +440,7 @@ uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 uniform vec4 uEdge;    // warm key from, to (gamma); relief gain; skylight edge amount
 uniform float uDering; // how far the plate's sharpening ring is held to the sky
+${ZEN}
 ${MIST}
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -406,8 +458,8 @@ void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   vec3 hq = uHom * vec3((p - uMap.xy) / uMap.z, 1.0);
   vec2 uv = hq.xy / hq.z / uImg;
-  vec3 c = texture(uPlate, uv).rgb;
-  vec3 key = texture(uKey, uv).rgb;
+  vec3 c = plateAt(uv).rgb;
+  vec3 key = keyAt(uv).rgb;
   vec2 kt = 1.0 / vec2(textureSize(uKey, 0));
   // The photograph's own thin wires, which the key leaves out (the
   // insulator's tail and the droppers, kept as shot): a pixel well darker
@@ -417,18 +469,18 @@ void main() {
   // light on one side only and is left alone. They join the steel in the
   // cover (HALO) and lose the sky's chroma the grade lends them (below).
   float dpx = length(dFdx(uv));
-  float yp = dot(texture(uPlate, uv).rgb, LUMA);
+  float yp = dot(plateAt(uv).rgb, LUMA);
   float yb = 0.0;
   for (int k = 0; k < 4; k++) {
     float a = float(k) * 0.7853982;
     vec2 d = vec2(cos(a), sin(a)) * dpx;
-    yb = max(yb, min(dot(texture(uPlate, uv + d * 2.5).rgb, LUMA), dot(texture(uPlate, uv - d * 2.5).rgb, LUMA)));
-    yb = max(yb, min(dot(texture(uPlate, uv + d * 4.0).rgb, LUMA), dot(texture(uPlate, uv - d * 4.0).rgb, LUMA)));
-    yb = max(yb, min(dot(texture(uPlate, uv + d * 6.5).rgb, LUMA), dot(texture(uPlate, uv - d * 6.5).rgb, LUMA)));
+    yb = max(yb, min(dot(plateAt(uv + d * 2.5).rgb, LUMA), dot(plateAt(uv - d * 2.5).rgb, LUMA)));
+    yb = max(yb, min(dot(plateAt(uv + d * 4.0).rgb, LUMA), dot(plateAt(uv - d * 4.0).rgb, LUMA)));
+    yb = max(yb, min(dot(plateAt(uv + d * 6.5).rgb, LUMA), dot(plateAt(uv - d * 6.5).rgb, LUMA)));
   }
   // Never the open cobalt (S ~0.9 as shot), dark as it is between the two
   // pale rods of a dropper: a wire is grey, or grey with sky mixed in.
-  vec3 pc = texture(uPlate, uv).rgb;
+  vec3 pc = plateAt(uv).rgb;
   float pS = 1.0 - min(pc.r, min(pc.g, pc.b)) / max(max(pc.r, max(pc.g, pc.b)), 1e-4);
   float line = smoothstep(0.35, 0.6, 1.0 - yp / max(yb, 1e-4)) * smoothstep(0.25, 0.38, yb) * (1.0 - smoothstep(0.85, 0.95, pS));
   // De-ring. The photograph carries its in-camera sharpening: a light,
@@ -448,7 +500,7 @@ void main() {
   float rNear = key.r;
   for (int k = 0; k < 8; k++) {
     float a = float(k) * 0.7853982;
-    rNear = max(rNear, texture(uKey, uv + vec2(cos(a), sin(a)) * 4.0 * kt).r);
+    rNear = max(rNear, keyAt(uv + vec2(cos(a), sin(a)) * 4.0 * kt).r);
   }
   float ring = smoothstep(0.2, 0.6, rNear) * uDering;
   vec3 top = vec3(0.0);
@@ -463,10 +515,10 @@ void main() {
     for (int k = 0; k < 16; k++) {
       float a = float(k) * 0.7853982 + (k < 8 ? 0.0 : 0.3926991);
       vec2 o = uv + vec2(cos(a), sin(a)) * (k < 8 ? 6.0 : 10.0) * kt;
-      float r0 = texture(uKey, o).r;
-      float rs = max(r0, max(texture(uKey, o + vec2(5.0, 0.0) * kt).r, texture(uKey, o - vec2(5.0, 0.0) * kt).r));
-      rs = max(rs, max(texture(uKey, o + vec2(0.0, 5.0) * kt).r, texture(uKey, o - vec2(0.0, 5.0) * kt).r));
-      vec3 q = pow(textureLod(uPlate, o, 1.0).rgb, vec3(1.0 / 2.2));
+      float r0 = keyAt(o).r;
+      float rs = max(r0, max(keyAt(o + vec2(5.0, 0.0) * kt).r, keyAt(o - vec2(5.0, 0.0) * kt).r));
+      rs = max(rs, max(keyAt(o + vec2(0.0, 5.0) * kt).r, keyAt(o - vec2(0.0, 5.0) * kt).r));
+      vec3 q = pow(plateLodAt(o, 1.0).rgb, vec3(1.0 / 2.2));
       // A sample counts or it does not: a half-counted one would pull the
       // ceiling under the sky and draw a dark seam.
       float ok = step(rs, 0.06);
@@ -503,10 +555,10 @@ void main() {
   for (int k = 0; k < 8; k++) {
     float a = float(k) * 0.7853982 + 0.3926991;
     vec2 d = vec2(cos(a), sin(a));
-    float g1 = texture(uKey, uv + d * 5.0 * kt).g;
+    float g1 = keyAt(uv + d * 5.0 * kt).g;
     gMin = min(gMin, g1);
     gMax = max(gMax, g1);
-    gFar += texture(uKey, uv + d * 14.0 * kt).g;
+    gFar += keyAt(uv + d * 14.0 * kt).g;
   }
   float rim = smoothstep(0.3, 0.7, gMax - gMin);
   float inner = smoothstep(0.6, 1.0, gFar / 8.0);
@@ -523,7 +575,7 @@ void main() {
   // itself, not the plate a mip up, which there is half steel: the sky's
   // grade then runs right up to the member's edge and lets go across the
   // key's own ramp, so no band of ungraded, paler sky is left round it.
-  vec3 hm = rgb2hsv(mix(pow(texture(uPlate, uv, 1.5).rgb, vec3(1.0 / 2.2)), pow(c, vec3(1.0 / 2.2)), ring));
+  vec3 hm = rgb2hsv(mix(pow(plateBiasAt(uv, 1.5).rgb, vec3(1.0 / 2.2)), pow(c, vec3(1.0 / 2.2)), ring));
   float hue = hm.x * 360.0;
   float sky = smoothstep(0.08, 0.44, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
             * smoothstep(0.25, 0.4, hm.z) * (1.0 - mix(key.r, smoothstep(0.3, 0.75, key.r), ring))
@@ -570,7 +622,7 @@ void main() {
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
       float wt = (i == 0 ? 2.0 : 1.0) * (j == 0 ? 2.0 : 1.0);
-      lo += wt * textureLod(uPlate, uv + vec2(float(i), float(j)) * ts, 4.5).rgb;
+      lo += wt * plateLodAt(uv + vec2(float(i), float(j)) * ts, 4.5).rgb;
     }
   }
   lo /= 16.0;
@@ -588,8 +640,8 @@ void main() {
   // the difference is positive there and negative on the shadowed base.
   // Low frequency like the rest: it shapes masses, never draws a rim.
   vec2 sd = uSun * ts * 2.5;
-  float yAhead = pow(dot(textureLod(uPlate, uv + sd, 5.0).rgb, LUMA), 1.0 / 2.2);
-  float yBehind = pow(dot(textureLod(uPlate, uv - sd, 5.0).rgb, LUMA), 1.0 / 2.2);
+  float yAhead = pow(dot(plateLodAt(uv + sd, 5.0).rgb, LUMA), 1.0 / 2.2);
+  float yBehind = pow(dot(plateLodAt(uv - sd, 5.0).rgb, LUMA), 1.0 / 2.2);
   float side = clamp((yBehind - yAhead) * 5.0, -1.0, 1.0);
   float body = mass * smoothstep(0.0, 0.3, s);
   float facing = body * smoothstep(0.0, 0.6, side);
@@ -611,13 +663,13 @@ void main() {
   // zoom had flattened it. The fine end is read a mip up, so it lifts the
   // lobes, not the grain. Cloud only: the open sky and the steel take none,
   // so no dark ring is drawn around a cloud.
-  float yF = pow(dot(textureLod(uPlate, uv, 1.0).rgb, LUMA), 1.0 / 2.2);
+  float yF = pow(dot(plateLodAt(uv, 1.0).rgb, LUMA), 1.0 / 2.2);
   vec2 tr = vec2(12.0) / vec2(textureSize(uPlate, 0));
   float yB = 0.0;
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
       float wt = (i == 0 ? 2.0 : 1.0) * (j == 0 ? 2.0 : 1.0);
-      yB += wt * dot(textureLod(uPlate, uv + vec2(float(i), float(j)) * tr, 3.5).rgb, LUMA);
+      yB += wt * dot(plateLodAt(uv + vec2(float(i), float(j)) * tr, 3.5).rgb, LUMA);
     }
   }
   yB = pow(yB / 16.0, 1.0 / 2.2);
@@ -637,7 +689,7 @@ void main() {
   // The warm key: only the sunlit cores warm. Keyed tight on the modelled
   // cloud light a mip up (gamma, uEdge.xy, about 0.80-0.93): a fringe pixel
   // is cloud and cobalt mixed, and warm paper mixed into blue is khaki-grey.
-  float yk = pow(clamp(dot(textureLod(uPlate, uv, 1.5).rgb, LUMA) * ratio, 0.0, 1.0), 1.0 / 2.2);
+  float yk = pow(clamp(dot(plateLodAt(uv, 1.5).rgb, LUMA) * ratio, 0.0, 1.0), 1.0 / 2.2);
   float core = smoothstep(uEdge.x, uEdge.y, yk);
   // Above the core's light the plate's own chroma is clamped toward the same
   // warm-neutral, lit or not: the scan's colour blotches (green-grey,
@@ -660,7 +712,7 @@ void main() {
   for (int k = 0; k < 8; k++) {
     float a = float(k) * 0.7853982;
     vec2 o = vec2(cos(a), sin(a)) * vec2(52.0) / vec2(textureSize(uPlate, 0));
-    vec3 q = rgb2hsv(pow(textureLod(uPlate, uv + o, 4.0).rgb, vec3(1.0 / 2.2)));
+    vec3 q = rgb2hsv(pow(plateLodAt(uv + o, 4.0).rgb, vec3(1.0 / 2.2)));
     float wq = pow(q.y, 4.0) * smoothstep(0.25, 0.4, q.z) + 1e-5;
     vec2 hv = vec2(cos(q.x * 6.2831853), sin(q.x * 6.2831853));
     skyA += wq * vec3(hv * q.y, q.z);
@@ -703,7 +755,7 @@ void main() {
   float rIn = 0.0;
   for (int k = 0; k < 8; k++) {
     float a = float(k) * 0.7853982;
-    rIn += texture(uKey, uv + vec2(cos(a), sin(a)) * vec2(5.0) / vec2(textureSize(uKey, 0))).r;
+    rIn += keyAt(uv + vec2(cos(a), sin(a)) * vec2(5.0) / vec2(textureSize(uKey, 0))).r;
   }
   // The photograph's thin wires take it as the steel does.
   float onSteel = max(min(key.r, rIn / 8.0), line);
@@ -771,6 +823,7 @@ uniform vec3 uStructTint;
 uniform vec3 uCloudTop;
 uniform vec2 uGlow;
 ${GRAPHITE}
+${ZEN}
 ${MIST}
 float erf_(float x) {
   float s = sign(x);
@@ -821,7 +874,7 @@ void main() {
   float rim = max((x - 0.3) / 0.7, 0.0);
   float lit = uSkyLit.x * 8.0 * rim * rim;
   vec2 kuv = vRest / uImg;
-  vec3 sky = textureLod(uPlate, kuv, 4.0).rgb;
+  vec3 sky = plateLodAt(kuv, 4.0).rgb;
   vec3 skyN = sky / max(dot(sky, LUMA), 1e-4);
   float yG = (uCore * uStruct.y + uStruct.z) * (1.0 + lit);
   vec3 tint = mix(uMetal, mix(uMetal, skyN, uSkyLit.y), lit / (1.0 + lit));
@@ -1304,19 +1357,22 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
 
-  const [meta, plateBm, atlasBm, keyBm] = await Promise.all([
+  const [meta, plateBm, atlasBm, keyBm, zenBm] = await Promise.all([
     fetch(`${ASSET}wires.json`).then((r) => r.json()),
     bitmap(`${ASSET}plate.webp`),
     bitmap(`${ASSET}riders.png`),
     bitmap(`${ASSET}key.webp`),
+    bitmap(`${ASSET}zenith.png`),
   ]);
   const [IW, IH] = meta.image;
-  const view = pitchView(IW, IH, clamp(num("pitch", PITCH), -10, 30));
+  const view = pitchView(IW, IH, clamp(num("pitch", PITCH), -10, 50));
   const metal = metalTint(plateBm, meta);
   const plateMtf = PLATE_MTF;
   const plateTex = upload(gl, plateBm);
   const atlasTex = upload(gl, atlasBm);
   const keyTex = upload(gl, keyBm, { mips: false, linear: true });
+  const zenTex = upload(gl, zenBm, { mips: false });
+  zenBm.close?.();
   plateBm.close?.();
   atlasBm.close?.();
   keyBm.close?.();
@@ -1359,7 +1415,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
   // the strip follows the curve, not a polyline.
   const SUB = 8;
   const STRIDE = 10;
-  const maxVerts = (NODES * SUB + 2) * 2;
+  const maxVerts = (2 * NODES * SUB + 2) * 2;
   const wireBuf = gl.createBuffer();
   const wireData = new Float32Array(maxVerts * STRIDE);
   const wireVao = gl.createVertexArray();
@@ -1462,23 +1518,36 @@ export async function createCatenary(host, { embedded = false } = {}) {
     haloed = target(w, h, "rgba");
     filmed = target(w, h, "disp");
     film.resize(w, h);
-    // Cover the box with the photograph, then crop in to the view, inside
-    // the turned photograph. Rows stay rows under a pitch, so the plate's
-    // outline in view px is a trapezoid with level top and bottom.
+    // Cover the box with the photograph, then crop in to the view. Rows stay
+    // rows under a pitch, so the plate's outline in view px is a trapezoid
+    // with level top and bottom, narrow at the top, and so is ZEN_BOX's. The
+    // crop stays inside ZEN_BOX, above the plate's bottom, and inside the
+    // plate's left and right edges below the rows where they stop being clear
+    // sky (VIEW.clear); above row 0 and beside those clear stretches it looks
+    // into ZEN. A side's x is greatest (left) or least (right) at the top of
+    // the rows it holds, so each is tested there.
     const cover = Math.max(w / IW, h / IH);
     const e = VIEW.inset;
-    const [tl, tr, bl, br] = [
-      [e, e],
-      [IW - e, e],
-      [e, IH - e],
-      [IW - e, IH - e],
-    ].map(([x, y]) => view.view(x, y));
+    const corners = (x0_, y0_, x1_, y1_) =>
+      [
+        [x0_, y0_],
+        [x1_, y0_],
+        [x0_, y1_],
+        [x1_, y1_],
+      ].map(([x, y]) => view.view(x, y));
+    const [tl, tr, bl, br] = corners(e, e, IW - e, IH - e);
+    const [ztl, ztr, zbl, zbr] = corners(ZEN_BOX[0] + e, ZEN_BOX[1] + e, ZEN_BOX[2] - e, ZEN_BOX[3] - e);
     const sideAt = (a, b, y) => a[0] + ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]);
-    const yT = Math.max(tl[1], tr[1]);
+    const yT = Math.max(ztl[1], ztr[1]);
     const yB = Math.min(bl[1], br[1]);
-    const top = view.view(VIEW.mast[0], VIEW.top)[1];
+    const yL = view.view(e, VIEW.clear[0])[1];
+    const yR = view.view(IW - e, VIEW.clear[1])[1];
+    const vTop = num("viewTop", VIEW.top);
+    const zoom = clamp(num("viewZoom", VIEW.zoom), 0.5, 3);
+    const poleAt = num("poleAt", VIEW.poleAt);
+    const top = view.view(VIEW.mast[0], vTop)[1];
     const mastX = view.view(VIEW.mast[0], VIEW.mast[1])[0];
-    let k = Math.max(cover, Math.min(cover * VIEW.zoom, (w * VIEW.zoom) / IW));
+    let k = Math.max(cover, Math.min(cover * zoom, (w * zoom) / IW));
     let x0 = 0;
     let y0 = 0;
     for (let it = 0; it < 400; it++, k *= 1.01) {
@@ -1486,10 +1555,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
       const vh = h / k;
       if (yB - vh < yT) continue;
       y0 = clamp(top, yT, yB - vh);
-      const lo = Math.max(sideAt(tl, bl, y0), sideAt(tl, bl, y0 + vh));
-      const hi = Math.min(sideAt(tr, br, y0), sideAt(tr, br, y0 + vh));
+      const y1 = y0 + vh;
+      let lo = sideAt(ztl, zbl, y0);
+      let hi = sideAt(ztr, zbr, y0);
+      if (y1 > yL) lo = Math.max(lo, sideAt(tl, bl, Math.max(y0, yL)));
+      if (y1 > yR) hi = Math.min(hi, sideAt(tr, br, Math.max(y0, yR)));
       if (hi - lo < vw) continue;
-      x0 = clamp(mastX - VIEW.poleAt * vw, lo, hi - vw);
+      x0 = clamp(mastX - poleAt * vw, lo, hi - vw);
       break;
     }
     // kRef: the scale the motion is tuned at (cover, as before the crop), so
@@ -1616,6 +1688,14 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform4fv(pr.u.uSculpt, sculpt);
     gl.uniform3fv(pr.u.uCloudShade, cloudShade);
   };
+  const setZen = (pr) => {
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, zenTex);
+    gl.uniform1i(pr.u.uZen, 3);
+    gl.uniform4fv(pr.u.uZenBox, ZEN_BOX);
+    gl.uniform1f(pr.u.uZenGrain, ZEN_GRAIN);
+    gl.activeTexture(gl.TEXTURE0);
+  };
   const drawScene = () => {
     const W = stage.canvas.width;
     const H = stage.canvas.height;
@@ -1637,6 +1717,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, keyTex);
     gl.uniform1i(plateP.u.uKey, 1);
     gl.activeTexture(gl.TEXTURE0);
+    setZen(plateP);
     setGrade(plateP);
     gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
     gl.uniform4fv(plateP.u.uVib, vib);
@@ -1649,11 +1730,14 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     const k = map.k;
     for (const w of wires) {
-      // Strip over the visible run (plus a little past the frame edge).
+      // Strip over the visible run (plus a little past the frame edge). Past
+      // the photograph's edge (the feeder runs out of its top into ZEN's
+      // sky) the catenary is carried on, the string's far support and on
+      // past it at rest, until the wire has left the frame.
       let n = 0;
-      const jEnd = w.jExit;
+      const jEnd = 2 * w.N;
       const ho = w.def.handoff;
-      for (let js = 0; js <= jEnd * SUB; js++) {
+      for (let js = 0; js <= jEnd * SUB && n + 2 <= maxVerts; js++) {
         const j = js / SUB;
         const s = j * w.ds;
         // Rest: the catenary itself at s; displacement: a cubic through the
@@ -1667,6 +1751,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
         const [vx, vy] = view.view(ix, iy);
         const cx = map.ox + vx * k;
         const cy = map.oy + vy * k;
+        if (j > w.jExit && (cx < -64 || cy < -64 || cx > W + 64 || cy > H + 64)) break;
         // Across the drawn wire: perpendicular to its projected tangent, and
         // the width a strip of the photograph's wire takes there (area scale
         // over length scale of the local map).
@@ -1723,6 +1808,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, keyTex);
       gl.uniform1i(wireP.u.uKey, 1);
       gl.activeTexture(gl.TEXTURE0);
+      setZen(wireP);
       gl.uniform2f(wireP.u.uImg, IW, IH);
       setGrade(wireP);
       const rd = w.def.riders[0];
@@ -1929,6 +2015,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       gl.deleteTexture(lutTex);
       gl.deleteTexture(atlasTex);
       gl.deleteTexture(keyTex);
+      gl.deleteTexture(zenTex);
       for (const b of [quad, wireBuf, riderBuf]) gl.deleteBuffer(b);
       for (const v of [quadVao, wireVao, riderVao]) gl.deleteVertexArray(v);
       for (const pr of [plateP, wireP, riderP, haloSrcP, haloHP, haloCP, printP]) gl.deleteProgram(pr.p);
