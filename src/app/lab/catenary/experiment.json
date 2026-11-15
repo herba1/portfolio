@@ -1,6 +1,6 @@
 {
   "title": "Catenary",
-  "description": "A railway mast in Ine, Kyoto, seen from underneath against summer cumulus. The overhead wires are real strings: each was found in the photograph, fitted as a catenary from its insulator, painted out of the sky and redrawn live with its own width, shade and softening with distance, so at rest the frame is the photograph. Drag across a wire and it catches on your hand, slips off, and rings as a damped string: two pulses run out to the insulators, come back inverted, and settle into the low modes, while the wires on the same mast pick up a faint tremor. A slow breeze keeps them breathing.",
+  "description": "A railway mast in Ine, Kyoto, seen from underneath against one towering summer cumulus. The overhead wires are real strings: each was found in the photograph, fitted as a catenary from its insulator, painted out of the sky and redrawn live with its own width, shade and softening with distance, so at rest the frame is the photograph. Drag across a wire and it catches on your hand, slips off, and rings as a damped string: two pulses run out to the insulators, come back inverted, and settle into the low modes, while the wires on the same mast pick up a faint tremor. A slow breeze keeps them breathing.",
   "tags": ["WebGL", "Physics", "Film", "Photography"],
   "status": "draft",
   "createdAt": "2026-11-06T21:30:00.000Z",
@@ -22,6 +22,13 @@
       "licence": "Unsplash License",
       "note": "6000x4000, Ine, Kyoto Prefecture, Sony a7 IV. Six wires fitted as catenaries and painted out (clean plate 3600x2400 webp); the two in-line strain insulators cut out as sprites that ride their wires; per-wire width, blur, opacity and cross-cable shade measured against the clean plate, blur and opacity regressed on a Depth Anything V2 depth map of the photo. Shown with the camera turned a further 27 degrees up about its own centre, a worm's-eye some 57 degrees above the horizon: a pure-rotation homography H = K R K^-1 (K from a 24 mm lens on the full-frame sensor, no EXIF in the source), applied to the plate, the redrawn wires and the insulator sprites alike, and the frame cropped inside the turned photograph's footprint so no corner shows past the plate."
     },
+    {
+      "url": "https://commons.wikimedia.org/wiki/File:500px_photo_(44011304).jpeg",
+      "author": "Yasuo Ogiuchi",
+      "licence": "CC BY 3.0",
+      "note": "The sky: the photograph's dozen scattered puffs are replaced by one cumulus congestus from this frame (the side of the tower clear of its pole, as plated for the film-test piece, its wires inpainted), mirrored so its billowed flank faces the gantry, its own sky unmixed out of its edges and set behind the truss and the far pole on the right over a smooth fit of the Ine photograph's own clear sky (tools/depth/bakes/catenary/sky.py)."
+    },
+    "https://creativecommons.org/licenses/by/3.0/",
     "https://en.wikipedia.org/wiki/Catenary",
     "https://en.wikipedia.org/wiki/String_vibration"
   ]

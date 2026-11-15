@@ -142,13 +142,17 @@ const CLOUD_TOP = [0xf6, 0xf3, 0xec];
 // chroma (PRINT_WHITE), and a strong aim only made a cream patch beside the
 // pale-blue body of a small cloud.
 const CLOUD_AIM = [1.02, 1, 0.95];
-const CLOUD_LIFT = 0.64;
+// The cumulus behind the gantry is already a sculpted, sunlit tower as
+// photographed (tools/depth/bakes/catenary/sky.py): the lift and the S-curve
+// only lay a little warmth on its tops (about 240-246 after the print); at
+// full strength they flattened its lobes to one creamy white.
+const CLOUD_LIFT = 0.2;
 // The cloud's modelling (see PLATE): where its range starts (blurred luma,
 // gamma), how far the S-curve goes (0 straight, 1 the doubled smoothstep),
 // and how far the shade masses draw toward CLOUD_SHADE, the blue-grey of a
 // cumulus underside lit only by the sky.
 const CLOUD_FROM = 0.6;
-const SCULPT = 0.6;
+const SCULPT = 0.2;
 const SHADE_TINT = 0.6;
 const CLOUD_SHADE = [0x9d, 0xb6, 0xcf];
 // Toward the sun, degrees in the photograph (0 right, 90 up): upper left,
@@ -161,7 +165,9 @@ const SUN = 125;
 // a cloud's width round it and slips softly over the steel's edges. The
 // steel takes DIFFUSE_STEEL of it: enough that the bloom overlaps a member
 // beside the cloud, not so much that the one silhouette goes grey.
-const DIFFUSE = 0.45;
+// Lowered with the one big cloud: a frame-wide veil at the old strength
+// greyed the truss and the far pole where they cross it.
+const DIFFUSE = 0.25;
 const DIFFUSE_RADIUS = 1.3; // scale on the rings (0.022, 0.05 of the width)
 const DIFFUSE_STEEL = 0.28;
 // The cloud's edge (see PLATE): the warm tint is keyed tight on the modelled
@@ -175,7 +181,7 @@ const WARM_KEY = [0.8, 0.93];
 // blotches, which the warm key and the print would push to olive.
 const CORE_NEUTRAL = 0.8;
 const EDGE_BLUE = 0.4;
-const RELIEF = 0.2;
+const RELIEF = 0.5;
 // Halation, the film's own optics rather than its grade: light that went
 // through the emulsion, bounced off the base (no remjet) and came back
 // through the red layer a little way off. Over the finished linear scene,
