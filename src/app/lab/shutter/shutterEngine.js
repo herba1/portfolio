@@ -269,6 +269,11 @@ const float CREST_PUSH = 0.6;  // the crests' spread stretch about the local mea
 const float CREST_LIFT = 0.55; // the shoulder's rise toward white at a full crest
 const float CREST_ROLL = 0.88; // where the dodged crests start rolling into white
 const float CREST_DETAIL = 4.0; // the striations' stretch about the finer mean
+const float W_PUSH = 0.4;      // the cloud weight's push apart about the local mean
+const float GAP_LO = 0.03;     // cloudiness below which a gap burns fully to the clear sky
+const float GAP_HI = 0.18;     // cloudiness above which the silk's veil is kept whole
+const float VEIL_HI = 0.4;     // cloudiness by which the veil has taken the silk's pale chroma
+const float VEIL_PALE = 0.8;   // how far toward it: the thin veil keeps a tint of the sky's blue
 // The long exposure's colour. The integral averages cloud into sky, and
 // normalised by its length that is a pale lavender haze with no zenith ramp.
 // But between the streaks the sky was the same cobalt at every instant, so
@@ -288,12 +293,14 @@ vec3 keepSky(vec3 sl, vec3 ml, vec3 md, vec2 iuv){
   float Lm = s.x + max(m.x - s.x, 0.0) * inversesqrt(uGain);
   float L = clamp(Lm + (p.x - m.x) * uGain, 0.0, 1.0);
   // Cloud weight, from lightness: 0 on clear sky, 1 on a cloud's white,
-  // pushed apart about the local mean so the gaps between the streaks
-  // read as gaps, not as a thinner haze.
+  // pushed gently apart about the local mean so the streaks separate. The
+  // push only ever adds: it is floored at the pixel's own cloudiness, so
+  // the translucent drift below the local mean keeps its weight and the
+  // silk stays a broad, soft band instead of being cut down to its core.
   float span = max(0.94 - s.x, 0.1);
   float c = clamp((L - s.x) / span, 0.0, 1.0);
   float cm = clamp((Lm - s.x) / span, 0.0, 1.0);
-  float w = clamp(c + (c - cm) * 1.75, 0.0, 1.0);
+  float w = clamp(max(c, c + (c - cm) * W_PUSH), 0.0, 1.0);
   // The streaks' crests, where the cloud kept passing, are printed up
   // toward a cloud's white (a dodge, as the gaps below are a burn), so the
   // silk still reads as cumulus dragged along the wind, not as a blue veil.
@@ -319,13 +326,20 @@ vec3 keepSky(vec3 sl, vec3 ml, vec3 md, vec2 iuv){
   L = min(L, CREST_ROLL) + (1.0 - CREST_ROLL) * (1.0 - exp(-over / (1.0 - CREST_ROLL)));
   // Between the streaks the sky was the same clear cobalt whenever the
   // cloud was elsewhere, so the gaps keep its depth, not the mean's lift.
-  L = mix(L, min(L, s.x), (1.0 - w) * uDeep);
+  // The burn has a soft threshold on absolute cloudiness: only truly clear
+  // pixels (already near the clear sky's depth) fall all the way, while the
+  // silk's translucent body keeps a pale, sky-tinted veil.
+  L = mix(L, min(L, s.x), (1.0 - w) * (1.0 - smoothstep(GAP_LO, GAP_HI, c)) * uDeep);
   float Ci = length(p.yz);
   float Cs = length(s.yz);
   // A dodged crest keeps a floor of the clear sky's chroma (its hue is the
   // sky's below), so it stays a cool skylit white that cloudTone can still
   // warm on its sun side, not a colourless cream lozenge.
-  float C = mix(mix(max(Ci, Cs), Ci * 0.85, w), max(0.25 * Cs, 0.02), 0.6 * crest);
+  // The silk's translucent body takes its pale chroma early (a soft ramp on
+  // cloudiness, not the pushed weight), so it reads as a thin veil of cloud
+  // over the cobalt, not as a lighter patch of the same saturated blue.
+  float veil = max(w, VEIL_PALE * smoothstep(GAP_LO, VEIL_HI, c));
+  float C = mix(mix(max(Ci, Cs), Ci * 0.85, veil), max(0.25 * Cs, 0.02), 0.6 * crest);
   vec2 ab = s.yz / max(Cs, 1e-4) * C;
   return max(fromLab(vec3(L, mix(p.yz, ab, uKeep))), 0.0);
 }
