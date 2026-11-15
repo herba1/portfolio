@@ -43,7 +43,8 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape } fr
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, dering, hal, halNarrow, halWide,
 // diffuse, diffuseR, diffuseSteel, diffuseCap, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
-// override the grade; halThr sets the HALO pass's threshold; print and
+// override the grade; halThr sets the HALO pass's threshold, halDil,
+// halReach, halRing and halSat its ring round the silhouette; print and
 // printPin the PRINT curve.
 
 const ASSET = "/lab/catenary/";
@@ -218,14 +219,19 @@ const DERING = 1;
 // through the emulsion, bounced off the base (no remjet) and came back
 // through the red layer a little way off. Over the finished linear scene,
 // plate, live wires and insulators together: the light past HAL_THRESHOLD
-// (scene luminance, a soft knee) is blurred at two radii, HAL_NARROW and HAL_WIDE (gaussian sigma in device px at DPR 2,
-// scaled with the DPR), weighted, tinted HAL_TINT and added at HAL, in
-// proportion to how dark the pixel it lands on is (1 - its luma). So it
-// shows where sunlit cloud meets dark steel: a 1-3 px warm orange-red fringe
-// on the steel's side of the edge and a faint warm bleed into it, nothing on
-// steel against plain sky (the sky never reaches the threshold), and almost
-// nothing on the cloud itself. The wide radius stays low so it never reads
-// as a glow or a chroma smear.
+// (scene luminance, a soft knee) is blurred at two radii, HAL_NARROW and
+// HAL_WIDE (gaussian sigma in device px at DPR 2, scaled with the DPR),
+// weighted and added at HAL. It is kept off the silhouette itself: the steel
+// and every wire (the scene's cover target, see HAL_RING) take none of it,
+// so a 2-3 px wire over the cloud keeps its dark core instead of reading as
+// a pink-tan line. It lands as a thin warm-grey ring on the cloud just
+// outside the steel (HAL_RING), and elsewhere, tinted HAL_TINT, in
+// proportion to how dark the pixel is (1 - its luma): a faint warm bleed
+// into the sky past a cloud's edge, nothing on steel against plain sky (the
+// sky never reaches the threshold), and almost nothing on the cloud itself.
+// Specks of light (a glint on a clamp) throw nothing: a source has to be a
+// mass of light (HALO_SRC). The wide radius stays low so it never reads as
+// a glow or a chroma smear.
 const HAL = 3.4;
 // Measured on the scene: the open sky never passes 0.3, even beside cloud;
 // the cumulus behind the truss sits at 0.38-0.55 and only its cores reach
@@ -236,10 +242,20 @@ const HAL = 3.4;
 const HAL_THRESHOLD = 0.42;
 const HAL_TINT = [1, 0.5, 0.26]; // linear
 const HAL_CAP = 0.62;
-// The narrow radius carries the fringe; the wide one only a breath of warmth
-// into the steel, so a 16 px feeder over the brightest cloud is lifted a few
-// levels, not turned into a lit tube.
+// The narrow radius carries the ring; the wide one only a breath of warmth
+// past it.
 const HAL_NARROW = [1.8, 1]; // sigma (device px at DPR 2), weight
+// The halo is kept off what it lands on when that is steel or a wire: the
+// silhouette (the scene's cover target) dilated by HAL_RING[0] device px
+// takes none of it, so a wire crossing the cloud keeps its dark core. Out
+// to HAL_RING[1] device px from the silhouette the pixel, whatever its own
+// light, turns toward HAL_RING_TINT at its own luminance by HAL_RING[2]
+// times the halo it receives: a 1-2 px warm-grey ring on the cloud beside
+// the steel (about 180,180,190 against cloud at 150,187,219 after the
+// print). Nowhere may the halo warm a pixel past HAL_RING[3] saturation
+// (linear), so it never goes orange.
+const HAL_RING = [0.75, 1.75, 2, 0.5];
+const HAL_RING_TINT = [200, 170, 150]; // sRGB, the ring's warm grey
 const HAL_WIDE = [12, 0.03];
 // The open sky deepens toward the zenith (the top edge): on top of the
 // polariser, it loses up to ZENITH of its value there.
@@ -351,7 +367,11 @@ void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const PLATE = `#version 300 es
 precision highp float;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+// What the steel covers here (the key's R), the start of the scene's cover
+// target: the wires and insulators are laid over it as they are drawn. HALO
+// reads it to keep its light off the steel and wires themselves.
+layout(location = 1) out vec4 outCover;
 uniform sampler2D uPlate;
 uniform vec2 uRes;   // device px
 uniform vec3 uMap;   // ox, oy, k (device px per view px)
@@ -389,6 +409,28 @@ void main() {
   vec3 c = texture(uPlate, uv).rgb;
   vec3 key = texture(uKey, uv).rgb;
   vec2 kt = 1.0 / vec2(textureSize(uKey, 0));
+  // The photograph's own thin wires, which the key leaves out (the
+  // insulator's tail and the droppers, kept as shot): a pixel well darker
+  // than the plate on both sides of it, along any of four axes, 2.5, 4 and
+  // 6.5 device px out (a tail is some 10 px wide), against the cloud's light
+  // (the sky, under 0.3 as shot, has no halo to keep off). A cloud's edge is
+  // light on one side only and is left alone. They join the steel in the
+  // cover (HALO) and lose the sky's chroma the grade lends them (below).
+  float dpx = length(dFdx(uv));
+  float yp = dot(texture(uPlate, uv).rgb, LUMA);
+  float yb = 0.0;
+  for (int k = 0; k < 4; k++) {
+    float a = float(k) * 0.7853982;
+    vec2 d = vec2(cos(a), sin(a)) * dpx;
+    yb = max(yb, min(dot(texture(uPlate, uv + d * 2.5).rgb, LUMA), dot(texture(uPlate, uv - d * 2.5).rgb, LUMA)));
+    yb = max(yb, min(dot(texture(uPlate, uv + d * 4.0).rgb, LUMA), dot(texture(uPlate, uv - d * 4.0).rgb, LUMA)));
+    yb = max(yb, min(dot(texture(uPlate, uv + d * 6.5).rgb, LUMA), dot(texture(uPlate, uv - d * 6.5).rgb, LUMA)));
+  }
+  // Never the open cobalt (S ~0.9 as shot), dark as it is between the two
+  // pale rods of a dropper: a wire is grey, or grey with sky mixed in.
+  vec3 pc = texture(uPlate, uv).rgb;
+  float pS = 1.0 - min(pc.r, min(pc.g, pc.b)) / max(max(pc.r, max(pc.g, pc.b)), 1e-4);
+  float line = smoothstep(0.35, 0.6, 1.0 - yp / max(yb, 1e-4)) * smoothstep(0.25, 0.38, yb) * (1.0 - smoothstep(0.85, 0.95, pS));
   // De-ring. The photograph carries its in-camera sharpening: a light,
   // paler line one or two plate px wide on the sky side of every steel edge
   // (the far pole as shot: sky 106,151,192, then 120,157,195 and
@@ -645,6 +687,10 @@ void main() {
   float steel = 1.0 - key.r;
   float eAmt = uEdge.w * steel * steel * (1.0 - core) * smoothstep(0.3, 0.45, yk) * smoothstep(0.0, 0.3, need);
   c = max(dot(c, LUMA) + mix(cc, tc, eAmt), 0.0);
+  // The photograph's thin wires: the steel's grey at their own value, after
+  // the cloud's chroma has all been laid, so a dropper over the cloud reads
+  // as a dark wire, not a blue line.
+  c = mix(c, dot(c, LUMA) * uStructTint / dot(uStructTint, LUMA), line * (1.0 - key.r) * uStruct.x);
 
   // Wide diffusion: screened, so it lifts the cobalt and never clips. The
   // steel takes only its share (uMist.y): the bloom slips over a member's
@@ -659,7 +705,8 @@ void main() {
     float a = float(k) * 0.7853982;
     rIn += texture(uKey, uv + vec2(cos(a), sin(a)) * vec2(5.0) / vec2(textureSize(uKey, 0))).r;
   }
-  float onSteel = min(key.r, rIn / 8.0);
+  // The photograph's thin wires take it as the steel does.
+  float onSteel = max(min(key.r, rIn / 8.0), line);
   float bare = 1.0 - (1.0 - uMist.y) * onSteel;
   // Its colour follows the same key: warm paper off the sunlit cores,
   // skylight over the cobalt, so the veil never greys the blue it lifts.
@@ -674,6 +721,8 @@ void main() {
   // cloud's silhouette band. The wires and insulators blend over it with
   // their own alpha kept off it (blendFuncSeparate), so it survives them.
   outColor = vec4(c, 1.0 - rim);
+  // The cover (see outCover): the steel and the photograph's thin wires.
+  outCover = vec4(max(smoothstep(0.04, 0.6, key.r), line), 0.0, 0.0, 1.0);
 }`;
 
 // One strip per wire. Positions arrive in device px (top-left origin); the
@@ -705,7 +754,8 @@ in float vD;
 in vec4 vProf;
 in vec2 vRest;
 in float vUp;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outCover;
 uniform float uCore;      // the cable's measured core luminance (linear)
 uniform vec3 uMetal;      // its own tint, from the photographed section
 uniform vec2 uSkyLit;     // skylight on the upper flank (x core at the rim / 8), its sky chroma kept
@@ -784,6 +834,8 @@ void main() {
   // The diffusion over the wire, held under the same cap as the steel's.
   col = min(1.0 - (1.0 - col) * (1.0 - uCloudTop * mist(uKey, kuv) * uGlow.y * uMist.y), col * uMist.z);
   outColor = vec4(col, a);
+  // Its coverage, blended over the steel's (source alpha): the silhouette.
+  outCover = vec4(1.0, 0.0, 0.0, a);
 }`;
 
 // The sprite's corners go through the homography; w is its divisor, so the
@@ -801,9 +853,13 @@ void main() {
 const RIDER_F = `#version 300 es
 precision highp float;
 in vec2 vUv;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outCover;
 uniform sampler2D uAtlas;
-void main() { outColor = texture(uAtlas, vUv); }`;
+void main() {
+  outColor = texture(uAtlas, vUv);
+  outCover = vec4(1.0, 0.0, 0.0, outColor.a);
+}`;
 
 // HALO, 1: the light that reaches the base. The scene luminance (linear) of
 // whatever is past the threshold, all of it, not just the excess (a cloud at
@@ -816,6 +872,7 @@ const HALO_SRC = `#version 300 es
 precision highp float;
 out vec4 outColor;
 uniform sampler2D uScene;
+uniform sampler2D uCover;
 uniform vec2 uThr;   // threshold, cap
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 void main() {
@@ -824,7 +881,27 @@ void main() {
   // The scene's alpha is 0 on the cumulus's silhouette band (PLATE): its
   // sunlit rim against the sky is no source, so no warm-white ring is laid
   // round the cloud; the cloud behind the steel still throws its fringe.
-  outColor = vec4(min(y, uThr.y) * smoothstep(uThr.x - 0.05, uThr.x + 0.1, y) * clamp(sc.a, 0.0, 1.0), 0.0, 0.0, 1.0);
+  // Nor is the steel's own light: a glint on a clamp or a dropper is a
+  // speck, and a halo round it only made a white-orange blob with a red
+  // ring, a second warm accent beside the fringe.
+  // The cover dilated 1.5 px, so the pale edge of a glint is held too.
+  // And a source is a mass of light, not a speck: the light is held under
+  // its mean on a ring 3.5 px out (the steel and wires there counted at the
+  // pixel's own light, so the cloud right beside a wire still throws its
+  // ring), so a glint a few px across with sky round it throws nothing.
+  vec2 px = 1.0 / vec2(textureSize(uCover, 0));
+  vec2 uv = gl_FragCoord.xy * px;
+  float cov = texture(uCover, uv).r;
+  float ye = 0.0;
+  for (int k = 0; k < 8; k++) {
+    vec2 d = vec2(cos(float(k) * 0.7853982), sin(float(k) * 0.7853982)) * px;
+    cov = max(cov, texture(uCover, uv + d * 1.5).r);
+    float ct = clamp(texture(uCover, uv + d * 3.5).r, 0.0, 1.0);
+    ye += mix(dot(max(texture(uScene, uv + d * 3.5).rgb, 0.0), LUMA), y, ct) / 8.0;
+  }
+  ye = min(ye, y);
+  cov = clamp(cov, 0.0, 1.0);
+  outColor = vec4(min(ye, uThr.y) * smoothstep(uThr.x - 0.05, uThr.x + 0.1, ye) * clamp(sc.a, 0.0, 1.0) * (1.0 - cov), 0.0, 0.0, 1.0);
 }`;
 
 // Gaussian at two radii, separable. Narrow: a tap per px out to 3 sigma.
@@ -863,29 +940,65 @@ void main() {
   outColor = vec4(blur(uSrc, uv, false), 0.0, 1.0);
 }`;
 
-// 3: down, and onto the scene: tinted, weighted, and laid on in proportion
-// to how dark the pixel is, so it shows on the dark side of a bright edge.
+// 3: down, and onto the scene: tinted, weighted, laid on in proportion to
+// how dark the pixel is, and kept off the silhouette itself (see below).
 const HALO_C = `#version 300 es
 precision highp float;
 out vec4 outColor;
 uniform sampler2D uScene;
 uniform sampler2D uSrc;
+uniform sampler2D uCover;
 uniform vec3 uHal;   // gain, narrow weight, wide weight
 uniform vec3 uHalTint;
+uniform vec4 uRing;  // dilation, ring reach (device px), ring weight, saturation cap
+uniform vec3 uRingTint; // linear, luminance-normalised
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 ${HALO_BLUR}
 void main() {
   vec3 c = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb;
-  vec2 uv = gl_FragCoord.xy / vec2(textureSize(uSrc, 0));
+  vec2 px = 1.0 / vec2(textureSize(uSrc, 0));
+  vec2 uv = gl_FragCoord.xy * px;
   vec2 h = blur(uSrc, uv, true);
-  // Laid on by how dark the pixel is (1 - luma, eased to nothing by 0.5):
-  // dark steel beside the cloud (y ~0.03) takes all of it, the sky past a
-  // cloud's edge (y ~0.25) half, the cloud itself (y 0.4 and up) next to
-  // none, so it never warms the highlight it came from.
-  float halo = uHal.x * (uHal.y * h.x + uHal.z * h.y);
+  // What the pixel receives. The steel and the wires (the cover target:
+  // the key's steel, the live wires and insulators over it) take none: a
+  // 2-3 px wire is narrower than the narrow halo, and laid on over its
+  // whole width it read as a pink-tan line, not a silhouette. The cover is
+  // dilated by uRing.x so the silhouette's own soft edge stays dark too, and
+  // the light lands in a thin ring just outside it (below). Elsewhere it is
+  // laid on by how dark the pixel is (1 - luma, eased to nothing by 0.5):
+  // the sky past a cloud's edge (y ~0.25) half, the cloud itself (0.4 and
+  // up) next to none, so it never warms the highlight it came from.
+  float cov = texture(uCover, uv).r;
+  float dil = cov;
+  float near = cov;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982;
+    vec2 d = vec2(cos(a), sin(a)) * px;
+    dil = max(dil, texture(uCover, uv + d * uRing.x).r);
+    near = max(near, texture(uCover, uv + d * uRing.y).r);
+  }
+  dil = clamp(dil, 0.0, 1.0);
   float y = clamp(dot(max(c, 0.0), LUMA), 0.0, 1.0);
-  c += uHalTint * halo * (1.0 - smoothstep(0.0, 0.5, y));
-  outColor = vec4(c, 1.0);
+  float halo = uHal.x * (uHal.y * h.x + uHal.z * h.y) * (1.0 - dil);
+  vec3 o = c + uHalTint * halo * (1.0 - smoothstep(0.0, 0.5, y));
+  // The ring: out to uRing.y px from the silhouette, whatever the pixel's
+  // own light, the cloud beside the steel turns toward warm grey
+  // (uRingTint, at its own light) by as much light as the halo brings, at
+  // uRing.z: a hue turn, not a lift, so the edge goes warm instead of
+  // glowing white (a pale outline reads as sharpening), and never past the
+  // tint itself.
+  float rg = clamp(uRing.z * halo * clamp(near, 0.0, 1.0), 0.0, 0.85);
+  o = mix(o, uRingTint * dot(o, LUMA), rg);
+  // Nowhere orange: the halo may warm a pixel no further than uRing.w
+  // saturation (linear), or its own if it already had more.
+  vec3 cc = max(c, 0.0);
+  float s0 = (max(cc.r, max(cc.g, cc.b)) - min(cc.r, min(cc.g, cc.b))) / max(max(cc.r, max(cc.g, cc.b)), 1e-4);
+  float mx = max(o.r, max(o.g, o.b));
+  float s1 = (mx - min(o.r, min(o.g, o.b))) / max(mx, 1e-4);
+  float yo = dot(o, LUMA);
+  float cap = max(uRing.w, s0);
+  if (o.r > o.b && s1 > cap) o = yo + (o - yo) * (cap / s1);
+  outColor = vec4(o, 1.0);
 }`;
 
 // PRINT: the paper. Film luma through the curve (a 1024-entry table, read
@@ -1132,6 +1245,17 @@ export async function createCatenary(host, { embedded = false } = {}) {
     clamp(num("halWide", HAL_WIDE[1]), 0, 2),
   ];
   const halThr = clamp(num("halThr", HAL_THRESHOLD), 0.05, 4);
+  const ringTint = HAL_RING_TINT.map((v) => toLin(v / 255));
+  {
+    const yt = ringTint[0] * 0.2126 + ringTint[1] * 0.7152 + ringTint[2] * 0.0722;
+    for (let i = 0; i < 3; i++) ringTint[i] /= yt;
+  }
+  const ring = [
+    clamp(num("halDil", HAL_RING[0]), 0, 3),
+    clamp(num("halReach", HAL_RING[1]), 0, 6),
+    clamp(num("halRing", HAL_RING[2]), 0, 4),
+    clamp(num("halSat", HAL_RING[3]), 0, 1),
+  ];
   const sculpt = [clamp(num("cloudFrom", CLOUD_FROM), 0.3, 0.9), clamp(num("sculpt", SCULPT), 0, 1), clamp(num("shadeTint", SHADE_TINT), 0, 1), clamp(num("coreNeutral", CORE_NEUTRAL), 0, 1)];
   const cloudShade = CLOUD_SHADE.map((v) => toLin(v / 255));
   const sunA = (num("sun", SUN) * Math.PI) / 180;
@@ -1314,6 +1438,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.deleteFramebuffer(t.fbo);
   };
   let scene = null;
+  let covered = null;
   let haloSrc = null;
   let haloH = null;
   let haloed = null;
@@ -1323,8 +1448,15 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const build = () => {
     const w = stage.canvas.width;
     const h = stage.canvas.height;
-    [scene, haloSrc, haloH, haloed, filmed].forEach(free);
+    [scene, covered, haloSrc, haloH, haloed, filmed].forEach(free);
     scene = target(w, h, "rgba");
+    // The scene's second attachment: what the steel, wires and insulators
+    // cover (see PLATE, WIRE_F), for HALO.
+    covered = target(w, h, "r");
+    gl.bindFramebuffer(gl.FRAMEBUFFER, scene.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, covered.tex, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     haloSrc = target(w, h, "r");
     haloH = target(w, h, "rg");
     haloed = target(w, h, "rgba");
@@ -1669,6 +1801,10 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.useProgram(haloSrcP.p);
     gl.bindTexture(gl.TEXTURE_2D, scene.tex);
     gl.uniform1i(haloSrcP.u.uScene, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, covered.tex);
+    gl.uniform1i(haloSrcP.u.uCover, 1);
+    gl.activeTexture(gl.TEXTURE0);
     gl.uniform2f(haloSrcP.u.uThr, halThr, HAL_CAP);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
@@ -1687,7 +1823,12 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, scene.tex);
     gl.uniform1i(haloCP.u.uScene, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, covered.tex);
+    gl.uniform1i(haloCP.u.uCover, 2);
     gl.activeTexture(gl.TEXTURE0);
+    gl.uniform4f(haloCP.u.uRing, ring[0] * d, ring[1] * d, ring[2], ring[3]);
+    gl.uniform3fv(haloCP.u.uRingTint, ringTint);
     gl.uniform2fv(haloCP.u.uSig, sig);
     gl.uniform2f(haloCP.u.uStep, 0, 1 / H);
     gl.uniform3fv(haloCP.u.uHal, halo);
@@ -1783,7 +1924,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     destroy() {
       sound.destroy();
       film.destroy();
-      [scene, haloSrc, haloH, haloed, filmed].forEach(free);
+      [scene, covered, haloSrc, haloH, haloed, filmed].forEach(free);
       gl.deleteTexture(plateTex);
       gl.deleteTexture(lutTex);
       gl.deleteTexture(atlasTex);
