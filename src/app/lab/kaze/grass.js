@@ -19,10 +19,10 @@
 //
 // Two layers: the anchor (one tall culm with a seed head at your shoulder,
 // near-black olive, full resolution, sharp) and the rest (half resolution, so
-// slightly diffused behind it), lit against the light: a dark core, a warm
-// yellow-green rim on the side toward the sun, and the sky's value let in,
-// more with distance, so the field falls back paler and bluer behind the one
-// silhouette.
+// slightly diffused behind it), lit against the light: a dark core and a
+// warm yellow-green rim on the side toward the sun, opaque at every
+// distance, so the field is a low dark silhouette under the sky, never a
+// pale ghost over the cloud, and the anchor stands clear above it.
 
 const DEG = Math.PI / 180;
 
@@ -319,27 +319,61 @@ export function buildGrass() {
   }
 
   // ---- the field: plain blades, far to near (painter's order) ----
-  // Each is laid out by where its tip stands (its elevation seen from the
-  // lens) rather than its length, so the mass is heaviest along the bottom
-  // edge and thins upward as the blades run out, every one converging on the
-  // zenith. Only grass within a pace reaches into frame from 4 cm down.
+  // Each is laid out by where its tip lands on screen rather than its
+  // length: under a skyline that holds the field to the lower part of the
+  // frame (tips mostly stopping a little past half way up) and lets it climb
+  // only at the side edges, so the middle of the frame stays open sky, the
+  // cumulus bases clear behind the anchor. The mass is heaviest along the
+  // bottom edge and thins upward, every blade converging on the zenith. Only
+  // grass within a pace reaches into frame from 4 cm down.
   const items = [];
-  const put = (n, kind, D0, D1, Dp, e0, e1, ep) => {
+  const wide = camera(16, 10);
+  // the skyline, NDC y over NDC x: about 58% of the frame height through
+  // the middle, rising toward the side edges, less on the right, where the
+  // tower's flat base sits low behind the anchor's shoulder culms
+  const sky = (x) => {
+    const e = Math.min(1, Math.max(0, (Math.abs(x) - 0.55) / 0.45));
+    return 0.16 + (x < 0 ? 0.42 : 0.3) * e * e * (3 - 2 * e);
+  };
+  const tipAt = (phi, el) => {
+    const c = Math.cos(el);
+    return project(wide, [Math.sin(phi * DEG) * c, Math.cos(phi * DEG) * c, CAM.h + Math.sin(el)]);
+  };
+  // the elevations (from the lens) at which a tip at azimuth phi enters the
+  // frame and at which it meets the skyline; null if it never shows under it
+  const span = (phi) => {
+    let lo = null;
+    let hi = null;
+    for (let e = 25; e <= 86; e += 0.5) {
+      const p = tipAt(phi, e * DEG);
+      const inside = Math.abs(p[0]) < 1 && p[1] > -1 && p[1] < 1;
+      if (lo == null && inside) lo = e;
+      if (lo != null && p[1] <= sky(p[0])) hi = e;
+    }
+    return lo == null || hi == null || hi <= lo ? null : [lo, hi];
+  };
+  // n blades at D0..D1, their tips from f0 to f1 of the way from where they
+  // enter the frame up to the skyline (fp biases them low)
+  const put = (n, kind, D0, D1, Dp, f0, f1, fp) => {
     for (let i = 0; i < n; i++) {
       const D = D0 + (D1 - D0) * Math.pow(R(), Dp);
       // gathered a little toward the middle, where the bottom edge is
       const u = R() * 2 - 1;
       const phi = Math.sign(u) * Math.pow(Math.abs(u), 1.25) * 88;
-      const el = (e0 + (e1 - e0) * Math.pow(R(), ep)) * DEG;
-      items.push({ kind, D, phi, L: Math.min(1.15, (D * Math.tan(el) + 0.02) / 0.985) });
+      const f = f0 + (f1 - f0) * Math.pow(R(), fp);
+      const sp = span(phi);
+      // below the frame either way: no blade
+      if (!sp) continue;
+      const el = (sp[0] - 1 + (sp[1] + 4 - sp[0]) * f) * DEG;
+      items.push({ kind, D, phi, L: Math.min(1.15, (D * Math.tan(el) + CAM.h) / 0.985) });
     }
   };
-  // the field behind: thin, paler, a few paces' worth of air in front of it
-  put(190, "far", 0.42, 0.95, 1.0, 45, 64, 1.3);
+  // the field behind: a sparse few, standing a pace or two off
+  put(110, "far", 0.42, 0.95, 1.0, 0.3, 1.0, 0.8);
   // the body of it, round your head
-  put(230, "mid", 0.15, 0.45, 0.9, 47, 77, 1.7);
+  put(150, "mid", 0.15, 0.45, 0.9, 0.1, 1.0, 1.4);
   // a low fringe along the bottom edge, the mass the rest rises out of
-  put(480, "mat", 0.06, 0.3, 1.1, 47, 61, 1.2);
+  put(420, "mat", 0.06, 0.3, 1.1, 0.0, 0.6, 1.2);
   // one that crosses the sun, in from the left edge, for the halation (its
   // azimuth is the sun's, seen from the zenith)
   items.push({ kind: "sun", D: 0.34, phi: -79, L: 0.9 });
@@ -352,8 +386,10 @@ export function buildGrass() {
     rest.st.depth = dep;
     const vary = 0.8 + 0.4 * R();
     const dry = R() < 0.1 ? 0.5 : 0;
-    const base = mix3(mix3(lin(0x1c2614), lin(0x34421f), dep), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
-    const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep), lin(0x7a7434), dry).map((c) => c * vary);
+    // a pace off the blades are no paler than at your shoulder: against
+    // the light they stay dark silhouettes, carried by their rims
+    const base = mix3(mix3(lin(0x1c2614), lin(0x34421f), dep * 0.3), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
+    const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep * 0.3), lin(0x7a7434), dry).map((c) => c * vary);
     // mostly a droop outward, along its own line; a third of them across it
     const across = R() < 0.35;
     blade(rest, R, {
@@ -375,13 +411,17 @@ export function buildGrass() {
   // ---- the nearest few: at your cheek, wide and dark, out of focus ----
   // Drawn over the anchor at full resolution (the lens defocuses them, in the
   // shader, by their distance), and kept off its azimuth so none hides it.
-  for (let i = 0, k = 0; i < 80 && k < 14; i++) {
+  // Under the same skyline, and low under it: a dark frame along the
+  // bottom edge, not a wall across the cumulus.
+  for (let i = 0, k = 0; i < 80 && k < 10; i++) {
     const side = k % 2 ? 1 : -1;
     const phi = side * (22 + 50 * R()) + (side > 0 ? 8 : 0);
     if (Math.abs(phi - HERO) < 9 || Math.abs(phi) > 74) continue;
     const D = 0.05 + 0.07 * R();
-    const el = (52 + 22 * R()) * DEG;
-    const L = Math.min(0.9, D * Math.tan(el) + 0.02);
+    const sp = span(phi);
+    if (!sp) continue;
+    const el = (sp[0] + (sp[1] - sp[0]) * (0.25 + 0.5 * R())) * DEG;
+    const L = Math.min(0.9, D * Math.tan(el) + CAM.h);
     const root = at(D, phi);
     if (!inFrame(root, L)) continue;
     k++;
@@ -539,7 +579,7 @@ void main() {
   // Root to tip: the base sits in the shade of the sward and is thick; the
   // tip is thin and up in the light.
   float s = clamp(vAlong, 0.0, 1.0);
-  float lift = mix(0.55, 1.15, smoothstep(0.0, 1.0, pow(s, 0.8)));
+  float lift = mix(0.55, 1.05, smoothstep(0.0, 1.0, pow(s, 0.8)));
   vec3 c = vCol * lift;
   // where across the blade itself this is, px, and how much of the pixel
   // the defocused blade covers: the overlap of the blade with the disc
@@ -569,7 +609,7 @@ void main() {
   float sward = smoothstep(0.06, 0.5, vH);
   c *= mix(0.4, 1.0, sward);
   float tw = lit * behind * mix(0.35, 1.0, s) * mix(0.25, 1.0, sward);
-  c = mix(c, TRANS * mix(0.55, 1.0, s), 0.45 * tw);
+  c = mix(c, TRANS * mix(0.55, 1.0, s), 0.2 * tw);
   // Across, over both: a shallow trough read as a cylinder, the edges about
   // a quarter darker, and a soft paler midrib down the centre.
   float cyl = mix(0.75, 1.0, sqrt(max(0.0, 1.0 - x * x)));
@@ -577,15 +617,16 @@ void main() {
   c *= cyl * rib;
   // Backlit: the core darkens, toward the sun-facing half and away from it
   // alike, so the light through the margin is what carries the blade.
-  c *= mix(1.0, 0.72, lit * exp(-x * x / 0.18));
-  // The value let in toward the sky: the air between you and a blade, and
-  // the skylight through it. A blade at your shoulder takes a little of
-  // what is behind it and stays green; the field a few paces off takes most
-  // of it, paler and bluer, so it falls back behind the anchor.
+  c *= mix(1.0, 0.62, lit * exp(-x * x / 0.18));
+  // The air between you and a blade: a pace or two of it, no more, so it
+  // only cools the farthest blades a touch toward the sky's hue at a low
+  // value. A leaf against the light is opaque and darker than what is
+  // behind it, never a pale ghost of the cloud: the field stays a solid
+  // dark silhouette under the sky and its rims carry it.
   float dep = clamp(vDepth, 0.0, 1.0);
-  float air = lit * (0.08 + 0.6 * smoothstep(0.0, 1.0, dep));
+  float air = lit * (0.03 + 0.07 * smoothstep(0.0, 1.0, dep));
   vec3 tint = mix(vec3(0.78, 1.0, 0.5), vec3(0.94, 0.98, 1.0), smoothstep(0.2, 0.9, dep));
-  c = mix(c, skyFar * tint * mix(0.55, 0.84, dep), air);
+  c = mix(c, skyFar * tint * 0.3, air);
   // The sun-facing edge: a thin warm yellow-green rim where the light
   // grazes through the leaf's margin. Against the light it is always there
   // (the sun is in front of you, up to the left), brighter toward the sun
@@ -597,10 +638,9 @@ void main() {
   // through its body with a bright line along one side.
   float edge = exp(-max(0.0, vHalf - abs(px)) / (1.2 + 0.1 * vHalf));
   float rim = smoothstep(0.3, 0.85, vSunward) * edge;
-  float rimK = (0.3 + 0.6 * sn + 0.45 * behind) * mix(0.55, 1.0, s) * (1.0 - 0.45 * dep);
+  float rimK = (0.35 + 0.6 * sn + 0.5 * behind) * mix(0.55, 1.0, s) * (1.0 - 0.2 * dep);
   c += RIM * rim * rimK * (0.04 + 0.96 * lit);
-  // and softer with distance: the far blades give up some coverage, so the
-  // half-resolution layer reads as a haze of grass rather than flat cards
-  float cov = vA * dof * mix(1.0, 0.5, lit * smoothstep(0.25, 1.0, dep));
+  // opaque at every distance: a blade's coverage is its own, near or far
+  float cov = vA * dof;
   outColor = vec4(c * cov, cov);
 }`;
