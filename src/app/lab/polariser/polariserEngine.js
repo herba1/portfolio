@@ -138,6 +138,30 @@ const VIGNETTE = 0.28;
 // than on the sky so their silhouettes do not go to soot.
 const BURN = 1.7;
 const BURN_DEG = 13;
+// Veiling glare. Round the sun a smooth additive sheet of light lay over the
+// corner: nothing there could go darker than it, so the truss and the pointed
+// tower's facade sat on a raised floor and the cumulus round the sun, their
+// shadows lifted toward their tops, went to cream mush. A burn only scales,
+// so it darkened the sheet with everything else instead of removing it.
+// Light that adds is read off the darkest things in the frame and taken away
+// before the print curve (tools/depth/bakes/polariser/veil.py): on a box-
+// filtered mip of the plate, the 5th-percentile luminance per tile, the lower
+// envelope of those floors against the angle from the sun, fitted to
+// B + A exp(-γ / deg) over the far floor B, in plate units of luminance and
+// in the sheet's own colour (normalised to unit luminance).
+//  - VEIL, the lens's glare, from the towers and the truss. It is small (the
+//    nearest solid is 9° out, where it adds 0.02 to a 0.03 floor) and is
+//    taken off every pixel in full.
+//  - AUREOLE, from the open sky's darkest pixels: the light the haze scatters
+//    forward round the sun, along the whole line of sight, in front of the
+//    cumulus as well as the gaps. It lifts the sky's floor from 0.35 to 2.5
+//    within 5°, which the towers, a few hundred metres off, hardly see. Only
+//    AUREOLE_TAKE of it comes off the sky, so the aureole survives as a glow
+//    round the sun while the cloud shadows near it drop back under their
+//    sunlit tops.
+const VEIL = { a: 0.195, deg: 5.0, colour: [1.23, 0.932, 0.994] };
+const AUREOLE = { a: 3.04, deg: 14.3, colour: [0.848, 1.04, 1.051] };
+const AUREOLE_TAKE = 0.6;
 
 const rad = (d) => (d * Math.PI) / 180;
 const lumNorm = (c) => {
@@ -226,6 +250,8 @@ uniform vec3 uShade;     // cloud split tone: skylight-lit shadow, sunlit top
 uniform vec3 uSunlit;
 uniform float uLodBias;
 uniform vec2 uBurn;      // stops at the sun, falloff in radians
+uniform vec4 uVeil;      // lens glare at the sun (rgb, plate units), falloff in radians
+uniform vec4 uAureole;   // the share of the aureole taken off the sky, likewise
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // Negative to print. Print density is a sigmoid in log exposure, so the
@@ -244,6 +270,14 @@ vec3 srgbEncode(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
+// Takes an additive glare v off c. Where c stands well above the glare this
+// is c - v; at and below it (a pixel darker than the fitted floor, or the
+// fit's error) it rolls smoothly into c² / v instead of clipping to black,
+// so the deepest shadows keep their texture.
+vec3 deflare(vec3 c, vec3 v) {
+  c = max(c, 0.0);
+  return c * c / (c + v);
+}
 vec3 decode(vec3 v) {
   vec3 y = pow(v, vec3(2.2));
   return y / max(1.0 - y, 0.004) * ${(1 / K).toFixed(6)};
@@ -292,10 +326,15 @@ void main() {
   vec3 d = unproject((vUv * 2.0 - 1.0) * uWin.xy + uWin.zw);
   vec2 puv = plateUv(d);
   vec3 enc = texture(uPlate, puv, uLodBias).rgb;
-  vec3 C = decode(enc);
   vec3 aux = texture(uAux, puv, uLodBias).rgb;
   float cg = dot(d, uSun);
   float gam = acos(clamp(cg, -1.0, 1.0));
+  // The plate's veiling glare, taken off first: everything below (the sky
+  // unmix, the halation, the glass, the burn and the print curve) works on
+  // the scene as it would have been without it.
+  vec3 veil = uVeil.rgb * exp(-gam / uVeil.w);
+  vec3 veilSky = veil + uAureole.rgb * exp(-gam / uAureole.w);
+  vec3 C = deflare(decode(enc), mix(veil, veilSky, aux.r));
 
   // Sky: every open-sky pixel is cloud laid over clear sky. The clear sky
   // behind it, S, is the plate's clear-sky-only field (clearsky.py: the
@@ -318,7 +357,7 @@ void main() {
   // values of difference decode to a tenfold change, so the aureole's
   // near-clipped sky round the sun is glare and cloud, not clear sky.
   float clipped = smoothstep(0.88, 0.96, max(enc.r, max(enc.g, enc.b)));
-  vec3 S = decode(texture(uClear, puv).rgb);
+  vec3 S = deflare(decode(texture(uClear, puv).rgb), veilSky);
   float Ls = dot(S, LUMA);
   float L = dot(C, LUMA);
   float alpha = clamp((L - Ls) / max((uCloudWhite - 1.0) * Ls, 1e-3), 0.0, 1.0);
@@ -358,8 +397,9 @@ void main() {
     near += decode(textureLod(uPlate, puv + o, haloLod).rgb);
     wide += decode(textureLod(uPlate, puv + 2.0 * o, haloLod + 1.0).rgb);
   }
-  near *= 0.125;
-  wide *= 0.125;
+  // The surround is mostly sky; the glare comes off it as off the sky.
+  near = deflare(near * 0.125, veilSky);
+  wide = deflare(wide * 0.125, veilSky);
   vec3 sur = 0.6 * near + 0.4 * wide;
   float spill = max(sur.r - C.r, 0.0);
   // Only on the dark side of the edge (the towers). Spilled onto the sky it
@@ -742,6 +782,8 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uSunlit, SUNLIT);
     gl.uniform1f(u.uLodBias, LOD_BIAS);
     gl.uniform2f(u.uBurn, BURN, rad(BURN_DEG));
+    gl.uniform4f(u.uVeil, ...VEIL.colour.map((v) => v * VEIL.a), rad(VEIL.deg));
+    gl.uniform4f(u.uAureole, ...AUREOLE.colour.map((v) => v * AUREOLE.a * AUREOLE_TAKE), rad(AUREOLE.deg));
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform1f(u.uSkyGrey, SKY_GREY);
     gl.uniform1f(u.uCloudWhite, CLOUD_WHITE);
