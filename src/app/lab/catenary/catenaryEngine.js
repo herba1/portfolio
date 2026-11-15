@@ -43,7 +43,8 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape } fr
 // ?viewTop=<row>, ?viewZoom=, ?poleAt= move the crop (VIEW).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, dering, hal, halNarrow, halWide,
-// diffuse, diffuseR, diffuseSteel, diffuseCap, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
+// diffuse, diffuseR, diffuseSteel, diffuseCap, polar, polarSat, polarHue,
+// polarRamp, polarFloor, polarKnee, polarHueFilm, vib, vibFloor, vibHue, vibV
 // override the grade; halThr sets the HALO pass's threshold, halDil,
 // halReach, halRing and halSat its ring round the silhouette; print and
 // printPin the PRINT curve.
@@ -263,25 +264,37 @@ const HAL_NARROW = [1.8, 1]; // sigma (device px at DPR 2), weight
 const HAL_RING = [0.75, 1.75, 2, 0.5];
 const HAL_RING_TINT = [200, 170, 150]; // sRGB, the ring's warm grey
 const HAL_WIDE = [12, 0.03];
-// The open sky deepens toward the zenith (the top edge): on top of the
-// polariser, it loses up to ZENITH of its value there.
-const ZENITH = 0.1;
 // Graduated sky density, the way a polariser deepens a summer sky toward the
-// zenith (here the top and upper right of the frame). Only the open blue
-// sky takes it: a chroma mask (saturation over ~0.3, hue 190-220 in the
-// plate's own sRGB) leaves cloud, steel and wires as shot. At the top edge
-// the sky loses POLAR of its value, easing to nothing at the bottom, with a
-// little more saturation and its hue drawn to about 208.
-const POLAR = 0.22;
+// zenith (here the frame's top-right corner, where the turned camera looks
+// furthest up). One smooth radial ramp from that corner, flat at the corner
+// and gone POLAR_RAMP frame heights out (the far bottom-left is 1.9): the
+// open sky (off the steel, off the cloud's matte, and chromatic: the open
+// cobalt is S ~0.9 everywhere, so the gate is 1 across all of it) loses up to
+// POLAR of its value along it, with a little more saturation. No hue or
+// value gate rides on it, so the ramp is the same function across the plate
+// and the sky past its edge (ZEN), and no band or smudge can come of either.
+// After every other grade in PLATE the open sky's hue is held, not mixed, at
+// POLAR_HUE (the plate's cobalt and zenith.py's fit both lean violet as they
+// darken), and its value (gamma) kept over POLAR_FLOOR by a soft floor
+// (knee POLAR_KNEE), so the deepest corner lands near herb ref 3's cobalt,
+// about rgb(2,68,126): hue 208, V ~0.5, never a navy smudge. POLAR_HUE is
+// the hue as printed. The film's per-channel curve crushes a cobalt's red
+// into the toe and turns it POLAR_HUE_FILM degrees further toward blue, so
+// the saturated sky is held that much short of it (see PLATE).
+const POLAR = 0.14;
 const POLAR_SAT = 0.08;
 const POLAR_HUE = 208;
+const POLAR_HUE_FILM = 6;
+const POLAR_RAMP = 3.2;
+const POLAR_FLOOR = 0.52;
+const POLAR_KNEE = 0.06;
 // Sky vibrance floor, after the polariser and before the film. The plate's
 // lower sky is a hazy powder blue (S ~0.46 as shot); a real summer sky under
 // a polariser holds its cyan-cobalt down to the horizon. Through the same
 // chroma mask, ungraduated, low-saturation sky is drawn toward VIB_FLOOR
 // (S' = max(S, mix(S, VIB_FLOOR, VIB))), its hue held at VIB_HUE, and the
 // brightest of it (V over ~0.7) loses up to VIB_V of its value. The
-// polariser's top-to-bottom deepening rides on top of this.
+// polariser's corner-to-corner deepening rides on top of this.
 const VIB = 0.4;
 const VIB_FLOOR = 0.85;
 const VIB_HUE = 208;
@@ -429,14 +442,15 @@ uniform vec3 uMap;   // ox, oy, k (device px per view px)
 uniform mat3 uHom;   // view px -> image px: the turned camera
 uniform vec2 uImg;   // image px
 uniform sampler2D uKey; // R structure, G cloud matte, B cloud light wide
-uniform vec4 uStruct;  // amount, gain, floor, zenith
+uniform vec4 uStruct;  // amount, gain, floor, (unused)
 uniform vec3 uStructTint;
 uniform vec3 uCloudTop; // linear
 uniform vec2 uGlow;     // cloud lift, diffusion
 uniform vec4 uSculpt;   // cloud range floor (gamma), S-curve amount, shade tint, core neutral
 uniform vec3 uCloudShade; // linear
 uniform vec2 uSun;     // toward the sun, image px direction (unit)
-uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
+uniform vec3 uPolar;   // value loss at the corner, saturation gain, hue held (0..1)
+uniform vec4 uPolarRamp; // radius (frame heights), value floor, knee (gamma), film hue shift (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 uniform vec4 uEdge;    // warm key from, to (gamma); relief gain; skylight edge amount
 uniform float uDering; // how far the plate's sharpening ring is held to the sky
@@ -577,24 +591,22 @@ void main() {
   // key's own ramp, so no band of ungraded, paler sky is left round it.
   vec3 hm = rgb2hsv(mix(pow(plateBiasAt(uv, 1.5).rgb, vec3(1.0 / 2.2)), pow(c, vec3(1.0 / 2.2)), ring));
   float hue = hm.x * 360.0;
-  float sky = smoothstep(0.08, 0.44, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
-            * smoothstep(0.25, 0.4, hm.z) * (1.0 - mix(key.r, smoothstep(0.3, 0.75, key.r), ring))
+  // The open sky by structure alone (POLAR): off the steel (as the de-ring
+  // holds it), off the cloud's matte, and chromatic at all.
+  float open = smoothstep(0.08, 0.44, hm.y) * (1.0 - mix(key.r, smoothstep(0.3, 0.75, key.r), ring))
             // Never the cloud itself (the bake's feathered matte): its skylit
             // hollows are pale blue by chroma alone and would deepen to cobalt.
             * (1.0 - key.g);
-  // Toward the zenith: the top edge, leaning to the upper right.
+  // The blue sky by chroma, for the vibrance floor below.
+  float sky = open * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue)) * smoothstep(0.25, 0.4, hm.z);
+  // Toward the zenith: one radial ramp from the frame's top-right corner.
   vec2 f = p / uRes;
-  float z = clamp(0.82 * (1.0 - f.y) + 0.18 * f.x, 0.0, 1.0);
-  z = z * z * (3.0 - 2.0 * z);
-  float w = sky * z;
+  float zd = length((vec2(1.0, 0.0) - f) * vec2(uRes.x / uRes.y, 1.0));
+  float zr = 1.0 - smoothstep(0.0, uPolarRamp.x, zd);
+  float w = open * zr;
   vec3 h = rgb2hsv(g);
-  float dh = fract(uPolar.z - h.x + 0.5) - 0.5;
-  h.x = fract(h.x + dh * 0.6 * w);
   h.y = clamp(h.y * (1.0 + uPolar.y * w), 0.0, 1.0);
   h.z *= 1.0 - uPolar.x * w;
-  // Zenith: straight top-down, so the sky is deepest at the top edge.
-  float zt = 1.0 - f.y;
-  h.z *= 1.0 - uStruct.w * sky * zt * zt;
   // Vibrance floor: the whole open sky, not graduated. Never in a cloud's
   // lit core (bright and nearly grey as shot): the floor there only fans the
   // plate's faint chroma blotches into colour, olive once the warm key lands.
@@ -772,6 +784,38 @@ void main() {
   // Alpha carries what may feed the halation (HALO_SRC): all of it but the
   // cloud's silhouette band. The wires and insulators blend over it with
   // their own alpha kept off it (blendFuncSeparate), so it survives them.
+  // The floor (POLAR_FLOOR), last, so no grade above can sink the cobalt to
+  // navy: an exposure, not a clamp. The sky's own light is read wide, the
+  // plate a few mips up, the lightest of a ring some 16 plate px round the
+  // pixel (so a wire or a member's dark never counts as the sky's), deepened
+  // along the ramp as the polariser deepens it, and lifted over the floor by
+  // a smooth max (knee uPolarRamp.z). Every pixel off the steel there takes
+  // the same gain, so a thin wire keeps its contrast against the sky.
+  vec2 pt = 1.0 / vec2(textureSize(uPlate, 0));
+  vec3 rq = plateLodAt(uv, 3.0).rgb;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982;
+    rq = max(rq, plateLodAt(uv + vec2(cos(a), sin(a)) * 16.0 * pt, 3.0).rgb);
+  }
+  float vr = pow(max(rq.r, max(rq.g, rq.b)), 1.0 / 2.2) * (1.0 - uPolar.x * zr);
+  float vk = vr - uPolarRamp.y;
+  float vf = uPolarRamp.y + 0.5 * (vk + sqrt(vk * vk + uPolarRamp.z * uPolarRamp.z));
+  c *= mix(1.0, pow(vf / max(vr, 1e-4), 2.2), 1.0 - key.r);
+  // Then the open sky's hue is held at POLAR_HUE, as the film will print it:
+  // its curve crushes a cobalt's red into the toe, so what reaches the print
+  // is green over blue. A saturated pixel's green is set from its blue as if
+  // its red were already gone (so a cobalt with a little red, the plate's,
+  // and one with none, zenith.py's past the edge, print the same hue); a
+  // pale one (a cloud's fringe) is held in plain HSV.
+  vec3 hk = rgb2hsv(pow(c, vec3(1.0 / 2.2)));
+  vec3 hc = hsv2rgb(vec3(uPolar.z, hk.yz));
+  float sh = smoothstep(0.5, 0.8, hk.y);
+  // Green's share of the way from red to blue (cobalt: blue the most, red
+  // the least), for the hue the film will turn to POLAR_HUE.
+  float kh = clamp((2.0 / 3.0 - uPolar.z + uPolarRamp.w * sh) * 6.0, 0.0, 1.0);
+  float rh = hc.r * (1.0 - sh);
+  hc.g = rh + (hc.b - rh) * kh;
+  c = mix(c, pow(hc, vec3(2.2)), open * (1.0 - line));
   outColor = vec4(c, 1.0 - rim);
   // The cover (see outCover): the steel and the photograph's thin wires.
   outCover = vec4(max(smoothstep(0.04, 0.6, key.r), line), 0.0, 0.0, 1.0);
@@ -1287,7 +1331,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     clamp(num("struct", STRUCT), 0, 1),
     clamp(num("structGain", STRUCT_GAIN), 0, 4),
     clamp(num("structFloor", STRUCT_FLOOR), 0, 0.1),
-    clamp(num("zenith", ZENITH), 0, 0.5),
+    0,
   ];
   const cloudTop = CLOUD_TOP.map((v, i) => toLin(v / 255) * CLOUD_AIM[i]);
   const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("diffuse", DIFFUSE), 0, 1)];
@@ -1323,6 +1367,12 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
+  const polarRamp = [
+    clamp(num("polarRamp", POLAR_RAMP), 0.2, 4),
+    clamp(num("polarFloor", POLAR_FLOOR), 0, 1),
+    clamp(num("polarKnee", POLAR_KNEE), 0.001, 0.3),
+    clamp(num("polarHueFilm", POLAR_HUE_FILM), -30, 30) / 360,
+  ];
   const vib = [
     clamp(num("vib", VIB), 0, 1),
     clamp(num("vibFloor", VIB_FLOOR), 0, 1),
@@ -1720,6 +1770,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     setZen(plateP);
     setGrade(plateP);
     gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
+    gl.uniform4fv(plateP.u.uPolarRamp, polarRamp);
     gl.uniform4fv(plateP.u.uVib, vib);
     gl.uniform2fv(plateP.u.uSun, sun);
     gl.uniform4fv(plateP.u.uEdge, edge);
