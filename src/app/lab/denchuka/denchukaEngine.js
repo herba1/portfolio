@@ -124,6 +124,7 @@ uniform sampler2D uAlpha;
 uniform sampler2D uSky;           // r: the sky with everything overhead gone (1 = sky); g: elevation; b: the cumulus
 uniform sampler2D uCloud;         // the cumulus's own colour (cloud.py)
 uniform sampler2D uClean;         // r: the hardware, g: the shaft: clean, choked coverage (solid.py)
+uniform sampler2D uScatter;       // the cumulus's light, blurred: r wide (~3.5% of the frame), g tight (~0.5%)
 uniform highp sampler2D uState;   // x: id, row 0 wires / 1 hardware / 2 poles: 1 = in place
 uniform vec2 uPlate;
 uniform int uNW;
@@ -183,14 +184,18 @@ vec3 hsv2rgb(vec3 c) {
 // sides take the blue of the sky that lights them, its sunlit tops go
 // warm-neutral.
 const vec3 COBALT = vec3(207.0, 0.78, 0.69);
-vec3 skyGrade(vec3 c, float deep) {
-  vec3 h = rgb2hsv(c);
+// the scan's own cloud's share of a pixel of its bare sky
+float scanCloud(vec3 h) {
   float deg = h.x * 360.0;
   // the scan's clear sky is in the azure band; anything else is its cloud
   float band = smoothstep(168.0, 184.0, deg) * (1.0 - smoothstep(236.0, 250.0, deg));
   float a = mix(1.0, clamp(1.0 - h.y / 0.74, 0.0, 1.0), band);
   // its cloud's share, with the thin haze over the sky (a < ~0.5) taken out
-  float cloudA = smoothstep(0.5, 0.95, a);
+  return smoothstep(0.5, 0.95, a);
+}
+vec3 skyGrade(vec3 c, float deep) {
+  vec3 h = rgb2hsv(c);
+  float cloudA = scanCloud(h);
   vec3 sky = hsv2rgb(vec3((COBALT.x + 3.0 * deep) / 360.0, COBALT.y, COBALT.z * mix(1.0, 0.77, deep)));
   // cloud: more range; shade sides to skylight blue, sunlit tops to warm white
   float v = clamp(0.86 + (h.z - 0.86) * 1.5, 0.0, 1.0);
@@ -418,6 +423,44 @@ vec3 solidColour(vec2 pp, ivec2 ip, int rk) {
   return plate(cpl, vec2(cq) + 0.5, ids(cq).w / 64);
 }
 
+// The cumulus in the air, not on it (scatterMap). A real tower is seen
+// through a few kilometres of lit air: its light scatters forward round its
+// own silhouette, so the cobalt pales toward cyan for a good way out from
+// every crown (the wide term, mostly green, a little blue, almost no red:
+// the sky's own hue lifted toward the white, ~(3,95,160) to ~(34,135,181)
+// over the last few percent of the frame before the edge), and the emulsion
+// lays a thin warm-neutral halation right at the rim (the tight term, red a
+// touch over green and blue), so the crowns roll off warm into the sky
+// instead of being cut out of it. Both are read off the cloud's own light,
+// blurred, so they follow every billow; both fade to a trace on the deep
+// zenith cobalt far from any cloud, and neither reaches into the cloud's own
+// relief (they are laid where its coverage falls below 1).
+const vec3 AIR_LIFT = vec3(0.03, 0.2, 0.1);
+const vec3 HALO_C = vec3(1.0, 0.94, 0.88);
+// b: the cloud's own coverage here (the cumulus's, or the scan's own cloud's)
+vec3 cloudAir(vec3 g, vec2 pp, float b, float deep) {
+  vec2 sc = texture(uScatter, pp / uPlate).rg;
+  float open = 1.0 - smoothstep(0.15, 0.8, b);
+  // dark (zenith) sky far from any cloud takes only a trace of it
+  float gate = mix(1.0, 0.6, deep) * smoothstep(0.008, 0.1, sc.r);
+  g += AIR_LIFT * pow(sc.r, 0.8) * gate * open;
+  // the tight ring: on the open sky beside the rim and on the rim itself,
+  // its light and its colour both: the saturated cyan the edge's air would
+  // otherwise brighten into is turned part way to the warm neutral
+  float ring = smoothstep(0.03, 0.5, sc.g) * (1.0 - smoothstep(0.6, 0.98, b)) * mix(1.0, 0.7, deep);
+  float y = dot(g, vec3(0.2126, 0.7152, 0.0722));
+  vec3 warm = HALO_C * (y / dot(HALO_C, vec3(0.2126, 0.7152, 0.0722)));
+  g = mix(g, warm, 0.35 * ring) + HALO_C * ring * 0.11;
+  return g;
+}
+// the same thin ring on what stands in front of the cloud (the shaft, the
+// hardware, a wire): the tower's light round its edge. open: how much of a
+// short neighbourhood is open air (so only the silhouette's edge takes it)
+vec3 cloudHalo(vec3 col, vec2 pp, float open, float k) {
+  float t = texture(uScatter, pp / uPlate).g;
+  return col + HALO_C * smoothstep(0.1, 0.8, t) * open * k;
+}
+
 void main() {
   vec2 pp = vec2(vUv.x, 1.0 - vUv.y) * uPlate;
   ivec2 ip = ivec2(floor(pp));
@@ -452,6 +495,7 @@ void main() {
   float deep = clamp(0.73 * sk.g + 0.5 * (1.0 - pp.y / uPlate.y), 0.0, 1.0);
   vec3 graded = skyGrade(behind, deep);
   if (sk.b > 0.002) graded = cloudEdge(cloudGrade(cloudTex(pp), sk.g), graded, sk.b);
+  graded = clamp(cloudAir(graded, pp, max(sk.b, scanCloud(rgb2hsv(behind))), deep), 0.0, 1.0);
   float skyA;
   if (hwUp || shUp) {
     // Over the hardware and the shaft the pixel is built again from its
@@ -464,6 +508,19 @@ void main() {
     vec3 obj = solidGrade(sc, 1.0);
     if (shUp && (!hwUp || cl.r < 0.5)) obj = sunRim(obj, shaftU(pp, e.z), dot(sc, LUMA));
     col = mix(bg, obj, cs);
+    // the cumulus's thin ring round the solid's silhouette: a few texels in
+    // from where the open air is, fading inward
+    if (cs > 0.01) {
+      float open = 0.0;
+      for (int k = 0; k < 8; k++) {
+        ivec2 o = ivec2(k == 0 || k == 3 || k == 5 ? -1 : (k == 2 || k == 4 || k == 7 ? 1 : 0),
+          k < 3 ? -1 : (k > 4 ? 1 : 0));
+        int pl2;
+        open += (1.0 - solidAt(ip + o * 2, pl2)) + 0.6 * (1.0 - solidAt(ip + o * 4, pl2)) + 0.3 * (1.0 - solidAt(ip + o * 7, pl2));
+      }
+      open = clamp(open / 5.0, 0.0, 1.0) * sk.r;
+      col = clamp(cloudHalo(col, pp, open * cs, 0.16), 0.0, 1.0);
+    }
     if (cw > 0.002) {
       vec3 under = plate(hwUp ? 1 : 2, pp, rk);
       col = mix(col, solidGrade(unmix(plate(0, pp, rk), under, cw)), cw);
@@ -494,6 +551,7 @@ void main() {
     }
     openSky /= 12.0;
     col = mix(col, graded, clamp(0.18 * openSky * cw * (1.0 - cs) * sk.r, 0.0, 1.0));
+    col = clamp(cloudHalo(col, pp, openSky * cw * (1.0 - cs) * sk.r, 0.08), 0.0, 1.0);
   }
   // what of this pixel is still sky (skyW) and of that the cumulus (cloudW),
   // after everything moving in front of it: the optics' keys (GLOW)
@@ -901,6 +959,80 @@ function imageTexture(gl, img, nearest = false) {
   return t;
 }
 
+// The cumulus's light in the air (COMP: cloudAir), built once at half the
+// plate's size: its coverage (sky.png B) times its light (cloud.webp), and
+// the scan's own cloud over the upper right the same way (its share and
+// value off the bare-sky plate, as skyGrade reads them),
+// blurred twice: r wide (sigma ~2.5% of the frame's width: the forward
+// scatter round the tower; its deepest pocket still a third of its crowns),
+// g tight (~0.3%: the emulsion's halation at its rim, keyed on the light
+// squared, so the sunlit crowns ring and the dim shaded veil does not, and
+// the ring is never brighter than the cloud it comes off). Blurred over a frame
+// that is opaque only inside the plate and read back unpremultiplied, so the
+// cloud running out of the frame's edges keeps its strength there.
+const SCATTER = { w: 1200, h: 800, wide: 30, tight: 4 };
+const smooth = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+function scatterMap(sky, cloud, p0, p3, idsImg) {
+  const { w, h } = SCATTER;
+  const mk = () => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    return [c, c.getContext("2d", { willReadFrequently: true })];
+  };
+  const [src, sx] = mk();
+  sx.drawImage(sky, 0, 0, w, h);
+  const cov = sx.getImageData(0, 0, w, h).data;
+  // the bare sky as COMP's plate(3) reads it: p3 where the ids give the
+  // pixel a rank, p0 where they do not (p3 is a grey filler there)
+  sx.imageSmoothingEnabled = false;
+  sx.drawImage(idsImg, 0, 0, w, h);
+  const rank = sx.getImageData(0, 0, w, h).data;
+  sx.imageSmoothingEnabled = true;
+  sx.drawImage(p0, 0, 0, w, h);
+  const own = sx.getImageData(0, 0, w, h).data;
+  sx.drawImage(p3, 0, 0, w, h);
+  const own3 = sx.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < own.length; i += 4) {
+    if (rank[i + 2] >= 64) for (let k = 0; k < 3; k++) own[i + k] = own3[i + k];
+  }
+  sx.drawImage(cloud, 0, 0, w, h);
+  const lit = sx.getImageData(0, 0, w, h);
+  const d = lit.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const t = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+    const b = cov[i + 2];
+    // the scan's own cloud (COMP: skyGrade), off the bare-sky plate: its
+    // share read from its saturation in the azure band, its light its value
+    const [r, g, bl] = [own[i], own[i + 1], own[i + 2]];
+    const mx = Math.max(r, g, bl);
+    const c = mx - Math.min(r, g, bl);
+    const hue = c === 0 ? 0 : mx === r ? 60 * (((g - bl) / c + 6) % 6) : mx === g ? 60 * ((bl - r) / c + 2) : 60 * ((r - g) / c + 4);
+    const band = smooth(168, 184, hue) * (1 - smooth(236, 250, hue));
+    const sat = mx > 0 ? c / mx : 0;
+    const a = smooth(0.5, 0.95, 1 - band + band * clamp(1 - sat / 0.74, 0, 1));
+    const v = mx / 255;
+    d[i] = Math.max(b * (0.35 + 0.65 * t), a * 255 * (0.35 + 0.65 * v));
+    d[i + 1] = Math.max(b * t * t, a * 255 * v * v);
+    d[i + 3] = 255;
+  }
+  sx.putImageData(lit, 0, 0);
+  const out = new ImageData(w, h);
+  const o = out.data;
+  [SCATTER.wide, SCATTER.tight].forEach((r, ch) => {
+    const [, bx] = mk();
+    bx.filter = `blur(${r}px)`;
+    bx.drawImage(src, 0, 0);
+    const b = bx.getImageData(0, 0, w, h).data;
+    for (let i = 0; i < b.length; i += 4) o[i + ch] = b[i + ch];
+  });
+  for (let i = 3; i < o.length; i += 4) o[i] = 255;
+  return out;
+}
+
 function target(gl, w, h) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -1078,6 +1210,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
   const skyTex = imageTexture(gl, imgs[6]);
   const cloudTex = imageTexture(gl, imgs[7]);
   const solidTex = imageTexture(gl, imgs[8]);
+  const scatterTex = imageTexture(gl, scatterMap(imgs[6], imgs[7], imgs[0], imgs[3], imgs[4]));
 
   // Element table.
   // a is the element's progress here, so the span's start is kept as from
@@ -1291,6 +1424,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     bindTex(7, skyTex, u.uSky);
     bindTex(8, cloudTex, u.uCloud);
     bindTex(9, solidTex, u.uClean);
+    bindTex(10, scatterTex, u.uScatter);
     gl.uniform2f(u.uPlate, PW, PH);
     gl.uniform1i(u.uNW, nw);
     gl.uniform4fv(u.uW, uW);
@@ -1468,7 +1602,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [...plates, idsTex, alphaTex, skyTex, cloudTex, solidTex, stateTex].forEach((t) => gl.deleteTexture(t));
+      [...plates, idsTex, alphaTex, skyTex, cloudTex, solidTex, scatterTex, stateTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
