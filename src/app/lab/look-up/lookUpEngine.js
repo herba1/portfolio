@@ -6,8 +6,9 @@ import { createFilm } from "../_kit/film";
 // The street is one 360 capture (Poly Haven's Canary Wharf, CC0). Its own
 // sky is a flat haze, so above the towers a second capture is laid in
 // through the street's sky matte: Poly Haven's Kloofendal 48d partly cloudy
-// pure sky (CC0), fair-weather cumulus with sunlit tops and skylit bases,
-// its open blue redrawn as one cobalt ramp by elevation. Graded offline
+// pure sky (CC0), fair-weather cumulus relit by the street's own low warm
+// sun from the right (warm sunward domes, skylit blue folds), its open blue
+// redrawn as one cobalt ramp by elevation. Graded offline
 // (tools/depth/bakes/look-up) and stored as a cubemap. Every pixel is a ray:
 // its angle from the centre of the frame comes from one radial family,
 //

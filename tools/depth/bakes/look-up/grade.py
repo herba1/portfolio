@@ -47,21 +47,24 @@ def cap_maps(w, h_eq, ppd):
     span = 180.0 * h_eq / (w / 2)
     mu = (az / 360 * w - 0.5).astype(np.float32)
     mv = ((90 - elev) / span * h_eq - 0.5).astype(np.float32)
-    return mu, mv, elev
+    # the cap's own lat/lon (degrees) and how a world vector reads in its
+    # frame (world x, y, z = xr, zr, -yr), for the sun in _sunlit
+    geo = (np.degrees(lat).astype(np.float32), np.degrees(lon).astype(np.float32), lambda v: np.array([v[0], -v[2], v[1]], np.float32))
+    return mu, mv, elev, geo
 
 def grade_cap(eq0, wsky, P, prof, sky2=None):
     h, w, _ = eq0.shape
     ppd = w / 360
-    mu, mv, elev = cap_maps(w, h, ppd)
+    mu, mv, elev, geo = cap_maps(w, h, ppd)
     pad = 4
     padw = lambda a: np.concatenate([a[:, -pad:], a, a[:, :pad]], 1)
     rm = lambda a: cv2.remap(padw(a), mu + pad, mv, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     R, WR = rm(eq0), rm(wsky)
     S = None if sky2 is None else rm(sky2)
-    out, _, _, _ = _grade(R, P, w, elev=elev, wsky_in=WR, prof=prof, sky2=S)
+    out, _, _, _ = _grade(R, P, w, elev=elev, wsky_in=WR, prof=prof, sky2=S, geo=geo)
     return out
 
-def _grade(eq, P, w, elev=None, wsky_in=None, prof=None, sky2=None):
+def _grade(eq, P, w, elev=None, wsky_in=None, prof=None, sky2=None, geo=None):
     h = eq.shape[0]
     span = 180.0 * h / (w / 2)
     if elev is None:
@@ -69,7 +72,7 @@ def _grade(eq, P, w, elev=None, wsky_in=None, prof=None, sky2=None):
     Y = eq @ LUMA
     if wsky_in is not None:
         if sky2 is not None:
-            return _composite(eq, P, w, elev, wsky_in, sky2, prof)
+            return _composite(eq, P, w, elev, wsky_in, sky2, prof, geo)
         return _grade2(eq, P, w, elev, Y, wsky_in, prof)
     # --- sky mask: bright, connected to the zenith
     m = (Y > P['skyY']).astype(np.uint8)
@@ -195,10 +198,10 @@ def _shoulder(out, P):
 # toward the sun and the horizon), never by the cloud gaps' shapes. The clouds
 # keep their drawing and are toned warm-neutral on the lit tops, skylight blue
 # in the shaded bases.
-def _composite(eq, P, w, elev, wsky, sky2, prof):
+def _composite(eq, P, w, elev, wsky, sky2, prof, geo=None):
     # eq and sky2 are temporaries here (wrapped or remapped by the caller), so
     # they are worked in place: at 8K every full-size copy is a third of a GB.
-    sky, alpha, prof = _sky2(sky2, P, w, elev, prof)
+    sky, alpha, prof = _sky2(sky2, P, w, elev, prof, geo)
     del sky2
     eq, wsky = _edges(eq, wsky, w, P)
     eq *= P['expo'] * np.array(P['restTint'], np.float32)
@@ -237,7 +240,7 @@ def _quarter(a):
     h, w = a.shape[:2]
     return cv2.resize(a, (max(1, w // 4), max(1, h // 4)), interpolation=cv2.INTER_AREA)
 
-def _sky2(K, P, w, elev, prof):
+def _sky2(K, P, w, elev, prof, geo=None):
     np.minimum(K, P['s2Clamp'], out=K); K *= P['s2Expo']
     Ks = cv2.GaussianBlur(K, (0, 0), w / 8192 * P['s2Denoise'])
     b = (Ks[..., 2] - Ks[..., 0]) / (Ks[..., 2] + 1e-4)
@@ -269,10 +272,15 @@ def _sky2(K, P, w, elev, prof):
     np.maximum(K, 0, out=K); K *= smooth(0.02, 0.15, alpha)[..., None]
     Yc = K @ LUMA
     Yown = Yc / np.maximum(alpha, 0.3)
-    lit = smooth(P['s2ShLo'], P['s2ShHi'], Yown)[..., None]
+    # lit: how far each part of a cloud faces the street's low warm sun (see
+    # _sunlit), so the cumulus take the same key as the sunlit stone
+    if geo is None:
+        pw = (K.shape[1] - w) // 2
+        lon = ((np.arange(K.shape[1]) - pw + 0.5) / w * 360).astype(np.float32)[None, :]
+        geo = (elev, lon, lambda v: np.asarray(v, np.float32))
+    lit = _sunlit(alpha, Yown, w, geo, P)
     tLit = np.array(P['cloudLit'], np.float32); tSh = np.array(P['cloudShade'], np.float32)
-    tint = tSh + (tLit - tSh) * lit
-    del lit
+    tint = tSh + (tLit - tSh) * lit[..., None]
     tint /= (tint @ LUMA)[..., None]
     K /= (Yc + 1e-5)[..., None]                          # the cloud's own chroma
     K -= tint; K *= P['s2Keep']; K += tint               # toward the lit/shade tint
@@ -283,7 +291,16 @@ def _sky2(K, P, w, elev, prof):
     # skylight lift: the shaded bases are lit by the whole blue dome, so on
     # film they open up cool instead of sinking to grey
     Yc *= 1 + P.get('s2ShadeLift', 0) * (1 - smooth(P['s2ShLo'], P['s2ShHi'], Yown))
-    del Yown
+    # the sun's key: sunward domes up, the folds and bases away from it down
+    Yc *= np.exp(P['sunKey'] * (lit - P['sunPivot']))
+    # clarity inside the cloud only: the domes' own texture and edges, from
+    # the capture's log luminance against a masked blur of it (sunClarR
+    # degrees), soft-clipped so no edge rings
+    Yc *= _clarity(Yown, alpha, w, P)
+    # and the dome's skylight filling the shade, so the folds open up blue
+    # instead of sinking to slate grey
+    Yc += P['sunSky'] * (1 - lit) * alpha
+    del Yown, lit
     K *= Yc[..., None]
     del Yc
     # the open blue: a smooth cobalt ramp by elevation, lit by the capture's
@@ -295,6 +312,63 @@ def _sky2(K, P, w, elev, prof):
     glow *= P['skyGain'] * (1 - alpha)
     K += skyc * glow[..., None]
     return K, alpha, prof
+
+# The street's key light is a low warm sun from the right of the resting view
+# (sunAz, sunEl: the sunlit stone and the warm sills all sit on that side), but
+# the cumulus capture is lit from elsewhere. So each cloud is relit by it: on
+# the sky, the direction toward the sun at every pixel is the great circle
+# toward (sunAz, sunEl); the cloud's density (its matte, blurred at the puff
+# and mass scales) and its own luminance (the domes, read as height) are
+# differentiated along that direction. Where density falls toward the sun the
+# cloud faces it and takes the warm-neutral key; where it falls away, and deep
+# under a thick mass, the cloud is in its own shade and lit by the blue dome.
+# geo: (lat, lon) in degrees on the grid being graded and a function taking a
+# world vector into that grid's frame (the equirect, or the rotated cap).
+def _sun_vec(P):
+    a, e = np.radians(P['sunAz']), np.radians(P['sunEl'])
+    return np.array([np.cos(e) * np.sin(a), np.sin(e), np.cos(e) * np.cos(a)], np.float32)
+
+def _sunlit(alpha, Yown, w, geo, P):
+    lat, lon, to_frame = geo
+    s = to_frame(_sun_vec(P))
+    la, lo = np.radians(lat), np.radians(lon)
+    # the sun's tangent direction, in (east, north) of the grid's lat/lon
+    te = s[0] * np.cos(lo) - s[2] * np.sin(lo)
+    tn = -s[0] * np.sin(la) * np.sin(lo) + s[1] * np.cos(la) - s[2] * np.sin(la) * np.cos(lo)
+    tl = np.sqrt(te * te + tn * tn) + 1e-4
+    ppr = w / (2 * np.pi)
+    ce = (te / tl * ppr / np.maximum(np.cos(la), 0.2)).astype(np.float32)
+    cn = (tn / tl * ppr).astype(np.float32)
+    def toward(a):
+        # d a / d(angle toward the sun), per radian (rows run north to south)
+        gy, gx = np.gradient(a)
+        return gx * ce - gy * cn
+    ppd = w / 360
+    al = alpha.astype(np.float32)
+    lit = np.zeros_like(al)
+    for sd, wt in ((P['sunR1'], P['sunW1']), (P['sunR2'], P['sunW2'])):
+        D = cv2.GaussianBlur(al, (0, 0), ppd * sd)
+        lit -= toward(D) * (np.radians(sd) * 2.5 * wt)
+    # the domes: the cloud's own light as height, at dome scale
+    H = cv2.GaussianBlur(np.log(np.maximum(Yown, 1e-3)).astype(np.float32), (0, 0), ppd * P['sunRb'])
+    lit -= np.tanh(toward(H) * np.radians(P['sunRb']) * 2.5) * P['sunWb']
+    # thick mass: the base we see from below is the shaded side
+    D3 = cv2.GaussianBlur(al, (0, 0), ppd * P['sunRt'])
+    lit -= (D3 - 0.5) * P['sunThick']
+    lit += P['sunBias']
+    lit *= P['sunGain']
+    return (0.5 + 0.5 * np.tanh(lit)).astype(np.float32)
+
+def _clarity(Yown, alpha, w, P):
+    if P.get('sunClar', 0) <= 0:
+        return 1
+    m = smooth(0.25, 0.7, alpha).astype(np.float32)
+    lY = np.log(np.maximum(Yown, 1e-3)).astype(np.float32)
+    s_ = w / 360 * P['sunClarR']
+    bl = cv2.GaussianBlur(lY * m, (0, 0), s_) / (cv2.GaussianBlur(m, (0, 0), s_) + 1e-4)
+    d = lY - bl
+    c = P['sunClarClip']
+    return np.exp(np.tanh(d / c) * c * P['sunClar'] * m)
 
 def _profile2(K, b, elev1, P):
     # per elevation: the open sky's blueness and its luminance
@@ -344,7 +418,9 @@ def _sky_ramp(elev, P):
     tt = np.clip(np.asarray(elev, np.float32) / 90, 0, 1)[..., None]
     zen, mid, low, hor = [s2l(c) for c in P['skyHex']]
     def lerp(a, b_, x): return a + (b_ - a) * x
-    return np.where(tt > 0.5, lerp(mid, zen, smooth(0.5, 1.0, tt)), np.where(tt > 0.17, lerp(low, mid, (tt - 0.17) / 0.33), lerp(hor, low, tt / 0.17))).astype(np.float32)
+    # (mid to zenith on a straight ramp, so the blue keeps deepening right up
+    # to the zenith instead of flattening out above 70 degrees)
+    return np.where(tt > 0.5, lerp(mid, zen, (tt - 0.5) * 2), np.where(tt > 0.17, lerp(low, mid, (tt - 0.17) / 0.33), lerp(hor, low, tt / 0.17))).astype(np.float32)
 
 def _buildings1(rest, wsky, w, P, elev):
     m = np.clip(1 - wsky, 0, 1).astype(np.float32)
@@ -456,8 +532,12 @@ def _tower_curve(graded, mblur, w, P):
 # (cloudLit) while the shaded folds keep the skylight blue (cloudShade).
 # (aLo..sharpA only drive the street's own sky, used when no sky2 is given.)
 # sky2Yaw turns the cumulus capture so its sun (azimuth 214, 48 degrees up in
-# the HDRI) stands at 200, behind the engine's resting view (YAW0 = 20): the
-# clouds overhead are front-lit, white tops over skylit bases, as in ref 3.
+# the HDRI) stands at 200, behind the engine's resting view (YAW0 = 20). The
+# capture's own light reads flat overhead, so the clouds are relit (_sunlit)
+# by the street's key instead: a low warm sun at sunAz/sunEl, from the right
+# of the resting view, the side the sunlit stone and the warm sills are on.
+# Looking up, each puff splits warm cream on its sunward domes to skylight
+# blue in its folds and away side, as in ref 3.
 # bLit/bWarm*: the sunlit stone is the one warm note against the cobalt.
 # bKeep*/bWB*/bRefl*: the towers keep their own colour on top of that ramp
 # (blue-green glass, steel, warm stone) and the glass and shaded faces take
@@ -465,13 +545,15 @@ def _tower_curve(graded, mblur, w, P):
 # negative instead of a toned print under a colour sky (see _buildings1).
 # skyHex is a soft film cobalt, not polariser ink: lighter and less
 # saturated (the engine's film pass adds only a little blue depth on top), so
-# the frame lands near #1f5fae at the zenith and #3f8fcf toward the edges.
-# cloudShade/s2Keep/s2ShadeLift: the cloud bases take the dome's skylight,
-# opened up and cool; the warm cream of the tops comes from the engine's
-# print shoulder.
+# the frame deepens on a straight ramp to about #235fb0 at the zenith and
+# lightens toward the horizon.
+# cloudShade/s2Keep/s2ShadeLift/sunSky: the cloud bases take the dome's
+# skylight, opened up and cool; cloudLit and the engine's print shoulder warm
+# the sunward tops. sunKey (log luminance, about sunPivot) sets how far apart
+# the two sides sit; sunClar* is the clarity inside the cloud.
 P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
-         skyHex=['#1a63c0', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
-         expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.52, 0.72, 1.0],
+         skyHex=['#0e5ec8', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
+         expo=0.36, cloudLit=[1.0, 0.92, 0.78], cloudShade=[0.32, 0.6, 1.0],
          restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3,
          bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#201f1e', bLit='#d6c3a2', bLitGain=1.12, bFloor=0.25,
          bDetail=1.0, bHlLo=0.35, bHlHi=1.0, bWarmR=0.25, bWarmB=0.3,
@@ -479,5 +561,9 @@ P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          bLocal=0.35, bLcR=0.35, bLcClip=0.35, bCon=1.18, bPivot=0.12, bConTop=0.5, bToe=0.007,
          # the second sky (see _sky2)
          sky2Yaw=-14.0, s2Clamp=40.0, s2Expo=0.8, s2Denoise=1.0, s2Lo=0.45, s2Hi=0.9,
-         s2Gap1=1.5, s2Gap2=8.0, s2ShLo=0.25, s2ShHi=1.1, s2Keep=0.1, s2Mid=0.7, s2Form=0.25, s2ShadeLift=0.3,
-         s2CloudGain=1.0, s2Glow=0.5, eRad=2.0)
+         s2Gap1=1.5, s2Gap2=8.0, s2ShLo=0.25, s2ShHi=1.1, s2Keep=0.05, s2Mid=0.7, s2Form=0.25, s2ShadeLift=0.8,
+         s2CloudGain=1.0, s2Glow=0.5, eRad=2.0,
+         # the clouds' key light (see _sunlit) and their clarity
+         sunAz=120.0, sunEl=28.0, sunR1=2.0, sunW1=0.9, sunR2=5.0, sunW2=1.1, sunRb=0.6, sunWb=1.0,
+         sunRt=8.0, sunThick=1.2, sunBias=0.1, sunGain=2.0, sunKey=1.5, sunPivot=0.55,
+         sunClar=1.5, sunClarR=0.3, sunClarClip=0.3, sunSky=0.1)
