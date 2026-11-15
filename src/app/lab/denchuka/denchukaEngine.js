@@ -52,10 +52,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // behind the transformers, clear cobalt over it (cloud.py: Poly Haven's Skidpan HDRI,
 // CC0, cut at its own resolution and placed under this camera so its
 // verticals converge with the pole's), laid into the same regrade through
-// the same matte (sky.png B its soft coverage, cloud.webp its unmixed
-// value, and in B - R where its flank's base is): its sunlit tops warm-neutral and rolled off below white, its
-// shade pockets skylight blue, keeping the billows' own relief, deepening up
-// the sky with the cobalt. Each removal
+// the same matte (sky.png B its soft coverage, cloud.webp its light, from
+// its deepest shade pocket to its brightest crown): its sunlit crowns
+// warm-neutral and rolled off below white, its shade pockets a saturated
+// skylight blue, keeping the billows' own relief, deepening up the sky with
+// the cobalt. Each removal
 // uncovers more of it; at the end it is the subject of the clean sky.
 //
 // Query: ?year=0..1 holds the years (elements caught mid-motion, as a still);
@@ -189,42 +190,32 @@ vec3 skyGrade(vec3 c, float zen) {
 }
 // The towering cumulus (cloud.py: a photographed tower, unclipped, placed
 // under this camera) graded into the same light, so it glows and carries the
-// frame: the bright subject the dark pole cuts across. Its upper half is
-// sunlit: from the foot of the roll-off (~0.6 in the bake) to the crowns it
-// runs ~0.89-0.975 in the sun's own warm neutral (the crowns at ~240-250 on
-// screen), each billow keeping its drawing, none of it clipped. Its body, in
-// its own shade, is lit by a whole bright summer sky: its pockets a clear,
-// saturated skylight blue (hue ~205, sat ~0.3), its lit lobes paling toward
-// white, so the tower has volume (sunlit crowns against blue shade) and is
-// never a milky grey: its billows stretched about the bake's shade (x1.8) so
-// the folds between them go down to ~0.75 and no further (a deeper stretch
-// reads as an overcast mass, and mottles), the blue carrying the depth more
-// than the value does, a little deeper and bluer the higher up the sky it is
-// (the cobalt ramp, zen). One lightness curve runs through shade and sun, so
-// no lobe's edge steps or rings. The sun on the crowns is the same
-// sun as the concrete, a warm neutral (#fff9f3) that the film's own warmth
-// carries the rest of the way.
+// frame: the bright subject the dark pole cuts across. The bake carries one
+// number, the tower's light t (its own log radiance over its own range, 0 its
+// deepest shade pocket, 1 its brightest crown, across all 8 bits), and this
+// turns it into the whole relief on one curve, so no lobe's edge steps or
+// rings: the shade pockets, lit only by a whole bright summer sky, a clearly
+// saturated skylight blue (hue ~205, sat ~0.42, value ~0.70); the shaded body
+// a clear blue paling as each billow catches more light; the sunlit flanks
+// and crowns in the sun's own warm neutral at ~0.92-0.97, the top percent or
+// two rolled off just under white (~250 on screen), none of it clipped. So
+// the tower has volume, luminous crowns stepping down into blue shade, and is
+// never a milky grey wash. A little deeper and bluer the higher up the sky it
+// is (the cobalt ramp, zen). The sun on the crowns is the same sun as the
+// concrete, a warm neutral (#fff9f3) that the film's own warmth carries the
+// rest of the way.
 const vec3 SUN = vec3(1.0, 0.978, 0.952);
 vec3 cloudGrade(vec3 c, float zen) {
-  float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  // one lightness curve through shade and sun, so a lobe's edge never steps:
-  // the shade's billows stretched (x1.8 about the bake's ~0.6, the folds
-  // between them down to ~0.75, its lit lobes up to ~0.89), then a gentler
-  // run up through the sunlit flanks to the crowns (~0.975)
-  float L = v < 0.6 ? 0.89 + (v - 0.6) * 1.8 : 0.89 + (v - 0.6) * 0.42;
-  L = clamp(L, 0.72, 0.975);
+  float t = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  // lightness: the pockets ~0.70, the body ~0.78-0.85, the crowns ~0.92-0.97,
+  // the brightest percent or two rolled off toward ~0.98-0.99
+  float L = min(0.70 + 0.27 * t + 0.03 * smoothstep(0.55, 0.95, t), 0.99);
   // how much of the sun this face sees: its colour only, wide and soft
-  float top = smoothstep(0.6, 0.84, v);
-  // skylight: a clear saturated blue (hue ~205) in the shade pockets, deeper
-  // and a touch bluer up the sky, its saturation falling as a billow catches
-  // more light; never pale cyan, never a dead grey
-  float ss = mix(0.32, 0.08, smoothstep(0.78, 0.93, L)) * mix(0.95, 1.08, zen);
-  // the base of the flank (cloud.py's underside cue, B - R in the bake): lit
-  // only by the sky under it, a deeper, more saturated skylight blue (its
-  // shade only: a lit lobe low on it stays white)
-  float base = clamp((c.b - c.r) * 5.0, 0.0, 1.0) * (1.0 - smoothstep(0.82, 0.9, L));
-  ss = mix(ss, 0.44, base);
-  vec3 shadeC = hsv2rgb(vec3((205.0 + 3.0 * zen + 2.0 * base) / 360.0, ss, L * mix(1.0, 0.97, zen)));
+  float top = smoothstep(0.5, 0.86, t);
+  // skylight: saturated in the pockets, falling as a billow catches more
+  // light, a touch more up the sky; never pale cyan, never a dead grey
+  float ss = mix(0.4, 0.05, smoothstep(0.08, 0.8, t)) * mix(0.95, 1.06, zen);
+  vec3 shadeC = hsv2rgb(vec3((205.0 + 3.0 * zen) / 360.0, ss, L * mix(1.0, 0.975, zen)));
   vec3 sunC = SUN * L;
   return mix(shadeC, sunC, top);
 }
@@ -311,32 +302,12 @@ vec3 unmix(vec3 withIt, vec3 behind, float a) {
   return clamp((withIt - (1.0 - a) * behind) / max(a, 0.2), 0.0, 1.0);
 }
 
-// The cumulus's value, debanded. Half the tower lives in its shade, in the
-// bake's 0.5-0.6 (some 25 steps of 8 bits), which the grade stretches (x1.8,
-// and its skylight saturation with it), so the steps came up on screen as
-// flat, hard-edged plateaus: a posterised, oil-paint body. Each pixel is
-// averaged with the cloud round it (8 taps, 3 and 6 texels out, turned per
-// pixel) but only with taps within a step or two of its own value, so a
-// plateau's edge becomes the soft ramp it stands for and a billow's real
-// edge (several steps at once) stays drawn. (Not in the sun, over ~0.62,
-// where the grade compresses the steps and every one is the billows' drawing.)
+// The cumulus's light, as baked. (Its shade once lived in some 25 steps of 8
+// bits and was debanded here by averaging each pixel with the cloud round
+// it, which smeared the billows; the bake now spreads the light across all
+// 256 steps, so it is drawn at its own resolution, as crisp as the wires.)
 vec3 cloudTex(vec2 pp) {
-  vec3 c0 = texture(uCloud, pp / uPlate).rgb;
-  float v0 = dot(c0, LUMA);
-  if (v0 > 0.64) return c0;
-  float sh = 1.0 - smoothstep(0.6, 0.64, v0);
-  float r0 = fract(sin(dot(floor(pp), vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
-  vec3 acc = c0;
-  float w = 1.0;
-  for (int k = 0; k < 8; k++) {
-    float ang = r0 + float(k) * 0.7854;
-    vec2 o = vec2(cos(ang), sin(ang)) * ((k & 1) == 0 ? 3.0 : 6.0);
-    vec3 c = texture(uCloud, (pp + o) / uPlate).rgb;
-    float wk = sh * (1.0 - smoothstep(1.5 / 255.0, 3.5 / 255.0, abs(dot(c, LUMA) - v0)));
-    acc += c * wk;
-    w += wk;
-  }
-  return acc / w;
+  return texture(uCloud, pp / uPlate).rgb;
 }
 
 // how much of a plate pixel is still covered by a standing piece (a wire,

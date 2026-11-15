@@ -45,20 +45,26 @@
 # cloud thinning into cobalt, with no pale band of the HDRI's sky between
 # them. Its shade side, lit by the sky, is a little blue itself, so the body
 # is made solid inside its silhouette. Its edge, all round the tower, is
-# then feathered from its signed distance over ~13-17 plate px reaching into
-# the silhouette, its value losing its contrast toward it, and the comp
-# turns the falloff to the sky's hue (the edge, below; COMP cloudAir).
+# then feathered from its signed distance over ~10-16 plate px reaching into
+# the silhouette (~30 on the anvil, its thin outflow), its light losing its
+# contrast toward it, and the comp turns the falloff to the sky's hue (the
+# edge, below; COMP cloudAir). The anvil's shelf, a flat shade with a hard
+# base under the anvil's lobe, dissolves up from its base into the blue (the
+# anvil, below). A small pocket of the HDRI's sky caught in the tower's foot
+# is filled (HOLE_MAX), even where it runs out of the frame.
 #
 # Tone: linear radiance, each turret set against its neighbours and each
 # billow's own light and shade lifted (most in the shade side, where the
-# HDRI's are faint), then laid over a floor into display values the live
-# grade (denchukaEngine.js cloudGrade) stretches and tints: the shade
-# pockets skylight blue, the sunlit flanks and crowns warm-neutral, lit from
-# the right as the pole is.
+# HDRI's are faint), then written as the tower's light t, its log radiance
+# over its own range across all 8 bits (0 its deepest shade pocket, 1 its
+# brightest crown), which the live grade (denchukaEngine.js cloudGrade) turns
+# into the whole relief: the pockets a saturated skylight blue (hue ~205, sat
+# ~0.4, value ~0.70), the sunlit flanks and crowns warm-neutral at
+# ~0.92-0.97, the top percent or two rolled off just under white.
 #
-# Writes cloud.webp (RGB: the cloud's value, opaque, neutral but for the
-# underside's skylight cue in B - R; the underside, below) and the B channel of
-# sky.png (the cloud's coverage). Run after export.py, which writes sky.png R, G.
+# Writes cloud.webp (R = G = B: the cloud's light t, opaque) and the B channel
+# of sky.png (the cloud's coverage). Run after export.py, which writes sky.png
+# R, G.
 import os, sys, json
 import numpy as np, cv2
 
@@ -296,6 +302,16 @@ sil = cv2.morphologyEx((a > 0.4).astype(np.uint8), cv2.MORPH_CLOSE, ell(8))
 n, lab, _, _ = cv2.connectedComponentsWithStats(1 - sil, connectivity=4)
 edge = np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))
 sil = (~np.isin(lab, edge) | (sil > 0)).astype(np.uint8)
+# ... unless it is small: a pocket of the HDRI's sky caught in the tower's
+# foot at the frame's bottom-right corner reaches two edges of the frame, and
+# laid over the cobalt it showed as a saturated blue blob with a hard edge in
+# the cloud's base, at every year. Nothing under HOLE_MAX plate px is sky.
+HOLE_MAX = 20000
+n, lab, st, _ = cv2.connectedComponentsWithStats(1 - sil, connectivity=4)
+hole = np.isin(lab, [i for i in range(1, n) if st[i, cv2.CC_STAT_AREA] < HOLE_MAX])
+sil = (hole | (sil > 0)).astype(np.uint8)
+hole = cv2.dilate(hole.astype(np.uint8), ell(4)) > 0
+print(f"holes filled: {hole.sum()} px")
 # and only the tower: the HDRI's small wisps and fragments round it, apart
 # from it, would be a second vocabulary of cloud in the sky
 n, lab, st, _ = cv2.connectedComponentsWithStats(sil, connectivity=8)
@@ -322,7 +338,7 @@ C = np.clip(C, 0, None)
 # than that (where the unmixing amplifies any error in the fitted sky), it
 # takes the colour of the cloud just inside it
 w = np.clip((a - 0.45) / 0.3, 0, 1).astype(np.float32)
-w = cv2.erode(w, ell(1))
+w = cv2.erode(w, ell(1)) * ~hole  # (a filled hole is the HDRI's sky: take the cloud round it)
 C = np.where((w > 0)[..., None], C, 0)
 Cf = push_pull(C.astype(np.float32), w)
 C = C * w[..., None] + Cf * (1 - w[..., None])
@@ -347,28 +363,27 @@ print(f"specks: {n - 1} dark spots, {speck.sum()} px filled")
 C = np.where(speck[..., None], push_pull(C.astype(np.float32), (~speck).astype(np.float32)), C)
 
 # ---------------------------------------------------------------- tone
-RELIEF_FOLD, RELIEF_BILLOW, RELIEF_SHADE = 1.2, 1.5, 2.2
+RELIEF_FOLD, RELIEF_BILLOW, RELIEF_SHADE = 1.2, 1.5, 1.7
 CY = C @ np.array([0.2126, 0.7152, 0.0722])
 ref = np.percentile(CY[a > 0.9], 99.5)
 x = CY / ref
 # Relief. Cut at its own resolution the tower has its cauliflower drawing,
 # but in radiance it is low in contrast (the HDRI's sun is ~75 degrees round,
-# the tower is lit half from the side) and the soft shoulder below would
-# flatten its sunlit half to one white. So each turret is set against the
+# the tower is lit half from the side). So each turret is set against the
 # ones round it (lb - lB: the folds where one shades the next) and each
 # billow keeps its own light and shade (ls - lb), everywhere, a little more in
 # the shade side, where the HDRI's billows are faintest. (Not along the anvil
 # shelf's underside, where it would bring the streaks back.)
 lx = np.log(np.maximum(x, 1e-4)).astype(np.float32)
-# First a light low-frequency pass. Lifted as it is cut (x2.5-4 on the
-# billows in the shade side), the HDRI's finest grain, its sensor noise and
-# the remap's ringing, came up as blotches with hard borders: a posterised,
-# oil-paint body. Pulled SMOOTH of the way toward its own low-pass (SMOOTH_S
-# px) first, the lift draws the billows' soft, bleeding volume and not the
-# grain between them.
-SMOOTH, SMOOTH_S = 0.5, 1.6
+# First a light low-frequency pass: lifted as it is cut, the HDRI's finest
+# grain (its sensor noise, the remap's ringing) came up as blotches with hard
+# borders. Pulled SMOOTH of the way toward its own low-pass (SMOOTH_S px), the
+# lift draws the billows and not the grain between them. (Kept light: pulled
+# half way it smeared the billows' drawing to watercolour beside the crisp
+# pole and wires.)
+SMOOTH, SMOOTH_S = 0.3, 1.2
 lx = lx + SMOOTH * (cv2.GaussianBlur(lx, (0, 0), SMOOTH_S) - lx)
-ls = cv2.GaussianBlur(lx, (0, 0), 0.7)  # its drawing, not the HDRI's noise
+ls = cv2.GaussianBlur(lx, (0, 0), 0.6)  # its drawing, not the HDRI's noise
 lb = cv2.GaussianBlur(lx, (0, 0), 10)
 lB = cv2.GaussianBlur(lx, (0, 0), 48)
 inshade = 1 - np.clip((np.exp(lb) - 0.35) / 0.4, 0, 1)
@@ -376,39 +391,38 @@ inshade = inshade * (1 - 0.8 * band[..., 0])
 x = np.exp(lB + (lb - lB) * (RELIEF_FOLD + 1.2 * inshade) + (ls - lb) * (RELIEF_BILLOW + RELIEF_SHADE * inshade))
 x = x / np.percentile(x[a > 0.5], 99.97)  # the brightest crown at 1
 print("relief x: " + "  ".join(f"p{p} {np.percentile(x[a > 0.9], p):.3f}" for p in (1, 5, 10, 25, 50, 75, 95)))
-# Over a floor: the live grade (cloudGrade) holds everything under 0.5 at 0.5
-# and stretches the shade under ~0.58 hard, so the bake keeps the deepest
-# shade just above FLOOR and spreads the rest, nearly linearly, up to the
-# brightest crown at SH (nothing clipped: the relief's own maximum is 1), so
-# the turrets' relief lands in the sunlit run, where the grade draws it.
-SH, FLOOR = 0.995, 0.5
-GX = 1.15
-disp = FLOOR + (SH - FLOOR) * np.clip(x, 0, 1) ** GX
-
-# ---------------------------------------------------------------- the underside
-# The tower's lower-left flank, its anvil shelf and the lobes under it, is
-# the HDRI's flattest cloud: a uniform shade with a hard edge on the cobalt
-# and a flat base, so it read as a cut-out laid on the sky. A cumulus's base
-# is the darkest of it, lit only by the sky under it (the grade draws a low
-# value there as a deeper, more saturated skylight blue, hue ~205-208), its
-# sunlit lobes above stay bright, and where it thins at its edge it melts
-# into the blue. So, on that flank (UND_REG: the plate x, y where it fades
-# out and in):
-# - how far a pixel stands above the base (its distance to the matte's
-#   edge, weighed by how far that edge faces down) darkens it: most just
-#   inside the base, fading up over UND_L (and a weaker, longer UND_L2, so
-#   the whole shelf runs from blue shade at its base to its lit lobes), the
-#   lobes' own relief riding on it, and its sunlit lobes, even low on it,
-#   kept bright; the same share is written as the underside's skylight cue
-#   (cloud.webp, below), which the grade turns to a saturated skylight blue;
-# - the thin margin inside the edge (UND_RIM px) is lifted to the cloud just
-#   inside it (the HDRI's own darker margin, its cloud thinning over its
-#   sky, unmixed, drew a dark outline), the darkening rolls off a little
-#   there and it lifts a touch: lit through, never an outline;
-# - (its edge, and the rest of the tower's, is feathered below: the edge)
-UND_REG = ((1450.0, 1750.0), (760.0, 900.0))
-UND_L, UND_L2, UND_DARK, UND_RIM = 40.0, 150.0, 0.075, 6.0
+# Light. The bake carries one number, t: the tower's own log radiance over its
+# own range, 0 its deepest shade pocket (the LO_P percentile of the body), 1
+# its brightest crown, written across all 8 bits (the old bake squeezed the
+# whole shade side into 0.5-0.6, some 25 steps, and the grade had to stretch
+# them back out: a pale, flat body). The live grade (cloudGrade) turns t into
+# the whole relief at once: the pockets a saturated skylight blue at ~0.70,
+# the shaded body a clear blue, the sunlit flanks paling to warm-neutral
+# crowns at ~0.92-0.97 and the top percent or two rolled off just under white.
+# T_GAMMA < 1 lifts the shaded body off the pockets, so it is the folds, not
+# the whole flank, that go deep.
+LO_P, T_GAMMA = 0.6, 0.85
+xlo = np.percentile(x[a > 0.9], LO_P)
+t = np.clip(np.log(np.maximum(x, xlo) / xlo) / np.log(1 / xlo), 0, 1) ** T_GAMMA
+t = t.astype(np.float32)
+print("light t: " + "  ".join(f"p{p} {np.percentile(t[a > 0.9], p):.3f}" for p in (1, 5, 10, 25, 50, 75, 90, 95, 98, 99)))
 sm = lambda e0, e1, v: np.clip((v - e0) / (e1 - e0), 0, 1) ** 2 * (3 - 2 * np.clip((v - e0) / (e1 - e0), 0, 1))
+fill = lambda v, w: push_pull(np.repeat(v.astype(np.float32)[..., None], 3, -1), w.astype(np.float32))[..., 0]
+
+# ---------------------------------------------------------------- the anvil
+# The tower's lower-left flank, its anvil shelf and the lobes under it, is
+# the HDRI's flattest cloud: a uniform shade with a hard, flat base on the
+# cobalt. Darkened toward that base (as a cumulus's base is) it read as a
+# flat blue-grey band hung under the anvil, a matte sticker laid on the sky.
+# An anvil is not a cumulus's base: it is the tower's outflow thinning out,
+# so on that flank (UND_REG: the plate x, y where it fades out and in) its
+# coverage dissolves up from its base instead: over DISS px above the edge
+# (how far it stands inside the edge, weighed by how far the nearest stretch
+# of edge faces down or to the side), the flat shade going first and the lit billows (t
+# above their neighbourhood) holding on longer, so what is left of the shelf
+# is its own lit lobes standing in the blue, not a band.
+UND_REG = ((1350.0, 1750.0), (760.0, 900.0))
+DISS, DISS_LIT = 150.0, 320.0
 reg = ((1 - sm(*UND_REG[0], xs)) * sm(*UND_REG[1], ys)).astype(np.float32)
 solid = (a_shape > 0.5).astype(np.uint8)
 # signed distance to the matte's half-coverage contour (+ inside), plate px
@@ -419,85 +433,65 @@ ab = cv2.GaussianBlur(a_shape, (0, 0), 10)
 gy, gx = np.gradient(ab)
 under = sm(0.15, 0.6, -gy / np.maximum(np.hypot(gx, gy), 1e-5)).astype(np.float32)
 under = cv2.GaussianBlur(under, (0, 0), 6)
-# the base: each pixel's distance to the matte's edge, weighed by how far the
-# nearest stretch of edge faces down (so the shade turns off smoothly where
-# the edge turns from a base to a flank)
 edge = ((solid == 0) & (cv2.dilate(solid, ell(1)) > 0)).astype(np.uint8)
 dedge, lab_ = cv2.distanceTransformWithLabels(1 - edge, cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
 ey, ex = np.nonzero(edge)
+# (the shelf's edge faces down and round to the side under the anvil's lobe:
+# everything there but the edges that face up, the lobe's sunlit top, goes)
+upf = cv2.GaussianBlur(sm(0.1, 0.5, gy / np.maximum(np.hypot(gx, gy), 1e-5)).astype(np.float32), (0, 0), 6)
 lut = np.zeros(lab_.max() + 1, np.float32)
-lut[lab_[ey, ex]] = under[ey, ex]
-facing = cv2.GaussianBlur(lut[lab_], (0, 0), 8)
-base = (0.7 * np.exp(-dedge / UND_L) + 0.3 * np.exp(-dedge / UND_L2)) * facing
-base = cv2.GaussianBlur(base.astype(np.float32), (0, 0), 4)
-# the sunlit lobes that hang low on the flank keep their light (the grade
-# lights everything over ~0.6 in the bake): only the shade is the base's
-base = base * (1 - sm(0.575, 0.62, cv2.GaussianBlur(disp.astype(np.float32), (0, 0), 2)))
-# the thin margin just inside the edge is lifted to the cloud just inside it
-# where it falls below it (the HDRI's darker margin: its cloud thinning over
-# its sky, unmixed), the falloff outside the edge takes the margin's own value
-# (not the brighter fill the unmixing left there), and it rolls up a touch
-# toward the edge: lit through, never an outline, dark or light
-rim = 1 - sm(0.0, UND_RIM, np.maximum(sd, 0))
-fill = lambda v, w: push_pull(np.repeat(v.astype(np.float32)[..., None], 3, -1), w.astype(np.float32))[..., 0]
-d2 = disp + (np.maximum(disp, fill(disp, sd > UND_RIM + 2)) - disp) * rim
-d2 = np.where(sd < 1, fill(d2, sd >= 1), d2)
-d2 = d2 - UND_DARK * base * (1 - 0.35 * rim) + 0.012 * rim
-d2 = np.maximum(d2, FLOOR + 0.004)
-disp = disp + (d2 - disp) * reg
-print(f"underside: {np.mean((reg * base > 0.3) & (sd > 0)) * 100:.2f}% of the frame darkened toward the base")
+lut[lab_[ey, ex]] = 1 - upf[ey, ex]
+facing = cv2.GaussianBlur(lut[lab_], (0, 0), 12)
+tl = cv2.GaussianBlur(t, (0, 0), 14)
+lift = np.clip(t - tl, -0.15, 0.3)
+diss = sm(0.0, DISS, np.maximum(sd, 0) + DISS_LIT * lift)
+basew = np.clip(facing * reg, 0, 1).astype(np.float32)
+keep_a = (1 - basew * (1 - diss)).astype(np.float32)
+keep_a = cv2.GaussianBlur(keep_a, (0, 0), 1.2)
+print(f"anvil: {np.mean((keep_a < 0.7) & (a_shape > 0.5)) * 100:.2f}% of the frame dissolved toward its base")
 
 # ---------------------------------------------------------------- the edge
 # Cut at the HDRI's own resolution the matte goes from clear sky to solid
-# cloud in ~3 plate px all round the tower, so its silhouette (the anvil's
-# most of all) read as a cut-out laid on the cobalt, with a pale rim of the
-# cloud's lightest value on it. A cloud's edge is where it thins: its
-# coverage falls off over a few metres of air, and what is left of it there
-# is lit like the air round it, losing its own light and shade to the sky's.
+# cloud in ~3 plate px all round the tower, so its silhouette read as a
+# cut-out laid on the cobalt. A cloud's edge is where it thins: its coverage
+# falls off over a few metres of air, and what is left of it there is lit
+# like the air round it, losing its own light and shade to the sky's.
 # - The coverage is rebuilt, all round the tower, from the signed distance
 #   to its half-coverage contour (smoothed, so the contour carries no pixel
 #   steps): a smoothstep from FEATHER_OUT px outside it to FEATHER_IN px
-#   inside it (wider where the edge faces down, the base, which dissolves
-#   into the blue more than a sunlit crown does), so the falloff reaches
-#   into the silhouette rather than blurring out of it. Inside it the
-#   matte keeps its own holes; outside the ramp its own wisps come back.
-# - Its value loses its contrast toward the edge: within HAZE_D px of it, it
+#   inside it, wider where the edge faces down and widest on the anvil (the
+#   tower's left, ANVIL_X: its thin outflow, whose sunlit tip was the hardest
+#   cut edge in the frame), so the falloff reaches into the silhouette rather
+#   than blurring out of it. Inside it the matte keeps its own holes;
+#   outside the ramp its own wisps come back.
+# - Its light loses its contrast toward the edge: within HAZE_D px of it, it
 #   is pulled (HAZE at the edge) toward its own wide local mean, so no
 #   billow's light or shade runs out to the silhouette; outside the contour
-#   it takes the margin's own value, never the brighter fill the unmixing
-#   left there. The live comp (COMP) then turns what is left of it there to
-#   the sky's hue at the coverage's falloff, the edge sitting in the same air
-#   as the cobalt.
-FEATHER_OUT, FEATHER_IN = 3.0, (10.0, 14.0)  # plate px: up/side-facing edge, underside
-HAZE_D, HAZE, HAZE_S = 22.0, 0.65, 8.0
+#   it takes the margin's own value. The live comp (COMP cloudAir) then turns
+#   what is left of it there to the sky's hue at the coverage's falloff.
+FEATHER_OUT, FEATHER_IN = 3.0, (10.0, 16.0)  # plate px: up/side-facing edge, underside
+ANVIL_X, ANVIL_OUT, ANVIL_IN = (900.0, 1350.0), 8.0, 30.0
+HAZE_D, HAZE, HAZE_S = 22.0, 0.55, 8.0
+anv = (1 - sm(*ANVIL_X, xs)).astype(np.float32)
 sds = cv2.GaussianBlur(sd, (0, 0), 2.0)
+fout = FEATHER_OUT + (ANVIL_OUT - FEATHER_OUT) * anv
 fin = FEATHER_IN[0] + (FEATHER_IN[1] - FEATHER_IN[0]) * under
-a_f = sm(-FEATHER_OUT, fin, sds)
-a_edge = np.where(sds >= 0, np.minimum(a_f, a_shape), np.maximum(a_f, a_shape * sm(FEATHER_OUT, FEATHER_OUT + 6, -sds)))
-a = np.clip(a_edge * fade, 0, 1).astype(np.float32)
+fin = fin + (ANVIL_IN - fin) * anv
+a_f = sm(-fout, fin, sds)
+a_edge = np.where(sds >= 0, np.minimum(a_f, a_shape), np.maximum(a_f, a_shape * sm(fout, fout + 6, -sds)))
+a = np.clip(a_edge * fade * keep_a, 0, 1).astype(np.float32)
 inner = (sds > 2).astype(np.float32)
-dl = cv2.GaussianBlur(disp.astype(np.float32) * inner, (0, 0), HAZE_S) / np.maximum(cv2.GaussianBlur(inner, (0, 0), HAZE_S), 1e-3)
+dl = cv2.GaussianBlur(t * inner, (0, 0), HAZE_S) / np.maximum(cv2.GaussianBlur(inner, (0, 0), HAZE_S), 1e-3)
 hz = HAZE * (1 - sm(0.0, HAZE_D, sds))
-disp = np.where(inner > 0, disp + (dl - disp) * hz, disp)
-disp = np.where(sds <= 2, fill(disp, sds > 2), disp)
+t = np.where(inner > 0, t + (dl - t) * hz, t)
+t = np.where(sds <= 2, fill(t, sds > 2), t)
 print(f"edge: {np.mean((a > 0.02) & (a < 0.98)) * 100:.2f}% of the frame in the falloff")
 
-chroma = C / np.maximum(CY, 1e-6)[..., None]
-# the HDRI's own tint, a little softened, for the value below
-chroma = 1 + (chroma - 1) * 0.6
-lin = chroma * (disp ** 2.2)[..., None]
-rgb = np.clip(lin, 0, 1) ** (1 / 2.2)
-# The live grade draws the cloud from its value alone (cloudGrade), so the
-# tint above never reaches the screen: the bake is written neutral, at the
-# same value, and carries one cue in its colour instead, the underside's
-# skylight (B - R, at unchanged luminance): how far a pixel is the base's
-# own deeper, more saturated blue. The grade turns it to skylight saturation.
-UND_CUE = 0.2
-v_ = rgb @ np.array([0.2126, 0.7152, 0.0722])
-cue = np.clip(reg * base, 0, 1) * UND_CUE
-rgb = np.clip(v_[..., None] + cue[..., None] * np.array([-0.0722, 0, 0.2126]) / 0.2848, 0, 1)
-ry = rgb[a > 0.9] @ np.array([0.2126, 0.7152, 0.0722])
-print("cloud display Y: " + "  ".join(f"p{p} {np.percentile(ry, p):.3f}" for p in (5, 25, 50, 75, 95, 99, 99.9)) + f"  max {rgb[a > 0.5].max():.3f}")
+# The live grade draws the cloud from t alone (cloudGrade): the bake is
+# written neutral, R = G = B = t.
+rgb = np.repeat(np.clip(t, 0, 1)[..., None], 3, -1)
+ry = t[a > 0.9]
+print("cloud light t: " + "  ".join(f"p{p} {np.percentile(ry, p):.3f}" for p in (5, 25, 50, 75, 95, 99, 99.9)))
 print(f"coverage: {np.mean(a > 0.5) * 100:.1f}% of the frame")
 # ---------------------------------------------------------------- write
 cv2.imwrite(out + "cloud.webp", (np.clip(rgb, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 90])
