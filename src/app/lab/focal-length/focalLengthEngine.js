@@ -29,10 +29,11 @@ import { createFilm } from "../_kit/film";
 // 24 mm the frame is still mostly cumulus, the towers only at the corners.
 //
 // The capture is turned 32 degrees about the zenith (ROLL), so the curved
-// glass tower's crown and canopy, the one face the capture could not hold
-// together, sits on the frame's short axis and mostly past its top edge,
-// and the dark grid tower and a sunlit stepped stone tower take the top
-// corners.
+// glass tower's rounded crown sits on the frame's short axis with only its
+// railed corner in the frame, and the dark grid tower and a sunlit stepped
+// stone tower take the top corners. That crown is the capture's own curtain
+// wall, only developed (canopy_photo.py), so its mullions, its railing and
+// what its glass reflects are the photograph's.
 // An upright frame turns another quarter, so the same tower stays on its
 // short axis.
 //
