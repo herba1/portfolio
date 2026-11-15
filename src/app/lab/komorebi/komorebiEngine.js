@@ -91,7 +91,30 @@ const SUN = { x: 0.52, y: 0.362, r: 0.0028631, L: 194211, color: [1.0375, 1.006,
 // again. amp: deflection per unit wind, in tuft radii.
 // settle: seconds over which its rest follows the slow breeze; pinhole:
 // how thin the needles are right over the disc.
-const TUFT = { r: 0.026, amp: 1.15, hz: 0.95, zeta: 0.16, flutter: 0.1, settle: 2.5, pinhole: 0.75 };
+// The tuft is cut from the near crown's own matte, never a disc: its needle
+// clusters are the dark of the canopy's light at cluster scale (a band from
+// mip 0.6 to 3.5), the bright gaps between them open to the sky, so it is as
+// perforated as the crown round it. holes: the band (stops) past which a gap
+// opens, soft its half-width, core how much fuller it is over the disc;
+// edge: how far its rim wanders (tuft radii), by patches twice cell; cell:
+// the size (asset px) of the patches of its clusters that stay on the
+// branch when it swings, stay the share that do. The lit needles behind its
+// gaps stay too, so at rest it closes back into a full crown.
+const TUFT = {
+  r: 0.026,
+  amp: 1.15,
+  hz: 0.95,
+  zeta: 0.16,
+  flutter: 0.1,
+  settle: 2.5,
+  pinhole: 0.75,
+  holes: 0.1,
+  soft: 0.18,
+  core: 0.6,
+  edge: 0.4,
+  cell: 9,
+  stay: 0.2,
+};
 // Scene light is written at 1/16 so the sun fits a half float; film adds it back.
 const GAIN = 1 / 16;
 // Share of the measured radiance the disc keeps. Still ~100x past the clip,
@@ -284,6 +307,9 @@ uniform vec2 uEdge;          // x gradient half-span (px), y share on a crown's 
 uniform vec4 uHalo;          // halation ring: rgb peak, a radius (core widths)
 uniform vec2 uSil;           // how far the lower canopy sinks into silhouette, knee
 uniform vec4 uTuft;          // xy tuft offset (asset uv), z radius (asset widths), w pinhole
+uniform vec4 uTuftN;         // gap band (stops), its half-width, fuller over the disc, rim raggedness
+uniform vec3 uTuftS;         // patch cell (asset px), noise level past which clusters stay, how far it has swung (0..1)
+uniform sampler2D uCanopyBlur; // canopy, mipmapped sampler
 uniform vec2 uLog;
 uniform sampler2D uCloudsBlur; // same texture, mipmapped sampler
 uniform vec3 uSkyHor;
@@ -315,13 +341,46 @@ vec2 disp(int k, vec2 uv) {
   return vec2(d.x, d.y * ASPECT) * e.x * e.y;
 }
 
-// The tuft: the needles round the sun hang on their own twig. A needle's
-// share of it falls off with its distance from the disc, and the clumps
-// that catch the light go with the twig first while the dark gaps between
-// them stay, so the gap it leaves has a rim drawn by needles, not a circle.
-float tuftMask(vec2 p) {
-  float q = length((p - uSun) * vec2(1.0, 1.0 / ASPECT));
-  return 1.0 - smoothstep(0.4 * uTuft.z, 1.3 * uTuft.z, q);
+// The tuft: the needles round the sun hang on their own twig, cut from the
+// near crown's own matte. Its clusters are the dark of the foliage light at
+// cluster scale and the bright gaps between them are sky, so the tuft is as
+// ragged and as perforated as the crown round it (60-80% cover), and its rim
+// follows the clusters, not a circle. A few patches of its clusters, and
+// the lit needles behind its gaps, stay on the branch: at rest the two
+// close back into the crown, and when it swings the needles part, a few
+// strands still crossing the opening.
+float lumAt(vec2 p, float lod) {
+  return dot(textureLod(uCanopyBlur, p, lod).rgb, LUMA) * (uLog.y - uLog.x);
+}
+float hash(vec2 i) {
+  return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453);
+}
+float vnoise(vec2 x) {
+  vec2 i = floor(x);
+  vec2 f = x - i;
+  vec2 w = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), w.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), w.x), w.y);
+}
+// The near crown's matte a at its rest point p: the tuft's part (x), its
+// clusters at 60-80% cover, and what stays on the branch (y). At rest they
+// cover at least a; a stay patch is drawn in both, so the tuft keeps its
+// full density when it swings and the needles left behind are its own.
+vec2 tuftSplit(vec2 p, float a) {
+  float q = length((p - uSun) * vec2(1.0, 1.0 / ASPECT)) / uTuft.z;
+  if (q > 1.5 || a <= 0.0) return vec2(0.0, a);
+  float dm = lumAt(p, 0.6) - lumAt(p, 3.5);
+  vec2 c = p * vec2(${AW}.0, ${AH}.0) / uTuftS.x;
+  // Its rim wanders by patches and runs round the clusters.
+  float rim = q + uTuftN.w * (2.0 * vnoise(0.5 * c + vec2(5.0, 23.0)) - 1.0) + 0.2 * clamp(dm, -1.0, 1.0);
+  float m = 1.0 - smoothstep(0.75, 1.0, rim);
+  float th = uTuftN.x + uTuftN.z * smoothstep(0.75, 0.0, q);
+  float n = 1.0 - smoothstep(th - uTuftN.y, th + uTuftN.y, dm);
+  float stay = smoothstep(-0.06, 0.06, vnoise(c) - uTuftS.y);
+  // Every gap between its clusters is backed by lit needles behind that
+  // stay. Until it has swung clear of its own needles' width the crown
+  // under it stays whole, so its flutter at rest never opens slivers round
+  // every cluster; past that the needles part.
+  return vec2(a * m * n, a * (1.0 - m) + a * m * mix(1.0, n * stay + 1.0 - n, uTuftS.z));
 }
 // Needle detail: the foliage light here against its surround, in stops.
 float needles(vec2 p) {
@@ -331,30 +390,21 @@ float needles(vec2 p) {
     + texture(uCanopy, p + vec2(0.0, o.y)).rgb + texture(uCanopy, p - vec2(0.0, o.y)).rgb, LUMA) * 0.25;
   return (v - m) * (uLog.y - uLog.x);
 }
-float tuftShare(float a, float m, float n) {
-  return clamp((m - 0.5) * 2.5 + 1.2 * (a - 0.6) + 0.7 * n + 0.5, 0.0, 1.0);
-}
 // The near crown, with the tuft riding on its branch and swung by its own
-// offset. Its needles and the rest are parts of one matte, so at rest
-// they sum back to it exactly.
+// offset. Its needles and the rest are cut from one matte, so at rest
+// they close back into it.
 float nearCover(vec2 uv, out vec2 ub, out vec2 ut, out float ab, out float at) {
   ub = uv - disp(2, uv);
   ut = ub - uTuft.xy;
-  ab = texture(uLayers, ub).b;
-  at = 0.0;
-  float mb = tuftMask(ub);
-  float mt = tuftMask(ut);
-  if (mb > 0.0) ab *= 1.0 - tuftShare(ab, mb, needles(ub));
-  if (mt > 0.0) {
-    at = texture(uLayers, ut).b;
-    float n = needles(ut);
-    at *= tuftShare(at, mt, n);
-    // A pinhole in the tuft: the dark gaps between the needles right over
-    // the disc are thin, so at rest the sun is a star through them; it
-    // swings away with the tuft.
-    vec2 pq = (ut - uSun) * vec2(1.0, 1.0 / ASPECT) / (1.9 * uSunR);
-    at *= 1.0 - uTuft.w * exp(-dot(pq, pq)) * smoothstep(0.4, -0.6, n);
-  }
+  ab = tuftSplit(ub, texture(uLayers, ub).b).y;
+  at = tuftSplit(ut, texture(uLayers, ut).b).x;
+  // A pinhole: the needles right over the disc are thin, so at rest the
+  // sun is a star through them; it swings away with the tuft, and what
+  // stays on the branch leaves the disc itself open.
+  vec2 pq = (ut - uSun) * vec2(1.0, 1.0 / ASPECT) / (1.9 * uSunR);
+  at *= 1.0 - uTuft.w * exp(-dot(pq, pq)) * (1.0 - smoothstep(-0.6, 0.4, needles(ut)));
+  vec2 bq = (ub - uSun) * vec2(1.0, 1.0 / ASPECT) / (2.4 * uSunR);
+  ab *= 1.0 - exp(-dot(bq, bq));
   return min(ab + at, 1.0);
 }
 
@@ -852,6 +902,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
   const texClouds = imageTexture(gl, cloudImg);
   gl.bindTexture(gl.TEXTURE_2D, texClouds);
   gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindTexture(gl.TEXTURE_2D, texCanopy);
+  gl.generateMipmap(gl.TEXTURE_2D);
   // The base fetch stays plain linear; the blur reads the mips through its
   // own sampler.
   const blurSampler = gl.createSampler();
@@ -1068,6 +1120,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     bind(4, texClouds, "uClouds");
     bind(5, texClouds, "uCloudsBlur");
     gl.bindSampler(5, blurSampler);
+    bind(6, texCanopy, "uCanopyBlur");
+    gl.bindSampler(6, blurSampler);
     gl.uniform4f(u.uBack, BACKLIGHT.near, BACKLIGHT.mid, BACKLIGHT.cool, BACKLIGHT.bark);
     gl.uniform2fv(u.uBackRoll, BACKLIGHT.roll);
     gl.uniform4f(u.uRimW, GLINT.disc[0], GLINT.disc[1], GLINT.hold, GLINT.fall);
@@ -1100,6 +1154,9 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     const ty = tuft.y - tuft.sy + tuft.fy;
     gl.uniform2f(u.uSil, SILHOUETTE.strength, SILHOUETTE.knee);
     gl.uniform4f(u.uTuft, tx, ty * ASPECT, TUFT.r, TUFT.pinhole);
+    gl.uniform4f(u.uTuftN, TUFT.holes, TUFT.soft, TUFT.core, TUFT.edge);
+    // Value noise sits round 0.5: P(v > t) ~ 0.5 - 1.6 (t - 0.5).
+    gl.uniform3f(u.uTuftS, TUFT.cell, 0.5 + (0.5 - TUFT.stay) / 1.6, smooth(0.15, 0.6, Math.hypot(tx, ty) / TUFT.r));
     // The film's halation follows the gap too: a red fringe round the open
     // sun, next to none round the pinpoint.
     const gap = smooth(0.35, 1.15, Math.hypot(tx, ty) / TUFT.r);
@@ -1108,6 +1165,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.viewport(0, 0, L.pw, L.ph);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindSampler(5, null);
+    gl.bindSampler(6, null);
 
     film.render(
       sceneT.tex,
