@@ -24,11 +24,11 @@ import { createStage, clamp } from "../_kit/stage";
 // The plate's own sky was flat haze, so inside the sky matte it is replaced by
 // a photographed summer cumulus dome (Poly Haven, Rural Asphalt Road, Alexander Scholten, CC0;
 // tools/depth/bakes/passes-sky.py): piled cumulus with hard sunlit tops and
-// blue-shadowed bases, standing low, with clear deep blue over them. Each
+// blue-shadowed bases, towering, with clear deep blue over them. Each
 // pixel looks it up along its true camera ray, the plate's pitch and lens, so
 // the clouds converge on the same vanishing point as the buildings. The dome
-// turns with the dragged sun so its tallest bank stands low on the sun's
-// side of the canyon, over the wall tops and behind the tower, and the open
+// turns with the dragged sun so its tallest bank stands on the sun's side
+// of the canyon, filling its lower half behind the tower, and the open
 // canyon above stays cobalt. The sun itself is drawn where the light stands.
 //
 // Plate and dome are then developed as one exposure: a single film pass over
@@ -68,19 +68,21 @@ const float LENS = 1.034;
 // The sky dome: where its tallest cumulus bank stands across the equirect.
 const float SKY_U = 0.24;
 // The clouds are graded as lit volumes, not shown as the photograph's white:
-// their sunlit crowns a warm white just under paper, their shadow side the
-// open sky's light. Both are given as the print would show them (display
-// rgb) and taken back through the tone curve, so the shoulder lands exactly
-// there. The crowns glow: the film's diffusion and halation take what is
-// over 0.84 in luma, and a cream crown at 225 never reached it.
-const vec3 CLOUD_LIT = vec3(248.0, 245.0, 236.0) / 255.0;
-const vec3 CLOUD_SHADE = vec3(150.0, 175.0, 205.0) / 255.0;
+// their sunlit crowns a warm white just under paper, their bodies a pale
+// grey-blue, their bases the open sky's light. All three are given as the
+// print would show them (display rgb) and taken back through the tone
+// curve, so the range lands exactly there and is not piled into the crown.
+// The crowns glow: the film's diffusion and halation take what is over 0.84
+// in luma.
+const vec3 CLOUD_LIT = vec3(252.0, 248.0, 238.0) / 255.0;
+const vec3 CLOUD_BODY = vec3(200.0, 214.0, 230.0) / 255.0;
+const vec3 CLOUD_SHADE = vec3(143.0, 180.0, 216.0) / 255.0;
 // The open sky as the print shows it, by the ray's elevation: a clear
 // cerulean just over the wall tops (the frame's lowest sky, 38 degrees up)
 // deepening to cobalt at the top of the frame (72 degrees). The dome's own
 // blue layer only modulates it, a few percent either way.
 const vec3 SKY_LOW = vec3(79.0, 159.0, 214.0) / 255.0;
-const vec3 SKY_HIGH = vec3(23.0, 71.0, 160.0) / 255.0;
+const vec3 SKY_HIGH = vec3(16.0, 80.0, 148.0) / 255.0;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
 // The walls' albedo is brought up from the shade the plate was shot in by
@@ -110,6 +112,29 @@ vec3 toward(vec3 D, vec3 T, float a){
   vec3 t = T - D * dot(T, D);
   float l = length(t);
   return l < 1e-4 ? D : normalize(D * cos(a) + t / l * sin(a));
+}
+
+// The photographed bank is soft, lit from behind, with little inside it, so
+// the lobes a cumulus is built of are laid in: a field of round domes on the
+// sky, one to a cell, joined by a soft maximum so they crowd and swell into
+// each other like cauliflower, with no seam where two meet. Returns the
+// slope of that surface, in cells.
+vec2 hash2(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
+vec2 billow(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  float sw = 1e-4;
+  vec2 sg = vec2(0.0);
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 c = vec2(float(x), float(y));
+    vec2 h = hash2(i + c);
+    vec2 d = f - (c + 0.15 + 0.7 * h);
+    float r2 = pow(0.5 + 0.3 * fract(h.x * 7.31 + h.y * 3.17), 2.0);
+    float z = exp(-dot(d, d) / r2);
+    float w = exp(6.0 * z);
+    sw += w;
+    sg += w * (-2.0 * d / r2 * z);
+  }
+  return sg / sw;
 }
 
 void main(){
@@ -218,24 +243,55 @@ void main(){
   float facing = dot(D, DOME_SUN);
   float low = 1.0 - smoothstep(0.05, 0.5, D.z);
   float thick = smoothstep(1.5, 6.0, d0);
-  float light = 0.5 + 0.55 * sunEdge + 0.4 * topEdge + 0.6 * fine + 0.45 * model + 0.2 * facing - 0.14 * low * thick - 0.12 * thick;
+  // Where in the tower of cloud this part stands: cloud under it and clear
+  // sky over it is a crown, cloud piled over it is the bank's shaded base.
+  // Read wide (up to 12 degrees each way), so a bank that fills the canyon
+  // keeps one gradient from its sunlit tops down to its blue base, not a
+  // flat slab with lobes drawn on it.
+  float above = 0.45 * density(toward(D, ZEN, 0.05), 5.0) + 0.35 * density(toward(D, ZEN, 0.11), 5.5) + 0.2 * density(toward(D, ZEN, 0.2), 6.0);
+  float below = 0.45 * density(toward(D, -ZEN, 0.05), 5.0) + 0.35 * density(toward(D, -ZEN, 0.11), 5.5) + 0.2 * density(toward(D, -ZEN, 0.2), 6.0);
+  float height = clamp((below - above) / max(max(below, above), 0.8), -1.0, 1.0);
+  // And between those scales, the lobes a bank is built of, each a bulge a
+  // degree or two across with its own lit top and its own shade under it.
+  float dm = density(D, 3.5);
+  float lobe = clamp((dm - density(toward(D, DOME_SUN, 0.02), 3.5)) + (density(toward(D, -ZEN, 0.02), 3.5) - density(toward(D, ZEN, 0.02), 3.5)), -2.0, 2.0) / max(dm, 0.6);
+  // The laid-in lobes, two sizes (about 5 and 2 degrees), on the dome's
+  // own sky, so they turn with it. Each is lit as a surface: the sun and the
+  // open sky over it, in the frame of the ray (right, up, toward the
+  // viewer), against what a flat face would take, so they model the bank
+  // without changing its level. Only in its body: the edges keep the
+  // photograph's own.
+  float delev = asin(clamp(D.z, -1.0, 1.0));
+  vec2 q = vec2(atan(D.y, D.x) * cos(delev), delev);
+  vec2 bg = billow(q / 0.085) + 0.6 * billow(q / 0.034 + 17.0);
+  vec3 bE = normalize(vec3(-D.y, D.x, 0.0) + vec3(1e-5, 0.0, 0.0));
+  vec3 bN = cross(D, bE);
+  vec3 Ls = vec3(dot(DOME_SUN, bE), dot(DOME_SUN, bN), -dot(DOME_SUN, D));
+  vec3 nb = normalize(vec3(-bg * 0.6, 1.0));
+  float bump = (dot(nb, Ls) - Ls.z) + 0.6 * (dot(nb, vec3(0.0, 0.6, 0.8)) - 0.8);
+  float body = smoothstep(0.8, 3.5, d0) * mask;
+  // A bank the sun faces (behind or beside the viewer) is lit down its whole
+  // face, the lobes modelling it; one the sun stands behind keeps its light
+  // in the crowns and the rims, and its body is the sky's.
+  float front = smoothstep(-0.6, 0.4, Ls.z);
+  float light = 0.36 + 0.12 * front + 0.28 * sunEdge + 0.2 * topEdge + 0.65 * fine + 0.55 * lobe + 0.55 * model + mix(0.32, 0.2, front) * height + 0.12 * facing - 0.1 * low * thick - 0.1 * thick + mix(0.45, 0.7, front) * bump * body;
   // The sun-side tops are lifted: a face that looks toward the sun with
   // little cloud between it and the sun is the crown, and it carries more
   // light than the modelling alone gives it.
   float sunSide = smoothstep(-0.3, 0.5, facing);
-  light += (0.35 * max(sunEdge, 0.0) + 0.25 * max(topEdge, 0.0)) * sunSide;
-  // A soft shoulder into the crown; the belly keeps its slope, so the
-  // photograph's modelling still reads in the shade. The shoulder runs all
-  // the way to the crown's white, so the brightest tops land there and do
-  // not stall a step under it.
-  light = clamp(light, 0.0, 2.0);
-  light = light < 0.55 ? light : 0.55 + 0.45 * (1.0 - exp(-(light - 0.55) / 0.3));
+  light += (0.22 * max(sunEdge, 0.0) + 0.16 * max(topEdge, 0.0) + 0.12 * max(height, 0.0)) * sunSide;
+  // No shoulder that piles the body into the crown: the light runs through
+  // the whole range on one soft S, so the bank keeps its blue base, its
+  // pale grey-blue middle and only its tops at the warm white.
+  float t = smoothstep(-0.15, 1.55, light);
   // The crown warms toward the key when the sun is low; the belly takes the
-  // open sky's light. Graded in print values, then taken back to light. The
-  // low sun dims the shade side; the lit crown keeps its light, warmer.
-  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.98, 0.945) + vec3(0.008, 0.0, 0.0), 1.0 - uDay);
+  // open sky's light. Graded in print values on three stops (base, body,
+  // crown), then taken back to light. The low sun dims the shade side; the
+  // lit crown keeps its light, warmer.
+  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.975, 0.935) + vec3(0.006, 0.0, 0.0), 1.0 - uDay);
   float dusk = mix(0.72, 1.0, uDay);
-  vec3 cloudP = tone(untone(min(mix(CLOUD_SHADE, crown, light), vec3(0.975))) * mix(dusk, 1.0, light * light));
+  vec3 cloudG = mix(mix(CLOUD_SHADE, CLOUD_BODY, t), mix(CLOUD_BODY, crown, t), t);
+  vec3 cloudP = tone(untone(min(cloudG, vec3(0.98))) * mix(dusk, 1.0, t * t));
   // The open sky dims less than the clouds' shade with a low sun: it is
   // the zenith's light, not the sun's.
   vec3 skyP = blueP * pow(mottle, 0.45) * mix(0.93, 1.0, uDay);
@@ -459,13 +515,15 @@ function sunFor(x, y) {
 // edge of the drag it waits at the wall tops instead of swinging out of
 // frame or across the canyon.
 const DOME_TURN = 0.35;
-const DOME_REACH = (35 * Math.PI) / 180;
-// And it is sunk this far, tilted down on its own side, so its tallest tops
-// (60 degrees up in the photograph) rise just over the wall tops and behind
-// the tower, and the open canyon above them stays deep blue. The tilt no
-// longer follows the sun's height: lifting the dome to meet a low sun swung
-// its clouds up across the whole canyon, an overcast sheet.
-const DOME_SINK = (14 * Math.PI) / 180;
+const DOME_REACH = (18 * Math.PI) / 180;
+// And it is sunk only this far, tilted down on its own side, so its tallest
+// tops (60 degrees up in the photograph) stand at about 57 behind the tower,
+// well over the wall tops: the bank fills the lower half of the canyon and
+// the open sky above it stays deep blue. Sunk further, the bank was a row of
+// small blobs along the wall tops. The tilt does not follow the sun's
+// height: lifting the dome to meet a low sun swung its clouds up across the
+// whole canyon, an overcast sheet.
+const DOME_SINK = (3 * Math.PI) / 180;
 
 // The dome's orientation for a sun: turned about the zenith to put its bank
 // on the sun's side, then tilted down toward the bank. Returned as the three
