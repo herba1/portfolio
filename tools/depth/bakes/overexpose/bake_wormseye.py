@@ -13,6 +13,10 @@
 #                (the pines re-keyed from the HDR's own radiance: soft coverage matte + real needle light -> trees.webp; plate and right-edge strip rebuilt)
 #     && python3 cumulus.py <copy of scene.webp> <copy of trees.webp> <copy of optics.png> <tree_lined_driveway_8k.hdr>
 #                (the cumulus re-solved from the 3x render: per-pixel depth matte, the photograph's luminance above lobe scale, clouds.py's shade below it)
+#     && python3 reaim.py <copy of scene.webp> <copy of trees.webp> <copy of optics.png> <tree_lined_driveway_8k.hdr>
+#                (once: the camera re-aimed at the cumulus, yaw 150 / pitch +76 -> yaw 178 / pitch +66; the bake carried over by
+#                 ray, the revealed low sky filled, pines and cumulus solved again from the HDR through the new camera.
+#                 deepen.py now holds the new aim; every pass above ran at the old one, reaim.OLD)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image

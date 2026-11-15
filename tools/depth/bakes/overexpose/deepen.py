@@ -39,8 +39,10 @@ from scipy import ndimage as ndi
 import wormseye_lib as wlib
 import bake_wormseye as bw
 
-YAW, PITCH, FOV, ROLL, SIZE = 150.0, 76.0, 116.0, -10.0, 1536   # the worm's-eye crop, unchanged
-U, V = 0.3906, 0.1706                                             # the new sun (resun.py)
+YAW, PITCH, FOV, ROLL, SIZE = 178.0, 66.0, 116.0, -10.0, 1536   # the worm's-eye crop, re-aimed at the cumulus by reaim.py
+U, V = 0.4973, 0.0625                                             # the hidden sun (resun.py's direction) in that frame
+# (every pass up to cumulus.py ran at the old aim, yaw 150, pitch +76, the hidden sun at U, V = 0.3906, 0.1706;
+#  reaim.OLD keeps it. Re-running an earlier pass needs those values back.)
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 ZEN = np.array([0.072, 0.142, 0.235])      # open sky overhead; prints #2f6fc0 at 0 EV
 EDGE = np.array([0.2, 0.37, 0.54])        # open sky ~5 deg above the horizon: paler, as low sky is
