@@ -29,9 +29,11 @@ import { createStage, clamp } from "../_kit/stage";
 // blue-shadowed bases, towering, with clear deep blue over them. Each
 // pixel looks it up along its true camera ray, the plate's pitch and lens, so
 // the clouds converge on the same vanishing point as the buildings. The dome
-// turns with the dragged sun so its tallest bank stands on the sun's side
-// of the canyon, filling its lower half behind the tower, and the open
-// canyon above stays cobalt. The sun itself is drawn where the light stands.
+// is fixed to the world, its tallest bank behind the tower and to its left,
+// filling the canyon's lower half, and the open canyon above stays cobalt.
+// Dragging moves only the light: the clouds stay where they are and are lit
+// from the sun's direction, their sunward flanks bright and warm and their
+// far sides in the sky's blue. The sun itself is drawn where the light stands.
 //
 // Plate and dome are then developed as one emulsion: the film over the
 // matted frame spreads its highlights through a half-size blur pyramid (a
@@ -303,7 +305,7 @@ void main(){
   float dm = density(D, 3.5);
   float lobe = clamp((dm - density(toward(D, DOME_SUN, 0.02), 3.5)) + (density(toward(D, -ZEN, 0.02), 3.5) - density(toward(D, ZEN, 0.02), 3.5)), -2.0, 2.0) / max(dm, 0.6);
   // The laid-in lobes, two sizes (about 5 and 2 degrees), on the dome's
-  // own sky, so they turn with it. Each is lit as a surface: the sun and the
+  // own sky, so they stay with it. Each is lit as a surface: the sun and the
   // open sky over it, in the frame of the ray (right, up, toward the
   // viewer), against what a flat face would take, so they model the bank
   // without changing its level. Only in its body: the edges keep the
@@ -321,12 +323,33 @@ void main(){
   // face, the lobes modelling it; one the sun stands behind keeps its light
   // in the crowns and the rims, and its body is the sky's.
   float front = smoothstep(-0.6, 0.4, Ls.z);
-  float light = 0.36 + 0.12 * front + 0.28 * sunEdge + 0.2 * topEdge + 0.65 * fine + 0.55 * lobe + 0.55 * model + mix(0.32, 0.2, front) * height + 0.12 * facing - 0.1 * low * thick - 0.1 * thick + mix(0.45, 0.7, front) * bump * body;
+  float light = 0.36 + 0.12 * front + 0.28 * sunEdge + 0.12 * topEdge + 0.65 * fine + 0.55 * lobe + 0.4 * model + mix(0.2, 0.12, front) * height + 0.12 * facing - 0.1 * low * thick - 0.1 * thick + mix(0.45, 0.7, front) * bump * body;
   // The sun-side tops are lifted: a face that looks toward the sun with
   // little cloud between it and the sun is the crown, and it carries more
   // light than the modelling alone gives it.
   float sunSide = smoothstep(-0.3, 0.5, facing);
   light += (0.22 * max(sunEdge, 0.0) + 0.16 * max(topEdge, 0.0) + 0.12 * max(height, 0.0)) * sunSide;
+  // The dome stays put and the sun goes round it, so which flank of each
+  // cloud is lit has to come from the sun alone. Read across the bank (3 to
+  // 15 degrees each way) along the great circle through the sun: clear sky
+  // toward the sun and cloud away from it is the flank that faces it, the
+  // reverse is the far side. Scaled by how far off the ray the sun stands:
+  // with the sun straight behind the viewer every face is lit alike.
+  float sNear = 0.4 * density(toward(D, DOME_SUN, 0.05), 5.0) + 0.35 * density(toward(D, DOME_SUN, 0.12), 5.5) + 0.25 * density(toward(D, DOME_SUN, 0.26), 6.5);
+  float sFar = 0.4 * density(toward(D, -DOME_SUN, 0.05), 5.0) + 0.35 * density(toward(D, -DOME_SUN, 0.12), 5.5) + 0.25 * density(toward(D, -DOME_SUN, 0.26), 6.5);
+  float across = sqrt(max(1.0 - facing * facing, 0.0));
+  float flank = clamp((sFar - sNear) / max(max(sFar, sNear), 0.8) * 2.2, -1.0, 1.0) * across;
+  // And the same a lobe wide, so each bulge on the lit flank has its own lit
+  // shoulder and the shade falls on the side away from the sun.
+  float lNear = density(toward(D, DOME_SUN, 0.018), 3.5);
+  float lFar = density(toward(D, -DOME_SUN, 0.018), 3.5);
+  float lflank = clamp((lFar - lNear) / max(max(lFar, lNear), 0.6) * 1.8, -1.0, 1.0) * across;
+  float sunward = clamp(0.7 * flank + 0.3 * lflank, -1.0, 1.0);
+  light += 0.75 * sunward * body + 0.6 * sunward * (1.0 - body);
+  // Close to the sun (within some 40 degrees) the cloud is lit from behind:
+  // its thin parts glow, warm, the forward scatter round the disc.
+  float aureole = smoothstep(0.75, 0.95, facing);
+  light += 0.25 * aureole * (1.0 - body);
   // No shoulder that piles the body into the crown: the light runs through
   // the whole range on one soft S, so the bank keeps its blue base, its
   // pale grey-blue middle and only its tops at the warm white.
@@ -337,7 +360,11 @@ void main(){
   // lit crown keeps its light, warmer.
   vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.975, 0.935) + vec3(0.006, 0.0, 0.0), 1.0 - uDay);
   float dusk = mix(0.72, 1.0, uDay);
+  // The sun-facing flank's crowns take the key's warmth; the far side
+  // keeps only the open sky's light, its blue.
+  crown = mix(crown, crown * vec3(1.0, 0.96, 0.89), max(smoothstep(0.0, 0.6, sunward), 0.8 * aureole));
   vec3 cloudG = mix(mix(CLOUD_SHADE, CLOUD_BODY, t), mix(CLOUD_BODY, crown, t), t);
+  cloudG = mix(cloudG, mix(CLOUD_SHADE, CLOUD_BODY, 0.35), 0.8 * smoothstep(0.05, 0.6, -sunward) * (1.0 - 0.3 * t));
   vec3 cloudP = tone(untone(min(cloudG, vec3(0.98))) * mix(dusk, 1.0, t * t));
   // The open sky dims less than the clouds' shade with a low sun: it is
   // the zenith's light, not the sun's.
@@ -701,32 +728,28 @@ function sunFor(x, y) {
   return { dir, col, day, az, el };
 }
 
-// The dome's cumulus bank follows the sun round, a share of its azimuth
-// (DOME_TURN) and never more than DOME_REACH off the camera's heading: so it
-// stands on the sun's side, between the sun and the tower, and at either
-// edge of the drag it waits at the wall tops instead of swinging out of
-// frame or across the canyon.
-const DOME_TURN = 0.35;
-const DOME_REACH = (18 * Math.PI) / 180;
+// The dome is the world's, not the sun's: it is laid once and never turns.
+// Its cumulus bank stands behind the tower and to its left (DOME_HEADING,
+// turned from the camera's heading), over the left wall's tops and filling
+// the lower canyon. Dragging moves only the light: the same clouds stay in
+// the same places, and their lit sides swing round with the warm wall.
+const DOME_HEADING = (-18 * Math.PI) / 180;
 // And it is sunk only this far, tilted down on its own side, so its tallest
 // tops (60 degrees up in the photograph) stand at about 57 behind the tower,
 // well over the wall tops: the bank fills the lower half of the canyon and
 // the open sky above it stays deep blue. Sunk further, the bank was a row of
-// small blobs along the wall tops. The tilt does not follow the sun's
-// height: lifting the dome to meet a low sun swung its clouds up across the
-// whole canyon, an overcast sheet.
+// small blobs along the wall tops.
 const DOME_SINK = (3 * Math.PI) / 180;
 
-// The dome's orientation for a sun: turned about the zenith to put its bank
-// on the sun's side, then tilted down toward the bank. Returned as the three
-// columns of uDome: unit vectors, in camera space, toward the bank along the
-// ground, to its right, and up.
-function domeFor(az) {
+// The dome's orientation: turned about the zenith to DOME_HEADING, then
+// tilted down toward the bank. Returned as the three columns of uDome: unit
+// vectors, in camera space, toward the bank along the ground, to its right,
+// and up.
+function domeFrame() {
   const sp = Math.sin(PITCH);
   const cp = Math.cos(PITCH);
-  const turn = clamp(az * DOME_TURN, -DOME_REACH, DOME_REACH);
-  const sa = Math.sin(turn);
-  const ca = Math.cos(turn);
+  const sa = Math.sin(DOME_HEADING);
+  const ca = Math.cos(DOME_HEADING);
   // Heading (0, -sp, -cp) and right (1, 0, 0) span the ground; up is (0, cp, -sp).
   const toward = [sa, -sp * ca, -cp * ca];
   const right = [ca, sp * sa, cp * sa];
@@ -783,6 +806,8 @@ export async function createPasses(host) {
   const uu = loc(upProg, "uTexel", "uOut", "uW", "uS", "uSrc", "uBase");
   const uh = loc(haloProg, "uStep", "uOut", "uSrc", "uCh");
   const uf = loc(filmProg, "uRes", "uNorm", "uSeed", "uDay");
+  // The dome is fixed to the world: set once, never per frame.
+  gl.uniformMatrix3fv(u.dome, false, domeFrame());
 
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -988,7 +1013,6 @@ export async function createPasses(host) {
     gl.uniform3f(u.up, 0, Math.cos(PITCH), -Math.sin(PITCH));
     gl.uniform1f(u.day, S.day);
     day = S.day;
-    gl.uniformMatrix3fv(u.dome, false, domeFor(S.az));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     // What scatters, at half size, then its pyramid down and back up, and
