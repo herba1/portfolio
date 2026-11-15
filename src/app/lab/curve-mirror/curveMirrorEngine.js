@@ -708,7 +708,44 @@ vec3 skyT(float el) {
   float f = clamp((el - E[i]) / (E[i + 1] - E[i]), 0.0, 1.0);
   return hsv2lin(mix(Hh[i], Hh[i + 1], f), mix(Ss[i], Ss[i + 1], f), mix(Vv[i], Vv[i + 1], f));
 }
-vec3 skyG(float el) { return skyT(32.0 + 0.64 * max(el, 0.0)); }
+// The print's sky: herb's summer cobalt. The bake's grade (skyT) is the
+// plate as it was baked, a mid blue whose darkest channel sat near 0.3 in
+// sRGB, and through the film it printed a hazy mid-blue (S 0.68 at the top
+// of the frame). Here the clear sky is re-graded, in scene light before any
+// diffusion, to a deep cyan-cobalt whose red falls to almost nothing as it
+// climbs: pale and open over the roofs, steeply deeper overhead, so the top
+// of the frame (about 46 degrees up) prints near rgb(5, 70, 135), S 0.95.
+vec3 skyN(float el) {
+  const float E[8] = float[8](-5.0, 0.0, 10.0, 20.0, 35.0, 50.0, 70.0, 90.0);
+  const float Hh[8] = float[8](209.0, 209.0, 208.5, 208.0, 208.0, 208.5, 209.0, 209.5);
+  const float Ss[8] = float[8](0.34, 0.38, 0.52, 0.68, 0.86, 0.95, 0.98, 0.99);
+  const float Vv[8] = float[8](0.93, 0.92, 0.89, 0.83, 0.71, 0.57, 0.48, 0.43);
+  el = clamp(el, -5.0, 90.0);
+  int i = 0;
+  for (int k = 0; k < 6; k++) if (el > E[k + 1]) i = k + 1;
+  float f = clamp((el - E[i]) / (E[i + 1] - E[i]), 0.0, 1.0);
+  return hsv2lin(mix(Hh[i], Hh[i + 1], f), mix(Ss[i], Ss[i + 1], f), mix(Vv[i], Vv[i + 1], f));
+}
+vec3 skyG(float el) { return skyN(32.0 + 0.64 * max(el, 0.0)); }
+
+// A sky graded from T0 (what it was baked to) to T1, read as a cloud laid
+// over the clear sky: C = sky (1 - a) + cloud a, so C' = C + (T1 - T0)(1 - a),
+// a cloud keeping its own light and taking only sky_grade.py's share (1 -
+// KEEP) of the difference. Its cover a is told by its standing above the
+// clear sky's luminance or off its chroma (the bake's clear sky sits within
+// 2 % of T0 on both; a belly in shade is a grey-blue a tenth brighter, not
+// blue), so a heap's shade stays its own grey-blue, not cobalt, and its
+// thin edges thin into the deeper sky without a step. Where it is clear sky
+// outright it is rescaled channel by channel instead, the same colour, so
+// its grain and drift ride along and the red's grain is not clipped at 0.
+vec3 cobalt(vec3 c, vec3 T0, vec3 T1) {
+  float lr = dot(c, LUMA) / max(dot(T0, LUMA), 1e-4);
+  float ch = (c.b - c.r) / max(c.b, 1e-4);
+  float ch0 = (T0.b - T0.r) / max(T0.b, 1e-4);
+  float a = max(smoothstep(1.03, 1.3, lr), smoothstep(0.05, 0.3, 1.0 - ch / max(ch0, 1e-3)));
+  vec3 over = c + (T1 - T0) * mix(1.0, 0.35, a);
+  return max(mix(over, c * T1 / T0, 1.0 - smoothstep(0.0, 0.3, a)), 0.0);
+}
 
 // spread: the angular footprint of a pixel in the reflection; aa: of the face
 // in metres; both taken in main, where every pixel of the quad runs them
@@ -773,9 +810,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float wPano = (1.0 - fromPhoto) * smoothstep(0.14, 0.26, nbC) * smoothstep(-1.0, 4.0, el) * (1.0 - above);
   float lr = dot(c, LUMA) / max(dot(T0, LUMA), 1e-4);
   float wSky = max(wPhoto, wPano) * smoothstep(0.35, 0.7, lr);
-  float cloud = smoothstep(1.03, 1.35, lr);
-  vec3 sk = mix(c * T1 / T0, c + 0.35 * (T1 - T0), cloud);
-  c = mix(c, max(sk, 0.0), wSky);
+  c = mix(c, cobalt(c, T0, T1), wSky);
 
   // The cumulus in the glass. The panorama's heaps (match.py's matte: the
   // tower built over the road behind the lens, the scraps the cloud plane
@@ -1143,6 +1178,14 @@ void main() {
   // the photograph
   vec3 col = enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize);
   vec4 aux = texture(uAux, p / uPhotoSize);
+  // its sky taken from the bake's grade to the cobalt, by elevation, through
+  // the matte (a wire across it, darker than half the sky, is left alone)
+  {
+    float el = degrees(asin(clamp(d.y, -1.0, 1.0)));
+    vec3 T0 = skyT(el);
+    float w = aux.b * smoothstep(0.35, 0.7, dot(col, LUMA) / max(dot(T0, LUMA), 1e-4));
+    col = mix(col, cobalt(col, T0, skyN(el)), w);
+  }
   // The cumulus' sunlit tops. clouds.py lights them in the bake (tops a
   // warm neutral, its TOP; sides and bellies 0.9 stop under, toward the
   // skylight's blue), but the plate is 8-bit: its whitest white develops through the
@@ -1492,7 +1535,13 @@ void main() {
   // glow past the ceiling (the sun's, at HDR) is rolled on its brightest
   // channel, not clipped channel by channel: clipped, a warm sun's glow came
   // out a flat grey-white, the milky veil; rolled, it keeps its hue
-  vec3 B = mix(texture(uNear, vUv).rgb, texture(uFar, vUv).rgb, uFarW);
+  // The veil is kept off the clear blue: where this pixel is saturated sky
+  // under the highlights, the wide spread (a haze laid over the whole
+  // cobalt) lands at a quarter and the near one (a cloud's roll-off, the
+  // sun's bloom in the glass) at 0.7, so the sky stays deep to a cloud's
+  // edge, and the glow still lifts shade, paint and glass round a highlight.
+  float blue = smoothstep(0.45, 0.85, (c.b - c.r) / max(c.b, 1e-4)) * (1.0 - smoothstep(uKey.x * 0.7, uKey.y, dot(c, LUMA)));
+  vec3 B = texture(uNear, vUv).rgb * (1.0 - uFarW) * (1.0 - 0.3 * blue) + texture(uFar, vUv).rgb * uFarW * (1.0 - 0.75 * blue);
   vec3 a = clamp(c / uCeil, 0.0, 1.0);
   vec3 b = max(uGain * B / uCeil, 0.0);
   float bm = max(max(b.r, b.g), b.b);
@@ -2178,6 +2227,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       gl.uniform1f(u.uFarW, MIST_K.farW);
       gl.uniform1f(u.uGain, MIST_K.gain);
       gl.uniform1f(u.uCeil, ceil);
+      gl.uniform2fv(u.uKey, MIST_K.key);
       run(dst);
     }
   };
