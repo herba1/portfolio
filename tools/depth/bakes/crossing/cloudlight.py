@@ -2,8 +2,10 @@
 
     python3 -I tools/depth/bakes/crossing/cloudlight.py <srcdir> <outdir>
 
-cumulus.py lays the tower and its foot onto the clouds card, but the card it
-leaves gives the composite away. The foot fades out across the frame along a
+cumulus.py plates a photographed cumulus congestus onto the clouds card
+(its towers and shaded flanks as shot, the tone on the cloud ramp). This
+pass was written for the HDRI cumulus it used to plate, whose card gave the
+composite away. The foot fades out across the frame along a
 wavering soft line (FOOT_U there) and its lower body falls off into a broad
 half-transparent band, so the sky shows through a milky veil above the far
 roofs and right of the crossbuck pole; the lower body's billows sit in a
@@ -69,7 +71,7 @@ MATTE_W, MATTE_H = 512, 339
 SS = 3  # the clouds card's px per 2 photo px (cumulus.py)
 PAD_PX = round(0.07 * EW * SS / 2)  # cumulus.PAD on the card: its edge fade
 # The clouds card's crop rect in photo uv (the engine's PLANES)
-CLOUD_RECT = [-0.08984, 0.19174, 0.8457, 1.30088]
+CLOUD_RECT = [-0.28613, 0.11062, 0.79785, 1.32301]
 # cumulus.py's tone ramp (sRGB), crevice to sunlit top
 TONE = ((0x7F, 0x9B, 0xBD), (0x9F, 0xB6, 0xD0), (0xBA, 0xCB, 0xDE), (0xD8, 0xE0, 0xE8), (0xEA, 0xEA, 0xE8), (0xF4, 0xF1, 0xEA))
 TONE_AT = (0.0, 0.24, 0.48, 0.7, 0.86, 1.0)
@@ -84,27 +86,30 @@ RIM = (1.1, 2.4)  # feather sigma px: the keyed edges, the rebuilt ones
 # The lobes below the crown: the tone's broad light (mean over BIG px), its
 # lobes (over LOBE px, against it) and its billows; GAIN stretches the lobes
 # and the billows, soft-clipped at CLIP on the ramp. Only in the lower body
-# (BODY_ROWS, card rows, eased) and out of the crown's light: the tower above
+# (BODY_ROWS, photo v, eased) and out of the crown's light: the tower above
 # keeps its tone as cumulus.py baked it (its billows are at full contrast
-# already, and its lit lobes are what the glow builds on).
+# already, and its lit lobes are what the glow builds on). The photographed
+# congestus has its own lobes and shade all the way down, so the stretch is
+# gentle.
 BIG, LOBE = 90.0, 22.0
-GAIN, CLIP = (3.4, 2.4), (0.34, 0.22)
-BODY_ROWS = (760.0, 1060.0)
+GAIN, CLIP = (1.6, 1.4), (0.34, 0.22)
+BODY_ROWS = (0.5, 0.68)
 # Each lobe a lit crest over a skylight-blue core: below the crown the broad
 # light is pulled (SHADE_PULL) toward CORE on the ramp (#bacbde), deepening
-# by CORE_LOW toward the foot (over the card's rows CORE_ROWS). The film and
-# the air take a card's #9fb6d0 down to the low sky's own value (about
-# #87b4d5 on screen), so a body any darker reads as sky seen through a veil.
-CORE, CORE_LOW, CORE_ROWS, SHADE_PULL = 0.5, 0.1, (900.0, 1900.0), 0.8
+# by CORE_LOW toward the foot (over CORE_ROWS, photo v). The photo's own
+# shaded flanks are solid, so only a share of the broad light is pulled: the
+# lit lower lobes stay lit and the shade settles between #9fb6d0 and #bacbde.
+CORE, CORE_LOW, CORE_ROWS, SHADE_PULL = 0.26, 0.06, (0.75, 1.1), 0.45
 # Where the HDRI's billows run out (their RMS under FLAT of the body's
 # median), round caps take over: CAPS (radius px, weight, seed), squashed by
 # CAP_SQUASH upright (a cumulus's lower lobes are wider than tall), lit from
 # SUN3 (right, up, toward us), CAP_AMP on the ramp. The HDRI's foot is hazy
 # even where it has billows, so down the lower body (CAP_ROWS) the caps come
 # in at CAP_BODY over them too: rounded lobes, lit on their sunward side.
+# (The photographed congestus is billowed everywhere: no caps over it.)
 FLAT = (0.25, 0.6)
-CAP_ROWS, CAP_BODY = (900.0, 1200.0), 0.7
-CLARITY, CLARITY_SIG = 0.6, 16.0  # unsharp on the tone, down CAP_ROWS
+CAP_ROWS, CAP_BODY = (0.75, 0.9), 0.0
+CLARITY, CLARITY_SIG = 0.3, 16.0  # unsharp on the tone, down CAP_ROWS
 CAPS = ((130.0, 0.6, 41), (56.0, 0.35, 42), (24.0, 0.08, 43))
 CAP_SQUASH, CAP_AMP = 0.75, 0.2
 SUN3 = np.array([0.55, -0.62, 0.56], np.float32)  # x right, y down, z toward us
@@ -114,9 +119,21 @@ FORM = 0.18
 # soft falloff (GLOW_SIG px), and SHOULDER (from, width) rolls every tone off
 # into the top of the ramp, so the brightest px land at 240-244, never 255.
 SUNWARD = (0.45, 0.75)
-GLOW, GLOW_SIG, GLOW_DEEP = 0.7, 60.0, 0.3
+GLOW, GLOW_SIG, GLOW_DEEP = 0.3, 50.0, 0.05
+# (where the crown is: across, to the right, and up the cloud, its own
+# extent; the photographed congestus is lit all down its tower, so only its
+# top takes the glow)
+CROWN = (0.6, 0.9)
 SHOULDER = (0.8, 0.22)
 SUN2D = (0.62, -0.78)  # the sun across the view: up and right (cumulus.py)
+
+
+def rows(v):
+    """Card rows of photo v (a pair, for the eased bands above)."""
+    return tuple((x - CLOUD_RECT[1]) * EH * SS / 2 for x in v)
+
+
+BODY_ROWS, CORE_ROWS, CAP_ROWS = rows(BODY_ROWS), rows(CORE_ROWS), rows(CAP_ROWS)
 
 
 def load(name, mode=None):
@@ -224,7 +241,7 @@ xn = np.clip((xx - x_l) / (x_r - x_l), 0, 1)
 t_raw = t0
 t0 = cv2.bilateralFilter(t0, 9, 0.03, 4.0)
 # the lit crown: bright lobes in the upper right of the tower
-lit = smoothstep(*SUNWARD, mblur(t0, 8.0)) * smoothstep(0.35, 0.7, 0.35 * xn + 0.85 * yn)
+lit = smoothstep(*SUNWARD, mblur(t0, 8.0)) * smoothstep(*CROWN, 0.35 * xn + 0.85 * yn)
 lit = cv2.GaussianBlur(lit, (0, 0), 8)
 # The lobes, at full local contrast: the tone split into the cloud's broad
 # light (BIG), its lobes (LOBE, against BIG) and its billows (the rest); the

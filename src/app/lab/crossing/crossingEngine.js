@@ -15,12 +15,11 @@ import { createFilm } from "../_kit/film";
 // opaque back card filled from a dilated matte, with no ghost of a wire.
 // The photo's own clouds were faint torn wisps, so the sky card holds the
 // clear cobalt gradient alone and an eighth card between it and the far
-// houses carries real cumulus (cumulus.py, from a Poly Haven summer HDRI):
-// the sun only on the crown's warm tops, a lobed left flank and lower body in
-// skylight blue-grey shade that keep the HDRI's own billows, and no base in
-// the sky: it grows up out of the horizon, its foot (a broad congestus bank
-// from the same HDRI, in shade) running on down past the lowest roof and far
-// behind the town.
+// houses carries a real cumulus congestus (cumulus.py, from a CC0
+// photograph): dense, cauliflower-edged sunlit towers over solid shaded
+// flanks in skylight blue-grey, no sky through the mass, and no base in the
+// sky: it rises from behind the far roofs and the old house's eave, running
+// on far behind both, and climbs past the crossbuck's arms into the top third.
 //
 // The closed photograph is the stack itself, not a plate laid over it: at
 // rest the cards are drawn flat and composite back to the picture, wires,
@@ -86,11 +85,11 @@ const PLANES = [
   // the sky: a smooth gradient, so past its overscan the edge texel runs on
   // (deep cobalt toward the zenith) and the turned lens never runs out of it
   { file: "p0", rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66, open: true }, // sky
-  // The cumulus (cumulus.py): real cloud from a summer HDRI, its own card
+  // The cumulus (cumulus.py): a photographed congestus, its own card
   // between the sky and the town so a swing slides it against the roofs.
-  // It stands far off over the town, its foot a solid bank running on far
-  // below the roofline (to v 1.3), so a swing never uncovers a base hanging
-  // in the sky or a strip of clear sky under it; it sits back near the
+  // It stands far off over the town, run on far below the roofline (to v
+  // 1.3) and left behind the old house, so a swing never uncovers a base
+  // hanging in the sky or a strip of clear sky under it; it sits back near the
   // sky card, so it barely slides against the sky and the street slides
   // across it. A cut-out on a wide transparent margin, feathered to 0 well
   // inside every edge, so it need not cover the window; it throws no shadow
@@ -98,7 +97,7 @@ const PLANES = [
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
   // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [-0.08984, 0.19174, 0.8457, 1.30088], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  { file: "clouds", rect: [-0.28613, 0.11062, 0.79785, 1.32301], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   // The town's travel is held (travel, below): looking up, the turned lens
   // would carry the far roofs down out of the window until only a defocused
   // sliver of roof was left streaking along its bottom edge.
