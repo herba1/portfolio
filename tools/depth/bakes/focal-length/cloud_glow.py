@@ -37,12 +37,27 @@
 #               film's per-channel shoulder bleaches plate warmth to neutral,
 #               so on the lit tops (the key times a ramp hiA..hiB on the
 #               screen level) the screen colour itself is set warm (warmD,
-#               R > G > B by about 5 and 7 levels, toward #FFF4E6), and the
-#               plate value is found by running the target back through the
-#               film model, per channel, corrected for the pixel's own tint.
-#  4. blend     the regraded pixel replaces the old one by the cloud weight,
-#               so the translucent fringes and the thin wisps take a share of
-#               the lift in proportion to how much cloud they are.
+#               R > G > B by about 10 and 15 levels in the model, toward
+#               #FFF4E6), and the plate value is found by running the target
+#               back through the film model, per channel, corrected for the
+#               pixel's own tint. The model leaves out the engine's mist,
+#               bloom and vignette, which pull the lit tops cooler and a few
+#               levels down, so warmD is set for what lands on the screen:
+#               about (246, 240, 230) for the top 3% of the 10 mm hero's big
+#               cloud, nothing clipped (it was a cool-neutral 250/246/241
+#               white).
+#  4. unmix     a cloud edge is a share of cloud over the clear sky behind
+#               it. Each pixel is solved for that coverage (on luminance and
+#               blue-minus-red, against the local clear sky, a normalized
+#               blur of the saturated sky round it, and the local cloud's own
+#               chroma ratio), the cloud it holds is developed and laid back
+#               over the sky it lets through unchanged. Lifting and retoning
+#               the whole pixel, sky share and all, had drawn a pale,
+#               bleached rim round every cloud. Past coreDeg from any clear
+#               sky the pixel is all cloud (the chroma solve there would read
+#               the plate's blocky webp chroma as coverage), and the faint
+#               wash of a few percent of cloud within fringeDeg of a cloud
+#               body goes back to clear sky.
 #
 # The inner inset takes the outer plate's matte by angle, refined at its
 # edges by its own pixels, and the outer plate's key, so the two plates agree
@@ -64,13 +79,18 @@
 #               dTopLong 240, so the lit tops shade instead of plateauing; the
 #               key is widened to cWidthLong (1.3 stop) so warm tops grade
 #               into the blue body. The inset is developed once more as at
-#               the wide end (detailWide 1.0, the old shoulder and filter);
-#               its luminance ratio to the long one, log2, softened aBlur px
-#               and stored in the inset's alpha at 127 codes per aStops round
-#               128, is what the engine takes in full at 10 mm and not at all
-#               at 24 mm. The outer cap, seen only from 10 to 16 mm and at the
-#               20 mm corners, is developed once at detailOuter (1.1), the
-#               wide end's filter and shoulder and the widened key.
+#               the wide end (detailWide 1.8); its luminance ratio to the long
+#               one, log2, softened aBlur px and stored in the inset's alpha
+#               at 127 codes per aStops round 128, is what the engine takes in
+#               full at 10 mm and not at all at 24 mm. The outer cap, seen
+#               only from 10 to 16 mm and at the 20 mm corners, is developed
+#               once at detailOuter (1.8). Both wide developments use the long
+#               end's cloud-only filter (baseDegWide, baseEpsWide) and
+#               rational shoulder: the old small-eps filter kept the cells in
+#               the base and its tanh shoulder piled them into the flat-white
+#               plateaus the big 10 mm cloud showed (30% of its lit top sat
+#               at 240 or more on the screen, now 12%; the 4 to 12 px band of
+#               the top's luminance has 1.4x the relief).
 #
 # python3 -I cloud_glow.py outer_in.webp inner_in.webp outdir '{params}' [debug.png]
 # as published: the defaults. Measured on the developed frames: at 20 mm the
@@ -79,19 +99,22 @@
 # average (248, 243, 236), cloud p90 luma at 10 mm 229, nothing at 255 but
 # the caption and the dither's odd pixel. With step 5, at 20 mm: the frame
 # share at or above 250 is 0.11% (was 0.6%), above 245 0.6% (was 2.2%), cloud
-# G p90 229 (was 235); the 10 mm frame's clouds measure as before.
+# G p90 229 (was 235); the 10 mm frame's clouds measure as before. (The lit
+# top figures above predate the unmix and the warmer, shaded tops of steps 3
+# to 5; see those steps for what they measure now.)
 # Inputs are crown_cap.py's plates (the ones published before this pass):
 # running it on its own output would lift the clouds twice.
 import sys, json, numpy as np, cv2
 from PIL import Image
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
-P = dict(q=93, stops=0.6, cKey=65, cWidth=0.8, cWidthLong=1.3, detailWide=1.0, detailLong=2.0,
-         detailOuter=1.1, baseDegLong=1.0, baseEpsLong=0.25, kDLong=190.0, aDLong=252.0, dTopLong=240.0, dMaxLong=251.0, aStops=1.5, aBlur=1.5, cHue=208.0, cSat=0.36, topPlate='#fff1d9',
+P = dict(q=93, stops=0.6, cKey=65, cWidth=0.8, cWidthLong=1.3, detailWide=1.8, detailLong=2.0,
+         detailOuter=1.8, baseDegLong=1.0, baseEpsLong=0.25, kDLong=190.0, aDLong=252.0, dTopLong=240.0, dMaxLong=251.0, aStops=1.5, aBlur=1.5, cHue=208.0, cSat=0.36, topPlate='#fff1d9',
          cS0=0.5, cS1=0.36, hiKnee=0.625, hiCeil=1.0, tqMax=0.985,
-         kD=200.0, aD=250.0, dTop=245.0, dMax=251.0, dCap=254.6, baseDeg=0.37, baseEps=0.09, detail=1.2,
-         hiA=205.0, hiB=238.0, warmD=[1.024, 1.0, 0.972], innerDeg=47.5, thLo=84.0, thHi=90.0,
+         kD=200.0, aD=250.0, dTop=245.0, dMax=251.0, dCap=250.0, baseDeg=0.37, baseEps=0.09, detail=1.2,
+         hiA=205.0, hiB=238.0, warmD=[1.04, 1.0, 0.94], innerDeg=47.5, thLo=84.0, thHi=90.0,
          texDeg=0.07, poolDeg=0.23, texHi=0.035, growDeg=0.2, gapDeg=0.6, closeDeg=0.5, openDeg=0.35,
-         texLoose=0.018, openLoose=0.6, thLoose=62.0, minDeg=2.0, feather=0.06)
+         texLoose=0.018, openLoose=0.6, thLoose=62.0, minDeg=2.0, feather=0.06,
+         skyS0=0.4, skyS1=0.5, skyDeg=0.5, coreDeg=0.3, fringeDeg=0.5, fr0=0.02, fr1=0.12, baseDegWide=1.0, baseEpsWide=0.25)
 if len(sys.argv) > 4: P.update(json.loads(sys.argv[4]))
 DBG = sys.argv[5] if len(sys.argv) > 5 else ''
 s2l = lambda v: np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4).astype(np.float32)
@@ -282,16 +305,62 @@ LK = np.log2(pc[2])
 print('cloud px', int(sel.sum()), 'new cloud Y pct 25/50/key/90/99.5', pc.round(4)); del Ysel, sel
 
 def inv(T, c):
-    # screen level -> plate light, per channel, on the grey ramp
+    # screen level -> plate light, per channel, on the grey ramp; capped at
+    # dCap so the warm tops' red, with the engine's halation, grain and
+    # dither on top, never reaches 255
     return np.interp(np.minimum(T, P['dCap']), dg[:, c], pg).astype(np.float32)
 
-def glow(X, cw, ppd, Q=None):
+def unmix(X, m, th, ppd):
+    # coverage: each pixel as alpha of cloud over (1 - alpha) of the clear
+    # sky beside it, solved on luminance and blue-minus-red with the local
+    # sky (a normalized blur of the saturated sky) and the local cloud's own
+    # chroma ratio (the same over the cloud body), so a translucent edge is
+    # developed as the cloud it holds over the sky it lets through, never as
+    # a lifted, bleached piece of sky
+    v = l2s(X); V = v.max(-1); S = 1 - v.min(-1) / (V + 1e-5)
+    g = (m * (1 - smooth(P['thLo'], P['thHi'], th))).astype(np.float32)
+    Y = X @ LUMA; Dc = X[..., 2] - X[..., 0]
+    def nconv(a, w, deg):
+        s = deg * ppd
+        n = cv2.GaussianBlur(w, (0, 0), s)
+        if a.ndim == 3:
+            return np.stack([cv2.GaussianBlur(a[..., c] * w, (0, 0), s) for c in range(a.shape[-1])], -1) / np.maximum(n, 1e-6)[..., None], n
+        return cv2.GaussianBlur(a * w, (0, 0), s) / np.maximum(n, 1e-6), n
+    ws = (m * smooth(P['skyS0'], P['skyS1'], S)).astype(np.float32)
+    Sk, n1 = nconv(X, ws, P['skyDeg'])
+    Sk2, _ = nconv(X, ws, 4 * P['skyDeg'])
+    Sk = np.where((n1 > 0.05)[..., None], Sk, Sk2).astype(np.float32); del Sk2
+    wc = (m * smooth(P['cS0'], P['cS1'], S) * (V > 0.5)).astype(np.float32)
+    kc, n2 = nconv(Dc / np.maximum(Y, 1e-4), wc, P['skyDeg'])
+    kc = np.where(n2 > 0.05, kc, np.median(Dc[wc > 0.5] / np.maximum(Y[wc > 0.5], 1e-4))).astype(np.float32)
+    Ys = Sk @ LUMA; Ds = Sk[..., 2] - Sk[..., 0]
+    den = Ds - kc * Ys
+    a = 1 - (Dc - kc * Y) / np.where(np.abs(den) > 1e-4, den, 1e-4)
+    a = np.clip(np.where(den > 0.01, a, smooth(P['cS0'], P['cS1'], S)), 0, 1).astype(np.float32)
+    # a pixel no brighter than its sky holds no lit cloud
+    a *= smooth(0.0, 0.08, (Y - Ys) / np.maximum(Ys, 1e-4))
+    # the chroma solve only matters at the edges: inside the body (past
+    # coreDeg from any clear sky) it would read the plate's blocky chroma
+    # as coverage, so there the pixel is all cloud
+    dsky = cv2.distanceTransform((ws < 0.5).astype(np.uint8), cv2.DIST_L2, 5) / ppd
+    a = np.maximum(cv2.GaussianBlur(a, (0, 0), 1.0), smooth(0.5 * P['coreDeg'], P['coreDeg'], dsky)).astype(np.float32)
+    C = np.maximum((X - (1 - a)[..., None] * Sk) / np.maximum(a, 0.05)[..., None], 0).astype(np.float32)
+    # the faint, pale wash that ringed the clouds (a few percent of cloud
+    # over the sky, within fringeDeg of a cloud body) goes back to clear sky
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(round(P['fringeDeg'] * ppd)) + 1,) * 2)
+    near = cv2.GaussianBlur(cv2.dilate((a > 0.5).astype(np.uint8), k).astype(np.float32), (0, 0), 0.1 * ppd)
+    ac = (a * (1 - near * (1 - smooth(P['fr0'], P['fr1'], a)))).astype(np.float32)
+    return g, a, ac, C, Sk
+
+def glow(X, U, ppd, Q=None):
     P = {**globals()['P'], **(Q or {})}
-    L = np.log2(np.maximum((unshoulder(X) * G) @ LUMA, 1e-4)).astype(np.float32)
+    g, a, ac, C, Sk = U
+    w = g * a
+    L = np.log2(np.maximum((unshoulder(C) * G) @ LUMA, 1e-4)).astype(np.float32)
     rb = max(2, int(round(P['baseDeg'] * ppd)))
-    B = guided_w(L, cw, rb, np.float32(P['baseEps'])) if P.get('weighted') else guided(L, rb, np.float32(P['baseEps']))
-    on = cw > 1e-3
-    L, B, Xs, w = L[on], B[on], X[on], cw[on]
+    B = guided_w(L, w, rb, np.float32(P['baseEps'])) if P.get('weighted') else guided(L, rb, np.float32(P['baseEps']))
+    on = (g * np.maximum(a, ac)) > 1e-3
+    L, B, Xs, gs, As, Acs, Cs, Sks = L[on], B[on], X[on], g[on], a[on], ac[on], C[on], Sk[on]
     # the screen level each cloud pixel is developed to: base through the
     # shoulder, detail on at the knee's slope (the film's own below it)
     e0 = float(np.interp(P['kD'], dgY, eg))
@@ -315,20 +384,32 @@ def glow(X, cw, ppd, Q=None):
         F = film(tgt)
         tgt *= np.stack([inv(T[:, c], c) / np.maximum(inv(F[:, c], c), 1e-6) for c in range(3)], -1)
         tgt = np.clip(tgt, 0, 1)
+    # the pixel was (1 - a) sky + a cloud; it becomes (1 - ac) sky + ac of
+    # the developed cloud
     out = X.copy()
-    out[on] = Xs + (tgt - Xs) * w[:, None]
-    return out
+    new = (1 - Acs)[:, None] * Sks + Acs[:, None] * tgt
+    old = (1 - As)[:, None] * Sks + As[:, None] * Cs
+    out[on] = Xs + (new - old) * gs[:, None]
+    return np.maximum(out, 0)
 
-On = glow(O, cwO, ppdO, dict(detail=P['detailOuter'], cWidth=P['cWidthLong']))
+UO = unmix(O, mO, thO, ppdO)
+On = glow(O, UO, ppdO, dict(detail=P['detailOuter'], cWidth=P['cWidthLong'], baseDeg=P['baseDegWide'],
+                             baseEps=P['baseEpsWide'], weighted=True, rational=True, kD=P['kDLong'], aD=P['aDLong'], dTop=P['dTopLong'], dMax=P['dMaxLong']))
+cwO = UO[0] * UO[1]; del UO
 On *= (thO < 95 * 1.004)[..., None]
-cwI = cloud_w(I, mI, thI)
-In = glow(I, cwI, ppdI, dict(detail=P['detailLong'], cWidth=P['cWidthLong'], baseDeg=P['baseDegLong'],
+UI = unmix(I, mI, thI, ppdI)
+cwI = UI[0] * UI[1]
+In = glow(I, UI, ppdI, dict(detail=P['detailLong'], cWidth=P['cWidthLong'], baseDeg=P['baseDegLong'],
                                 baseEps=P['baseEpsLong'], weighted=True, kD=P['kDLong'], aD=P['aDLong'],
                                 dTop=P['dTopLong'], dMax=P['dMaxLong'], rational=True))
 # the wide end's development, as a luminance ratio to the long end's: the
 # engine scales the inset by ratio ** (1 - t), t = 0 at 10 mm, 1 at 24 mm
-Iw = glow(I, cwI, ppdI, dict(detail=P['detailWide'], cWidth=P['cWidthLong']))
-lr = np.log2(np.maximum(Iw @ LUMA, 1e-6) / np.maximum(In @ LUMA, 1e-6)) * (cwI > 1e-3); del Iw
+Iw = glow(I, UI, ppdI, dict(detail=P['detailWide'], cWidth=P['cWidthLong'], baseDeg=P['baseDegWide'],
+                             baseEps=P['baseEpsWide'], weighted=True, rational=True, kD=P['kDLong'], aD=P['aDLong'], dTop=P['dTopLong'], dMax=P['dMaxLong']))
+del UI
+lr = np.log2(np.maximum(Iw @ LUMA, 1e-6) / np.maximum(In @ LUMA, 1e-6)) * (cwI > 1e-3)
+if DBG: np.save(DBG.replace('.png', '_Iw.npy'), Iw.astype(np.float16))
+del Iw
 # the ratio is only taken in full where the inset is drawn at a third of its
 # size or less, so it is stored softened (aBlur px) and coarse (aStops), which
 # keeps the alpha to well under a megabyte

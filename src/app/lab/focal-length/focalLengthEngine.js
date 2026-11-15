@@ -54,7 +54,7 @@ const ENC = 2.0; // the caps store scene light / 2, sRGB-encoded
 // developed for the long end (cloud_glow.py: the detail layer at 2x over a
 // cloud-only base on a slow shoulder, so the cells and crevices read when a
 // cloud fills the frame); its alpha holds the wide end's development (detail
-// at 1x, the old shoulder) as a log2 luminance ratio, 127 codes per A_STOPS
+// at 1.8x on the same base and shoulder) as a log2 luminance ratio, 127 codes per A_STOPS
 // stops round 128, taken in full at 10 mm and not at all at 24 mm, where the
 // clouds are drawn three times larger.
 const A_STOPS = 1.5;
