@@ -18,9 +18,17 @@ import { CARD } from "./splatVideoParams";
 // column out.
 // Inside the photo the card is the image, with the border ramp baked into its
 // left and right edges divided back out so the image and its continuation
-// meet without a seam. After card_finish.py the top edge carries no ramp:
-// the card is cut at the photo's top row as one antialiased line, so the
-// signal head ends on a crisp chord instead of a smear.
+// meet without a seam. After card_finish.py the top edge carries no ramp,
+// and the photo's own steel stops at its top row on one antialiased line; the
+// gantry does not. The photo cuts the truss obliquely along that row, from the
+// left edge to the signal head, so the same clean bay carries it on over the
+// top along its own axis, out to the vertical past the head's end bracket
+// where the cantilever really ends. Under the top row each bay is laid in
+// beneath the photo's steel down to the first chord the photo shows whole
+// across that bay, so the carried members end inside a chord, the steps
+// between chords fall on verticals, and no member ends on the row; the
+// bracket posts that meet the row just under the band are carried up into the
+// bottom chord.
 
 const CARD_VERTEX = `
 precision highp float;
@@ -78,6 +86,10 @@ uniform vec2 uTrussRef;
 uniform vec2 uTrussAxis;
 uniform vec2 uTrussWindow;
 uniform vec2 uTrussBand;
+uniform float uTrussEnd;
+uniform vec2 uTrussVertical;
+uniform vec3 uTrussChords;
+uniform float uTrussSliver;
 uniform vec2 uExtrude;
 uniform float uTopCut;
 
@@ -140,6 +152,38 @@ vec4 image(vec2 photo, vec2 gx, vec2 gy) {
   return vec4(c.rgb, a);
 }
 
+// The truss at a point of the plane: the clean bay shifted by whole periods
+// along the axis, inside the band and short of its far end. Past the left
+// seam it fills the band (s before the bay). From the bay on it is laid in
+// over the top: above the photo's top row it fills the band, and under the
+// row each bay (from just left of one vertical to just left of the next, so
+// a vertical is never split) goes down to the first chord whose centre is
+// still inside the photo at the bay's right end, where the photo's own chord
+// swallows the ends of the members.
+vec4 trussAt(vec2 q, bool above, bool left, vec2 gx, vec2 gy) {
+  if (uTrussOn < 0.5) return vec4(0.0);
+  vec2 across = vec2(-uTrussAxis.y, uTrussAxis.x);
+  vec2 rel = q - uTrussRef;
+  float s = dot(rel, uTrussAxis);
+  float t = dot(rel, across);
+  if (t < uTrussBand.x || t > uTrussBand.y || s > uTrussEnd) return vec4(0.0);
+  float period = uTrussWindow.y - uTrussWindow.x;
+  if (s < uTrussWindow.x) {
+    if (!left) return vec4(0.0);
+  } else if (!above) {
+    float vertical = uTrussVertical.x - uTrussVertical.y;
+    float right = vertical + ceil((s - vertical) / period) * period + uTrussVertical.y;
+    float limit = uTrussBand.y;
+    for (int i = 2; i >= 0; i -= 1) {
+      vec2 chord = photoOf(uTrussRef + right * uTrussAxis + uTrussChords[i] * across);
+      if (chord.y >= 0.0) limit = uTrussChords[i];
+    }
+    if (t > limit) return vec4(0.0);
+  }
+  float k = -floor((s - uTrussWindow.x) / period);
+  return image(photoOf(q + k * period * uTrussAxis), gx, gy);
+}
+
 void main() {
   // The photo thins out over a short band below its top edge, where the
   // source ends and the analytic sky takes over.
@@ -155,33 +199,37 @@ void main() {
     vec2 q = planeOf(vPhoto);
     vec2 px = vPhoto * uPhotoPx - 0.5;
     float top = uTopCut > 0.5 ? topCut(vPhoto) : topFade;
-    bool inside = px.x >= uSeamPx && px.x <= uPhotoPx.x - 1.0 - uSeamPx && vPhoto.y <= 1.0 && (vPhoto.y >= 0.0 || uTopCut > 0.5);
+    bool inX = px.x >= uSeamPx && px.x <= uPhotoPx.x - 1.0 - uSeamPx;
+    bool inside = inX && vPhoto.y <= 1.0 && (vPhoto.y >= 0.0 || (uTopCut > 0.5 && px.y >= -8.0));
+    bool left = vPhoto.x < 0.5;
     if (inside) {
       c = image(vPhoto, gx, gy);
       c.a = clamp(c.a * unfade(vPhoto), 0.0, 1.0) * top;
     } else {
-      bool left = vPhoto.x < 0.5;
-      // The truss, bay by bay, or an edge column carried out.
-      vec4 base = vec4(0.0);
+      // an edge column carried out
       float edgeRow = left ? uExtrude.x : uExtrude.y;
-      if (uTrussOn > 0.5 && left) {
-        vec2 rel = q - uTrussRef;
-        float s = dot(rel, uTrussAxis);
-        float t = dot(rel, vec2(-uTrussAxis.y, uTrussAxis.x));
-        if (t >= uTrussBand.x && t <= uTrussBand.y && s < uTrussWindow.x) {
-          float period = uTrussWindow.y - uTrussWindow.x;
-          float k = ceil((uTrussWindow.x - s) / period);
-          base = image(photoOf(q + k * period * uTrussAxis), gx, gy);
-        }
-      }
       if (edgeRow >= 0.0 && px.y >= edgeRow && vPhoto.y <= 1.0) {
         float column = left ? 2.0 * uEdgePx : uPhotoPx.x - 1.0 - 2.0 * uEdgePx;
         vec2 from = vec2((column + 0.5) / uPhotoPx.x, vPhoto.y);
         vec4 edge = image(from, vec2(0.0, gx.y), vec2(0.0, gy.y));
-        edge.a *= unfade(from);
-        base = edge.a > base.a ? edge : base;
+        c = vec4(edge.rgb, clamp(edge.a * unfade(from), 0.0, 1.0) * top);
       }
-      c = vec4(base.rgb, base.a * top);
+    }
+    // The truss, bay by bay, past the left seam and over the top, laid in
+    // under whatever steel the photo has there.
+    vec4 truss = trussAt(q, vPhoto.y < 0.0, left && !inside, gx, gy);
+    if (truss.a > c.a) c = truss;
+    // The posts that meet the top row just under the band, carried up into
+    // its bottom chord.
+    if (vPhoto.y < 0.0 && inX && uTrussOn > 0.5 && uTrussSliver > 0.0) {
+      vec2 rel = q - uTrussRef;
+      float s = dot(rel, uTrussAxis);
+      float t = dot(rel, vec2(-uTrussAxis.y, uTrussAxis.x));
+      if (s >= uTrussWindow.x && s <= uTrussEnd && t > uTrussBand.y - 0.01 && t <= uTrussBand.y + uTrussSliver) {
+        vec2 from = vec2(vPhoto.x, 0.5 / uPhotoPx.y);
+        vec4 post = image(from, vec2(gx.x, 0.0), vec2(gy.x, 0.0));
+        if (post.a > c.a) c = post;
+      }
     }
   }
   if (c.a < 0.5 / 255.0) discard;
@@ -351,12 +399,18 @@ function createWireMesh(extend) {
   return mesh;
 }
 
-function cardGeometry(columns, rows) {
-  const geometry = new THREE.PlaneGeometry(1, 1, columns, rows);
+// `clearRows` rows cover the top `clearTo` of the card, where nothing is drawn
+// (it is there so the card's edge stays out of the frame), and `rows` the rest.
+function cardGeometry(columns, rows, clearRows = 0, clearTo = 0) {
+  const total = rows + clearRows;
+  const geometry = new THREE.PlaneGeometry(1, 1, columns, total);
   geometry.translate(0.5, 0.5, 0);
   // PlaneGeometry runs y upward; the card's rows run down the photo.
   const position = geometry.getAttribute("position");
-  for (let i = 0; i < position.count; i += 1) position.setY(i, 1 - position.getY(i));
+  for (let i = 0; i < position.count; i += 1) {
+    const row = Math.round((1 - position.getY(i)) * total);
+    position.setY(i, row <= clearRows ? (clearRows > 0 ? (row / clearRows) * clearTo : 0) : clearTo + ((row - clearRows) / rows) * (1 - clearTo));
+  }
   position.needsUpdate = true;
   return geometry;
 }
@@ -377,7 +431,11 @@ export function createCardLayer(card, image, remap, gl) {
   // Only the worm's-eye remap shows past the photo, so only it extends.
   const extend = remap ? card.extend : null;
   const rect = extend ? extend.rect : card.rect;
-  const span = [(rect[2] - rect[0]) / (card.rect[2] - card.rect[0]), (rect[3] - rect[1]) / (card.rect[3] - card.rect[1])];
+  // Above `clear` (photo v) the extended card is empty sky: it runs on only so
+  // that its top edge stays above the frame at every lean.
+  const clear = extend ? extend.clearAbove : rect[1];
+  const clearTo = (clear - rect[1]) / (rect[3] - rect[1]);
+  const span = [(rect[2] - rect[0]) / (card.rect[2] - card.rect[0]), (rect[3] - clear) / (card.rect[3] - card.rect[1])];
   const truss = extend?.truss;
 
   const material = new THREE.ShaderMaterial({
@@ -408,6 +466,11 @@ export function createCardLayer(card, image, remap, gl) {
       uTrussAxis: { value: new THREE.Vector2(...(truss ? truss.axis : [1, 0])) },
       uTrussWindow: { value: new THREE.Vector2(...(truss ? truss.window : [0, 1])) },
       uTrussBand: { value: new THREE.Vector2(...(truss ? truss.band : [0, 0])) },
+      // over the top (no end: it only runs on past the left seam)
+      uTrussEnd: { value: truss?.end ?? truss?.window[0] ?? 0 },
+      uTrussVertical: { value: new THREE.Vector2(...(truss?.vertical ?? [0, 0])) },
+      uTrussChords: { value: new THREE.Vector3(...(truss?.chords ?? [0, 0, 0])) },
+      uTrussSliver: { value: truss?.sliver ?? 0 },
       uExtrude: { value: new THREE.Vector2(...(extend?.extrude ?? [-1, -1])) },
       uTopCut: { value: extend && card.finish?.topRamp === false ? 1 : 0 },
     },
@@ -418,8 +481,9 @@ export function createCardLayer(card, image, remap, gl) {
     ...PREMULTIPLIED_OVER,
   });
   // The grid stays as fine per unit of photo as before, so the lens bends the
-  // longer card's rows as smoothly as it bends the splats.
-  const geometry = cardGeometry(Math.ceil(CARD.segments[0] * span[0]), Math.ceil(CARD.segments[1] * span[1]));
+  // longer card's rows as smoothly as it bends the splats; the empty sky above
+  // gets a few rows of its own.
+  const geometry = cardGeometry(Math.ceil(CARD.segments[0] * span[0]), Math.ceil(CARD.segments[1] * span[1]), clearTo > 0 ? CARD.clearRows : 0, clearTo);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.matrixAutoUpdate = false;

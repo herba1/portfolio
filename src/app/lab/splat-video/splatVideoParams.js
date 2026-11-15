@@ -15,6 +15,11 @@ export const PLAYBACK = {
 export const SPEEDS = [0.25, 0.5, 1];
 export const DEFAULT_SPEED = 1;
 
+// The lean's limits are tied to the extended card (card_extend.py): at every
+// corner of them (yaw +-12, pitch +-6, dolly 0.92-1.08, any window shape) the
+// card's top edge, run on to photo v = -4, stays above the frame, and the
+// truss carried over the photo's top ends on its own end vertical. Widen them
+// only together with meta.card.extend.rect.
 export const ORBIT = {
   yawLimitDeg: 12,
   pitchLimitDeg: 6,
@@ -78,6 +83,8 @@ export const RENDER = {
 // the strips the carried-on wires are drawn with.
 export const CARD = {
   segments: [192, 128],
+  // rows for the empty sky the extended card runs on into above the truss
+  clearRows: 24,
   wiresMax: 16,
   // a carried-on wire: plane units per step of s / (1 - s), how far along
   // the strip it stops (t = 999 reach, at the vanishing point), and its samples

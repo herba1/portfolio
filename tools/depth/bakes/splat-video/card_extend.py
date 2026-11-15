@@ -23,6 +23,16 @@
 #     sleeves on the catenary are a few hundred px long) is carried on at the
 #     sleeve's width for the rest of a typical sleeve's length, then tapers to
 #     the wire, so it never stops in a straight cut at the photo's edge;
+#   * the truss over the top: the gantry runs on above the photo's top row
+#     (the photo cuts it obliquely, across the whole band, from the left edge
+#     to the signal head), so the same bays carry it on over the top, along
+#     its own axis, out to the vertical just past the head's end bracket,
+#     where the cantilever really ends. Under the top row each bay is laid in
+#     beneath the photo's own steel down to the first chord the photo shows
+#     whole across that bay, so the members carried on end inside a chord,
+#     the steps between chords fall on verticals, and no member ends on the
+#     row; the bracket posts that reach the row just under the band are
+#     carried up into the bottom chord;
 #   * extrude: the building block at the bottom-left barely clears the frame
 #     at full lean, so those rows simply carry the column just inside the
 #     edge outward. The bottom-right corner is wires only after
@@ -52,9 +62,14 @@ REACH_PX = 700             # how far in from the edge a wire is followed to fit 
 # 0.12, full lean), the building and the trees by x = -0.03 and 1.0. The
 # wires are not bounded by it: each is its own ribbon run out to its
 # vanishing point, since overhead wires cross the whole sky.
-# The top row starts a few texels above the photo so the player can cut the
-# card there as one antialiased line (card_finish.py takes the ramp off it).
-EXTEND_RECT = [-1.0, -0.004, 1.05, 1.0]
+# Above the photo the truss carried over the top reaches v = -0.205 (its top
+# chord at the end vertical); past CLEAR_ABOVE the card is empty sky. It still
+# runs on, to v = -4 (rays 73 degrees up from the source lens before the
+# remap widens them), so that its top edge stays above the frame at every
+# lean the orbit allows (yaw +-12, pitch +-6, dolly 0.92-1.08), from a phone
+# held upright to a 21:9 monitor: the card never ends inside the frame.
+EXTEND_RECT = [-1.0, -4.0, 1.05, 1.0]
+CLEAR_ABOVE = -0.23
 SLEEVE_PX = 520            # a splice sleeve's length on the photo, near the right edge
 SLEEVE_MIN_PX = 120        # carried on at least this far past the seam
 SLEEVE_TAPER = 0.2         # of the carried length, where it narrows to the wire
@@ -67,6 +82,12 @@ TRUSS_REF = (-2.6, -2.1)
 TRUSS_ANGLE_DEG = -11.6
 TRUSS_WINDOW = (0.2857, 0.4814)   # along the axis, plane units
 TRUSS_BAND = (0.300, 0.950)       # across it
+# Over the top: the truss runs on to the first vertical at or past the end
+# bracket of the signal head (the last steel on the photo's top row), and the
+# posts that meet the top row just under the band are carried up TRUSS_SLIVER
+# into it.
+HEAD_END_X = 2064
+TRUSS_SLIVER = 0.08
 
 meta_path = os.path.join(OUT, "meta.json")
 meta = json.load(open(meta_path))
@@ -326,8 +347,47 @@ for x0, y0, _ in candidates:
 wire_rgb = np.median(np.concatenate(wire_rgb), 0)
 
 angle = np.radians(TRUSS_ANGLE_DEG)
+axis = np.array([np.cos(angle), np.sin(angle)])
+normal = np.array([-axis[1], axis[0]])
+
+# The verticals: the densest column of the clean bay, across the band, and
+# the width it holds at least 70% of that. The chords: the rows of the bay
+# that are solid all the way along it.
+period = TRUSS_WINDOW[1] - TRUSS_WINDOW[0]
+ss = np.linspace(TRUSS_WINDOW[0], TRUSS_WINDOW[1], 400, endpoint=False)
+tt = np.linspace(TRUSS_BAND[0], TRUSS_BAND[1], 160)
+qs = np.array(TRUSS_REF) + ss[None, :, None] * axis + tt[:, None, None] * normal
+pts = origin + qs[..., :1] * e1 + qs[..., 1:] * e2
+uv = (pts[..., :2] / pts[..., 2:] / th + 1) * 0.5
+column = cv2.remap(al, (uv[..., 0] * W - 0.5).astype(np.float32), (uv[..., 1] * H - 0.5).astype(np.float32), cv2.INTER_LINEAR).mean(0)
+peak = int(np.argmax(column))
+solid = column >= 0.7 * column[peak]
+lo, hi = peak, peak
+while solid[(lo - 1) % len(ss)] and hi - lo < len(ss):
+    lo -= 1
+while solid[(hi + 1) % len(ss)] and hi - lo < len(ss):
+    hi += 1
+step = ss[1] - ss[0]
+vertical = (TRUSS_WINDOW[0] + 0.5 * (lo + hi) * step, 0.5 * (hi - lo + 1) * step)
+head_end = px_to_q(HEAD_END_X, 0) - np.array(TRUSS_REF)
+head_s = float(head_end @ axis)
+truss_end = vertical[0] + np.ceil((head_s - vertical[0] - vertical[1]) / period) * period + vertical[1]
+rows = cv2.remap(al, (uv[..., 0] * W - 0.5).astype(np.float32), (uv[..., 1] * H - 0.5).astype(np.float32), cv2.INTER_LINEAR).mean(1)
+chords, start = [], None
+for i, solid_row in enumerate(np.append(rows >= 0.9, False)):
+    if solid_row and start is None:
+        start = i
+    elif not solid_row and start is not None:
+        chords.append(float(0.5 * (tt[start] + tt[i - 1])))
+        start = None
+if len(chords) != 3:
+    sys.exit(f"card_extend.py expects the truss's three chords, found {len(chords)}")
+print(f"truss: chords at t = {', '.join(f'{c:.3f}' for c in chords)}")
+print(f"truss: verticals at s = {vertical[0]:.4f} + k {period:.4f}, {2 * vertical[1]:.4f} wide; head ends at s = {head_s:.3f}, truss over the top to s = {truss_end:.4f}")
+
 meta["card"]["extend"] = {
     "rect": EXTEND_RECT,
+    "clearAbove": CLEAR_ABOVE,
     "seamPx": SEAM_PX,
     "edgeFade": EDGE_FADE,
     "photo": [W, H],
@@ -345,6 +405,13 @@ meta["card"]["extend"] = {
         "axis": [float(np.cos(angle)), float(np.sin(angle))],
         "window": list(TRUSS_WINDOW),
         "band": list(TRUSS_BAND),
+        # carried on over the photo's top: where it ends along the axis, its
+        # verticals (centre in the bay, half-width) and chords (across it),
+        # and how far the posts just under the band are carried up into it
+        "end": round(float(truss_end), 4),
+        "vertical": [round(float(vertical[0]), 4), round(float(vertical[1]), 4)],
+        "chords": [round(c, 4) for c in chords],
+        "sliver": TRUSS_SLIVER,
     },
     # photo rows (px) from which the left and right edge columns are carried outward
     "extrude": [left_floor, -1],

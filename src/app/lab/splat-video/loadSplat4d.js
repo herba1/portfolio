@@ -320,6 +320,18 @@ function readCard(card, fail) {
 // wires run out to their vanishing points, a tiled truss on the card's
 // plane, and edge columns extruded outward. Anything malformed leaves the
 // card at the photo's own edge.
+// The truss carried on over the photo's top: where it ends along its axis,
+// its verticals (centre in the bay, half-width) and three chords (across
+// it), and how far the posts under its band are carried up into it. Without
+// them it only runs on past the left seam.
+function trussTop(truss) {
+  const { end, vertical, chords, sliver } = truss;
+  if (!(Number.isFinite(end) && end > truss.window[0])) return {};
+  if (!(Array.isArray(vertical) && vertical.length === 2 && vertical.every(Number.isFinite) && vertical[1] >= 0)) return {};
+  if (!(Array.isArray(chords) && chords.length === 3 && chords.every(Number.isFinite))) return {};
+  return { end, vertical: vertical.slice(), chords: chords.slice(), sliver: Number.isFinite(sliver) && sliver > 0 ? sliver : 0 };
+}
+
 function readCardExtend(extend, finite) {
   if (!extend || typeof extend !== "object") return null;
   const { rect, basis, wires, truss } = extend;
@@ -331,6 +343,8 @@ function readCardExtend(extend, finite) {
   const trussOk = truss && finite(truss.ref, 2) && finite(truss.axis, 2) && finite(truss.window, 2) && finite(truss.band, 2) && truss.window[1] > truss.window[0];
   return {
     rect: rect.slice(),
+    // above this photo v the card is empty sky (its top edge kept out of the frame)
+    clearAbove: Number.isFinite(extend.clearAbove) && extend.clearAbove > rect[1] && extend.clearAbove < rect[3] ? extend.clearAbove : rect[1],
     photo: extend.photo.slice(),
     seamPx: extend.seamPx,
     edgeFade: extend.edgeFade,
@@ -338,7 +352,7 @@ function readCardExtend(extend, finite) {
     // a sleeve: [half-width, taper start, taper end, offset across], plane units
     wires: lines.map((w) => ({ start: w.start.slice(), run: w.run.slice(), across: w.across.slice(), half: w.half, sleeve: finite(w.sleeve, 4) && w.sleeve[0] > 0 && w.sleeve[2] > w.sleeve[1] ? w.sleeve.slice() : null })),
     wireColor: finite(extend.wireColor, 3) ? extend.wireColor.slice() : [0.08, 0.12, 0.18],
-    truss: trussOk ? { ref: truss.ref.slice(), axis: truss.axis.slice(), window: truss.window.slice(), band: truss.band.slice() } : null,
+    truss: trussOk ? { ref: truss.ref.slice(), axis: truss.axis.slice(), window: truss.window.slice(), band: truss.band.slice(), ...trussTop(truss) } : null,
     extrude: finite(extend.extrude, 2) ? extend.extrude.slice() : null,
   };
 }
