@@ -240,7 +240,8 @@ void main() {
 //     against a local mean (two rings round the pixel, cloud only), the local
 //     contrast is opened up and the whole lot runs through a soft filmic
 //     shoulder that only reaches a warm near-white (#F4F1EA, never past it)
-//     on the sunlit tops;
+//     on the sunlit tops, and reaches it gradually, so a turret models
+//     continuously from the warm top into the blue shade;
 //   - sun: the cloud is read as a height field (the slope of its log
 //     radiance over four rings, a turret to a body across) and lit from one
 //     sun shared by every print, the deck's own. The side of a cloud that
@@ -263,13 +264,13 @@ void main() {
 //     for itself.
 const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const SKY_GRADE = {
-  cloudGain: 0.5, // stops into the shoulder at a mid cloud of the deck (x = 1 is the knee)
-  cloudToe: 2.1, // log contrast of the cloud's broad modelling (the deck's cumulus have their own)
-  detail: 1.7, // log contrast of the fine detail against the local mean
+  cloudGain: 0.85, // stops into the shoulder at a mid cloud of the deck
+  cloudToe: 1.6, // log contrast of the cloud's broad modelling (the deck's cumulus have their own)
+  detail: 1.2, // log contrast of the fine detail against the local mean
   depth: 2, // stops the shade side can fall below the knee, at most
   cloudSlope: 0.3, // film's slope in the clouds (log out per log exposure), to take the meter out
   cloudKeep: 1, // stops of the print's own exposure put back on the cloud, per stop
-  knee: 3, // hardness of the shoulder: higher holds the mids lower and the tops whiter
+  knee: 1.8, // hardness of the shoulder the cloud's light climbs from shade to top on: higher flattens the tops sooner
   splitTone: 1, // 0 leaves cloud neutral, 1 is the full skylight split
   keep: 0.5, // share of the print's own dye cast kept in the cloud
   skyKeep: 0.7, // power of the print's own exposure ratio kept in the clear sky
@@ -418,8 +419,10 @@ void main() {
       onSky += rw.a;
     }
     // weighted to the broad rings: the sun lights a cloud's body, and the
-    // small rings alone paint mottled shade streaks inside the masses
-    grad += gj / (4.0 * r) * (j == 0 ? 0.12 : (j == 1 ? 0.3 : (j == 2 ? 0.5 : 0.4)));
+    // small rings alone paint mottled shade streaks inside the masses; the
+    // smallest one barely counts, or the terminator at a turret's edge flips
+    // from lit to shade over a few pixels and cuts a contour round the top
+    grad += gj / (4.0 * r) * (j == 0 ? 0.03 : (j == 1 ? 0.3 : (j == 2 ? 0.5 : 0.4)));
   }
   onSky /= 32.0;
   Lm /= wm;
@@ -458,8 +461,6 @@ void main() {
   // never to storm cloud
   lx = lx < 0.0 ? -uModel.w * (1.0 - exp(lx / uModel.w)) : lx;
   lx += uEv.x * uEv.y * uModel.z;
-  float xs = exp2(clamp(lx, -12.0, 8.0));
-  float yc = xs / pow(1.0 + pow(xs, uModel.y), 1.0 / uModel.y); // 0..1, 1 = the top of the shoulder
   // The tone is laid as colour, not as darkness: a cloud is lit by the sun
   // from one side and by the open blue everywhere else, so its shade is the
   // sky's light, a pale skylight blue (#8FB4D8), and only the faces turned to
@@ -467,17 +468,28 @@ void main() {
   // in light, which gives the pale blue-white of a cumulus flank.
   vec3 hiL = toLin(HI);
   vec3 shL = mix(vec3(dot(toLin(SHADE), LUMA)), toLin(SHADE), uCloud.z);
-  float sunlit = smoothstep(0.62, 0.95, yc) * smoothstep(-0.25, 0.45, facing);
+  // (the warm white needs the light of a top as well as the side turned to the sun)
+  float sunlit = smoothstep(-0.6, 0.85, lx) * smoothstep(-0.25, 0.45, facing);
   // a cloud's bright side away from the sun is a neutral white, not the
   // warm one: the warmth is the sun's
   vec3 top = mix(vec3(dot(hiL, LUMA)) * vec3(0.975, 0.99, 1.02), hiL, sunlit);
-  // shade to top along the cloud's light, mixed on a perceptual scale so a
-  // flank half way round reads half way between them; on the faces turned to
-  // the sun the climb finishes sooner, so they land on the warm white
-  // instead of stalling a step short of it in the blue-white
-  float u = smoothstep(-1.5, 1.6 - 0.5 * sunlit, lx - uEv.x * uEv.y * uModel.z);
-  vec3 tint = mix(sqrt(shL), sqrt(top), u);
+  // Shade to top along the cloud's light, on a perceptual scale so a flank
+  // half way round reads half way between them. The climb runs through a
+  // soft shoulder (the knee) that eases in at the shade end and only reaches
+  // the top asymptotically, so a turret keeps modelling all the way up into
+  // the warm white instead of landing on a flat cream plateau with a contour
+  // round it. The colour turns a little ahead of the light: a flank is
+  // blue-white, but the last stretch of a top is the white getting brighter,
+  // not a blue-grey one. The light aims a little past the white (1.2) and
+  // the ceiling below rounds it off, so only the brightest turrets reach it.
+  float ut = max(lx - uEv.x * uEv.y * uModel.z + 1.5, 0.0) / 2.3;
+  float uw = ut * ut;
+  float u = uw / pow(1.0 + pow(uw, uModel.y), 1.0 / uModel.y);
+  float uh = mix(u, 1.0, smoothstep(0.7, 0.97, u));
+  vec3 tint = mix(sqrt(shL), sqrt(top), uh);
   tint *= tint;
+  float yt = mix(sqrt(dot(shL, LUMA)), 1.2 * sqrt(dot(top, LUMA)), u);
+  tint *= yt * yt / max(dot(tint, LUMA), 1e-4);
   // the deepest undersides go a little below the skylight blue, never grey
   tint *= mix(0.8, 1.0, smoothstep(-0.1, 0.3, u));
   // the print's own dye cast stays in the body, but the sunlit tops lose
@@ -487,9 +499,13 @@ void main() {
   vec3 own = mix(vec3(1.0), (lin + 0.002) / (Y + 0.002), uCloud.w * (1.0 - sunlit));
   vec3 cloud = tint * own * pow(clamp((Y + 0.004) / (Yb + 0.004), 0.75, 1.33), 1.1);
   // never past the warm white, and never by clipping one channel (that
-  // turns blue shade cyan): the whole colour comes down together
+  // turns blue shade cyan): the whole colour comes down together, and it
+  // rolls into that ceiling on a shoulder rather than hitting it, so the
+  // brightest tops still carry their modelling instead of a flat cap
   vec3 over = cloud / hiL;
-  cloud /= max(1.0, max(over.r, max(over.g, over.b)));
+  float om = max(over.r, max(over.g, over.b));
+  float oc = om > 0.75 ? 0.75 + 0.25 * (1.0 - exp((0.75 - om) / 0.25)) : om;
+  cloud *= oc / max(om, 1e-4);
 
   // clear sky: a dome. The colour opens from cobalt to a pale cyan with
   // slope right from the zenith (a smoothstep would leave the middle prints
