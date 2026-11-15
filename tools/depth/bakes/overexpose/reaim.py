@@ -20,28 +20,41 @@
 #
 # Every pass so far is a function of the direction on the sky (the dome field is
 # of zenith angle alone, the hidden sun's aureole of the angle from it), so the
-# shipped bake is carried over exactly where it must be: each pixel of the new
+# shipped bake can be read exactly through the new camera: each pixel of the new
 # frame is a ray, and where that ray fell inside the old frame its scene,
 # sky-hold key, ink and matte are resampled from there (Lanczos, log-encoded
-# codes). That is kept only round the hidden sun (CARRY_DEG), where crown.py's
-# crown, its pin-holes, the aureole and the glow key live and no solve can
-# rebuild them. Everywhere else the tighter field would only magnify the old
-# plate (and its grain) by up to 1.4x, so the open sky is laid fresh as the
-# clean dome field (polarise.py's dome and crown.py's aureole, with
-# foliage.dome's low-order fit on the carried bake's open sky) times grain
-# matched to the photograph's at the bake's own scale, and the pines and the
-# cumulus are then solved from the 8k HDR's own radiance through the new camera
-# by foliage.foliage() and cumulus.cumulus(), exactly as they were solved before.
-# The hidden sun keeps its direction (deepen.U / V are its new frame position).
-# Where the new frame reaches past the old one's top edge the crown has nothing
-# to carry, so there (and across the carry's feather) it is solved from the HDR as
-# the other pines are.
+# codes). Nothing of it is kept in the picture, though: the tighter field would
+# only magnify the old plate (and its grain) by up to 1.4x, so the old bake only
+# lends its open sky to foliage.dome's low-order fit, its grain statistics and
+# its ink's median. The open sky is laid fresh everywhere as the clean dome
+# field (polarise.py's dome and crown.py's aureole, a function of the angle from
+# the hidden sun, with that fit) times grain matched to the photograph's at the
+# bake's own scale, and all three pines and the cumulus are then solved from the
+# 8k HDR's own radiance through the new camera by foliage.foliage() and
+# cumulus.cumulus(), exactly as they were solved before.
 #
-# Last, the optics: what the old optics held beyond a blur of the old visible
-# scene (the disc's veil around the hidden sun, beyond the encoding) is carried
-# over by the same resampling, and the blurs are rebaked from the new visible scene.
+# The hidden-sun crown too. An earlier run carried crown.py's crown (and with it
+# the aureole, pin-holes and glow key) over within 20-27 deg of the sun, the one
+# part no solve had rebuilt: it printed as the smeariest silhouette in the frame
+# (crown.py's donor was a tone-mapped, recompressed bake; its lip soft and
+# rubbery, a hanging wisp doubled by the resampling) and its feather met the
+# fresh dome along a straight diagonal seam. Now that crown is unmixed from the
+# HDR like the others (its needle sprays as fine as the lens left them), and the
+# hidden sun is laid again on the fresh sky share (sun()): the aureole is already
+# in the dome field behind the needles, so it shows through every real gap;
+# close to the sun the thinnest needles are eaten by irradiation (the matte's
+# gaps grow by up to IRR_PX); the disc sparkles in the crown's real pin-holes
+# within SPARK_DEG; and the sky hold's glow key is laid on the sky share, the
+# needle mass taking KEY_NEEDLE of it, so the crown prints as dark as the other
+# pines inside a cyan-white bloom. The hidden sun keeps its direction
+# (deepen.U / V are its new frame position).
+#
+# Last, the optics are baked from the new visible scene, plus the disc's own
+# light (beyond the encoding) as a tight veil round the hidden sun, weighted by
+# the new sky share (crown.veil).
 #
 #   python3 reaim.py <scene.webp> <trees.webp> <optics.png> <tree_lined_driveway_8k.hdr> [out_dir]
+# (optics.png is no longer read: nothing of the old optics is carried)
 # (pass copies of the old-aim files; the 3x render is cached beside the HDR)
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
@@ -62,8 +75,12 @@ LUMA = np.array([0.2126, 0.7152, 0.0722])
 OLD = (178.0, 66.0, -10.0, 116.0, 0.4973, 0.0625)   # yaw, pitch, roll, field, hidden sun U, V of the bake carried over
 # (the first re-aim carried (150, 76, -10, 116, 0.3906, 0.1706) over to this one)
 OLD_GRAIN_BOX = (100, 330, 1050, 620)        # open sky in the old frame the grain is measured on (x0, y0, x1, y1)
-CARRY_DEG = (20.0, 27.0)                     # the old bake is kept this close to the hidden sun, fading out to the second
-FEATHER_PX = 10                              # the carried-over bake fades into the new plate over this band inside the old frame's edge
+FEATHER_PX = 10                              # the old bake's open sky counts for the dome fit this far inside the old frame's edge
+# the hidden sun, laid again on the fresh sky share (sun())
+IRR_PX, IRR_W, IRR_KEEP = 2.0, 2.5, 0.85     # irradiation: gap growth at the sun (px), its e-fold (deg), share of the opened sky kept
+SPARK_DEG, SPARK_N, SPARK_PX, SPARK_GAP = 6.0, 8, 14, 7   # sparkles: within (deg), how many, largest pin-hole (px), spacing (px)
+SPARK_OPEN = 0.35                            # a pin-hole's sky share must pass this at its brightest pixel
+SUN_KEY_DEG = 40.0                           # the glow key is laid again this close to the hidden sun (it is ~0 past it)
 
 def smooth(a, lo, hi):
     t = np.clip((a - lo) / (hi - lo), 0, 1)
@@ -107,16 +124,59 @@ def warp(a, mx, my, interp=cv2.INTER_LANCZOS4):
         return cv2.remap(a, mx, my, interp, borderMode=cv2.BORDER_REFLECT)
     return np.stack([cv2.remap(a[..., c], mx, my, interp, borderMode=cv2.BORDER_REFLECT) for c in range(a.shape[-1])], -1)
 
+def sun(out, a8, a, d, g):
+    """The hidden sun laid again on the fresh sky share: the aureole is in the dome field
+    behind the needles already; here the matte's thinnest needles are eaten by
+    irradiation, the disc sparkles in the crown's real pin-holes, and the sky hold's
+    glow key is laid on the sky share (the needle mass taking KEY_NEEDLE of it)."""
+    a = a.copy()
+    # irradiation: near the sun the light behind eats the thin needles, so the
+    # gaps open by up to IRR_PX; solid branches survive
+    rr = IRR_PX * np.exp(-g / IRR_W)
+    t = 1 - a
+    for r in range(1, int(np.ceil(IRR_PX)) + 1):
+        disk = np.hypot(*np.mgrid[-r:r + 1, -r:r + 1]) <= r + 0.3
+        dil = ndi.grey_dilation(t, footprint=disk) * IRR_KEEP
+        t = np.maximum(t, dil * np.clip(rr - r + 1, 0, 1))
+    a = np.where(g < 6 * IRR_W, 1 - t, a)
+    # sparkles: the disc through the crown's real pin-holes (small gaps not joined to the open sky)
+    lab, nl = ndi.label(a < 1 - SPARK_OPEN)
+    spark = np.zeros_like(a)
+    placed = []
+    if nl:
+        idx = np.arange(1, nl + 1)
+        size = ndi.sum(np.ones_like(a), lab, idx)
+        peak = ndi.minimum_position(a + 1e-3 * g, lab, idx)
+        cand = [k for k in range(nl) if size[k] <= SPARK_PX and g[peak[k]] < SPARK_DEG]
+        for k in sorted(cand, key=lambda k: g[peak[k]]):
+            r, c = peak[k]
+            if len(placed) == SPARK_N or any(abs(r - r2) + abs(c - c2) < SPARK_GAP for r2, c2 in placed):
+                continue
+            if r < 1 or c < 1 or r > a.shape[0] - 2 or c > a.shape[1] - 2:
+                continue
+            placed.append((r, c))
+            v = sunburst.SPARK_L * np.exp(-g[r, c] / sunburst.SPARK_W)
+            for dr, dc, f in sunburst.SPARK_KERN:
+                spark[r + dr, c + dc] = max(spark[r + dr, c + dc], f * v)
+            a[r, c] *= 0.3                      # the hole's brightest pixel lets the disc through
+    print('sparkles', len(placed), placed)
+    out = out + spark[..., None] * (sunburst.SPARK_COL / (sunburst.SPARK_COL @ LUMA))
+    # the glow key on the sky share: the needle mass is held nearly as the other pines
+    ksky = np.clip(ndi.gaussian_filter(1 - a, 1.5), 0, 1)
+    key = sunburst.KEY_A * np.exp(-g / sunburst.KEY_DEG) * (sunburst.KEY_NEEDLE + (1 - sunburst.KEY_NEEDLE) * ksky)
+    share = d + (1 - d) * key
+    a_new = 3 + 252 * np.round((1 - np.clip(share, 0, 1)) * 63) / 63
+    w = 1 - smooth(g, SUN_KEY_DEG - 5, SUN_KEY_DEG)
+    a8 = np.clip(np.round(a8 + w * (a_new - a8)), 0, 255).astype(np.uint8)
+    a[a < 0.004] = 0
+    return out, a8, a
+
 def main():
     s = np.asarray(Image.open(sys.argv[1]).convert('RGBA')); t = np.asarray(Image.open(sys.argv[2]).convert('RGBA'))
-    g8 = np.asarray(Image.open(sys.argv[3]).convert('RGB'))
     hdr = sys.argv[4]; od = sys.argv[5] if len(sys.argv) > 5 else bw.OUT
     n = s.shape[0]
     old_pix = bw.dec_log(s[..., :3]); old_a8 = s[..., 3].astype(float)
-    old_ink = bw.dec_log(t[..., :3]); old_ta = t[..., 3] / 255.0
-    # the old optics' own extra light (beyond a blur of what was seen), at 512
-    vis_old = old_pix * (1 - old_ta[..., None]) + old_ink * old_ta[..., None]
-    extra = bw.dec_log(g8) - bw.optics(vis_old)
+    old_ta = t[..., 3] / 255.0
     old_grain_pix = old_pix.copy()
 
     # the new aim (deepen.py holds it); the hidden sun keeps its direction
@@ -136,7 +196,7 @@ def main():
     ta = np.clip(warp(old_ta, mx, my), 0, 1)
 
     # 2. the open sky: the clean dome field times the photograph's grain, at the bake's
-    #    own scale; the old bake is kept only round the hidden sun (crown.py's crown and glow)
+    #    own scale, everywhere (the carried bake only lends the dome its fit)
     elev, g = deepen.geometry()
     T = polarise.sky_field(90.0 - elev)
     N = T + crown.aureole(T, g)
@@ -151,11 +211,8 @@ def main():
     ta = ta * w_in[..., 0]
     # the dome's low-order fit on the carried bake's open sky, then the fill with it
     D, _ = foliage.dome(pix, np.round(a8).astype(np.uint8), ~(w_in[..., 0] > 0.99), g, np.zeros((n, n)))
-    w_keep = w_in * (1 - smooth(g, *CARRY_DEG))[..., None]
-    print('old bake kept on %.3f of the frame (round the hidden sun)' % float((w_keep > 0.5).mean()))
-    pix = w_keep * pix + (1 - w_keep) * D * G
-    a8 = w_keep[..., 0] * a8 + (1 - w_keep[..., 0]) * key_glow
-    a8 = np.clip(np.round(a8), 0, 255).astype(np.uint8)
+    pix = D * G
+    a8 = np.clip(np.round(key_glow), 0, 255).astype(np.uint8)
 
     # 3. the pines and the cumulus solved again from the HDR through the new camera
     foliage.STRIP = (0, 0, 0, 0, 1)
@@ -163,23 +220,24 @@ def main():
     foliage.grain = lambda p, shape, r: grain0(old_grain_pix, shape, r)   # measured on the old frame's open sky
     raw = foliage.render(hdr)
     rng = np.random.default_rng(41)
-    # round the hidden sun the crown is crown.py's, carried over; where the new frame
-    # reaches past the old one's edge there is none to carry, so it is solved there too
-    # (and across the carry's feather, so the seam is under solid needle, not mixed sky)
-    w_crown = np.maximum(smooth(g, *foliage.CROWN_DEG), 1 - smooth(dist, FEATHER_PX, FEATHER_PX + 6.0) * inside)
-    plate, a8f, I, a, diag = foliage.foliage(pix, a8, ink, ta, raw, rng, crown_w=w_crown)
+    # the hidden sun's crown included: crown.py's is not carried, it is solved like the others
+    plate, a8f, I, a, diag = foliage.foliage(pix, a8, ink, ta, raw, rng, crown_w=np.ones((n, n)))
     rng = np.random.default_rng(53)
     out, a8n, cdiag = cumulus.cumulus(plate, a8f, a, raw, rng)
     out = np.clip(out, 2.0 ** bw.LO, 2.0 ** bw.HI)
 
-    # 4. optics: the blurs of the new visible scene, plus the old extra light carried over
+    # 4. the hidden sun, on the fresh sky share
+    out, a8n, a = sun(out, a8n, a, cdiag['d'], g)
+    out = np.clip(out, 2.0 ** bw.LO, 2.0 ** bw.HI)
+
+    # 5. optics: the blurs of the new visible scene, plus the disc's own veil
     vis = out * (1 - a[..., None]) + I * a[..., None]
-    S = 512; k = n // S
-    ex_d = warp(extra[:, :S], mx[::k, ::k] / k, my[::k, ::k] / k, cv2.INTER_LINEAR)
-    ex_h = warp(extra[:, S:], mx[::k, ::k] / k, my[::k, ::k] / k, cv2.INTER_LINEAR)
-    w_s = cv2.resize(w_keep[..., 0].astype(np.float32), (S, S), interpolation=cv2.INTER_AREA)[..., None]
-    ex = np.concatenate([ex_d * w_s, ex_h * w_s], 1)
-    glow = np.maximum(bw.optics(vis) + ex, 2.0 ** bw.LO)
+    ring = (g > 2) & (g < 6) & (a < 0.02) & (cdiag['d'] < 0.05)
+    ring = ring if ring.sum() > 50 else (g > 2) & (g < 6)
+    vcol = out[ring].mean(0)
+    vcol = vcol / (vcol @ LUMA)
+    vcol = vcol + sunburst.SRC_WHITE * (1 - vcol); vcol /= vcol @ LUMA
+    glow = np.maximum(bw.optics(vis) + crown.veil(1 - a, vcol, crown.VEIL_NEEDLE), 2.0 ** bw.LO)
 
     rng = np.random.default_rng(67)
     inside_m = a > 0
@@ -194,7 +252,7 @@ def main():
     for f in ('scene.webp', 'trees.webp', 'optics.png'):
         print(f, os.path.getsize(os.path.join(od, f)) // 1024, 'KB')
     if len(sys.argv) > 5:
-        v = np.stack([diag['a'], cdiag['d'], w_keep[..., 0]], -1)
+        v = np.stack([a, cdiag['d'], 1 - a8n / 255.0], -1)
         Image.fromarray((np.clip(v, 0, 1) * 255).astype(np.uint8)).save(os.path.join(od, 'reaim_diag.png'))
 
 if __name__ == '__main__':
