@@ -20,8 +20,8 @@ import { createStage, clamp } from "../_kit/stage";
 // edge), up and down its elevation. The concrete faces and the tower's
 // lattice take a warm key from it, shaded by the MoGe normals and kept out of
 // the creases the depth map finds, and a fill from the open sky: on the walls
-// a warm-neutral sun and the sky's light held near grey, so lit concrete is
-// a warm stone and only the faces turned from the sun lean cool.
+// the sunlit face prints a warm stone and the one turned away a cool
+// grey-blue well below it, so dragging across swaps which wall glows.
 //
 // The plate's own sky was flat haze, so inside the sky matte it is replaced by
 // a photographed summer cumulus dome (Poly Haven, Rural Asphalt Road, Alexander Scholten, CC0;
@@ -95,26 +95,26 @@ const float EXPO = 1.35;
 const float WALL_RANGE = 1.5;
 const float WALL_MID = 0.6;
 // The walls are one pale concrete under two lights of different colour
-// temperature, and the canyon is the split between them. The sun's key is
-// a warm neutral, about 5300 K (KEY_WARM, #FFE8C4), not an amber: sunlit
-// concrete prints a warm stone, hue 30 to 45 at low chroma, and the sky
-// stays the one saturated blue in the frame. The sky's light on the walls is
-// read from the dome over each face, but desaturated before it touches the
-// concrete: on a face the sun reaches it is all but neutral (AMB_LIT_SAT,
-// saturation in light), so it cannot wash the stone in the sky's hue; only a
-// face turned from the sun keeps a little of its blue (AMB_SHADE_SAT), and
-// prints a cool grey, never the cobalt behind it. Levels, as the print
-// shows them: SHADE_P is a vertical face of concrete at WALL_MID in the
-// sky's light alone, KEY_P one square to the high sun, about 200 in luma,
-// well under the crowns. SUN_HIGH is the luma of sunFor's colour with the
-// sun high: a weaker sun takes the key down by the square root of its
-// share, and a setting one turns the key from KEY_WARM toward its own amber.
-const vec3 KEY_WARM = vec3(255.0, 232.0, 196.0) / 255.0;
-const float AMB_LIT_SAT = 0.02;
-const float AMB_SHADE_SAT = 0.36;
-const float SHADE_P = 0.47;
-const float KEY_P = 0.87;
+// temperature, and the canyon is the split between them: the one gesture is
+// moving the sun, so which wall glows has to be the loudest thing it does.
+// They are set as the print should show them, not as lights to be guessed
+// at through the tone curve's shoulder. STONE is a facade of concrete at
+// WALL_MID standing KEY_NDL to the sun (a wall's own share at mid
+// elevation): a sunlit warm stone, hue 37. SHADE is the same face turned
+// away, in the sky's light alone: a cool grey-blue, well below the stone
+// and far below the sky's own blue. Laid in light, the stone's warmth is
+// almost all the key's (the shoulder takes the chroma out of a highlight, so
+// the key that prints that stone is near amber in light), and the sky's
+// share on a sunlit face is the shade's level held neutral, so its blue
+// cannot grey the stone. SUN_HIGH is the luma and SUN_HUE_HIGH the hue of
+// sunFor's colour with the sun high: a weaker sun takes the key down by the
+// square root of its share, and a setting one ambers it by its own hue's
+// shift from the high sun's.
+const vec3 STONE = vec3(216.0, 192.0, 154.0) / 255.0;
+const vec3 SHADE = vec3(143.0, 153.0, 166.0) / 255.0;
+const float KEY_NDL = 0.6;
 const float SUN_HIGH = 2.52;
+const vec3 SUN_HUE_HIGH = vec3(1.0, 0.78, 0.6);
 // Where a vertical face's sky visibility sits (skyVis with n level).
 const float SKY_VERT = 0.55;
 
@@ -123,14 +123,6 @@ vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
 // Its inverse: the light that prints as y.
 vec3 untone(vec3 y){ vec3 t = pow(y, vec3(2.2)); return t / (1.0 - t) / EXPO; }
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-// c with its saturation (max minus min over max, in light) held to at most
-// s, drawn toward its brightest channel, at its own luminance.
-vec3 capSat(vec3 c, float s){
-  float m = max(max(c.r, c.g), c.b);
-  float sat = 1.0 - min(min(c.r, c.g), c.b) / max(m, 1e-5);
-  vec3 d = vec3(m) + (c - vec3(m)) * min(1.0, s / max(sat, 1e-5));
-  return d * luma(c) / max(luma(d), 1e-5);
-}
 // The dome's layers as stored: x = K s / (1 - s), s = y ^ 2.2.
 vec3 skyDecode(vec3 y, float k){ vec3 s = min(pow(y, vec3(2.2)), vec3(0.9975)); return k * s / (1.0 - s); }
 // The equirect's coordinate for a direction in the dome's frame.
@@ -467,25 +459,25 @@ void main(){
   // The tower: its paint under the sun's own colour and the sky's cyan.
   vec3 towerL = alb * (uSunCol * key + vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis + bounce) + uSunCol * spec;
 
-  // The walls, under the two temperatures. The sky's light comes from the
-  // dome toward the half of it over the face, read very soft: its blue, or
-  // its clouds' grey where the bank stands there. Its hue is held near
-  // neutral on a face the sun reaches and keeps some blue only on one turned
-  // from it (or a recess the sun does not get into), and its level is the
-  // shade's, so the dome sets only which way the grey leans.
+  // The walls, under the two temperatures. The sky's light is SHADE's: its
+  // cool blue on a face turned from the sun (or a recess the sun does not
+  // get into), held neutral at the same level on one the sun reaches. The
+  // dome over the face, read very soft, only greys it a little where the
+  // bank stands there, its clouds' light being whiter than the open blue.
   vec3 Dn = normalize(n + uUp) * uDome;
-  vec3 skyHueW = mix(toLin(SKY_LOW), toLin(CLOUD_BODY), smoothstep(0.2, 3.0, density(Dn, 7.5)));
+  float bank = smoothstep(0.2, 3.0, density(Dn, 7.5));
   float sunFace = smoothstep(0.0, 0.08, ndl) * vis;
-  vec3 ambW = capSat(skyHueW, mix(AMB_SHADE_SAT, AMB_LIT_SAT, sunFace));
-  float shadeL = untone(vec3(SHADE_P)).g / WALL_MID;
-  ambW *= shadeL / luma(ambW) * mix(0.6, 1.0, uDay) * skyVis / SKY_VERT;
-  // The key, a warm neutral scaled by how square the face stands to the sun,
-  // no wrap: a plane takes none past edge-on. A low sun ambers it and dims
-  // it, by the square root of its strength, so at noon a sun stronger than
-  // the reference does not carry the lit faces to paper.
-  vec3 keyHue = mix(uSunCol / max(luma(uSunCol), 1e-3), toLin(KEY_WARM) / luma(toLin(KEY_WARM)), smoothstep(0.3, 1.0, uDay));
-  float keyL = (untone(vec3(KEY_P)).g / WALL_MID - shadeL) * sqrt(max(luma(uSunCol), 1e-3) / SUN_HIGH);
-  vec3 sunKey = keyHue * keyL;
+  vec3 shadeL = untone(SHADE) / WALL_MID;
+  float shadeY = luma(shadeL);
+  vec3 ambW = mix(shadeL, vec3(shadeY), max(sunFace, 0.15 * bank));
+  ambW *= mix(0.6, 1.0, uDay) * skyVis / SKY_VERT;
+  // The key, scaled by how square the face stands to the sun, no wrap: a
+  // plane takes none past edge-on. Unclamped past KEY_NDL, a low sun square
+  // to a face carries it up the shoulder, toward a pale gold, not to paper.
+  vec3 keyTint = uSunCol / max(uSunCol.r, 1e-3) / SUN_HUE_HIGH;
+  vec3 sunKey = (untone(STONE) / WALL_MID - vec3(shadeY)) / KEY_NDL;
+  sunKey *= keyTint * luma(sunKey) / max(luma(sunKey * keyTint), 1e-4);
+  sunKey *= sqrt(max(luma(uSunCol), 1e-3) / SUN_HIGH);
   vec3 wallL = alb * (sunKey * max(ndl, 0.0) * vis + ambW + bounce) + sunKey * spec;
   vec3 litP = mix(tone(wallL), tone(towerL), tower);
 
