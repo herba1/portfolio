@@ -34,12 +34,6 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // sky round it (a 1/16-res glow fed to the film with the frame). The
 // buildings are the photograph at the photo's sun.
 //
-// Then the emulsion, which the stock film pass leaves thin: a thin warm
-// halation fringe on the dark side of every edge against the bright sky and
-// cloud (the wires, the pole, the roofs, the signal), a gentle diffusion on
-// the sunlit crowns alone, and luma-only grain on the print, weighted to the
-// midtones and stepped at 24 fps (a grain tick redraws only the print).
-//
 // Query: ?sun=0..1 holds the sun (0 = 12:30, 1 = 17:00, the last light; the
 // photo is 0.424, 14:25);
 // ?t=seconds freezes the grain; ?still=1 skips the reveal; ?film=0 shows the
@@ -81,8 +75,8 @@ const SKY_WARMC = [1.0, 0.92, 0.8];
 const SKY_WARM_AMT = 1.0;
 // The cumulus: a photographed plate (cloud.webp, from tools/depth/bakes/
 // afternoon/cumulus.py: R its own luminance, A its coverage, built as a main
-// tower and a smaller turret in front of its flank, the body below the
-// crowns built as large rounded lobes lit as the crowns are; relief.py: G and B the slope
+// tower and a smaller turret in front of its flank, every billow below the
+// crowns quilted from the same HDRI's tower body; relief.py: G and B the slope
 // of the plate's own tone read as a height) laid behind the street so
 // both rise from behind the right-hand roofs with their crowns whole in the
 // sky and blue between them. The main crown's top (CLOUD_FOOT, card px) lands
@@ -99,16 +93,6 @@ const CLOUD_ROT = 22;
 const CLOUD_RELIEF = 0.25;
 // the share of the cumulus's light the air and the lens spread round it
 const CLOUD_GLOW = 0.08;
-// The emulsion (see FXSRC, FXCOMP, BLIT): a thin warm halation fringe on the
-// dark side of every edge against the bright sky, its strength and colour (the
-// red layer's, a warm orange-red); the share of the sunlit crowns' light the
-// diffusion spreads; the grain's amplitude at mid grey (print units) and its
-// clump size as a fraction of the print's height.
-const HAL_K = 0.55;
-const HAL_C = [1.0, 0.4, 0.16];
-const MIST = 0.18;
-const GRAIN = 0.06;
-const GRAIN_SIZE = 1 / 800;
 const S_PHOTO = (T0 - T_START) / T_SPAN;
 const S_OPEN = 0.86;
 
@@ -188,10 +172,6 @@ uniform vec3 uCam;   // f, cx, cy
 uniform vec4 uView;  // plate window x0, y0, w, h (pixels, y down)
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const vec3 UP = vec3(${UP.map((v) => v.toFixed(5)).join(", ")});
-// the light that halates: the sky and cloud only, from the mid blue up,
-// saturating (the emulsion's red layer fills), so the cloud halates most but
-// the open sky round the signal still leaves a trace
-float halSrc(float m, float y) { return m * smoothstep(0.02, 0.4, y) * y / (y + 0.25); }
 vec2 platePx(vec2 uv) { return uView.xy + vec2(uv.x, 1.0 - uv.y) * uView.zw; }
 vec3 viewPos(vec2 px, float Z) { return Z * vec3((px.x - uCam.y) / uCam.x, (uCam.z - px.y) / uCam.x, 1.0); }
 vec2 proj(vec3 P) { return vec2(uCam.y + uCam.x * P.x / P.z, uCam.z - uCam.x * P.y / P.z); }
@@ -434,9 +414,8 @@ void main() {
   // The cumulus: a photographed plate, its own luminance and alpha, relit by
   // the sun here. Its drawing (the tone of every billow, lit from its upper
   // left in the photograph, as this sun stands) is kept; the sun model decides
-  // which faces take the sun. Every billow is lit from that side (the crowns
-  // photographed in the plate, the body below them rounded lobes lit as the
-  // crowns are, dressed in the crowns' own grain), and
+  // which faces take the sun. Every billow is photographed (the crowns from
+  // the plate, the body below them quilted from the same HDRI's tower), and
   // it is lit as a soft volume: its shape is its coverage through wide blurs
   // plus the photograph's tone blurred to its billows, read as rounded
   // swells, with the plate's fine relief (relief.py) only a quarter-strength
@@ -445,9 +424,8 @@ void main() {
   // toward the sun through its blurred coverage). The sunlit side is a warm
   // white that rolls off across each lobe on a shoulder short of paper white,
   // never clipped; it warms to peach as the sun drops and its lit faces swing
-  // lower with it. The shade is the dome's blue-grey, about three quarters of
-  // the lit side (light scattered through the whole mass), only a little
-  // deeper under the billows and low in the towers. A few percent
+  // lower with it. The shade is the dome's blue-grey, a little over half the
+  // lit side, deepest under the billows and low in the towers. A few percent
   // of the sky's colour veils it all, so it stands in the same air.
   float low = 1.0 - smoothstep(3.0, 40.0, uEl);
   // toward the sun on the plate
@@ -459,24 +437,22 @@ void main() {
   vec2 ex = vec2(1.0, 0.0);
   vec2 ey = vec2(0.0, 1.0);
   // The cloud's shape as a soft volume: its coverage seen through two wide
-  // blurs (the tower, about 300 card px, and its lobes, about 100), plus the
-  // photograph's own tone, blurred to its big billows (about 50), read as a
-  // height. Each is a rounded swell, so the light rolls across a few large
-  // lobes instead of catching every crease of the plate: read narrower, the
-  // small billows each take their own terminator and the body quilts into
-  // an even field of round lumps, egg-crate clay.
-  vec2 g5 = vec2(textureLod(uCloud, cuv + ex * 70.0 * ct, 5.8).a - textureLod(uCloud, cuv - ex * 70.0 * ct, 5.8).a,
-                 textureLod(uCloud, cuv + ey * 70.0 * ct, 5.8).a - textureLod(uCloud, cuv - ey * 70.0 * ct, 5.8).a);
-  vec2 g7 = vec2(textureLod(uCloud, cuv + ex * 210.0 * ct, 7.7).a - textureLod(uCloud, cuv - ex * 210.0 * ct, 7.7).a,
-                 textureLod(uCloud, cuv + ey * 210.0 * ct, 7.7).a - textureLod(uCloud, cuv - ey * 210.0 * ct, 7.7).a);
-  vec2 gt = vec2(textureLod(uCloud, cuv + ex * 60.0 * ct, 5.3).r - textureLod(uCloud, cuv - ex * 60.0 * ct, 5.3).r,
-                 textureLod(uCloud, cuv + ey * 60.0 * ct, 5.3).r - textureLod(uCloud, cuv - ey * 60.0 * ct, 5.3).r);
+  // blurs (the tower, about 130 card px, and its lobes, about 40), plus the
+  // photograph's own tone, blurred to its billows (about 20), read as a
+  // height. Each is a rounded swell, so the light rolls across large forms
+  // instead of catching every crease of the plate.
+  vec2 g5 = vec2(textureLod(uCloud, cuv + ex * 28.0 * ct, 4.5).a - textureLod(uCloud, cuv - ex * 28.0 * ct, 4.5).a,
+                 textureLod(uCloud, cuv + ey * 28.0 * ct, 4.5).a - textureLod(uCloud, cuv - ey * 28.0 * ct, 4.5).a);
+  vec2 g7 = vec2(textureLod(uCloud, cuv + ex * 90.0 * ct, 6.5).a - textureLod(uCloud, cuv - ex * 90.0 * ct, 6.5).a,
+                 textureLod(uCloud, cuv + ey * 90.0 * ct, 6.5).a - textureLod(uCloud, cuv - ey * 90.0 * ct, 6.5).a);
+  vec2 gt = vec2(textureLod(uCloud, cuv + ex * 24.0 * ct, 4.0).r - textureLod(uCloud, cuv - ex * 24.0 * ct, 4.0).r,
+                 textureLod(uCloud, cuv + ey * 24.0 * ct, 4.0).r - textureLod(uCloud, cuv - ey * 24.0 * ct, 4.0).r);
   // and the plate's fine relief (relief.py) only as a quarter-strength grain
   // on it: read at full strength it shades every crease, crumpled foil
   vec2 gc = (textureLod(uCloud, cuv, 1.2).gb - 0.5) * 4.0;
-  vec2 gb = vec2(textureLod(uCloud, cuv + ex * 22.0 * ct, 3.9).r - textureLod(uCloud, cuv - ex * 22.0 * ct, 3.9).r,
-                 textureLod(uCloud, cuv + ey * 22.0 * ct, 3.9).r - textureLod(uCloud, cuv - ey * 22.0 * ct, 3.9).r);
-  vec2 gv = 1.6 * g7 + 1.5 * g5 + (5.6 * gt + 0.8 * gb) * smoothstep(0.3, 0.9, cl.a) + ${CLOUD_RELIEF.toFixed(2)} * gc;
+  vec2 gb = vec2(textureLod(uCloud, cuv + ex * 9.0 * ct, 2.6).r - textureLod(uCloud, cuv - ex * 9.0 * ct, 2.6).r,
+                 textureLod(uCloud, cuv + ey * 9.0 * ct, 2.6).r - textureLod(uCloud, cuv - ey * 9.0 * ct, 2.6).r);
+  vec2 gv = 1.6 * g7 + 1.1 * g5 + (4.4 * gt + 1.0 * gb) * smoothstep(0.3, 0.9, cl.a) + ${CLOUD_RELIEF.toFixed(2)} * gc;
   // card to plate: the card's turn (the scale drops out of a direction)
   float rc = uCl1.x / length(uCl1.xy);
   float rs = uCl1.y / length(uCl1.xy);
@@ -488,20 +464,13 @@ void main() {
   // wrapped: light diffuses round a cloud's limb rather than ending at it
   float dif = dot(cn, cl3);
   float wrap = clamp((dif + 0.35) / 1.35, 0.0, 1.0);
-  // and the same read off the tower's broad form alone (its coverage, never
-  // the billows' tone): deep in the body the sun follows this, so the lobes
-  // there are drawn by the dome's light on their tops and in their creases,
-  // not flipped in and out of sun lobe by lobe into a dappled pattern
-  vec2 gvB = 1.6 * g7 + 1.5 * g5;
-  vec3 cnB = normalize(vec3(-vec2(gvB.x * rc + gvB.y * rs, -gvB.x * rs + gvB.y * rc), 1.0));
-  float wrapB = clamp((dot(cnB, cl3) + 0.35) / 1.35, 0.0, 1.0);
   // the photograph's tone, soft: the billows against the lobe round them
   // (lit crowns bright, the tucks between them in shade)
-  float tB = textureLod(uCloud, cuv, 5.1).r;
+  float tB = textureLod(uCloud, cuv, 3.8).r;
   float tn = clamp((tB - 0.45) / 0.5, 0.0, 1.0);
   // (the plate's few hard dark tucks compressed, so they shade as soft
   // hollows rather than stains)
-  float mid = tB - textureLod(uCloud, cuv, 7.8).r;
+  float mid = tB - textureLod(uCloud, cuv, 6.5).r;
   mid = mid / (1.0 + 5.0 * abs(mid));
   // How deep in the cloud this point stands, seen from the sun: its coverage
   // summed along a march toward the sun across the card, each step read at a
@@ -526,7 +495,7 @@ void main() {
   // towers round it shade it. The billows decide where: a lobe that bulges
   // out of the outline and the photograph's bright billows stand out as
   // crowns deeper in, the notches between lobes go into the body.
-  float cvx = textureLod(uCloud, cuv, 5.4).a - textureLod(uCloud, cuv, 7.8).a;
+  float cvx = textureLod(uCloud, cuv, 4.0).a - textureLod(uCloud, cuv, 6.5).a;
   float deep = smoothstep(1.2, 5.0, tup - 2.5 * (tn - 0.45) - 2.5 * mid - 4.0 * cvx + 0.6);
   // faces turned down toward the street see neither the sun nor the dome;
   // faces turned up catch both
@@ -536,20 +505,8 @@ void main() {
   // sun reaches into the mass; the photograph's darker tucks and the inner
   // billows stay in the shade. A wide smoothstep, so the terminator is a
   // soft roll across each lobe, never a ridge.
-  float wrapS = mix(wrap, wrapB, 0.7 * deep);
-  float sunK = smoothstep(-0.05, 1.0, 0.75 * reach + 0.95 * wrapS + 2.0 * mid * (1.0 - 0.75 * deep) + 0.35 * (tn - 0.4) * (1.0 - 0.5 * deep)
+  float sunK = smoothstep(-0.05, 1.0, 0.75 * reach + 0.95 * wrap + 2.0 * mid * (1.0 - 0.4 * deep) + 0.35 * (tn - 0.4)
                           + 0.15 * up - 0.35 * deep - 0.35 * down - 0.35);
-  // The plate's tucks may shade a lit crown only so far: never below the
-  // light the broad form there takes (the same sum without the billows'
-  // tone), less a soft hollow's worth. Unfloored, a few small dark tucks on
-  // the sunlit crown drop into full shade, a field of blue pits, crumpled foil.
-  float tBB = textureLod(uCloud, cuv, 6.6).r;
-  float midB = tBB - textureLod(uCloud, cuv, 8.6).r;
-  midB = midB / (1.0 + 5.0 * abs(midB));
-  float tnB = clamp((tBB - 0.45) / 0.5, 0.0, 1.0);
-  float sunKB = smoothstep(-0.05, 1.0, 0.75 * reach + 0.95 * mix(wrap, wrapB, 0.5) + 2.0 * midB * (1.0 - 0.75 * deep)
-                           + 0.35 * (tnB - 0.4) * (1.0 - 0.5 * deep) - 0.35 * deep - 0.35);
-  sunK = max(sunK, sunKB - 0.25);
   // The sunlit side: a warm white (a pale peach once low) that rolls off on
   // a shoulder and is never clipped, brightest where a lobe faces the sun
   // square and dimming as it turns away. Set above paper white in print:
@@ -558,23 +515,14 @@ void main() {
   vec3 litC = mix(vec3(1.0, 0.98, 0.94), vec3(1.0, 0.86, 0.72), pow(low, 1.3)) * litF;
   vec3 over = max(litC - 0.92, 0.0);
   litC = min(litC, 0.92) + 0.18 * (1.0 - exp(-over / 0.18));
-  // The shade: lit by the open dome and the light scattered through the mass,
-  // the sky's own blue-grey (hue about 210) at about three quarters of the
-  // sunlit side, so the body glows rather than sitting in grey clay. Faces turned up to the dome and
+  // The shade: lit by the open dome, the sky's own blue-grey (hue about
+  // 210), a little over half the sunlit side. Faces turned up to the dome and
   // the photograph's brighter billows stand paler; the undersides, the body
   // low down and the tucks between billows go deepest.
-  // Below 0 it runs on into the creases: the body low in the tower sits
-  // about at the foot of that range, so its lobes need room both ways, their
-  // tops paler and the creases under them deeper (shadeCr), or the body
-  // reads as one flat sheet with pale puffs on it.
-  float skyR = 0.45 + 0.45 * up + (1.0 + 1.0 * deep) * mid + (0.5 + 0.4 * deep) * (tn - 0.45) - 0.15 * deep - 0.18 * down;
-  // (the same floor: a crease is the dome's shade a step down, never a hole)
-  skyR = max(skyR, 0.45 + (1.0 + 1.0 * deep) * midB + (0.5 + 0.4 * deep) * (tnB - 0.45) - 0.15 * deep - 0.15);
-  float skyK = clamp(skyR, 0.0, 1.0);
-  vec3 shadeHi = mix(vec3(0.79, 0.86, 0.905), vec3(0.81, 0.845, 0.89), low);
-  vec3 shadeLo = mix(vec3(0.63, 0.745, 0.815), vec3(0.67, 0.735, 0.81), low);
-  vec3 shadeCr = shadeLo * vec3(0.92, 0.94, 0.955);
-  vec3 shadeC = mix(mix(shadeLo, shadeHi, skyK), shadeCr, clamp(-skyR / 0.45, 0.0, 1.0) * smoothstep(0.2, 0.8, deep));
+  float skyK = clamp(0.45 + 0.45 * up + 2.0 * mid + 0.5 * (tn - 0.45) - 0.3 * deep - 0.35 * down, 0.0, 1.0);
+  vec3 shadeHi = mix(vec3(0.67, 0.77, 0.835), vec3(0.71, 0.76, 0.82), low);
+  vec3 shadeLo = mix(vec3(0.47, 0.585, 0.655), vec3(0.51, 0.575, 0.65), low);
+  vec3 shadeC = mix(shadeLo, shadeHi, skyK);
   // Multiple scattering: the sun that went into the lit billows comes back
   // out of the shade just beside them, a soft lift of the shade near the
   // light that dies away deeper in, so the terminator glows rather than cuts.
@@ -582,13 +530,9 @@ void main() {
   shadeC = mix(shadeC, msC, 0.35 * reach * (1.0 - deep) * (1.0 - 0.6 * down));
   // and the photograph's own billows drawn faintly into both, at their own
   // soft scale only (never the plate's fine grain, which reads as foil)
-  // (its dark side clamped: the grain can lift a billow but darkens one only
-  // a few percent, never below the shade floor round it)
   float fine = textureLod(uCloud, cuv, 1.6).r - textureLod(uCloud, cuv, 4.5).r;
-  fine = max(fine, -0.05);
   float draw = 0.5 + 0.4 * (1.0 - sunK);
-  vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + 0.45 * fine * draw), vec3(1.07));
-  cloud = max(cloud, shadeC * 0.95);
+  vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + 0.6 * fine * draw), vec3(1.07));
   // Where the cloud thins to its edge the sun comes through it, so a sunlit
   // billow's top ends in a bright fringe. That is only true where the sun
   // stands: the edge has to face it (squared, so it fades fast as the edge
@@ -641,11 +585,7 @@ void main() {
     return;
   }
   o += uGlowK * texture(uGlow, vUv).rgb * vec3(0.9, 0.96, 1.04) * (1.0 - 0.75 * cov);
-  // Alpha carries the share of this pixel's light the diffusion filter takes:
-  // only the sunlit tops of the cumulus (lit, high in a tower, where the sun
-  // reaches), so the mist halos the crowns and nothing else in the frame.
-  float crown = cov * smoothstep(0.35, 0.9, sunK) * (1.0 - deep) * (1.0 - deep) * smoothstep(0.2, 0.7, reach);
-  outColor = vec4(o, uDebug > 0.5 ? 0.0 : crown);
+  outColor = vec4(o, 1.0);
 }`;
 
 // The glow: a wide, separable gaussian at 1/16 res (sigma about 2.2 texels a
@@ -656,77 +596,17 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uSrc;
 uniform vec2 uDir;
-uniform float uSig;      // 2 sigma^2, in texels of the target
 void main() {
-  vec4 acc = vec4(0.0);
+  vec3 acc = vec3(0.0);
   float ws = 0.0;
   for (int i = -6; i <= 6; i++) {
-    float w = exp(-float(i * i) / uSig);
-    acc += texture(uSrc, vUv + uDir * float(i)) * w;
+    float w = exp(-float(i * i) / 9.7);
+    acc += texture(uSrc, vUv + uDir * float(i)).rgb * w;
     ws += w;
   }
-  outColor = acc / ws;
+  outColor = vec4(acc / ws, 1.0);
 }`;
 
-// The emulsion's own optics, laid on the relit frame in linear light before
-// the film develops it. First the sources, at half res: rgb the light the
-// diffusion takes (the sunlit crowns only, from the shade's alpha), a the
-// light that halates (the bright sky and cloud behind everything, by the
-// matte, rising from the pale sky near the roofs to the cloud).
-const FXSRC = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 outColor;
-uniform sampler2D uScene;
-uniform sampler2D uMat;
-${COMMON}
-void main() {
-  vec4 s = texture(uScene, vUv);
-  float m = texture(uMat, platePx(vUv) / uPlate).r;
-  float y = dot(s.rgb, LUMA);
-  outColor = vec4(s.rgb * s.a, halSrc(m, y));
-}`;
-
-// Then laid on at full res. Halation: the bright sky's light that went
-// through the emulsion, struck the base and came back through the red layer
-// a few pixels off, so a thin warm fringe stands on the dark side of every
-// edge against the bright sky and the cloud (the signal arm, the wires, the
-// roofs), strongest against the cloud, and nothing on the sky side, which is
-// already brighter than it. Diffusion: the crowns' light leaves its pixel
-// and lands spread (energy kept), a soft veil round the sunlit tops alone.
-const FXCOMP = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 outColor;
-uniform sampler2D uScene;
-uniform sampler2D uMat;
-uniform sampler2D uHal;   // half res, narrow blur: a the halation source
-uniform sampler2D uB4;    // quarter res: the crowns' light, near spread
-uniform sampler2D uB8;    // eighth res: and the wide wing
-uniform float uHalK;
-uniform vec3 uHalC;
-uniform float uMist;
-${COMMON}
-void main() {
-  vec4 s = texture(uScene, vUv);
-  float m = texture(uMat, platePx(vUv) / uPlate).r;
-  float y = dot(s.rgb, LUMA);
-  float halo = max(texture(uHal, vUv).a - halSrc(m, y), 0.0);
-  // it shows only where the receiver is darker than the light it took, and
-  // mostly on the occluders: the sky beside the cloud takes a third of it,
-  // a breath of warmth on the outline rather than a drawn line
-  halo *= (1.0 - smoothstep(0.06, 0.55, y)) * mix(1.0, 0.3, m);
-  vec3 col = s.rgb + uHalK * uHalC * halo;
-  vec3 spread = mix(texture(uB4, vUv).rgb, texture(uB8, vUv).rgb, 0.7);
-  col += uMist * (spread - s.rgb * s.a);
-  outColor = vec4(max(col, 0.0), 1.0);
-}`;
-
-// The print: the developed frame onto the paper, with the grain. Luma only
-// (no dye speckle: the same offset in every channel), clumped over two
-// octaves about a pixel and a half across, weighted to the midtones (a bell
-// on the print's luma: clean in the paper-white crowns and the deep blacks),
-// and stepped at 24 fps, the film's own rate.
 const BLIT = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -735,29 +615,10 @@ uniform sampler2D uTex;
 uniform float uFade;
 uniform vec3 uPaper;
 uniform float uRaw;
-uniform float uGrain;
-uniform float uGrainPx;
-uniform float uSeed;
-float hash12(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-float vnoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
-}
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
   if (uRaw > 0.5) c = mix(c * 12.92, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-  vec2 gp = gl_FragCoord.xy / uGrainPx + uSeed * vec2(17.13, 31.71);
-  float g = vnoise(gp) * 0.6 + vnoise(gp * 2.07 + 5.3) * 0.4 - 0.5;
-  float y = clamp(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
-  float w = pow(4.0 * y * (1.0 - y), 1.5);
-  c += g * uGrain * w;
-  outColor = vec4(mix(uPaper, clamp(c, 0.0, 1.0), uFade), 1.0);
+  outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
 function loadImage(src) {
@@ -905,13 +766,11 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     shade: program(gl, VERT, SHADE),
     blit: program(gl, VERT, BLIT),
     gblur: program(gl, VERT, GBLUR),
-    fxsrc: program(gl, VERT, FXSRC),
-    fxcomp: program(gl, VERT, FXCOMP),
   };
   const film = createFilm(gl, { width: 2, height: 2 });
 
   const L = { x: 0, y: 0, w: 1, h: 1 };
-  const T = { scene: null, fx: null, film: null, vis: null, visB: null, gsrc: null, g1: null, g2: null, fs: null, fs2: null, b4a: null, b4b: null, b8a: null, b8b: null };
+  const T = { scene: null, film: null, vis: null, visB: null, gsrc: null, g1: null, g2: null };
   let scale = 1;
   let lastBox = null;
   let visDirty = true;
@@ -946,11 +805,6 @@ export async function createAfternoon(host, { embedded = false } = {}) {
       freeTarget(gl, T.scene);
       T.scene = target(gl, L.rw, L.rh, false);
     }
-    T.fx = target(gl, L.rw, L.rh, floatOk);
-    if (!T.fx.ok) {
-      freeTarget(gl, T.fx);
-      T.fx = target(gl, L.rw, L.rh, false);
-    }
     T.film = target(gl, L.rw, L.rh, false);
     T.vis = target(gl, L.vw, L.vh, false);
     T.visB = target(gl, L.vw, L.vh, false);
@@ -964,13 +818,6 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     T.gsrc = glowT(Math.round(L.rw / 8), Math.round(L.rh / 8));
     T.g1 = glowT(Math.round(L.rw / 16), Math.round(L.rh / 16));
     T.g2 = glowT(Math.round(L.rw / 16), Math.round(L.rh / 16));
-    // the emulsion's sources at 1/2, the crowns' diffusion at 1/4 and 1/8
-    T.fs = glowT(Math.round(L.rw / 2), Math.round(L.rh / 2));
-    T.fs2 = glowT(Math.round(L.rw / 2), Math.round(L.rh / 2));
-    T.b4a = glowT(Math.round(L.rw / 4), Math.round(L.rh / 4));
-    T.b4b = glowT(Math.round(L.rw / 4), Math.round(L.rh / 4));
-    T.b8a = glowT(Math.round(L.rw / 8), Math.round(L.rh / 8));
-    T.b8b = glowT(Math.round(L.rw / 8), Math.round(L.rh / 8));
     film.resize(L.rw, L.rh);
     visDirty = true;
     dirty = true;
@@ -1007,8 +854,7 @@ export async function createAfternoon(host, { embedded = false } = {}) {
   let dragX = 0;
   let dragGoal = 0;
   let touched = held;
-  // ?t= holds the grain at that moment of the 24 fps run
-  let seed = frozen ? Math.floor(Math.abs(timeQ) * 24) % 997 : 0;
+  let seed = 0;
 
   const inPrint = (p) => p.x >= L.x && p.x <= L.x + L.w && p.y >= L.y && p.y <= L.y + L.h;
   stage.on("down", (p) => {
@@ -1125,12 +971,10 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.useProgram(P.gblur.p);
     gl.uniform1i(P.gblur.u.uSrc, 7);
-    gl.uniform1f(P.gblur.u.uSig, 9.7);
     gl.activeTexture(gl.TEXTURE7);
     const gb = (src, dst, dx, dy) => {
-      gl.activeTexture(gl.TEXTURE7);
       gl.bindTexture(gl.TEXTURE_2D, src.tex);
-      gl.uniform2f(P.gblur.u.uDir, dx / dst.w, dy / dst.h);
+      gl.uniform2f(P.gblur.u.uDir, dx / T.g1.w, dy / T.g1.h);
       to(dst);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
@@ -1145,48 +989,11 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     to(T.scene);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // 3. The emulsion's optics, in linear light: halation and the crowns'
-    // diffusion (skipped for ?film=0 and the debug views).
-    const linear = floatOk && T.scene.ok && T.fx.ok;
-    if (!raw) {
-      gl.useProgram(P.fxsrc.p);
-      common(P.fxsrc);
-      bindTex(0, T.scene.tex, P.fxsrc.u.uScene);
-      bindTex(1, mat, P.fxsrc.u.uMat);
-      to(T.fs);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.useProgram(P.gblur.p);
-      // narrow (sigma 2 half-res texels, 4 px of the print) for the
-      // halation; then on down for the diffusion's near spread and its wing
-      gl.uniform1f(P.gblur.u.uSig, 8.0);
-      gb(T.fs, T.fs2, 1, 0);
-      gb(T.fs2, T.fs, 0, 1);
-      gl.uniform1f(P.gblur.u.uSig, 9.7);
-      gb(T.fs, T.b4a, 1, 0);
-      gb(T.b4a, T.b4b, 0, 1);
-      gb(T.b4b, T.b8a, 1, 0);
-      gb(T.b8a, T.b8b, 0, 1);
-      gb(T.b8b, T.b8a, 1, 0);
-      gb(T.b8a, T.b8b, 0, 1);
-      const f = P.fxcomp.u;
-      gl.useProgram(P.fxcomp.p);
-      common(P.fxcomp);
-      bindTex(0, T.scene.tex, f.uScene);
-      bindTex(1, mat, f.uMat);
-      bindTex(2, T.fs.tex, f.uHal);
-      bindTex(3, T.b4b.tex, f.uB4);
-      bindTex(4, T.b8b.tex, f.uB8);
-      gl.uniform1f(f.uHalK, debugLight ? 0 : HAL_K);
-      gl.uniform3fv(f.uHalC, HAL_C);
-      gl.uniform1f(f.uMist, debugLight ? 0 : MIST);
-      to(T.fx);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
-
-    // 4. Develop.
+    // 3. Develop.
+    const linear = floatOk && T.scene.ok;
     if (!raw) {
       film.render(
-        T.fx.tex,
+        T.scene.tex,
         {
           ...FILM_PRESETS.summer,
           // The scan already carries its grade; the film adds the optics.
@@ -1195,33 +1002,19 @@ export async function createAfternoon(host, { embedded = false } = {}) {
           contrast: 1.08 + 0.1 * sun.late,
           toe: 0.0,
           saturation: 1.04,
-          // less dye-cloud bleed than the stock: at full it carries the sky's
-          // cyan onto the dark edges and the halation's red off them
-          softness: 0.32,
           blueDepth: 0.35,
           shadowTint: [0.97 - 0.02 * sun.late, 1, 1.03 + 0.03 * sun.late],
           highlightTint: [0.99 + 0.03 * sun.late, 1, 1.01 - 0.05 * sun.late],
           vignette: 0.22,
           whitePoint: 1.25,
           input: linear ? "linear" : "srgb",
-          // the grain is laid on the print (BLIT), luma only
-          grain: 0,
           grainSeed: seed,
         },
         T.film.fbo,
       );
       gl.bindVertexArray(vao);
     }
-    present(fade);
-  };
 
-  // The print onto the paper, with the grain: all a grain tick redraws.
-  const present = (fade) => {
-    const linear = floatOk && T.scene.ok;
-    gl.bindVertexArray(vao);
-    gl.disable(gl.BLEND);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.disable(gl.DEPTH_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.clearColor(PAPER[0], PAPER[1], PAPER[2], 1);
@@ -1235,13 +1028,8 @@ export async function createAfternoon(host, { embedded = false } = {}) {
     gl.uniform1f(P.blit.u.uFade, fade);
     gl.uniform1f(P.blit.u.uRaw, raw && linear && !debugVis ? 1 : 0);
     gl.uniform3fv(P.blit.u.uPaper, PAPER);
-    gl.uniform1f(P.blit.u.uGrain, raw ? 0 : GRAIN);
-    gl.uniform1f(P.blit.u.uGrainPx, Math.max(1, L.ph * GRAIN_SIZE));
-    gl.uniform1f(P.blit.u.uSeed, seed);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    lastFade = fade;
   };
-  let lastFade = 1;
 
   // Reveal: the print comes up a stop and a half over, a white-blue winter
   // glare, and settles; then, untouched, the sun walks on from the
@@ -1322,11 +1110,7 @@ export async function createAfternoon(host, { embedded = false } = {}) {
       }
     }
     const revealing = !still && age < REVEAL + 0.1;
-    if (!dirty && !moving && !revealing && Math.abs(sunS - lastVisS) < 1e-5) {
-      // idle: only the grain moves, and only the print is redrawn for it
-      if (tick) present(lastFade);
-      return;
-    }
+    if (!dirty && !moving && !tick && !revealing && Math.abs(sunS - lastVisS) < 1e-5) return;
     dirty = false;
     draw(expo, fade);
   });
