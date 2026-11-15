@@ -16,12 +16,33 @@
 # the grey cores into holes. Clear sky is saturated blue (log2 b/r about 1.5),
 # cloud is near neutral (about 0.3), so
 #   cover  c = how far a pixel's b/r has fallen from the local clear sky's,
-#   light  s = its luminance over the local clear sky, ranked inside the cloud,
-# and the two ship in separate channels, so the shader can tell a puff's thin
-# rim (low cover) from its grey, thick middle (full cover, low light):
+# and it ships apart from the cloud's light (below), so the shader can tell a
+# puff's thin rim (low cover) from its grey, thick middle (full cover, little
+# sun):
 #   aux.g = c                     0..255
-#   aux.b = light id (1..15) where a light was cut out, else 16 + s * 239
+#   aux.b = light id (1..15) where a light was cut out, else 0
 # (the one emitter in frame sits on the brick, far from any sky).
+#
+# The cloud's light ships on its own, full resolution, as real radiance
+# rather than a rank: cloud.webp next to DST_aux.png. Every pixel's colour
+# over the local clear sky, R = C / S, is split by least squares into two
+# lights of known colour,
+#   R = k * skyC + u * sunC
+# skyC the local clear sky's chroma (luminance 1), sunC the chroma of the
+# brightest sun-facing billows (near neutral): k is the skylight a pixel
+# passes on (about 1 on a thin wisp, 0.5 in a thick, blue core), u the sun it
+# scatters (0 in a lee pocket, 2 on a typical flank, 8 on a dome). The
+# shader grades the two separately over time (the sun goes, the skylight
+# stays), so each puff keeps its own billows and shadow pockets all the way
+# into blue hour. Both are log2 in 8 bits, dithered, lossless:
+#   cloud.r = log2(u + 2^U_LO), U_LO..U_HI   (sun share)
+#   cloud.g = log2(max(k, 2^K_LO)), K_LO..K_HI  (skylight share)
+#   cloud.b = 0 (unused)
+# Away from any cloud (where the shader's alpha is zero) the two are written
+# flat, u = 0 and k = 1, so the file carries only the clouds.
+# The source's sun sits in the shaft, in a gap of the big puff (the plate's
+# sun has set, the source's has not): inside its aureole both shares are
+# blended towards the cloud around it and the gap is closed (see below).
 #
 #   python3 clouds.py SRC.hdr SRC_aux.png DST_aux.png [yaw_offset] [preview.jpg]
 # SRC_aux.png is the aux.png pack.py wrote (or this script's own output): it
@@ -63,22 +84,77 @@ S = mblur(L, clear, s0)
 # the log-ratio itself, linear: no threshold here, the shader feathers it
 c_lin = np.clip((bs - b) / np.maximum(bs - 0.25, 0.3), 0, 1)
 c = c_lin * c_lin * (3 - 2 * c_lin)
-r = np.log2(np.maximum(L, 1e-6) / np.maximum(S, 1e-6))
-inc = sky & (c > 0.5)
-lo, hi = np.percentile(r[inc], [4, 97])
-s = np.clip((r - lo) / (hi - lo), 0, 1)
-s = s * s * (3 - 2 * s) * 0.5 + s * 0.5
 ids = np.where(a[..., 2] < 16, a[..., 2], 0)
-print('yaw %+.0f  cover %.2f of the sky  r in cloud p4 %.2f p97 %.2f' % (yaw_off, (c[sky] > 0.3).mean(), lo, hi))
-print('light in cloud p10/50/90', np.percentile(s[inc], [10, 50, 90]).round(2))
+
+# the cloud's light: skylight and sun shares over the local clear sky
+LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
+U_LO, U_HI, K_LO, K_HI = -6.0, 3.5, -3.0, 1.0
+U_CAP = 7.0  # soft cap on the sun share: the brightest domes, not the sun
+Bk = np.stack([mblur(im[..., i], clear, s0) for i in range(3)], -1)
+R = im / np.maximum(S, 1e-6)[..., None]
+kC = Bk / np.maximum(Bk @ LUMA, 1e-6)[..., None]
+inc0 = sky & (c > 0.5)
+lr = np.log2(np.maximum(R @ LUMA, 1e-6))
+top = inc0 & (lr > np.percentile(lr[inc0], 97)) & (lr < np.percentile(lr[inc0], 99.5))
+uC = (R[top] / (R[top] @ LUMA)[:, None]).mean(0)
+uC = (uC / (uC @ LUMA)).astype(np.float32)
+kk = (kC * kC).sum(-1); uu = float(uC @ uC); ku = kC @ uC
+rk = (R * kC).sum(-1); ru = R @ uC
+det = np.maximum(kk * uu - ku * ku, 1e-6)
+k_ = (rk * uu - ru * ku) / det
+u_ = (ru * kk - rk * ku) / det
+k_, u_ = np.where(u_ < 0, rk / kk, k_), np.maximum(u_, 0)
+k_, u_ = np.maximum(k_, 0), np.where(k_ < 0, ru / uu, u_)
+# the sun: the panorama's sun sits in a gap of the big puff at the frame's
+# left edge, and its aureole washes the clouds round it white and neutral,
+# so there the split reads everything as sun (k = 0) and the gap as clear.
+# Under the plate's set sun neither is true: inside the aureole the two
+# shares are blended towards their values on the cloud around it (a
+# normalised blur from outside), the sun share is pulled down to what the
+# rest of the cloud carries, and the gap the disc sat in is closed.
+Lb = cv2.GaussianBlur(L, (0, 0), 3)
+sy, sx = np.unravel_index(np.argmax(Lb), Lb.shape)
+yy, xx = np.mgrid[0:H, 0:W]
+dsun = np.hypot(xx - sx, yy - sy) * 1440 / W
+k_ = np.where(inc0, np.clip(k_, 0.3, 1.2), k_)  # no cloud passes on no skylight, nor on more than a wisp
+ring = inc0 & (dsun > 160) & (dsun < 420)
+w_in = np.exp(-(dsun / 150) ** 2)
+k_ = k_ * (1 - w_in) + mblur(k_, ring, 70) * w_in
+u_ = U_CAP * (1 - np.exp(-u_ / U_CAP))
+u_ring = mblur(u_, ring, 70)
+lo_ = np.log2(u_ + 0.05)
+hp = lo_ - cv2.GaussianBlur(lo_, (0, 0), 6)          # the billows, kept
+u_fill = np.maximum(u_ring * 2 ** (0.6 * hp), 0)
+u_ = u_ * (1 - w_in) + u_fill * w_in
+u_ *= 1 - 0.35 * np.exp(-(dsun / 260) ** 2)
+gap = np.exp(-(dsun / 80) ** 2)
+c_lin = np.maximum(c_lin, cv2.GaussianBlur(c_lin.astype(np.float32), (0, 0), 30) * 1.4 * gap)
+c_lin = np.clip(c_lin, 0, 1)
+# the skylight share is a broad field and its split from the sun share
+# amplifies the panorama's noise: smooth it a little (the sun share keeps
+# every texel)
+k_ = cv2.GaussianBlur(k_.astype(np.float32), (0, 0), 1.6 * W / 1440)
+print('sun at', sx, sy, ' sun chroma', uC.round(3))
+print('in cloud  sun share p5/50/95', np.percentile(u_[inc0], [5, 50, 95]).round(2), ' sky share', np.percentile(k_[inc0], [5, 50, 95]).round(2))
+
+print('yaw %+.0f  cover %.2f of the sky' % (yaw_off, (c[sky] > 0.3).mean()))
 
 rng = np.random.default_rng(11)
 tp = lambda: rng.random(c.shape) + rng.random(c.shape) - 1.0
 g8 = np.clip(np.round(c_lin * 255 + tp() * 0.5), 0, 255)
-b8 = np.where(ids > 0, ids, np.clip(np.round(16 + s * 239 + tp() * 0.5), 16, 255))
-rgb = np.stack([a[..., 0], g8, b8], -1).astype(np.uint8)
+rgb = np.stack([a[..., 0], g8, ids], -1).astype(np.uint8)
 cv2.imwrite(aux_out, rgb[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
+def enc(x, lo, hi):
+    return np.clip(np.round((np.clip(x, lo, hi) - lo) / (hi - lo) * 255 + tp()), 0, 255)
+away = cv2.dilate((c_lin > 0.02).astype(np.uint8), np.ones((25, 25), np.uint8)) == 0
+ue = np.where(away, 0, enc(np.log2(u_ + 2 ** U_LO), U_LO, U_HI))
+ke = np.where(away, np.round(-K_LO / (K_HI - K_LO) * 255), enc(np.log2(np.maximum(k_, 2 ** K_LO)), K_LO, K_HI))
+cl = np.stack([ue, ke, np.zeros_like(ue)], -1).astype(np.uint8)
+cloud_out = os.path.join(os.path.dirname(os.path.abspath(aux_out)), 'cloud.webp')
+cv2.imwrite(cloud_out, cl[..., ::-1], [cv2.IMWRITE_WEBP_QUALITY, 101])
+print(cloud_out, os.path.getsize(cloud_out))
+
 if len(sys.argv) > 5:
-    v = np.clip(c * (0.45 + 0.55 * s), 0, 1) * (0.3 + 0.7 * a[..., 0] / 255)
+    v = np.clip(c * (0.3 + 0.7 * np.log2(1 + u_) / np.log2(1 + U_CAP)), 0, 1) * (0.3 + 0.7 * a[..., 0] / 255)
     cv2.imwrite(sys.argv[5], (cv2.resize(v, (W // 3, H // 3), interpolation=cv2.INTER_AREA) * 255).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 85])
