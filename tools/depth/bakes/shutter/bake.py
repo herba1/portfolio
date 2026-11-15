@@ -52,7 +52,9 @@ Steps
 2. Each frame: sRGB -> linear, area-downscaled to 1920x1080 in linear light
    when the source is larger (no sharpening anywhere), graded (grade.py: the
    phone's flat daylight blue pulled to a cyan-cobalt that deepens toward the
-   zenith, radial about the towers' vanishing point).
+   zenith, radial about the towers' vanishing point; the cloud's near-whites
+   to a cream shoulder; the towers, through the stillness matte, to a warm
+   grey-steel with only their reflected sky a muted cyan).
 3. Shutter: every frame becomes the integral over its own interval, sampled
    16 times along the optical flow to the next frame (the clouds jump ~0.9%
    of the frame per frame; a mean of raw frames is a strobe of copies, not a
@@ -226,7 +228,7 @@ def prep(f, i):
         lin = cv2.warpAffine(lin, M, (lin.shape[1], lin.shape[0]), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
         lin = np.maximum(lin, 0)
     lin = cv2.resize(lin, (CW, CH), interpolation=cv2.INTER_AREA)
-    return grade(lin)
+    return grade(lin, tower=mask)
 
 
 def to8(lin, dither=True):

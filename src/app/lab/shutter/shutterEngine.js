@@ -121,7 +121,7 @@ const CREST = 1; // the crests' rise toward a cloud's white, at full keep
 // shade's skylight chroma.
 const SUN = [-0.8, 0.6];
 const SUN_TAP = 0.012;
-const TONE = { k: 1, hue: (72 * Math.PI) / 180, warm: 0.012, shade: 0.09, edge: 0.06 };
+const TONE = { k: 1, hue: (85 * Math.PI) / 180, warm: 0.017, shade: 0.09, edge: 0.06 };
 
 const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0 };
 // The top end (FINISH_FS): the highlights above the knee are printed back up
@@ -132,8 +132,10 @@ const PAPER = 0.966;
 const LIFT = 0.1; // stops over the meter-down
 const STREAK_LIFT = 0.45; // the streaks' share of those stops
 const GLINT_DETAIL = 0.5;
-const CREAM_HUE = (80 * Math.PI) / 180;
-const CREAM_C = 0.013;
+// The near-whites' cream: #F4EEE2 (OKLab h ~85, C ~0.017), a sunlit cumulus
+// top on summer film, the warm counterpoint to the cobalt and the steel.
+const CREAM_HUE = (85 * Math.PI) / 180;
+const CREAM_C = 0.017;
 const RING_PX = 3; // at DPR 2
 const RING_C = 0.05;
 const RING_HUE = (48 * Math.PI) / 180;
@@ -383,8 +385,8 @@ vec3 cloudTone(vec3 sl, vec2 iuv){
   float top = smoothstep(0.0, uEdge, g);
   float under = smoothstep(0.0, uEdge, -g);
   // Sunlit is only the true crest, most of all its sun-facing edge, and it
-  // is a pale near-white with the faintest warmth: the tower's glint is the
-  // one warm accent in the frame. Warmth goes only into light that is
+  // is a cream near-white (#F4EEE2), the same warm neutral as the towers'
+  // steel and the print's shoulder: the counterpoint to the cobalt. Warmth goes only into light that is
   // already near neutral, so a blue streak never passes through green on
   // its way to white. Everything below the crest, a partly covered pixel of
   // the integral as much as a cloud's flank or the side turned away, is the
@@ -543,7 +545,7 @@ float lumaOf(vec3 s){ return dot(lin(s), LUMA); }
 const float PRINT_WHITE = ${PRINT_WHITE.toFixed(4)}; // linear: what the top of the shoulder rolls into
 const float PRINT_GAIN = ${PRINT_GAIN.toFixed(4)};    // the most the white point is ever raised
 const vec2 WARM_D = vec2(0.58, 0.93); // display luma where the warm-neutral shoulder starts and is whole
-const vec2 WARM_AB = vec2(0.0009, 0.0089); // its colour: hue ~84 deg, a hair of chroma (OKLab)
+const vec2 WARM_AB = vec2(0.0015, 0.0169); // its colour: the cream, #F4EEE2 (OKLab h ~85, C ~0.017)
 float matteAt(vec2 duv, float lod){
   vec2 t = duv * uCover.xy + uCover.zw;
   return textureLod(uStill, vec2(t.x, 1.0 - t.y), lod).a;
