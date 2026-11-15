@@ -198,31 +198,46 @@ void main(){
   float liW = lightOf(textureLod(uAux, uv, 2.0).b);
   float core = mix(li, liW, 0.5);                   // sunlit tops and flanks
   float body = smoothstep(0.35, 0.9, covM);         // deep inside a puff
-  // Two parts. Skylight: the shaft's own colour scattered on. A cloud's lee
-  // and thick middles are lit by the blue sky around them, so their colour is
-  // a step from neutral towards the local sky (about half way where the
-  // cloud is dim, less on the lit tops), never a grey or lavender of its own.
-  // Sun: a lift in stops on the tops, more on the lit side, peach while the
-  // afterglow lasts (strongest towards the sun's side), then only a faint
-  // warm white. It leaves on its own, faster curve (uSunK), so by blue hour
-  // the cloud sits as deep slate-blue under the cobalt with a warm breath on
-  // its tops.
+  // Two parts, added, never mixed. Skylight: a cumulus is lit through and
+  // through by multiple scattering of the blue sky around it, so its body
+  // never falls to a grey of its own: every cloud pixel is floored at the
+  // local clear-sky colour (a little paler, a little bluer, luminance 1),
+  // from just over the sky on thin wisps to just under it in a thick lee.
+  // That floor rides the sky's own level (lum, uCloudSkyK), so as the
+  // exposure falls the body goes slate-blue under the cobalt, not brown.
+  // Sun: added on top, in stops, by the light rank (core) and the lit side,
+  // peach while the afterglow lasts; as the span runs it narrows to the top
+  // ranks only, a thin warm cap over a blue body.
   float sunny = clamp(core * (0.55 + 0.45 * lit), 0.0, 1.0);
-  float shade = exp2(-0.95 * (1.0 - sunny) * (0.35 + 0.65 * body));
   float glowK = clamp(uAfter * (0.45 + 0.55 * facing), 0.0, 1.0);
   float topK = smoothstep(0.15, 0.95, sunny);         // the lit tops only
-  vec3 skyTint = mix(vec3(1.0), col, mix(0.68, 0.15, sunny) * (1.0 - 0.25 * uCloudKeep) + uCloudKeep);
-  vec3 skyC = skyTint;
-  // only the lit tops take the warm white and the afterglow's peach
-  vec3 warm = mix(uCloudWhite, uCloudPeach, glowK * 0.62);
-  skyC = mix(skyC, warm, topK * (0.2 + 0.4 * uAfter)) * shade;
+  // The floor's colour: the sky's hue pushed a little bluer, about half its
+  // chroma at sunset (a cloud is paler than the gap beside it) and most of
+  // it by blue hour (slate under cobalt). Its level: just over the sky on
+  // thin wisps and lit flanks, just under it in a thick lee, and a touch
+  // under overall as the night comes (uCloudSkyK).
+  vec3 skyTint = mix(vec3(1.0), col, mix(0.5, 0.78, uS)) * vec3(0.93, 0.99, 1.14);
+  skyTint = max(skyTint, 0.0) / dot(max(skyTint, 0.0), LUMA);
+  float thick = body * (1.0 - sunny);
+  // the flank towards the set sun faces the brighter half of the sky
+  vec3 skyC = skyTint * clamp(mix(1.1, 0.88, thick) * mix(0.93, 1.07, lit), 0.85, 1.12);
+  // while the afterglow lasts the lit tops scatter its peach through as well
+  skyC = mix(skyC, uCloudPeach * dot(skyC, LUMA), topK * 0.4 * glowK);
   float up = uCloudGain * (0.08 + 0.72 * core) * (0.6 + 0.5 * lit);
   float room = uShoulder - uKnee;
   up = up < uKnee ? up : uKnee + room * (1.0 - exp(-(up - uKnee) / room));
-  // what of the sun reaches the lee arrives scattered through the puff, so
-  // it carries the sky's colour there; only the tops see it warm
-  vec3 sunCol = mix(uCloudWhite, uCloudPeach, glowK * (0.9 - 0.35 * core));
-  vec3 sunC = mix(skyTint, sunCol, 0.3 + 0.7 * topK) * (exp2(up) - 1.0) * uSunK;
+  // the cap: all ranks at sunset, only the brightest by blue hour
+  float capLo = 0.45 * smoothstep(0.35, 1.0, uS);
+  float capW = smoothstep(capLo, mix(0.45, 0.95, uS), sunny);
+  // what of the sun reaches the middle ranks arrives scattered, so it
+  // carries the sky's colour there; only the tops see it warm (a warm
+  // added to a blue of the same weight would print grey)
+  vec3 sunCol = mix(uCloudWhite, uCloudPeach, glowK * (0.95 - 0.3 * core) + 0.5 * uS);
+  sunCol /= dot(sunCol, LUMA);
+  vec3 sunC = mix(skyTint, sunCol, 0.25 + 0.75 * topK) * (exp2(up) - 1.0) * uSunK * capW;
+  // narrower, but held a little longer than the solved core: the last of
+  // the sun is a line on the very tops, not a dimming of the whole cloud
+  sunC *= 1.0 + 1.4 * uS * topK;
   vec3 cl = (skyC + sunC) * uCloudSkyK * lum;
   // No cloud may print past the film's white: the brightest channel rolls
   // into uCloudCeil (scene units, before the camera's exposure), so the
