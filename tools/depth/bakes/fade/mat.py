@@ -51,10 +51,7 @@ LW, LH = W // 2, H // 2
 z = np.load(wd + "/dose.npz")
 up = lambda a: cv2.resize(a.astype(np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
 dose = up(z["dose"])
-# the photo's own light takes the sky the frame itself shows each wall
-# (dose.py's svf_frame: without the lane's far wall, which only the dose
-# marches), as it was matched to the photograph
-svf = up(z["svf_frame"] if "svf_frame" in z else z["svf"])
+svf = up(z["svf"])
 valid = cv2.resize(np.array(Image.open(wd + "/moge/mask.png").convert("L")), (W, H), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255
 
 hsv = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
