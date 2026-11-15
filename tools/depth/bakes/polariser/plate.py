@@ -13,6 +13,8 @@
 #      perspective window; engine VIEW and HERO)
 #   -> clean.py --turned turned/plate.jpg out_aux.png plate.jpg aux.png (the
 #      fragment that window brings in: the distant slatted tower top left)
+#   -> clean.py --street plate.jpg aux.png plate.jpg aux.png (the street
+#      furniture across the block's corner, street.png)
 # aux_old.png for reproj.py: git show 39c5ed8:public/lab/polariser/aux.png > aux_old.png
 # HDRI: Poly Haven docklands_01 at 16k, its native maximum (the 8k gave the
 # plate only about 11 px/deg at the frame centre, so facades and window grids

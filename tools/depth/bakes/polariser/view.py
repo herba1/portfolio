@@ -15,11 +15,17 @@
 # still reaching 90 deg out in the corners (rectilinear would need an
 # infinite plane), and it magnifies the rim, where the towers are, against the
 # middle, where the open sky is.
-# The window is a shift lens on that plane: off the axis toward the apartment
-# block and the pointed tower, which is where Docklands' height is, and turned
-# 8 deg so the block's face spans the top. The zenith (the vanishing point)
-# sits right of and below the print's centre, the block walls the top, the
-# tower and the glass block the left, the mast and the drum the foot.
+# The window is a shift lens on that plane: off the axis toward the pointed
+# tower and the glass block, which is where Docklands' height is, and down
+# toward the quay, and turned 10 deg about the zenith, so the convention
+# centre and its glass drum stand up whole into the bottom right instead of
+# a bowed sliver along the foot. (An earlier window, shifted up toward the
+# apartment block and turned 8 deg, held more of the block's face but left
+# the right half and the foot open sky, so the canyon read on two sides.)
+# The zenith (the vanishing point) sits right of and above the print's
+# centre: the block's corner walls the top and points at it, the tower and
+# the glass block wall the left, the mast and the drum and its neighbour
+# the foot, and all of them converge on it.
 import os, sys
 import numpy as np, cv2
 from PIL import Image
@@ -31,8 +37,8 @@ HFOV = 149.09834806856665
 SUN = (38.12255859375, 28.762207031249996)
 K = 0.5            # general perspective: 0 rectilinear .. 1 stereographic
 HALF = 1.8         # half-width of the 4:5 window, plane units
-SHIFT = (-0.17, 0.15)  # window centre from the image of the camera axis, plane units (y up)
-TURN = -8.0        # deg, window turned about the zenith
+SHIFT = (-0.2, -0.1)  # window centre from the image of the camera axis, plane units (y up)
+TURN = -10.0       # deg, window turned about the zenith
 
 Z = np.array([0.0, 1.0, 0.0])
 f, R, U = basis(*CAM)

@@ -51,7 +51,8 @@ import fill  # noqa: E402
 kit = fill.kit
 
 TURNED = len(sys.argv) > 1 and sys.argv[1] == '--turned'
-args = sys.argv[2:] if TURNED else sys.argv[1:]
+STREET = len(sys.argv) > 1 and sys.argv[1] == '--street'
+args = sys.argv[2:] if TURNED or STREET else sys.argv[1:]
 src, srcaux, dst, dstaux = args[:4]
 maskout = args[4] if len(args) > 4 else ''
 img = np.asarray(Image.open(src).convert('RGB')).astype(np.float32) / 255
@@ -112,6 +113,62 @@ if TURNED:
     print('lama calls', lama.calls, 'secs', round(lama.secs, 1))
     a = cv2.GaussianBlur(hole.astype(np.float32), (0, 0), 3)
     save(img, sky_aux(aux, np.maximum(a, hole)))
+    sys.exit()
+
+
+# ------------------------------------------------------------------ street furniture
+# python3 -I clean.py --street plate.jpg aux.png out_plate.jpg out_aux.png [mask.png]
+# runs last, on the plate --turned wrote (its coordinates). The closest things
+# in the print were street furniture on the quay under the camera, hanging
+# soft and half-cropped across the apartment block's corner at the top left,
+# where the eye landed on them before the red mast:
+#  - the galvanised banner pole with its two banner boxes, the pedestrian
+#    signal head on its own pole and that pole's arm;
+#  - the thin sign pole with the 'Control zone' and no-parking signs, and the
+#    small signs at its foot;
+#  - the 'P' sign, its street-name plate and its pole, with the lamp head
+#    and bracket halfway down;
+#  - the traffic signal head with its backplate, bracket and pole.
+# The hole is street.png (white = fill), plate px 400-2200 x 0-1100: SAM 2.1
+# (tools/depth/segment.py prompt, on that crop of the plate) with points on
+# each pole and box, components under 3000 px dropped (stray hits on the
+# walkway lattice), plus hand shapes for what SAM missed (the sign pole as a
+# 24 px line from crop 575,0 to 882,684, the traffic head's backplate and
+# bracket, the pole above the head, the street-name plate, the arm, the
+# lamp head), all grown by a 15 px disc so the soft edges and the halo go.
+# Everything behind them is the block's facade, its glazed balconies and the
+# walkway, with a sliver of sky under the banner boxes, so LaMa fills it from
+# the facade round each hole (each pole is a separate, narrow hole, so the
+# fill has the window grid on both sides to continue). The aux channels are
+# filled from their surroundings (Telea), so the sky channel follows the
+# facade's outline across the holes and the glass channels stay as they were.
+# The print's window, shifted down toward the quay so the convention centre
+# and its drum stand up into the bottom right (view.py), also brings the tip
+# of the harp bridge's white pylon and its cables up past the print's foot,
+# right of the lightship's hull: thin white lines poking into the sky. That
+# hole (plate px, the print's foot crosses it from 441,4052 to 696,4164) is
+# filled the same way and its aux set to sky, as the frame-edge fragments
+# above were.
+if STREET:
+    OX, OY = 400, 0
+    sm = np.asarray(Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'street.png')).convert('L')) > 127
+    hole = np.zeros((H, W), bool)
+    hole[OY:OY + sm.shape[0], OX:OX + sm.shape[1]] = sm
+    harp = poly([(495, 4015), (655, 4030), (730, 4090), (730, 4210), (600, 4210), (485, 4095)])
+    hole |= harp
+    print('hole', round(hole.mean() * 100, 3), '% of the plate')
+    if maskout:
+        Image.fromarray((hole * 255).astype(np.uint8)).save(maskout)
+        if os.environ.get('MASK_ONLY'):
+            sys.exit()
+    lama = fill.Lama(threads=4)
+    img = fill.fill(img, hole, 'lama', lama=lama, grain=True, feather=8)
+    print('lama calls', lama.calls, 'secs', round(lama.secs, 1))
+    q = np.clip(np.round(aux * 255), 0, 255).astype(np.uint8)
+    hm = hole.astype(np.uint8)
+    aux = cv2.inpaint(q, hm, 9, cv2.INPAINT_TELEA).astype(np.float32) / 255
+    a = cv2.GaussianBlur(harp.astype(np.float32), (0, 0), 3)
+    save(img, sky_aux(aux, np.maximum(a, harp)))
     sys.exit()
 
 

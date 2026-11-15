@@ -32,7 +32,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the first framing had at its edges (the construction block and red tower
 // crane, lamp arms) are filled with the plate's own sky
 // (tools/depth/bakes/polariser/clean.py), so the mast is the print's only
-// strong warm colour.
+// strong warm colour; and the street furniture on the quay under the camera
+// (a banner pole, signal heads, signs, lamp poles), which hung soft across
+// the block's corner at the top left, is filled with the block's facade, so
+// the mast is the only sharp anchor too.
 // The print is not that stereographic crop: a 140° stereographic field bowed
 // every roofline into a circle round the frame. Each print pixel is instead a
 // direction in a general perspective projection centred on the zenith
@@ -60,11 +63,13 @@ const CAM = { yaw: 120, pitch: 84, roll: 50, hfov: 149.09834806856665, aspect: 4
 // of the bow out of the block's edges and the quay while the corners still
 // reach 90° out, and it magnifies the rim, where the towers stand, against the
 // open sky in the middle. The 4:5 window is HALF plane units half-wide,
-// centred SHIFT from the image of the plate's axis (toward the apartment block
-// and the pointed tower) and turned TURN degrees about the zenith, so the
-// block's face spans the top and the vanishing point sits right of and below
-// the centre: the towers rush toward it from the top and the left.
-const VIEW = { k: 0.5, half: 1.8, shift: [-0.17, 0.15], turn: -8 };
+// centred SHIFT from the image of the plate's axis (toward the pointed tower
+// and down toward the quay) and turned TURN degrees about the zenith, so the
+// block's corner walls the top, the tower and the glass block the left, and
+// the mast, the convention centre and its glass drum the foot, and the
+// vanishing point sits right of and above the centre: the towers rush toward
+// it from three sides.
+const VIEW = { k: 0.5, half: 1.8, shift: [-0.2, -0.1], turn: -10 };
 // Mip bias on the plate and aux lookups. The print minifies the plate over
 // most of the frame, and plain trilinear filtering would blend in the next
 // mip down, which is coarser than the print, so the towers would come out
@@ -80,7 +85,7 @@ const K = 0.6;
 // The filter angle that deepens this frame most (mean sky transmission is
 // lowest there, tools/depth/bakes/polariser/view.py, through the print's own
 // projection); the hero still and the end of the reveal.
-const HERO = 0.193;
+const HERO = 0.183;
 // Effective maximum degree of polarisation. A clean Rayleigh sky reaches about
 // 0.75, but a March cumulus sky is multiply scattered off bright cloud and a
 // real circular polariser does not extinguish fully, so the band 90° from the
