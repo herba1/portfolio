@@ -8,9 +8,10 @@
       on one plate (FORCE=1, with SRC a copy of the plate before it and that
       plate's aux.png back in OUT, to run it again). SHEET: optional preview.
 
-    Order: last, after grade.py (it moves only the sky, the cloud's edge and
-    the cold cast on the foreground at the right edge; grade.png's zones
-    stand). The panorama (env.webp) is not touched.
+    Order: last on the plate, after grade.py (it moves only the sky, the
+    cloud and the cold cast on the foreground at the right edge; grade.png's
+    zones stand). CUMULUS: the cumulus' source (cumulus.py). The panorama
+    is not touched: farheap.py lays the same cut in the far side's sky.
 
 clouds.py laid a photographed cumulus over the plate, but the source was
 backlit (a silver lining on every turret) and the plate's sun stands behind
@@ -32,20 +33,19 @@ So, in the plate's linear light:
      cloud; the new one is the graded target by elevation
      (sky_grade.target), the one cobalt gradient that deepens toward the
      zenith across the whole frame, the plate's own grain on it;
-  2. the cloud's matte, unmixed: how far each pixel has gone pale from B
-     (PALE), soft, so a wisp or a thinning belly keeps its share; eroded as
-     a grey matte ERODE px (a hard edge moves in past the rim's outermost
-     line and the overshoot, a soft one barely changes) and feathered
-     FEATHER px, so the edge rolls into the blue;
-  3. its light decontaminated: B taken out by the pixel's share (where the
-     share is too thin to trust, the body's colour pushed out). Inside RIM
-     px of the body's edge on clear sky (a wire across it is not an edge),
-     each pixel's light is held to the body's just inside (CAP: a crown
-     stays white where the body behind it is white, a thin silver line round
-     a shaded tower goes), its hue the body's, its fine florets laid back on
-     (DETAIL). Then the faces turned to the sun lit, broadly (SUN_D deep,
-     SUN_LIFT brighter, SUN_WARM toward the sunlit top's warm white): a
-     front-lit heap, bright on its sun side and rolling off at its edge;
+  2. the cumulus not keyed out of the plate but laid again, whole
+     (cumulus.place at clouds.PLACE: cut at the source's full resolution,
+     re-lit to the plate's sun, taken down to the plate and sharpened as
+     the plate is). Keyed from the plate (how far each pixel had gone pale
+     from B, eroded and feathered, its light capped at the rim), it came out
+     softer than everything round it, a milky low-contrast blob with a thin
+     bright rim, and the shaded belly, the sky's own saturation, keyed out
+     with the sky, so its lit lobes low at the right stood alone as flat
+     white decals. Now every sky pixel takes the new sky and the new cloud
+     over it (the old one is not kept anywhere), and the film's grain is
+     laid over the cloud as over the clear sky round it (GRAIN_C);
+  3. (the plate's old clear sky B is still read for the slate band's strips
+     between two wires);
   4. laid over the plate with clouds._lay_over (every wire, pole and eave's
      edge pixel unmixed against the new sky, the sharpening halo taken out);
      the strips of old sky the matte left out between two wires run close
@@ -69,41 +69,39 @@ import kit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clouds
+import cumulus
 import develop
 import sky_grade
 
 PALE = (0.92, 0.45)  # saturation over the old clear sky's: no cloud .. all cloud
 SLATE = ((1980.0, 820.0), 80.0)  # the slate band low at the right: from (x, y) on, and its feather (px)
-ERODE = 1.5  # px the cloud's matte is eroded at its edge on clear sky
-FEATHER = 1.5  # px (sigma) it is then feathered
-RIM = 22.0  # px inside the edge over which its light is held to the body's
-CAP = 0.95  # the rim's light, at most this over the body's just inside it
-SUN_D = 80.0  # px: how deep a face turned to the sun is lit
-SUN_LIFT = 0.3  # how much brighter it is than the body
-SUN_WARM = 0.5  # and how far toward the sunlit top's warm white
-DETAIL = 1.0  # how much of the rim's own fine texture is laid back on
+GRAIN_C = 1.0  # the plate's grain over the cloud, as over the clear sky round it
 WARM = (1.05, 1.0, 0.88)  # the warmth the despilled foreground is given (linear)
 TOWER = (2330.0, 1030.0)  # the tower and the pole's fittings: from (x, y) on (above: the wires)
 TOWER_MIN = 3000.0  # px: a solid piece of the foreground (smaller: a wire pair and its gap)
 DESPILL = ((2120.0, 860.0), 140.0)  # the zone at the right edge: from (x, y) on, and its feather (px)
 
 
-def _pp(col, w, sigma):
-    out = kit.pushpull(col, w)
-    return cv2.GaussianBlur(out, (0, 0), sigma) if sigma > 0 else out
+def _grain(hp, clear):
+    """The plate's grain (hp, measured where the sky is clear) carried over
+    the rest of the frame: each hole filled from the clear sky a fixed step
+    away, never left smooth."""
+    g = np.where(clear, hp, np.nan).astype(np.float32)
+    for dy, dx in ((90, 0), (0, 47), (-90, 0), (0, -47), (180, 61), (-180, -61), (270, 0), (0, 150), (360, -90), (-360, 90)):
+        g = np.where(np.isnan(g), np.roll(np.where(clear, hp, np.nan), (dy, dx), (0, 1)), g)
+    return np.nan_to_num(g, nan=0.0).astype(np.float32)
 
 
-def composite(lin, sky, el, sun_img, tower):
+def composite(lin, sky, el, sun_img, tower, s):
     """The plate's sky rebuilt. lin: linear RGB; sky: the 0..1 open-sky
     matte; el: elevation (degrees) per pixel; sun_img: the sun's direction
     across the image (x right, y down), unit; tower: the solid foreground at
-    the right edge (solid()). Returns the image and maps."""
+    the right edge (solid()); s: the plate's px per degree over 28. Returns
+    the image and maps."""
     H, W = sky.shape
     T = sky_grade.target(el)
     L = kit.luma(lin)
     LT = kit.luma(T)
-    inside = (sky > 0.5).astype(np.uint8)
-    fg = (sky < 0.5).astype(np.uint8)
     sat = lambda c: (c.max(-1) - c.min(-1)) / np.maximum(c.max(-1), 1e-5)
     s_px = cv2.GaussianBlur(sat(develop.enc(lin)), (0, 0), 1.0)
 
@@ -125,74 +123,25 @@ def composite(lin, sky, el, sun_img, tower):
     slike = (slate > 0.5) & (tower < 0.5) & (sky < 0.95) & (dev < 0.1)
     slike = cv2.erode(slike.astype(np.uint8), kit.disk(1)).astype(np.float32)
     sky = np.maximum(sky, cv2.GaussianBlur(slike, (0, 0), 0.7))
-    inside = (sky > 0.5).astype(np.uint8)
-    fg = (sky < 0.5).astype(np.uint8)
 
-    # how much of each pixel is cloud: how far it has gone pale from its
-    # clear sky (unmixed, soft: a wisp keeps its share)
-    srB = s_px / np.maximum(sat(develop.enc(B)), 1e-3)
-    au = np.clip((PALE[0] - srB) / (PALE[0] - PALE[1]), 0, 1) * np.clip(sky, 0, 1)
-    # eroded as a grey matte (a hard edge moves in ERODE px, past the rim's
-    # outermost line and the overshoot; a soft one barely changes), feathered
-    a = cv2.erode(au, kit.disk(ERODE))
-    a = cv2.GaussianBlur(a, (0, 0), FEATHER)
-    a = np.where(fg > 0, np.maximum(a, au), a)
-
-    # the body (for the rim's distances): specks opened away, gaps filled; its
-    # edge only where it meets clear sky (a wire across it is not an edge)
-    core = cv2.morphologyEx((au > 0.5).astype(np.uint8), cv2.MORPH_OPEN, kit.disk(2))
-    core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, kit.disk(3))
-    solid = (core | fg).astype(np.uint8)
-    n, lab, st, _ = cv2.connectedComponentsWithStats((1 - solid).astype(np.uint8), connectivity=4)
-    small = np.zeros(n, bool)
-    small[1:] = st[1:, cv2.CC_STAT_AREA] < 900
-    core = np.where(small[lab] & (inside > 0), 1, core).astype(np.uint8)
-    d_in = cv2.distanceTransform((core | fg).astype(np.uint8), cv2.DIST_L2, 5)
-
-    # the new clear sky: the target, the plate's grain on it
-    clear = cand & (au < 0.05)
+    # the new clear sky: the target, the plate's grain on it (measured where
+    # the old sky was clear, and carried down a little over the rest)
+    clear = cand & (sat(develop.enc(lin)) / np.maximum(sat(develop.enc(B)), 1e-3) > PALE[0])
     hp = np.clip(L / np.maximum(cv2.GaussianBlur(L, (0, 0), 2.0), 1e-5) - 1, -0.06, 0.06)
-    grain = np.where(clear, hp, np.roll(np.where(clear, hp, 0), 90, 0))
+    grain = _grain(hp, clear)
     Tg = T * (1 + grain)[..., None]
 
-    # the cloud's own light, decontaminated: the old sky taken out by its
-    # share; where the share is too thin to trust, the body's pushed out
-    Fu = (lin - (1 - au[..., None]) * B) / np.maximum(au, 0.05)[..., None]
-    trust = kit.smoothstep(0.15, 0.4, au)
-    Fp = _pp(Fu, (au > 0.4).astype(np.float32), 1.0)
-    F = np.clip(Fu * trust[..., None] + Fp * (1 - trust[..., None]), 0, None)
-
-    # the rim: light held to the body's just inside it, hue pushed out
-    Lf = kit.luma(F)
-    deep = ((d_in > RIM) & (core > 0)).astype(np.float32)
-    mid = ((d_in > ERODE + 2) & (core > 0)).astype(np.float32)
-    Lp = _pp(Lf, deep, 4.0)
-    chroma = F / np.maximum(Lf, 1e-5)[..., None]
-    Cp = _pp(chroma, mid, 1.5)
-    Cd = _pp(chroma, deep, 4.0)
-    w = (1 - kit.smoothstep(0.5 * RIM, RIM, d_in)) * (core > 0)
-    Lb = cv2.GaussianBlur(Lf, (0, 0), 2.5)
-    det = np.clip(Lf / np.maximum(Lb, 1e-5), 0.6, 1.6) ** DETAIL
-    Lcap = np.minimum(Lb, Lp * CAP) * det
-    Lr = Lf * (1 - w) + np.minimum(Lf, Lcap) * w
-    hue = chroma * (1 - w[..., None]) + (Cp * 0.5 + Cd * 0.5) * w[..., None]
-
-    # the sun's side of the heap: a point whose neighbour SUN_D px toward the
-    # sun is open sky stands on a face turned to it; lit broadly, rolling into
-    # the body, not a line at the silhouette
-    body = core.astype(np.float32) * (fg == 0) + (fg > 0) * cv2.dilate(core, kit.disk(4)).astype(np.float32)
-    M = np.float32([[1, 0, -sun_img[0] * SUN_D], [0, 1, -sun_img[1] * SUN_D]])
-    toward = cv2.warpAffine(body, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    lit = cv2.GaussianBlur(np.clip(body - toward, 0, 1), (0, 0), SUN_D * 0.5) * body
-    lit = np.clip(lit * 1.6, 0, 1)
-    top = clouds.TOP / float(kit.luma(clouds.TOP[None, None])[0, 0])
-    hue = hue + (top[None, None] - hue) * (SUN_WARM * lit)[..., None]
-    Lr = Lr * (1 + SUN_LIFT * lit)
-    F = hue * Lr[..., None]
-
-    new = a[..., None] * F + (1 - a[..., None]) * Tg
+    # the cumulus, cut again from its source and laid whole (cumulus.place,
+    # at clouds.PLACE): the plate's old cloud is not keyed or kept, every
+    # sky pixel takes the new sky and the new cloud over it, under every
+    # wire and eave (clouds._lay_over); the film's grain over it as over the
+    # clear sky round it (the source's own was taken down with it)
+    C, A = cumulus.place(W, H, s, clouds.PLACE, sun_img[0], clouds.TOP, clouds.SHADE, clouds.BASE_C)
+    C = C * (1 + GRAIN_C * np.roll(grain, (61, 113), (0, 1)))[..., None]
+    new = Tg * (1 - A[..., None]) + C
     out, _ = clouds._lay_over(lin, new, sky, 2.5)
-    return np.clip(out, 0, None).astype(np.float32), {"a": a, "core": core.astype(np.float32), "w": w, "q": au, "lit": lit, "B": B, "sky": sky}
+    a = A * np.clip(sky, 0, 1)
+    return np.clip(out, 0, None).astype(np.float32), {"a": a, "B": B, "sky": sky}
 
 
 def _zone(H, W):
@@ -264,7 +213,7 @@ def main():
     el = np.degrees(np.arcsin(np.clip(rw[..., 1], -1, 1)))
     sx, sy = float(np.mean((right * sun).sum(-1))), -float(np.mean((up * sun).sum(-1)))
     sn = np.hypot(sx, sy)
-    out, maps = composite(lin, sky, el, (sx / sn, sy / sn), tower)
+    out, maps = composite(lin, sky, el, (sx / sn, sy / sn), tower, sc["f"] * np.pi / 180 / 28.0)
     out, k = despill(out, sky)
     enc = np.clip(np.round(develop.enc(out) * 255), 0, 255).astype(np.uint8)
     cv2.imwrite(f"{OUT}/photo.webp", enc[..., ::-1], [cv2.IMWRITE_WEBP_QUALITY, 88])
@@ -277,15 +226,15 @@ def main():
     aux8 = cv2.imread(f"{OUT}/aux.png", cv2.IMREAD_COLOR)
     aux8[..., 0] = np.where(z > 0.01, np.clip(np.round(sk * 255), 0, 255), aux8[..., 0]).astype(np.uint8)
     cv2.imwrite(f"{OUT}/aux.png", aux8)
-    print(f"plate: cloud {100 * (maps['a'] > 0.5).mean():.2f}%, rim {100 * (maps['w'] > 0.05).mean():.2f}% of the frame")
+    print(f"plate: cloud {100 * (maps['a'] > 0.5).mean():.2f}% of the frame")
     sc["matte"] = 1
     with open(f"{OUT}/scene.json", "w") as fh:
         json.dump(sc, fh, indent=1)
     if SHEET:
         sm = lambda x: cv2.resize(x, (W // 3, H // 3), interpolation=cv2.INTER_AREA)
         g = lambda m: np.repeat(sm(np.clip(m, 0, 1).astype(np.float32))[..., None], 3, -1)
-        tiles = [(g(maps["a"]), "cloud"), (g(maps["w"]), "rim"), (g(k), "despill"), (sm(srgb), "before"),
-                 (sm(enc.astype(np.float32) / 255), "after"), (g(maps["lit"]), "sunlit")]
+        tiles = [(g(maps["a"]), "cloud"), (g(k), "despill"), (sm(srgb), "before"),
+                 (sm(enc.astype(np.float32) / 255), "after")]
         kit.write_sheet(SHEET, kit.grid(tiles, 3))
 
 
