@@ -15,6 +15,12 @@ alpha = np.load(Wk + 'alpha.npy')
 cloud = np.load(Wk + 'cloud.npy')
 mask = np.load(Wk + 'lightmask.npy')
 lights = json.load(open(Wk + 'lights.json'))
+# Looking straight up from the kerb three sodium heads and a few lit rooms
+# fall in frame. Only one light is the warm accent: the lamp over the brick
+# at the bottom rim (the brightest street lamp). Every other light is still
+# taken out of the ambient (it ships lights off) but ships no emitter, so it
+# stays dark: a dead head, an empty room.
+lights = sorted([d for d in lights if d['kind'] == 'street'], key=lambda d: -d['energy'])[:1]
 AMB = np.maximum(fg - E, 1e-6)
 # where lights.py painted out a lamp's diffraction star, take its ambient
 im = np.load(Wk + 'v.npy')
@@ -22,6 +28,17 @@ painted = np.load(Wk + 'AMB.npy')
 pm = (np.abs(painted - (im - E)).max(-1) > 1e-5) & (alpha < 0.5)
 AMB[pm] = np.maximum(painted[pm], 1e-6)
 del im
+# the fg side of the matte's edge keeps a pixel-wide rim of sky-coloured
+# light (glass edges, the decontamination's leftovers) that prints as a pale
+# outline round the roofs once the sky goes dark: no pixel there may stand
+# brighter than the facade just inside it
+edge = (alpha < 0.5) & (cv2.dilate((alpha >= 0.5).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0)
+inner = ((alpha < 0.02) & ~edge).astype(np.float32)
+LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
+la = np.log2(np.maximum(AMB @ LUMA, 1e-6)).astype(np.float32)
+li = cv2.GaussianBlur(la * inner, (0, 0), 3) / np.maximum(cv2.GaussianBlur(inner, (0, 0), 3), 1e-4)
+k = np.exp2(np.minimum(li + 0.3 - la, 0))
+AMB = np.where(edge[..., None], AMB * k[..., None], AMB)
 # sky pixels hold the extrapolated foreground; keep them from being absurd
 AMB = np.where(alpha[..., None] > 0.999, np.minimum(AMB, 2.0), AMB)
 
@@ -46,13 +63,13 @@ cv2.imwrite(OUT + 'ambient.webp', v8[..., ::-1], [cv2.IMWRITE_WEBP_QUALITY, 101]
 le = (np.log2(np.maximum(e, 2 ** ELO)) - ELO) / (EHI - ELO)
 e8 = np.clip(np.round(1 + le * 254 + tpdf(le.shape) * 0.5), 1, 255).astype(np.uint8)
 e8[e.max(-1) < 2 ** ELO * 1.01] = 0
-e8[ids == 0] = 0
 
 # light ids -> compact index 1..N ordered as in the list
 order = {d['id']: i + 1 for i, d in enumerate(lights)}
 idx = np.zeros((H, W), np.uint8)
 for k, i in order.items():
     idx[ids == k] = i
+e8[idx == 0] = 0
 # aux: R sky matte, G cloud log-ratio, B light index
 aux = np.stack([np.clip(np.round(al * 255), 0, 255), np.clip(np.round((cl * 0.3 + 0.5) * 255 + tpdf(cl.shape) * 0.5), 0, 255), idx], -1).astype(np.uint8)
 cv2.imwrite(OUT + 'aux.png', aux[..., ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])

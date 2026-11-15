@@ -2,11 +2,11 @@ import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 
 // Blue Hour. One real dusk street (Poly Haven's Modern Evening Street, an HDR
-// panorama) seen from the kerb lying on your back: a worm's-eye shaft of sky
-// walled by two towers, a crane, brick and glass, every vertical running in
-// to the zenith. Split offline into three layers of linear light: the ambient
+// panorama) seen from the kerb lying on your back, straight up: a zenith
+// worm's-eye shaft of sky ringed by two towers, a crane, brick and curved
+// glass, every vertical running in to the one vanishing point overhead. Split offline into three layers of linear light: the ambient
 // city with the lamp switched off, the sky matte with its cloud texture, and
-// the one sodium lamp head poking in at the bottom edge. Drag across and the
+// the one sodium lamp head on the bottom rim. Drag across and the
 // twenty minutes after sunset run: the skylight falls about three and a half
 // stops while the shaft deepens from pale peach-cyan to cobalt, darkest
 // overhead, the clouds lose the sun on their own, faster curve (peach-white
@@ -24,17 +24,22 @@ const ELO = -9;
 const EHI = 14;
 
 // The view the plate was rendered with (see experiment.json), so every sky
-// pixel knows its elevation and bearing: rectilinear (k = 1), 94 deg across,
-// the axis pitched 84 deg up and the frame slid 0.2 half-widths below it (a
-// rising front, seen from underneath), so the zenith and the vanishing point
-// of every vertical sit inside the print, a little above its centre.
-const VIEW = { yaw: 116, pitch: -84, hfov: 94, k: 1, shift: 0.2 };
-const SUN_AZ = 168; // degrees, the bearing the sun went down on
+// pixel knows its elevation and bearing: a true zenith worm's-eye,
+// stereographic (k = 2), 125 deg across, the axis pitched the full 90 deg
+// and no frame slide, so the zenith is the print's centre and the vanishing
+// point of every vertical: towers, glass, brick and tree ring the frame and
+// all run in to it.
+const VIEW = { yaw: 116, pitch: -90, hfov: 125, k: 2, shift: 0 };
+// degrees, the bearing the sun went down on: the cloud panorama's own sun as
+// clouds.py turns and tilts it into the plate (it sits behind the right-hand
+// tower), so the sky's glow and the clouds' sunlit flanks agree
+const SUN_AZ = 214;
 
 // Lights, from the offline split (index = value in aux.b). kind: street
 // (sodium, on a photocell), led, warm (warm-white LED) or window (a room).
-// Looking straight up only one is in frame, and it is the only warm note.
-const LIGHTS = [{ kind: "street", x: 359, y: 1731, chroma: [0.505, 0.351, 0.144] }];
+// Looking straight up three sodium heads reach into the frame; only the one
+// over the brick, on the bottom rim, is lit (pack.py), the only warm note.
+const LIGHTS = [{ kind: "street", x: 482, y: 1584, chroma: [0.505, 0.351, 0.144] }];
 const MAX_LIGHTS = 32;
 const STREET_GAIN = 0.15; // the plate's lamp was metered for a darker sky, and it sits close
 const WARMUP = 0.16; // of the span (~3 min) for a sodium lamp to reach full
@@ -166,9 +171,10 @@ void main(){
   float ze = smoothstep(0.4, 1.0, e);
   float lumOld = exp2(uZenDeep * (0.45 - ze));
   // The zenith ramp. Its parameter is this ray's angle from the zenith on
-  // the view sphere (not its distance from the print's centre, which sits
-  // some way below the zenith), eased so the cobalt holds overhead and the
-  // paling gathers towards the roofs. Both ends are luminance-1 colours
+  // the view sphere (the zenith is the print's centre, but through the
+  // stereographic lens the print's radius is not linear in that angle),
+  // eased so the cobalt holds overhead and the paling gathers towards the
+  // roofs. Both ends are luminance-1 colours
   // times a level, all riding the time's sky exposure (uSkyLum), so the
   // shape and the hues hold while the light falls.
   float zth = acos(clamp(-d.y, -1.0, 1.0));

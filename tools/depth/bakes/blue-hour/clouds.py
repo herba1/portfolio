@@ -21,7 +21,7 @@
 # sun):
 #   aux.g = c                     0..255
 #   aux.b = light id (1..15) where a light was cut out, else 0
-# (the one emitter in frame sits on the brick, far from any sky).
+# (the one emitter shipped sits on the brick, at the bottom rim).
 #
 # The cloud's light ships on its own, full resolution, as real radiance
 # rather than a rank: cloud.webp next to DST_aux.png. Every pixel's colour
@@ -40,31 +40,45 @@
 #   cloud.b = 0 (unused)
 # Away from any cloud (where the shader's alpha is zero) the two are written
 # flat, u = 0 and k = 1, so the file carries only the clouds.
-# The source's sun sits in the shaft, in a gap of the big puff (the plate's
-# sun has set, the source's has not): inside its aureole both shares are
-# blended towards the cloud around it and the gap is closed (see below).
+# The source's sun has not set (the plate's has): it sits just behind the
+# right-hand tower, and inside its aureole both shares are blended towards
+# the cloud around it and any gap it sat in is closed (see below).
 #
 #   python3 clouds.py SRC.hdr SRC_aux.png DST_aux.png [yaw_offset] [preview.jpg]
 # SRC_aux.png is the aux.png pack.py wrote (or this script's own output): it
 # supplies the matte (r) and the light ids (b < 16), kept as they are. The
-# shipped layer is kloofendal_48d_partly_cloudy_puresky_8k.hdr at yaw_offset 0
-# (about 47% of the shaft under cloud, the sun just outside the frame).
+# shipped layer is kloofendal_48d_partly_cloudy_puresky_8k.hdr at yaw_offset
+# 210 and CLOUD_TILT 25 (the defaults): about a third of the shaft under
+# cloud, a clear patch on the zenith ringed by puffs, the sun behind the
+# right-hand tower at bearing 214 (the engine's SUN_AZ, printed below).
 import sys, os, numpy as np, cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from proj import load_eq, render
 
-VIEW = dict(yaw=116.0, pitch=-84.0, hfov=94.0, k=1.0, shift=0.2)
+# the plate's view (bake_view.py): a true zenith worm's-eye, stereographic,
+# 125 deg across, the axis straight up, no frame slide
+VIEW = dict(yaw=116.0, pitch=-90.0, hfov=125.0, k=2.0, shift=0.0)
 
 src, aux_in, aux_out = sys.argv[1], sys.argv[2], sys.argv[3]
-yaw_off = float(sys.argv[4]) if len(sys.argv) > 4 else 0.0
+# The source turns about the vertical by yaw_off and tilts TILT deg about the
+# camera's horizontal axis. Looking straight up, a turn alone only spins the
+# source's own zenith in place, and Kloofendal's zenith sits on a puff's edge
+# with its sun about 42 deg off it, inside the shaft wherever it turns. The
+# tilt slides the deck a little, so a clear patch lands on the zenith (the
+# gap between the towers, where the deepest cobalt is) with the puffs ringed
+# round it, and the sun goes down behind the right-hand tower.
+yaw_off = float(sys.argv[4]) if len(sys.argv) > 4 else 210.0
+TILT = float(os.environ.get('CLOUD_TILT', '25'))
 a = cv2.imread(aux_in, cv2.IMREAD_UNCHANGED)[..., ::-1].copy()
 H, W = a.shape[:2]
 sky = a[..., 0] > 0
 
 eq = load_eq(src, int(os.environ.get('EQW', '8192')))
-im, _ = render(eq, VIEW['yaw'] + yaw_off, VIEW['pitch'], VIEW['hfov'], W * 2, H * 2, 0.0, VIEW['k'], VIEW['shift'])
+im, dv = render(eq, VIEW['yaw'] + yaw_off, VIEW['pitch'] + TILT, VIEW['hfov'], W * 2, H * 2, 0.0, VIEW['k'], VIEW['shift'])
 del eq
 im = cv2.resize(im, (W, H), interpolation=cv2.INTER_AREA).astype(np.float32)
+dv = cv2.resize(dv, (W, H), interpolation=cv2.INTER_AREA)
+dv /= np.linalg.norm(dv, axis=-1, keepdims=True)
 L = im @ np.array([0.2126, 0.7152, 0.0722], np.float32)
 b = np.log2(np.maximum(im[..., 2], 1e-6) / np.maximum(im[..., 0], 1e-6))
 
@@ -105,8 +119,8 @@ k_ = (rk * uu - ru * ku) / det
 u_ = (ru * kk - rk * ku) / det
 k_, u_ = np.where(u_ < 0, rk / kk, k_), np.maximum(u_, 0)
 k_, u_ = np.maximum(k_, 0), np.where(k_ < 0, ru / uu, u_)
-# the sun: the panorama's sun sits in a gap of the big puff at the frame's
-# left edge, and its aureole washes the clouds round it white and neutral,
+# the sun: the panorama's sun sits in the frame (behind the right tower's
+# edge), and its aureole washes the clouds round it white and neutral,
 # so there the split reads everything as sun (k = 0) and the gap as clear.
 # Under the plate's set sun neither is true: inside the aureole the two
 # shares are blended towards their values on the cloud around it (a
@@ -114,8 +128,10 @@ k_, u_ = np.maximum(k_, 0), np.where(k_ < 0, ru / uu, u_)
 # rest of the cloud carries, and the gap the disc sat in is closed.
 Lb = cv2.GaussianBlur(L, (0, 0), 3)
 sy, sx = np.unravel_index(np.argmax(Lb), Lb.shape)
-yy, xx = np.mgrid[0:H, 0:W]
-dsun = np.hypot(xx - sx, yy - sy) * 1440 / W
+# distance from the sun as an angle on the sky, written in the units the
+# aureole was tuned in (px of the old 94 deg rectilinear print near its edge,
+# about 28 to the degree), so it holds through any projection
+dsun = np.degrees(np.arccos(np.clip(dv @ dv[sy, sx], -1, 1))) * 28.0
 k_ = np.where(inc0, np.clip(k_, 0.3, 1.2), k_)  # no cloud passes on no skylight, nor on more than a wisp
 ring = inc0 & (dsun > 160) & (dsun < 420)
 w_in = np.exp(-(dsun / 150) ** 2)
@@ -134,10 +150,13 @@ c_lin = np.clip(c_lin, 0, 1)
 # amplifies the panorama's noise: smooth it a little (the sun share keeps
 # every texel)
 k_ = cv2.GaussianBlur(k_.astype(np.float32), (0, 0), 1.6 * W / 1440)
-print('sun at', sx, sy, ' sun chroma', uC.round(3))
+# the bearing the sun went down on, in the plate's world (the engine's SUN_AZ)
+from proj import dirs, rot
+dp = dirs(W, H, VIEW['hfov'], VIEW['k'], VIEW['shift'])[sy, sx] @ rot(VIEW['yaw'], VIEW['pitch'], 0).T
+print('sun at', sx, sy, ' bearing %.0f deg, %.0f deg off the zenith' % (np.degrees(np.arctan2(dp[0], dp[2])) % 360, np.degrees(np.arccos(-dp[1]))), ' sun chroma', uC.round(3))
 print('in cloud  sun share p5/50/95', np.percentile(u_[inc0], [5, 50, 95]).round(2), ' sky share', np.percentile(k_[inc0], [5, 50, 95]).round(2))
 
-print('yaw %+.0f  cover %.2f of the sky' % (yaw_off, (c[sky] > 0.3).mean()))
+print('yaw %+.0f tilt %.0f  cover %.2f of the sky' % (yaw_off, TILT, (c[sky] > 0.3).mean()))
 
 rng = np.random.default_rng(11)
 tp = lambda: rng.random(c.shape) + rng.random(c.shape) - 1.0
