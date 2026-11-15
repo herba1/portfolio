@@ -31,9 +31,17 @@ import { createFilm } from "../_kit/film";
 // The capture is turned 32 degrees about the zenith (ROLL), so the curved
 // glass tower's crown and canopy, the one face the capture could not hold
 // together, sits on the frame's short axis and mostly past its top edge,
-// and the dark grid tower and the gold stone tower take the top corners.
+// and the dark grid tower and a sunlit stepped stone tower take the top
+// corners.
 // An upright frame turns another quarter, so the same tower stays on its
 // short axis.
+//
+// The street trees in the top-left corner are the one crisp silhouette in
+// the frame: the outer plate's alpha marks them (255 - 128 m), the scene
+// pass carries m through, and where it is set the frame is developed
+// without the film's diffusion (softness, Pro-Mist, halation), so they stay
+// sharp while everything else keeps its softness. They only reach the frame
+// below about 13 mm; above that the film runs once.
 //
 // Query: ?mm=10..24 holds a focal length.
 
@@ -43,6 +51,7 @@ const RI = 0.5; // the inner inset covers rho <= 0.5 (47.5 degrees: the whole fr
 const ENC = 2.0; // the caps store scene light / 2, sRGB-encoded
 const HALF_DIAG = 21.633; // mm, full frame
 const ROLL = (32 * Math.PI) / 180; // the capture's azimuth about the zenith
+const CRISP_RHO = 0.68; // the crisp mask starts this far out (the tree tops)
 
 const MM_LONG = 24;
 const MM_WIDE = 10;
@@ -88,10 +97,25 @@ void main() {
   float thz = atan(h, w.y);
   float rho = thz / TM;
   vec2 dir = h > 1e-7 ? w.xz / h : vec2(0.0);
-  vec3 o = texture(uOuter, 0.5 + 0.5 * rho * dir).rgb;
+  vec4 o = texture(uOuter, 0.5 + 0.5 * rho * dir);
   vec3 i = texture(uInner, 0.5 + 0.5 * (rho / RI) * dir).rgb;
   float wi = 1.0 - smoothstep(RI * 0.84, RI * 0.97, rho);
-  outColor = vec4(mix(o, i, wi) * uGain, 1.0);
+  // alpha carries the crisp mask: 255 - 128 m
+  float crisp = clamp((1.0 - o.a) * 2.0, 0.0, 1.0) * (1.0 - wi);
+  outColor = vec4(mix(o.rgb, i, wi) * uGain, crisp);
+}`;
+
+// The two developments, mixed by the scene's crisp mask.
+const MIX = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSoft;
+uniform sampler2D uCrisp;
+uniform sampler2D uScene;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  float m = texelFetch(uScene, p, 0).a;
+  outColor = vec4(mix(texelFetch(uSoft, p, 0).rgb, texelFetch(uCrisp, p, 0).rgb, m), 1.0);
 }`;
 
 const FILM = {
@@ -113,6 +137,8 @@ const FILM = {
   // sunlit cloud lands warm-neutral, never blue-white
   highlightTint: [1.02, 1, 0.965],
 };
+// The same development without diffusion, for the crisp silhouette.
+const NO_DIFFUSION = { softness: 0, bloom: 0, halation: 0 };
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const smoothstep = (a, b, x) => {
@@ -122,6 +148,12 @@ const smoothstep = (a, b, x) => {
 // Rectilinear down to 16 mm, then easing toward stereographic by 10 mm.
 const K_WIDE = 0.34;
 const kOf = (mm) => 1 + K_WIDE * smoothstep(16, 10, mm);
+// How far out (rho) the frame's corners reach at this focal length, with the
+// hover and breathing tilt on top.
+const cornerRho = (mm) => {
+  const k = kOf(mm);
+  return (k * Math.atan(HALF_DIAG / (mm * k)) + (2 * Math.PI) / 180) / ((TM * Math.PI) / 180);
+};
 
 function compile(gl, vs, fs) {
   const p = gl.createProgram();
@@ -234,6 +266,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
 
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const scene = compile(gl, VERT, SCENE);
+  const mixer = compile(gl, VERT, MIX);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -251,6 +284,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   let dpr = 1;
   let tex = null;
   let fbo = null;
+  let dev = []; // the soft and crisp developments, when the mask is in frame
   let enc = 1;
   let dirty = true;
   const build = () => {
@@ -258,6 +292,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     const h = canvas.height;
     if (tex) gl.deleteTexture(tex);
     if (fbo) gl.deleteFramebuffer(fbo);
+    freeDev();
     tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     fbo = gl.createFramebuffer();
@@ -280,6 +315,52 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     film.resize(w, h);
     dirty = true;
+  };
+
+  const freeDev = () => {
+    for (const d of dev) {
+      gl.deleteTexture(d.tex);
+      gl.deleteFramebuffer(d.fbo);
+    }
+    dev = [];
+  };
+  // Allocated the first time the trees come into frame.
+  const ensureDev = () => {
+    if (dev.length) return;
+    for (let n = 0; n < 2; n++) {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, canvas.width, canvas.height);
+      for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+      const f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      dev.push({ tex: t, fbo: f });
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  };
+  const develop = (params, crisp) => {
+    if (!crisp) {
+      film.render(tex, params);
+      return;
+    }
+    ensureDev();
+    film.render(tex, params, dev[0].fbo);
+    film.render(tex, { ...params, ...NO_DIFFUSION }, dev[1].fbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(mixer.p);
+    gl.bindVertexArray(vao);
+    [dev[0].tex, dev[1].tex, tex].forEach((t, n) => {
+      gl.activeTexture(gl.TEXTURE0 + n);
+      gl.bindTexture(gl.TEXTURE_2D, t);
+    });
+    gl.uniform1i(mixer.u.uSoft, 0);
+    gl.uniform1i(mixer.u.uCrisp, 1);
+    gl.uniform1i(mixer.u.uScene, 2);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
   };
 
   // Full bleed: the frame is the box, so the towers run off every edge. The
@@ -485,7 +566,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     // Film at 24 fps: the grain moves at the rate film did.
     const tick = reduced || held ? 0 : Math.floor(t * 24);
     if (tick !== lastGrain || exposure > 1e-3) {
-      film.render(tex, { ...FILM, exposure: exposure + (enc < 1 ? Math.log2(ENC) : 0), grainSeed: tick * 7.31 });
+      develop({ ...FILM, exposure: exposure + (enc < 1 ? Math.log2(ENC) : 0), grainSeed: tick * 7.31 }, cornerRho(mm) > CRISP_RHO);
       lastGrain = tick;
     }
 
@@ -542,6 +623,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
       host.removeEventListener("wheel", onWheel);
       host.removeEventListener("keydown", onKey);
       film.destroy();
+      freeDev();
       if (tex) gl.deleteTexture(tex);
       if (fbo) gl.deleteFramebuffer(fbo);
       gl.deleteTexture(outer);
@@ -549,6 +631,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(scene.p);
+      gl.deleteProgram(mixer.p);
       print.remove();
       mark.remove();
     },
