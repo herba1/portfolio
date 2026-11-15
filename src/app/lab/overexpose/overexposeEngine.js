@@ -71,6 +71,18 @@ export const FILM = {
   blueFadeK: 0.65,
   hiDesat: 0.45,
   skyQ: [0.6, 1.5], // log2 blue/red of the scene where sky starts and is full
+  // The normal print's open sky is lifted towards a luminous cobalt (zenith about
+  // rgb(30,100,160) at 0 EV, hue ~208) rather than the dense navy the polarised dome
+  // gives a straight print: the sky takes skyLift[0] more stops at 0 EV, easing out as
+  // (1 - ev / skyLift[2]) ^ skyLift[1], so the sky still rises monotonically with the
+  // drag and from skyLift[2] up the print is exactly the straight one. The lift is
+  // added as light, the sky's share of the pixel (scene alpha) times the open-sky
+  // field under it (sky.png, skyfield.py), so a cloud's thin edge, part sky, takes
+  // the sky's part of the lift and never prints darker than the sky beside it.
+  // The added light leans skyLiftTint (a touch of green), so the luminous sky
+  // holds the hue a bright print gives it (~208) rather than the dense dome's 211.
+  skyLift: [1.15, 1.5, 2],
+  skyLiftTint: [1.0, 1.15, 1.0],
   // The paper white is approached per channel on a soft knee (from paperKnee of
   // it), never by scaling all three down together, so the brightest cloud
   // still has a channel with gradation in it and the sky's red keeps climbing.
@@ -135,6 +147,7 @@ precision highp float;
 uniform sampler2D uScene;   // linear radiance (or log-encoded when uLogIn)
 uniform sampler2D uOptics;  // left half: diffusion, right half: halation source
 uniform sampler2D uTrees;   // the pines: rgb log radiance of the ink, alpha its matte
+uniform sampler2D uSky;     // the open sky's own field (dome + aureole), log radiance
 uniform vec2 uInk;          // the ink's share of the veil and of the halation
 uniform float uInkHi;       // and of the highlight veil
 uniform float uLogIn;
@@ -146,7 +159,7 @@ uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax; uni
 uniform vec2 uNeedleY; uniform vec2 uNeedleCap; // luminance key; bloom and halation caps, already scaled by exposure
 uniform float uLod;         // mip level the print is minified to
 uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform vec3 uBlueHueHi; uniform vec3 uBlueFade; uniform float uHiDesat; uniform float uHiWarm; uniform float uCloudWarm; uniform vec3 uCloudWarmHue;
-uniform vec2 uSkyQ; uniform float uPaperKnee;
+uniform vec2 uSkyQ; uniform float uPaperKnee; uniform float uSkyLift; uniform vec3 uSkyLiftTint;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
 uniform vec2 uBloomHi; uniform vec2 uHalHi; // amount, knee (scene radiance after 2^EV)
 uniform float uGrain; uniform float uSeed; uniform float uGrainPx;
@@ -188,7 +201,14 @@ void main(){
   sc = mix(sc, sc0, max(needle, cloud0) * step(0.01, uLod));
   // Exposure is a multiply on the scene's linear radiance, before anything else:
   // the sky, the cloud, the needles and the optics' blurs of them alike.
-  vec3 L = (uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb) * uExp;
+  vec3 L = uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb;
+  // The low-exposure sky lift, added as light in the sky's share: open sky lifts its
+  // own pixel (grain and all), a cloud's edge only the sky field under its sky share.
+  float skyS = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0);
+  vec3 skyPart = mix(skyS * dec(texture(uSky, uv).rgb), L, smoothstep(0.95, 1.0, skyS));
+  float lift = exp2(uSkyLift) - 1.0;
+  L = (L + lift * uSkyLiftTint * skyPart) * uExp;
+  float ex = uExp * (1.0 + lift * skyS); // for reading the sky back off the lifted light
   float hx = clamp(uv.x, 0.002, 0.998) * 0.5;
   vec3 D = dec(texture(uOptics, vec2(hx, uv.y)).rgb) * uExp;
   float Yb = dec(texture(uOptics, vec2(hx + 0.5, uv.y)).rgb).g * uExp;
@@ -231,7 +251,7 @@ void main(){
   // ratios, so no channel is ever pushed through zero.
   // Sky is read from the scene's own blue-over-red ratio, which no exposure
   // changes (and bright: a blue-black needle shadow is not sky).
-  vec3 Ls = L / uExp;
+  vec3 Ls = L / ex;
   float sky = smoothstep(uSkyQ.x, uSkyQ.y, log2(max(Ls.b, 1e-6) / max(Ls.r, 1e-6))) * smoothstep(0.02, 0.07, dot(Ls, LUMA));
   float blue = max(clamp((c.b - c.r) / (c.b + 1e-4), 0.0, 1.0), sky);
   // the cobalt lean eases as the print's brightest channel climbs: the red
@@ -348,10 +368,11 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const still = fixed != null || params.has("still");
 
-  const [sceneImg, opticsImg, treesImg] = await Promise.all([
+  const [sceneImg, opticsImg, treesImg, skyImg] = await Promise.all([
     bitmap("/lab/overexpose/scene.webp"),
     bitmap("/lab/overexpose/optics.png"),
     bitmap("/lab/overexpose/trees.webp"),
+    bitmap("/lab/overexpose/sky.png"),
   ]);
 
   // Warm white paper around the print, whatever the site theme.
@@ -379,6 +400,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   const logTex = upload(gl, sceneImg, false);
   const opticsTex = upload(gl, opticsImg, false);
   const treesTex = upload(gl, treesImg, true);
+  const skyTex = upload(gl, skyImg, false);
 
   // Decode the radiance once into a half-float texture so the minified print
   // averages light, not logarithms. Without a renderable float format, sample
@@ -419,6 +441,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
   sceneImg.close?.();
   opticsImg.close?.();
   treesImg.close?.();
+  skyImg.close?.();
 
   // Paper constants: grey lands on printGrey, slope paperGamma at the middle.
   const F = FILM;
@@ -529,6 +552,9 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, treesTex);
     gl.uniform1i(u.uTrees, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, skyTex);
+    gl.uniform1i(u.uSky, 3);
     gl.uniform1f(u.uLogIn, logIn);
     gl.uniform4f(u.uRect, x, y, s, s);
     const e = ev.v;
@@ -561,6 +587,8 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform1f(u.uCloudWarm, F.cloudWarm);
     gl.uniform3fv(u.uCloudWarmHue, F.cloudWarmHue);
     gl.uniform2fv(u.uSkyQ, F.skyQ);
+    gl.uniform1f(u.uSkyLift, F.skyLift[0] * Math.max(0, 1 - Math.max(e, 0) / F.skyLift[2]) ** F.skyLift[1]);
+    gl.uniform3fv(u.uSkyLiftTint, F.skyLiftTint);
     gl.uniform1f(u.uPaperKnee, F.paperKnee);
     gl.uniform1f(u.uBloom, F.bloom);
     gl.uniform1f(u.uHal, F.halation);
@@ -631,6 +659,7 @@ export async function createOverexpose(host, { embedded = false } = {}) {
       if (sceneTex !== logTex) gl.deleteTexture(sceneTex);
       gl.deleteTexture(opticsTex);
       gl.deleteTexture(treesTex);
+      gl.deleteTexture(skyTex);
       gl.deleteProgram(prog.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
