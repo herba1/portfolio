@@ -169,6 +169,7 @@ uniform sampler2D uEnv;    // sRGB equirect, centred on the mirror
 uniform sampler2D uEnvD;   // log distance code
 uniform sampler2D uAux;    // r: log z code, g: sunlit, b: sky
 uniform sampler2D uGrade;  // the plate's enamels: r yellow, g orange-red, b green (grade.py)
+uniform sampler2D uShade;  // where the sky fills the plate's shade side (shade.py)
 uniform sampler2D uEnvC;   // the panorama's cumulus matte (match.py)
 uniform sampler2D uEnvB;   // its far layer: the foreground taken out (reproject.py)
 uniform vec4 uView;        // photo px: x0, y0 (top), w, h
@@ -500,6 +501,35 @@ vec3 enamel(vec3 c, vec2 uv) {
   float a = radians(-8.0 * wy - 15.0 * wo);
   k.yz = mat2(cos(a), sin(a), -sin(a), cos(a)) * k.yz * sc;
   return max(fromOk(k), 0.0) * exp2(-0.5 * (wy + wo));
+}
+
+// Open shadows. Seen from under them against a summer zenith, the crossing's
+// lamp hoods and backplates and the crossbuck's bracket turn their averted
+// faces to the open sky; the plate held them a dark olive grey, and through
+// the film's toe they crushed to near-black discs, the two biggest dark masses
+// in the right half, read as cutouts. In herb's references shade under cobalt
+// stays open and blue, so they are lit here, in scene light before the film,
+// with the sky's own light: a skylight blue (hue ~205) added as irradiance on
+// dark paint, as much as the pixel is in shade (aux's sunlit share) and dark
+// (a lit face, a lit lip, a sunlit board is left alone). Where comes from the
+// bake (shade.py: the hoods and backplates in full, the crossbuck's boards at
+// half, and held off the terminator, so each keeps a narrow core shadow next
+// to its lit side, and the crossbuck stays the one hard silhouette). It
+// develops to about 0.2 value, a painted metal with a cobalt bounce.
+// The fill is light on paint, so it goes as the paint's own albedo (the
+// plate's shade value, which is albedo under what little light reached it):
+// a recess, the lens down its hood, a grimy band takes less, and the plate's
+// texture rides through. A floor under that keeps the blackest enamel from
+// staying a hole.
+const vec3 SKY_FILL = vec3(0.0085, 0.019, 0.031);
+vec3 skyFill(vec3 c, vec2 uv) {
+  float m = texture(uShade, uv).r;
+  if (m < 0.004) return c;
+  float sh = 1.0 - texture(uAux, uv).g;
+  float l = dot(c, LUMA);
+  float w = m * sh * smoothstep(0.12, 0.03, l);
+  float alb = clamp(l / 0.012, 0.0, 2.2);
+  return c + w * SKY_FILL * (0.35 + 0.65 * alb);
 }
 
 // The photograph's own dirt. The sunlit plaster under the house's eave
@@ -913,7 +943,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float pin = min(min(ppx.x, uPhotoSize.x - ppx.x), min(ppx.y, uPhotoSize.y - ppx.y));
   float fromPhoto = cam.z < 0.0 ? smoothstep(0.0, 160.0, pin) : 0.0;
   // the plate's enamels graded as the plate's are, where the glass shows them
-  if (fromPhoto > 0.0) c = mix(c, enamel(c, ppx / uPhotoSize), fromPhoto);
+  if (fromPhoto > 0.0) c = mix(c, skyFill(enamel(c, ppx / uPhotoSize), ppx / uPhotoSize), fromPhoto);
   vec3 nb = env(dir, 5.0);
   float nbC = (nb.b - nb.r) / max(nb.b, 1e-3);
   float above = smoothstep(0.28, 0.15, nbC) * smoothstep(0.62, 0.4, dot(nb, LUMA));
@@ -1316,7 +1346,7 @@ void main() {
 #else
 
   // the photograph
-  vec3 col = enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize);
+  vec3 col = skyFill(enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize), p / uPhotoSize);
   vec4 aux = texture(uAux, p / uPhotoSize);
   // its sky taken from the bake's grade to the cobalt, by elevation, through
   // the matte (a wire across it, darker than half the sky, is left alone)
@@ -1816,7 +1846,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg, envbImg] = await Promise.all([
+  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg, envbImg, shadeImg] = await Promise.all([
     fetch(BASE + "scene.json").then((r) => r.json()),
     loadImage(BASE + "photo.webp"),
     loadImage(BASE + "env.webp"),
@@ -1825,6 +1855,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     loadImage(BASE + "grade.png"),
     loadImage(BASE + "envc.png"),
     loadImage(BASE + "envb.webp"),
+    loadImage(BASE + "shade.png"),
   ]);
   const photo = imageTexture(gl, photoImg, { srgb: true, mips: true });
   const envT = imageTexture(gl, envImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
@@ -1833,6 +1864,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const envD = imageTexture(gl, envdImg, { wrapS: gl.REPEAT });
   const aux = imageTexture(gl, auxImg);
   const gradeT = imageTexture(gl, gradeImg);
+  const shadeT = imageTexture(gl, shadeImg);
   const envC = imageTexture(gl, envcImg, { wrapS: gl.REPEAT });
   const envB = imageTexture(gl, envbImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
 
@@ -2277,6 +2309,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       if (P === sceneP) bindTex(5, gradeT, u.uGrade);
       if (P === sceneP) bindTex(6, envC, u.uEnvC);
       if (P === sceneP) bindTex(7, envB, u.uEnvB);
+      if (P === sceneP) bindTex(8, shadeT, u.uShade);
       gl.uniform2f(u.uRes, L.rw, L.rh);
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
       gl.viewport(0, 0, L.rw, L.rh);
@@ -2509,7 +2542,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       film.destroy();
       filmP.destroy();
       for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT, diffT, diffPT, redT, ringT, ...mq, ...ms]) freeTarget(gl, t);
-      for (const t of [photo, envT, envD, aux, gradeT, envC]) gl.deleteTexture(t);
+      for (const t of [photo, envT, envD, aux, gradeT, envC, shadeT]) gl.deleteTexture(t);
       for (const pr of [sceneP, geoP, opticsP, blit, mistKeyP, mistDownP, mistBlurP, mistRedP, mistP, mistRingP]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
