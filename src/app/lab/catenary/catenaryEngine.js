@@ -41,7 +41,7 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape } fr
 // taut wire], ?pull=<wire> holds the pull.
 // ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
-// structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, halNarrow, halWide,
+// structFloor, cloudLift, cloudFrom, sculpt, shadeTint, dering, hal, halNarrow, halWide,
 // diffuse, diffuseR, diffuseSteel, diffuseCap, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
 // override the grade; halThr sets the HALO pass's threshold; print and
 // printPin the PRINT curve.
@@ -211,6 +211,9 @@ const WARM_KEY = [0.8, 0.93];
 const CORE_NEUTRAL = 0.8;
 const EDGE_BLUE = 0.4;
 const RELIEF = 0.5;
+// How far the photograph's sharpening ring is held down to the sky beside
+// the steel (see PLATE, de-ring): 1 is a clean edge.
+const DERING = 1;
 // Halation, the film's own optics rather than its grade: light that went
 // through the emulsion, bounced off the base (no remjet) and came back
 // through the red layer a little way off. Over the finished linear scene,
@@ -364,6 +367,7 @@ uniform vec2 uSun;     // toward the sun, image px direction (unit)
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 uniform vec4 uEdge;    // warm key from, to (gamma); relief gain; skylight edge amount
+uniform float uDering; // how far the plate's sharpening ring is held to the sky
 ${MIST}
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -383,6 +387,66 @@ void main() {
   vec2 uv = hq.xy / hq.z / uImg;
   vec3 c = texture(uPlate, uv).rgb;
   vec3 key = texture(uKey, uv).rgb;
+  vec2 kt = 1.0 / vec2(textureSize(uKey, 0));
+  // De-ring. The photograph carries its in-camera sharpening: a light,
+  // paler line one or two plate px wide on the sky side of every steel edge
+  // (the far pole as shot: sky 106,151,192, then 120,157,195 and
+  // 134,167,201 against the steel; beside the mast it runs six px out, from
+  // 183,208,236 on a sky of 140,174,213). The grade downstream (vibrance,
+  // the polariser, the film's contrast) only lifted it further, a pale cyan
+  // rim round every dark member: a doubled contour. So within a few px of
+  // the steel (the key's R, read on a ring 4 key px out) no pixel may rise
+  // past the local smooth sky: each channel, in gamma, is held under the
+  // sky read on two rings 6 and 10 key px out, on those of their
+  // samples that are well clear of steel (the most of each channel: the sky's own
+  // grain stays, and where the steel crosses lit cloud the cloud holds the
+  // ceiling up, so the edge there is left to the halation, HALO). What is
+  // left at the edge is the plate's own softening, no light line.
+  float rNear = key.r;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 0.7853982;
+    rNear = max(rNear, texture(uKey, uv + vec2(cos(a), sin(a)) * 4.0 * kt).r);
+  }
+  float ring = smoothstep(0.2, 0.6, rNear) * uDering;
+  vec3 top = vec3(0.0);
+  float clear = 0.0;
+  if (ring > 0.0) {
+    // Clear sky first: no steel at the sample or within some 7 plate px of
+    // it, so a sample run along the edge never reads the ring itself. In a
+    // gap too narrow for that (between a wire and a pole), any sample off
+    // the steel.
+    vec3 topNear = vec3(0.0);
+    float clearNear = 0.0;
+    for (int k = 0; k < 16; k++) {
+      float a = float(k) * 0.7853982 + (k < 8 ? 0.0 : 0.3926991);
+      vec2 o = uv + vec2(cos(a), sin(a)) * (k < 8 ? 6.0 : 10.0) * kt;
+      float r0 = texture(uKey, o).r;
+      float rs = max(r0, max(texture(uKey, o + vec2(5.0, 0.0) * kt).r, texture(uKey, o - vec2(5.0, 0.0) * kt).r));
+      rs = max(rs, max(texture(uKey, o + vec2(0.0, 5.0) * kt).r, texture(uKey, o - vec2(0.0, 5.0) * kt).r));
+      vec3 q = pow(textureLod(uPlate, o, 1.0).rgb, vec3(1.0 / 2.2));
+      // A sample counts or it does not: a half-counted one would pull the
+      // ceiling under the sky and draw a dark seam.
+      float ok = step(rs, 0.06);
+      float okNear = step(r0, 0.06);
+      top = max(top, q * ok);
+      clear = max(clear, ok);
+      topNear = max(topNear, q * okNear);
+      clearNear = max(clearNear, okNear);
+    }
+    top = clear > 0.5 ? top : topNear;
+    clear = max(clear, clearNear);
+    // A pixel boxed in by steel on every side has no sky to read: left as
+    // is. So is the steel itself (the key well on), and anything far past
+    // the sky: the ring is at most some 40 levels over it as shot, a lit
+    // clamp band or a glint on the mast is 90 and more, and is the picture.
+    vec3 gc = pow(c, vec3(1.0 / 2.2));
+    vec3 over = gc - top;
+    float lift = max(over.r, max(over.g, over.b));
+    ring *= clear * (1.0 - smoothstep(0.5, 0.85, key.r)) * (1.0 - smoothstep(0.18, 0.28, lift));
+    c = pow(mix(gc, min(gc, top + 1.5 / 255.0), ring), vec3(2.2));
+  } else {
+    ring = 0.0;
+  }
   // The cumulus's silhouette, read off its matte on two rings round the
   // pixel, about 10 and 28 plate px out (a key px is two plate px). Its
   // spread on the near ring (most less least) is 1 in a band either side of
@@ -392,7 +456,6 @@ void main() {
   // alpha, see HALO) and the bake's diffusion (key B, sky.py) all stop short
   // of the silhouette with them: a bright rim there bloomed into a white
   // ring round the whole cloud with a dark cobalt band just outside it.
-  vec2 kt = 1.0 / vec2(textureSize(uKey, 0));
   float gMin = key.g, gMax = key.g, gFar = 0.0;
   for (int k = 0; k < 8; k++) {
     float a = float(k) * 0.7853982 + 0.3926991;
@@ -413,10 +476,14 @@ void main() {
   // proportion. A narrow gate (it was 0.26-0.38) graded the whole fringe as
   // sky and let go of it all at once a few px further in, a darkened,
   // over-saturated cobalt ring hard against every cumulus: the HDR rim.
-  vec3 hm = rgb2hsv(pow(texture(uPlate, uv, 1.5).rgb, vec3(1.0 / 2.2)));
+  // Beside the steel (where the de-ring held it) the mask reads the pixel
+  // itself, not the plate a mip up, which there is half steel: the sky's
+  // grade then runs right up to the member's edge and lets go across the
+  // key's own ramp, so no band of ungraded, paler sky is left round it.
+  vec3 hm = rgb2hsv(mix(pow(texture(uPlate, uv, 1.5).rgb, vec3(1.0 / 2.2)), pow(c, vec3(1.0 / 2.2)), ring));
   float hue = hm.x * 360.0;
   float sky = smoothstep(0.08, 0.44, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
-            * smoothstep(0.25, 0.4, hm.z) * (1.0 - key.r)
+            * smoothstep(0.25, 0.4, hm.z) * (1.0 - mix(key.r, smoothstep(0.3, 0.75, key.r), ring))
             // Never the cloud itself (the bake's feathered matte): its skylit
             // hollows are pale blue by chroma alone and would deepen to cobalt.
             * (1.0 - key.g);
@@ -641,7 +708,6 @@ out vec4 outColor;
 uniform float uCore;      // the cable's measured core luminance (linear)
 uniform vec3 uMetal;      // its own tint, from the photographed section
 uniform vec2 uSkyLit;     // skylight on the upper flank (x core at the rim / 8), its sky chroma kept
-uniform float uRing;      // the photograph's edge overshoot (its sharpening)
 uniform sampler2D uPlate;
 uniform sampler2D uAtlas;
 uniform vec2 uAtlasSize;
@@ -672,15 +738,8 @@ void main() {
   float sig = sqrt(vProf.y * vProf.y + 0.085);
   float k = 0.70710678 / sig;
   float a = vProf.z * 0.5 * (erf_((vD + hw) * k) - erf_((vD - hw) * k));
-  // The photograph's edges carry its in-camera sharpening: a faint light
-  // ring on the sky side of every edge (the plate's own feeder at its clamp:
-  // sky 149, 157 at the edge, then the cable). An unsharp mask against a
-  // blur 2.5 times wider, kept to the outside only, so it never darkens the
-  // cable's own edge into an outline. (Below zero coverage only lands in a
-  // float target; an 8-bit one clamps it away.)
-  float kw = k / 2.5;
-  float aw = vProf.z * 0.5 * (erf_((vD + hw) * kw) - erf_((vD - hw) * kw));
-  a += uRing * min(a - aw, 0.0);
+  // No sharpening ring: the plate's own is held down beside its steel (see
+  // PLATE, de-ring), so a live edge, like the steel's, ends on the sky.
   // Near its insulator the photograph keeps its own wire; the live one takes
   // over along a ramp so the sum stays exactly the photograph.
   float r = vProf.w;
@@ -990,10 +1049,9 @@ const METAL_SHARE = 0.5;
 // optical blur as 0.53: the rest is the plate's own softening (the resample
 // to its width, the photograph's processing). Added in quadrature to every
 // wire's measured blur, so a live edge softens exactly as the steel beside it
-// does. The same edge rises to 157 on a sky of 149 before it falls: the
-// camera's sharpening ring, EDGE_RING of an unsharp mask (see WIRE_F).
+// does. As shot that edge also rises to 157 on a sky of 149 before it
+// falls, the camera's sharpening; it is not redrawn (see PLATE, de-ring).
 const PLATE_MTF = 1.3; // image px
-const EDGE_RING = 0.5;
 // Skylight on the upper flank: the rim of the cable runs 1 + 8 SKY_LIT times
 // its core (graded linear light; WIRE_F), and keeps SKY_CHROMA of the sky's
 // chroma.
@@ -1083,6 +1141,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     clamp(num("relief", RELIEF), 0, 3),
     clamp(num("edgeBlue", EDGE_BLUE), 0, 1),
   ];
+  const dering = clamp(num("dering", DERING), 0, 1);
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
@@ -1450,6 +1509,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform4fv(plateP.u.uVib, vib);
     gl.uniform2fv(plateP.u.uSun, sun);
     gl.uniform4fv(plateP.u.uEdge, edge);
+    gl.uniform1f(plateP.u.uDering, dering);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND);
@@ -1519,7 +1579,6 @@ export async function createCatenary(host, { embedded = false } = {}) {
       gl.uniform1f(wireP.u.uCore, w.core);
       gl.uniform3fv(wireP.u.uMetal, metal);
       gl.uniform2f(wireP.u.uSkyLit, SKY_LIT, SKY_CHROMA);
-      gl.uniform1f(wireP.u.uRing, EDGE_RING);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, plateTex);
       gl.uniform1i(wireP.u.uPlate, 2);
