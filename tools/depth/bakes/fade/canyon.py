@@ -1,7 +1,8 @@
 # Fade, step 2b: the slot of sky the frame cannot see.
 #
 #   python3 -I canyon.py <workdir>   (reads moge/, dose.npz, m/occ-sign.png,
-#                                     writes canyon.npz; mat.py folds it in)
+#                                     roofs.json, writes canyon.npz; mat.py
+#                                     folds it in)
 #
 # dose.py marches every sun and sky ray through the depth map in screen space,
 # and a ray that leaves the frame counts as open sky. The camera lies at the
@@ -30,7 +31,7 @@
 # half resolution: the sign is enamelled sheet metal standing in the lane, not
 # render on a wall, so no rain runs down it from a ledge and the engine keeps
 # the runoff, drips and patches off it.
-import sys, json, numpy as np, cv2
+import os, sys, json, importlib.util, numpy as np, cv2
 from PIL import Image
 
 wd = sys.argv[1]
@@ -94,6 +95,21 @@ roof = np.minimum(np.maximum(roof, h), ROOF)
 roof = cv2.GaussianBlur(roof, (0, 0), 6)
 beta = np.arctan(np.maximum(roof - h, 0) / LANE)
 canyon = np.where(v, FLOOR + (1 - FLOOR) * (1 - np.sin(beta)), 1).astype(np.float32)
+# where the far wall is a house whose roofline the frame shows (roofs.py:
+# the coral's, brought across the lane to LANE), dose.py has marched it as
+# geometry already, so the analytic wall stands down there
+_spec = importlib.util.spec_from_file_location("roofs", os.path.join(os.path.dirname(os.path.abspath(__file__)), "roofs.py"))
+R = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(R)
+roofs = R.load(wd)
+if roofs is not None:
+    nrm = cv2.imread(wd + "/moge/normal.png", cv2.IMREAD_UNCHANGED)[..., ::-1].astype(np.float32) / 65535.0 * 2 - 1
+    nrm = cv2.resize(nrm, (HW, HH), interpolation=cv2.INTER_AREA)
+    nrm = cv2.GaussianBlur(nrm, (0, 0), 4)
+    far = R.facing(roofs, P, nrm) & v
+    far = cv2.GaussianBlur(far.astype(np.float32), (0, 0), 6)
+    canyon = (canyon * (1 - far) + far).astype(np.float32)
+    print("canyon: far wall fitted on", int((far > 0.5).sum()), "px")
 
 sign = np.asarray(Image.open(wd + "/m/occ-sign.png").convert("L").resize((HW, HH), Image.BILINEAR)).astype(np.float32) / 255
 sign = cv2.GaussianBlur(cv2.dilate(sign, np.ones((5, 5), np.uint8)), (0, 0), 2)

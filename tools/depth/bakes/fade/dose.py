@@ -1,8 +1,9 @@
 # Fade, step 2: the annual solar dose of every surface in the photograph.
 #
 #   python3 -I dose.py <workdir> [--tan]  (reads plate-fill.png, moge/, m/occ-*.png,
-#                                          writes dose.npz; --tan redoes only the
-#                                          tan lines on the cached coarse march)
+#                                          roofs.json, writes dose.npz; --tan
+#                                          redoes only the tan lines on the
+#                                          cached coarse march)
 #
 # Geometry is MoGe-2's metric point map (normals.py, 800x600), taken to 1/4 of
 # the plate (500x375).
@@ -45,7 +46,7 @@
 # are not in the photo), which is generous to the lowest storeys.
 # dose is normalised by the same sum for an unshaded south wall, so 1.0 is
 # "a south wall in the open".
-import sys, json, numpy as np, cv2
+import os, sys, json, importlib.util, numpy as np, cv2
 from PIL import Image
 
 wd = sys.argv[1]
@@ -154,13 +155,35 @@ def geometry(W, H):
     return P, n, v, d, (f, cx, cy)
 
 
-def march(P, n, d, K, s, steps=36, tmax=TMAX, thick=THICK):
+# The rooflines across the lane, fitted and drawn as geometry (roofs.py):
+# each ray is tested against their facades and eaves first, and the depth
+# march takes no hit on the pixels they cover near their skyline (the live
+# sweep does the same).
+_spec = importlib.util.spec_from_file_location("roofs", os.path.join(os.path.dirname(os.path.abspath(__file__)), "roofs.py"))
+roofs_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(roofs_mod)
+ROOFS = roofs_mod.load(wd)
+QUADS = roofs_mod.quads(ROOFS) if ROOFS else []
+SKIP = {}
+
+
+def skip_at(W, H):
+    if (W, H) not in SKIP:
+        v = cv2.resize(valid0, (W, H), interpolation=cv2.INTER_AREA) > 0.5
+        SKIP[(W, H)] = roofs_mod.skip_mask(ROOFS, v, W, H) if ROOFS else np.zeros((H, W), bool)
+    return SKIP[(W, H)]
+
+
+def march(P, n, d, K, s, steps=36, tmax=TMAX, thick=THICK, roofs=True):
     """1 where the ray P + s t (t > 0) reaches the sky, per point (N,3) -> (N,)."""
     f, cx, cy = K
     H, W = d.shape
     ts = 0.02 * (tmax / 0.02) ** (np.arange(1, steps + 1) / steps)
     O = P + n * 0.03
     vis = np.ones(len(P), np.float32)
+    if QUADS and roofs:
+        vis[roofs_mod.hit(QUADS, O, s)[0]] = 0
+    skip = skip_at(W, H)
     for t in ts:
         Q = O + s[None] * t if s.ndim == 1 else O + s * t
         z = -Q[:, 2]
@@ -172,7 +195,7 @@ def march(P, n, d, K, s, steps=36, tmax=TMAX, thick=THICK):
         vi = np.clip(np.round(v).astype(np.int32), 0, H - 1)
         ds = d[vi, ui]
         behind = z - ds
-        hit = inside & (behind > 0.05 + 0.004 * z) & (behind < thick + 0.01 * z)
+        hit = inside & (behind > 0.05 + 0.004 * z) & (behind < thick + 0.01 * z) & ~skip[vi, ui]
         vis[hit] = 0
     return vis
 
@@ -193,18 +216,26 @@ def coarse():
     lv = np.stack([np.sin(phi) * np.cos(th), np.cos(phi), np.sin(phi) * np.sin(th)], -1)
     lv = lv[lv[:, 1] > 0.02]
     dirs = (lv[:, :1] * RT + lv[:, 1:2] * UP + lv[:, 2:3] * BK).astype(np.float32)
+    # (and the frame's own: the sky the walls see with only what the frame
+    # shows around them, for the photo's own light in mat.py, which was
+    # matched to the photograph without the lane's far wall)
     svf = np.zeros(len(idx), np.float32)
+    svf_frame = np.zeros(len(idx), np.float32)
     for dvec in dirs:
         c = np.clip(nv @ dvec, 0, None)
         m = c > 0
         if not m.any():
             continue
         vis = np.zeros(len(idx), np.float32)
-        vis[m] = march(Pv[m], nv[m], d, K, dvec, steps=28)
+        vis[m] = march(Pv[m], nv[m], d, K, dvec, steps=28, roofs=False)
+        svf_frame += c * vis
+        if QUADS:
+            vis[np.flatnonzero(m)[roofs_mod.hit(QUADS, Pv[m] + nv[m] * 0.03, dvec)[0]]] = 0
         svf += c * vis
     # normalise so an open horizontal surface is 1
     norm_h = np.clip(lv[:, 1], 0, None).sum()
     svf /= norm_h
+    svf_frame /= norm_h
     print("svf: median", np.median(svf).round(3), "p5", np.percentile(svf, 5).round(3), "p95", np.percentile(svf, 95).round(3))
 
     days = [21, 52, 80, 111, 141, 172, 202, 233, 264, 294, 325, 355]
@@ -234,16 +265,17 @@ def coarse():
             diffuse_sum += dhi * dt
             south_wall += (dni * max(float(np.cos(el) * np.cos(az - np.pi)), 0) + dhi * 0.5) * dt
         print("day", day, "done", flush=True)
-    return svf, direct, svec, diffuse_sum, south_wall
+    return svf, svf_frame, direct, svec, diffuse_sum, south_wall
 
 
 # --tan reuses the coarse march (dose-coarse.npz) and redoes only the tan lines
 if "--tan" in sys.argv:
     zc = np.load(wd + "/dose-coarse.npz")
     svf, direct, svec, diffuse_sum, south_wall = (zc[k] for k in ("svf", "direct", "svec", "diffuse_sum", "south_wall"))
+    svf_frame = zc["svf_frame"] if "svf_frame" in zc else svf
 else:
-    svf, direct, svec, diffuse_sum, south_wall = coarse()
-    np.savez_compressed(wd + "/dose-coarse.npz", svf=svf, direct=direct, svec=svec, diffuse_sum=diffuse_sum, south_wall=south_wall)
+    svf, svf_frame, direct, svec, diffuse_sum, south_wall = coarse()
+    np.savez_compressed(wd + "/dose-coarse.npz", svf=svf, svf_frame=svf_frame, direct=direct, svec=svec, diffuse_sum=diffuse_sum, south_wall=south_wall)
 
 dose_v = (direct + diffuse_sum * svf) / south_wall
 dose = np.zeros(H * W, np.float32)
@@ -252,6 +284,9 @@ dose = dose.reshape(H, W)
 svf_img = np.zeros(H * W, np.float32)
 svf_img[idx] = svf
 svf_img = svf_img.reshape(H, W)
+svf_frame_img = np.zeros(H * W, np.float32)
+svf_frame_img[idx] = svf_frame
+svf_frame_img = svf_frame_img.reshape(H, W)
 print("dose: median", np.median(dose_v).round(3), "p5", np.percentile(dose_v, 5).round(3), "p95", np.percentile(dose_v, 95).round(3), "max", dose_v.max().round(3))
 
 
@@ -414,7 +449,14 @@ print("occluders: px at 1/2 res", int(occ.sum()))
 # the wall points within reach, on the plaster behind
 band = cv2.dilate(occ.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (241, 241))) > 0
 band &= vh & ~occ
-zb = np.where(dwall - draw > 0.15, dwall, draw)
+# (not within the closing's reach of the frame's edge: there its window is
+# cut off, and the "wall behind" comes out as one depth held across a strip
+# of columns, a step back from the wall, that every ray off the wall beside
+# it landed behind: the pale strip at the frame's left edge)
+edge = np.zeros((HH, HW), bool)
+edge[:, :24] = edge[:, -24:] = True
+edge[:24] = edge[-24:] = True
+zb = np.where((dwall - draw > 0.15) & ~edge, dwall, draw)
 Pw = ray * zb[..., None]
 nw = cv2.GaussianBlur(nh * wt[..., None], (0, 0), 4) / np.maximum(cv2.GaussianBlur(wt, (0, 0), 4), 1e-3)[..., None]
 nw /= np.linalg.norm(nw, axis=2, keepdims=True) + 1e-6
@@ -491,6 +533,6 @@ loss = loss.reshape(HH, HW)
 dose_hi = np.maximum(dose_up - loss, 0)
 print("tan lines: beam share > 0.5 px", int((beam > 0.5).sum()), "mean sky taken", skyb[skyb > 0.01].mean().round(3) if (skyb > 0.01).any() else 0, "max loss", loss.max().round(3))
 
-np.savez_compressed(wd + "/dose.npz", dose=dose, svf=svf_img, valid=valid, normal=n, s0=s_photo, up=UP, dose_hi=dose_hi, tan=loss, occ=occ)
+np.savez_compressed(wd + "/dose.npz", dose=dose, svf=svf_img, svf_frame=svf_frame_img, valid=valid, normal=n, s0=s_photo, up=UP, dose_hi=dose_hi, tan=loss, occ=occ)
 
 print("wrote dose.npz")

@@ -34,7 +34,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    each pixel's height above the lane from MoGe-2, a lane a few metres
 //    wide whose far wall stands as high as the skyline above it, and the
 //    share of the beam and the sky that wall takes, 1 - sin of its
-//    elevation: the slot of sky.
+//    elevation: the slot of sky. And the rooflines the frame does show
+//    (roofs.py): the coral's eave and the roofs at the end of the lane are
+//    fitted to straight level lines and marched as geometry, before the
+//    depth march, which takes no hit just under their skylines (MoGe's
+//    depth blurs into the sky there); the coral's eave, set along the lane
+//    at its width, is the pink's far wall in place of the slot.
 //  - light.webp G: the photo's own illumination: the lane is in high sun, so
 //    one sun level (the white trim reflecting 0.85) plus a sky share by view
 //    factor, and albedo = photo / S.
@@ -327,6 +332,29 @@ const SLAB_SPAN = 16;
 const SLOT_SPAN = 24;
 const LANE = 6;
 const SWEEP_START = 66;
+// The rooflines across the lane (roofs.py, as it prints them): each a level
+// line A-B in camera space (m) and the way its facade faces. The sky mask's
+// edge on the coral wall and on the roofs at the end of the lane, split into
+// straight runs by RANSAC and lifted to level lines at the height MoGe's
+// points under each agree on; the coral's eave, opposite the pink, along the
+// lane at the lane's width from the corner where its roofline turns. Each is
+// marched as a house: its facade from the eave down to the lane (it stops a
+// ray entering the house from the lane) and the eave's overhang, ROOF_EAVE m
+// out over the lane; a receiver behind a facade (its own house, wherever
+// MoGe puts it) is not shaded by it. So an eave's shadow is a straight line,
+// level on the wall it falls on, at every sun.
+const ROOFS = [
+  [[-0.367, 32.808, 2.688], [-2.418, 2.884, -20.108], [-0.9961, 0.0013, 0.0879]],
+  [[8.34, 0.849, -13.204], [35.572, -14.075, -27.036], [-0.5946, -0.6619, -0.4564]],
+  [[6.147, 2.369, -12.542], [9.393, 0.443, -14.304], [-0.623, -0.6457, -0.4415]],
+  [[3.628, -4.151, -19.138], [1.566, -7.394, -21.448], [-0.8854, 0.3283, 0.3292]],
+  [[8.458, -4.085, -21.361], [4.742, -4.836, -21.615], [-0.197, 0.7693, 0.6078]],
+  [[57.428, -6.147, -36.581], [23.396, -9.369, -36.089], [-0.0658, 0.7887, 0.6113]],
+  [[9.03, -5.794, -22.373], [11.317, -7.243, -23.685], [0.646, 0.6316, 0.4287]],
+];
+const ROOF_EAVE = 0.5;
+const ROOF_LANE = -1.5;
+const ROOF_SIDE = 0.6;
 // The sweep's light is light, not a grade: it multiplies the faded albedo,
 // rendered = albedo x (sky + SWEEP_SUN x visibility x N.L x beam). The
 // photograph's own illumination S (light.webp G) is split into the lane's
@@ -400,6 +428,32 @@ const sunAt = (k) => {
   const l = Math.hypot(d[0], d[1], d[2]) || 1;
   return { dir: d.map((v) => v / l), beam: a.beam + (b.beam - a.beam) * t };
 };
+
+// The rooflines as parallelograms (corner O, edges E1 E2) for the sweep's
+// shader: each one's plane normal and the dual of its edges, so a hit point
+// X on the plane reads off its place as (X - O) . G1 and (X - O) . G2.
+const roofQuads = (() => {
+  const sub = (a, b) => a.map((v, i) => v - b[i]);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const scale = (a, k) => a.map((v) => v * k);
+  const out = [];
+  ROOFS.forEach(([A, B, side]) => {
+    const E1 = sub(B, A);
+    const down = scale(WORLD_UP, -(dot(A, WORLD_UP) - ROOF_LANE));
+    [
+      [down, 1],
+      [scale(side, ROOF_EAVE), 0],
+    ].forEach(([E2, one]) => {
+      const n = cross(E1, E2);
+      const c1 = cross(E2, n);
+      const c2 = cross(n, E1);
+      out.push({ o: A, n, g1: scale(c1, 1 / dot(E1, c1)), g2: scale(c2, 1 / dot(E2, c2)), side, one });
+    });
+  });
+  return out;
+})();
+const glslVec3s = (vs) => `vec3[](${vs.map((v) => `vec3(${v.map((x) => x.toFixed(5)).join(", ")})`).join(", ")})`;
 
 const srgbToLin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const hsvLin = ([h, s, v]) => {
@@ -1210,13 +1264,16 @@ void main() {
 // of the bake's suns on every surface. geo.webp and slab.webp (sweep.py) hold
 // the scene dose.py marched: each pixel's camera depth and normal, the thin
 // occluders as slabs off their walls, and the slot of sky above each pixel.
-// The march is dose.py's: toward the sun through the depth map in screen
-// space (a hit is a sample that lands behind the visible surface by up to the
-// houses' thickness), then through the occluders' slabs (a shutter leaf or a
-// lantern stops the ray, a cord a few % of it), then the far wall of the
-// lane, analytically: a wall LANE m from its own, as high above the pixel as
-// the slot says, takes every sun lower than its top. Out: R the beam's cosine
-// on the surface where it reaches it, G the visibility, A the surface.
+// The march is dose.py's: the rooflines across the lane first (ROOFS), then
+// toward the sun through the depth map in screen space (a hit is a sample
+// that lands behind the visible surface by up to the houses' thickness; none
+// just under a fitted roofline, slab.webp R), then
+// through the occluders' slabs (a shutter leaf or a lantern stops the ray, a
+// cord a few % of it), then the far wall of the lane, analytically where the
+// frame shows none of it: a wall LANE m from its own, as high above the
+// pixel as the slot says, takes every sun lower than its top. Out: R the
+// beam's cosine on the surface where it reaches it, G the visibility, A the
+// surface.
 const SUN = `#version 300 es
 precision highp float;
 out vec4 outColor;
@@ -1231,6 +1288,16 @@ const float SPAN = ${SLAB_SPAN.toFixed(1)};
 const float SLOT = ${SLOT_SPAN.toFixed(1)};
 const float EDGE = ${SLOT_EDGE.toFixed(3)};
 const float DISC = ${SUN_DISC.toFixed(5)};
+const int NQ = ${roofQuads.length};
+const vec3 QO[NQ] = ${glslVec3s(roofQuads.map((q) => q.o))};
+const vec3 QN[NQ] = ${glslVec3s(roofQuads.map((q) => q.n))};
+const vec3 QG1[NQ] = ${glslVec3s(roofQuads.map((q) => q.g1))};
+const vec3 QG2[NQ] = ${glslVec3s(roofQuads.map((q) => q.g2))};
+const vec3 QS[NQ] = ${glslVec3s(roofQuads.map((q) => q.side))};
+const float QONE[NQ] = float[](${roofQuads.map((q) => q.one.toFixed(1)).join(", ")});
+const float SIDE = ${ROOF_SIDE.toFixed(2)};
+const vec3 RT = vec3(${WORLD_RT.map((v) => v.toFixed(5)).join(", ")});
+const vec3 BK = vec3(${WORLD_BK.map((v) => v.toFixed(5)).join(", ")});
 ivec2 gSize;
 float depthAt(ivec2 p) {
   vec4 g = texelFetch(uGeo, p, 0);
@@ -1242,6 +1309,26 @@ vec3 octa(vec2 e) {
   vec3 v = vec3(e, 1.0 - abs(e.x) - abs(e.y));
   if (v.z < 0.0) v.xy = (1.0 - abs(v.yx)) * (step(0.0, v.xy) * 2.0 - 1.0);
   return normalize(v);
+}
+// the run along the ray to the first roofline it meets (0: none): a facade
+// only for a ray entering it from the lane, either only for a receiver in
+// front of that facade
+float roofHit(vec3 O, vec3 s) {
+  float best = 1e9;
+  for (int i = 0; i < NQ; i++) {
+    float den = dot(s, QN[i]);
+    if (abs(den) < 1e-9) continue;
+    float t = dot(QO[i] - O, QN[i]) / den;
+    if (t <= 1e-3 || t >= best) continue;
+    vec3 X = O + s * t - QO[i];
+    float a = dot(X, QG1[i]);
+    float b = dot(X, QG2[i]);
+    if (a < 0.0 || a > 1.0 || b < 0.0 || b > 1.0) continue;
+    if (dot(O - QO[i], QS[i]) <= -SIDE) continue;
+    if (QONE[i] > 0.5 && dot(s, QS[i]) >= 0.0) continue;
+    best = t;
+  }
+  return best < 1e8 ? best : 0.0;
 }
 // the texel a camera-space point projects to, or -1 off the frame
 ivec2 project(vec3 Q, out float qz) {
@@ -1273,12 +1360,26 @@ void main() {
   // how far along the ray the blocker stands (0: none), for the penumbra
   float tb = 0.0;
   float qz;
-  for (int i = 1; i <= 28; i++) {
-    float t = 0.02 * pow(3000.0, float(i) / 28.0);
+  // the rooflines first: a clean edge, a straight shadow line
+  float tq = roofHit(O, uSun);
+  if (tq > 0.0) {
+    vis = 0.0;
+    tb = tq;
+  }
+  // 64 steps out to 60 m: at 28 a ray that crosses a house across the lane
+  // between two samples (3.6 m apart at 12 m) slipped through it, and the
+  // shade came out pocked with lit holes along the house's silhouette
+  for (int i = 1; i <= 64; i++) {
+    if (vis <= 0.0) break;
+    float t = 0.02 * pow(3000.0, float(i) / 64.0);
     ivec2 q = project(O + uSun * t, qz);
     if (q.x < 0) continue;
     float ds = depthAt(q);
     if (ds <= 0.0) continue;
+    // just under a fitted roofline, where MoGe's depth blurs into the sky:
+    // no hit (the roofline has answered)
+    vec4 sk = texelFetch(uSlab, q, 0);
+    if (sk.b < 1.5 / 255.0 && sk.r < 0.25) continue;
     float behind = qz - ds;
     if (behind > 0.05 + 0.004 * qz && behind < 8.0 + 0.01 * qz) {
       vis = 0.0;
@@ -1307,6 +1408,13 @@ void main() {
   // the far wall of the lane, which the frame leaves out
   float slot = a7(own.a) * SLOT;
   vec3 nh = n - dot(n, uUp) * uUp;
+  // on a wall (not an occluder) the way it faces smoothed over a storey
+  // (slab.webp G): the run across the lane goes as 1 / its cosine to the
+  // sun, and read off the per-pixel normal the line came out scalloped
+  if (own.b < 1.5 / 255.0) {
+    float az = (own.g - 0.5) * 6.2831853;
+    nh = cos(az) * RT + sin(az) * BK;
+  }
   float lh = length(nh);
   if (vis > 0.0 && slot > 0.0 && lh > 0.5) {
     float sn = dot(uSun, nh / lh);
