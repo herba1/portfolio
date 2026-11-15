@@ -11,10 +11,20 @@
 #   G  cloud light, blurred thin (sigma ~0.35% of the width): the halation
 #      source, a warm rim where cloud meets sky and where steel crosses it.
 #   B  the same light, blurred wide (~1.4%): the diffusion that veils it.
+# The structure holds what is as bright as sky but is steel (hold.py): the
+# transformer's sunlit face and placard (BOX), the spacer rods on the
+# right-hand wires, and the holes inside the steel darker than any sky.
+# Without them sky.py fitted and laid its sky through the box and the
+# engine graded it as open cobalt. mend.py, after sky.py, draws the
+# structure's edge in and de-rings the plate round it.
+import os
 import sys
 
 import cv2
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hold import box_gate, fill_dark_holes, spacer_key
 
 PUB = sys.argv[1]
 SRC = "/tmp/claude-0/imgs2/picks/ine-catenary-clouds.jpg"
@@ -62,9 +72,16 @@ near = smooth(0.2, 0.42, depth) * (1 - np.clip(band * 1.5, 0, 1))
 # The steel is darker than whatever is behind it; snap the mask to its edges.
 s = guided(yg, near, 4, 2e-3)
 s = smooth(0.15, 0.85, np.clip(s, 0, 1))
+s_near = s
 # The steel is never as bright as the sky or cloud seen through it: what the
 # halo still holds between truss members and platform slats is let go.
-s *= 1 - smooth(0.5, 0.68, cv2.GaussianBlur(yg, (0, 0), 0.7))
+s = s * (1 - smooth(0.5, 0.68, cv2.GaussianBlur(yg, (0, 0), 0.7)))
+# Except where it is: the transformer's lit face and placard, kept whatever
+# their brightness inside BOX; the spacer rods, keyed from their colour; the
+# dark holes the near field left in the steel.
+s = np.maximum(s, s_near * box_gate(KW, KH))
+s = np.maximum(s, spacer_key(plate, KW, KH))
+s = fill_dark_holes(s, yg)
 
 mx, mn = plate.max(2), plate.min(2)
 chroma = (mx - mn) / np.maximum(mx, 1e-4)
