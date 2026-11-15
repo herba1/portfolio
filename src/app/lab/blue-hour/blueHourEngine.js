@@ -6,12 +6,7 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // worm's-eye shaft of sky ringed by two towers, a crane, brick and curved
 // glass, every vertical running in to the one vanishing point overhead. Split offline into three layers of linear light: the ambient
 // city with the lamp switched off, the sky matte with its cloud texture, and
-// the one sodium lamp head on the bottom rim. The architecture is lit by
-// the sky it stands in: the glass of the towers and the curved block
-// mirrors the same cloud HDRI through the zenith projection (Fresnel, by
-// each facade's bearing), the brick and concrete take the sky's light and
-// a low warm afterglow on the faces turned to the sunset, and only the tree
-// stays a black silhouette. Drag across and the
+// the one sodium lamp head on the bottom rim. Drag across and the
 // twenty minutes after sunset run: the skylight falls about three and a half
 // stops while the shaft deepens from pale peach-cyan to cobalt, darkest
 // overhead, the clouds lose the sun on their own, faster curve (peach-white
@@ -130,40 +125,32 @@ uniform vec3 uRampRim;      // and a paler, cyaner blue towards the roofs
 uniform vec2 uRampV;        // their levels, relative to the time's sky exposure
 uniform float uRampMax;     // zenith angle (rad) where the ramp reaches the rim colour
 uniform float uRampK;       // how far the ramp has taken over from the sunset gradient
-uniform sampler2D uFacade;  // r glass, g tree, b floor-line tilt (facade.py)
-uniform sampler2D uDome;    // the cloud HDRI's whole upper hemisphere (dome.py)
-uniform float uDomeF;       // its focal length and size, px
-uniform float uDomeN;
-uniform float uF0;          // coated glass reflectance at normal incidence
-uniform float uSkyFill;     // the sky's irradiance on a vertical face, of its level
-uniform vec3 uSunWarm;      // the afterglow on sun-facing masonry
-uniform float uLitGamma;    // masonry's log contrast about the plate's mid
-uniform float uLitCeil;     // and its soft ceiling
-uniform float uGlassBody;   // what a pane lets through
 uniform float uB[${MAX_LIGHTS}];
 uniform vec3 uTint[${MAX_LIGHTS}];
 out vec4 o;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float FG_MID = 0.06;  // the plate's median facade luminance
-const float TURN_MAX = 0.785398; // facade.png's turn range, 45 deg
-const float GLASS_SKY = 0.2; // a plate pane this bright was mirroring open sky
 // cloud.webp (clouds.py): log2 sun share and log2 skylight share in 8 bits
 const float U_LO = -6.0; const float U_HI = 3.5;
 const float K_LO = -3.0; const float K_HI = 1.0;
 
-// World direction (y down) of a plate point q, in plate px from the
-// print's centre (y down): the zenith stereographic view.
-vec3 viewDir(vec2 q){
+void main(){
+  vec2 p = gl_FragCoord.xy / uSize;
+  vec2 uv = vec2(p.x, 1.0 - p.y);
+  vec3 amb = textureLod(uAmb, uv, uLod).rgb;
+  vec3 em = textureLod(uEmit, uv, uLod).rgb;
+  vec4 ax = textureLod(uAux, uv, 0.0);
+  float a = ax.r;
+  float cov = ax.g;
+  int id = int(texelFetch(uAux, ivec2(uv * uTexSize), 0).b * 255.0 + 0.5);
+  if (id >= 16) id = 0;
+
+  // View direction of this plate pixel, for the sky gradient.
+  vec2 q = uv * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
   float r = length(q) + 1e-6;
   float th = uK * atan(r / (uK * uF));
-  return uRot * vec3(q / r * sin(th), cos(th));
-}
-
-// The open sky and its cloud toward world direction d (y down), before the
-// skylight scale: cw is the cloud's alpha there and cx its light (sun and
-// skylight shares, as cloud.webp), so the shaft and what the glass mirrors
-// are one sky, graded by one clock.
-vec3 skyAt(vec3 d, float cw, vec3 cx){
+  vec3 dc = vec3(q / r * sin(th), cos(th));
+  vec3 d = uRot * dc;
   float elev = asin(clamp(-d.y, -1.0, 1.0));
   float e = clamp(elev / 1.5708, 0.0, 1.0);
   vec2 hz = normalize(vec2(d.x, d.z) + 1e-5);
@@ -200,12 +187,29 @@ vec3 skyAt(vec3 d, float cw, vec3 cx){
   // unramped level (lumSun)
   float lumSun = lum;
   lum *= mix(lumOld, mix(uRampV.x, uRampV.y, kr), uRampK);
+  // Cloud: cover and light over the clear sky, one field of cumulus from a
+  // sky-only panorama through this same view (clouds.py), so the gaps between
+  // puffs are clean sky and the zenith deepens by the gradient above alone,
+  // with no patch, seam or pole pinch left in the layer to draw spokes.
+  // Alpha. aux.g is the cloud's blue/red log-ratio below the local clear sky,
+  // linear (clouds.py no longer thresholds it). Read mostly at mip 1 through
+  // a tight ramp, so a puff ends on a soft but definite edge, a texel or two
+  // wide, instead of smearing out into haze over a wide blurred feather.
+  float covW = textureLod(uAux, uv, 1.0).g;
+  float cw = smoothstep(0.1, 0.62, mix(cov, covW, 0.85));
+  // The buildings occlude the cloud, not the sky: alpha goes to zero a few
+  // texels inside the matte's edge (its eroded, blurred self), so no puff
+  // shows through balcony gaps or fringes a silhouette; the clear sky the
+  // matte already blends against the towers is what meets them.
+  float am = textureLod(uAux, uv, 1.5).r;
+  cw *= smoothstep(0.6, 1.0, min(a, am));
   // Light: the source panorama's own radiance over its local clear sky,
   // split offline into the skylight a pixel passes on (kS, about 1 on a thin
   // wisp, 0.5 in a thick blue core) and the sun it scatters (0 in a lee
   // pocket, about 2 on a flank, up to 7 on a dome). Full resolution, read at
   // mip 0, so every billow, sunlit dome and skylit pocket is the real cloud's.
   // The time only grades the two lights: the sun goes, the skylight stays.
+  vec3 cx = textureLod(uCloud, uv, 0.0).rgb;
   float sunS = max(exp2(cx.r * (U_HI - U_LO) + U_LO) - exp2(U_LO), 0.0);
   float skyS = exp2(cx.g * (K_HI - K_LO) + K_LO);
   float sn = sunS / uSunRef;                      // 1 = the reference core
@@ -257,109 +261,21 @@ vec3 skyAt(vec3 d, float cw, vec3 cx){
   cl *= pk2 / max(pk, 1e-6);
   // premultiplied over: the cloud's radiance times its alpha, plus the sky
   // it lets through
-  return col * lum * (1.0 - cw) + cl * cw;
-}
-
-void main(){
-  vec2 p = gl_FragCoord.xy / uSize;
-  vec2 uv = vec2(p.x, 1.0 - p.y);
-  vec3 amb = textureLod(uAmb, uv, uLod).rgb;
-  vec3 em = textureLod(uEmit, uv, uLod).rgb;
-  vec4 ax = textureLod(uAux, uv, 0.0);
-  float a = ax.r;
-  float cov = ax.g;
-  int id = int(texelFetch(uAux, ivec2(uv * uTexSize), 0).b * 255.0 + 0.5);
-  if (id >= 16) id = 0;
-
-  // View direction of this plate pixel, for the sky gradient.
-  vec2 q = uv * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
-  vec3 d = viewDir(q);
-  // Cloud: cover and light over the clear sky, one field of cumulus from a
-  // sky-only panorama through this same view (clouds.py), so the gaps between
-  // puffs are clean sky and the zenith deepens by the gradient above alone,
-  // with no patch, seam or pole pinch left in the layer to draw spokes.
-  // Alpha. aux.g is the cloud's blue/red log-ratio below the local clear sky,
-  // linear (clouds.py no longer thresholds it). Read mostly at mip 1 through
-  // a tight ramp, so a puff ends on a soft but definite edge, a texel or two
-  // wide, instead of smearing out into haze over a wide blurred feather.
-  float covW = textureLod(uAux, uv, 1.0).g;
-  float cw = smoothstep(0.1, 0.62, mix(cov, covW, 0.85));
-  // The buildings occlude the cloud, not the sky: alpha goes to zero a few
-  // texels inside the matte's edge (its eroded, blurred self), so no puff
-  // shows through balcony gaps or fringes a silhouette; the clear sky the
-  // matte already blends against the towers is what meets them.
-  float am = textureLod(uAux, uv, 1.5).r;
-  cw *= smoothstep(0.6, 1.0, min(a, am));
-  vec3 cx = textureLod(uCloud, uv, 0.0).rgb;
-  vec3 sky = skyAt(d, cw, cx);
+  vec3 sky = col * lum * (1.0 - cw) + cl * cw;
   // Dither after the ramp: interleaved gradient noise, about one 8-bit
   // step of the print either way, so the long, slow ramp never bands.
   float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   sky *= 1.0 + (ign - 0.5) * 0.022;
 
-  // The city, lit by the sky it stands in. Every facade here is a vertical
-  // plane with a horizontal normal, and facade.png says which bearing: its
-  // turn off square-on to the camera, read from the floor lines' tilt off
-  // the tangent round the zenith and smoothed to the plane (facade.py).
-  vec4 fm = textureLod(uFacade, uv, uLod);
-  float glass = fm.r;
-  float tree = fm.g;
-  float turn = (fm.b * 255.0 - 128.0) / 127.0 * TURN_MAX;
-  const vec3 UP = vec3(0.0, -1.0, 0.0);
-  vec3 n0 = -normalize(vec3(d.x, 0.0, d.z) + 1e-6);
-  vec3 n = cos(turn) * n0 + sin(turn) * cross(UP, n0);
-  // Glass: a mirror of the same sky. The reflected ray keeps the view's
-  // elevation and turns its bearing about the facade's normal, so a tower
-  // mirrors the shaft's sky from across the street, and through the dome
-  // (dome.py: the cloud HDRI over the whole upper hemisphere, in the plate's
-  // own zenith projection at a second focal length) it finds the puffs
-  // the camera cannot see. Schlick Fresnel on coated glass, a touch soft.
-  vec3 rf = reflect(d, n);
-  rf.y = min(rf.y, -0.1);
-  rf = normalize(rf);
-  vec3 rc = transpose(uRot) * rf;
-  float rth = acos(clamp(rc.z, -1.0, 1.0));
-  vec2 duv = 0.5 + normalize(rc.xy + 1e-6) * (2.0 * uDomeF * tan(0.5 * rth)) / uDomeN;
-  vec3 dm = textureLod(uDome, duv, 0.3).rgb;
-  float cwR = smoothstep(0.1, 0.62, dm.r);
-  vec3 env = skyAt(rf, cwR, vec3(dm.g, dm.b, 0.0));
-  // coated glass gives the mirror back a little cooler and cleaner than it
-  // takes it: the low, pale sky it sees lands cyan-cobalt, and a warm cloud
-  // flank in it reads as a reflection, not a stain
-  float envY = dot(env, LUMA);
-  env = max(mix(vec3(envY), env, 1.25) * vec3(0.86, 0.98, 1.12), 0.0);
-  float cosI = clamp(-dot(d, n), 0.0, 1.0);
-  float fres = uF0 + (1.0 - uF0) * pow(1.0 - cosI, 5.0);
-  // The same sky lights the masonry: its irradiance on a vertical face is
-  // the sky's colour half way up from the face's normal, at a fraction of
-  // its level, and while the afterglow lasts the faces turned to the sunset
-  // bearing catch it warm (uSunK, the sun's share left, so it fades
-  // through blue hour). The ambient plate is the albedo: its own light,
-  // normalised about the plate's mid and held under the paper.
-  vec3 skyN = skyAt(normalize(n + UP * 1.2), 0.0, vec3(0.0));
-  // a hemisphere's light is greyer than any one patch of it
-  skyN = mix(vec3(dot(skyN, LUMA)), skyN, 0.35);
-  float sunF = max(dot(normalize(n.xz + 1e-6), uSun), 0.0);
-  vec3 sunL = uSunWarm * uSunK * (0.25 + 0.75 * sunF * sunF);
+  // The city is the frame, not the subject: about a stop down and a harder
+  // log contrast about the plate's mid, so towers, crane and brick read as
+  // near-black silhouettes against the shaft; glass highlights roll off
+  // before they can compete with the cloud.
   vec3 fa = amb * uWB;
   float fy = dot(fa, LUMA) + 1e-6;
-  float al = FG_MID * pow(fy / FG_MID, uLitGamma);
-  al = al / (1.0 + al / uLitCeil);
-  vec3 alb = fa * (al / fy) / FG_MID;
-  vec3 lit = alb * (skyN * uSkyFill + sunL * uSkyLum);
-  // glass: what the pane lets through (the plate's own glass, a little
-  // above the old crush) under its mirror
-  vec3 body = mix(lit, fa * (al / fy) * uGlassBody, glass);
-  // and where the plate's own pane was dark it was mirroring the street,
-  // not the sky: its light is how much of the sky this pane can see
-  float vis = clamp(sqrt(fy / GLASS_SKY), 0.3, 1.0);
-  vec3 bld = mix(body, env, glass * fres * vis);
-  // The tree stays the one black anchor: about a stop down and a harder
-  // log contrast about the plate's mid, rolled off before it can glow.
   float ny = FG_MID * pow(fy / FG_MID, uFgGamma) * uFgGain;
   ny = ny / (1.0 + ny / 0.06);
-  vec3 dark = fa * (ny / fy);
-  vec3 fg = mix(bld, dark, tree) * uAmbK;
+  vec3 fg = fa * (ny / fy) * uAmbK;
   if (id > 0) {
     int k = id - 1;
     fg += em * uB[k] * uTint[k];
@@ -506,15 +422,6 @@ const CLOUD_STOPS = 4.8;
 const CORE_LIFT = 1.1; // stops: the reference lit core the curve is solved for
 const CLOUD_SKY1 = 0.8; // skylight a cloud passes on at +20 min, vs open sky
 const CLOUD_CEIL = 0.8; // of the film's white: the brightest a cloud top may print
-// The architecture is lit by the sky it stands in (facade.py, dome.py).
-const DOME_FOV = 190; // dome.webp: the cloud HDRI's upper hemisphere, deg across
-const GLASS_F0 = 0.3; // coated curtain-wall glass
-const GLASS_BODY = 0.12; // what a pane lets through, of the plate's own glass
-const SKY_FILL = 0.17; // the sky's irradiance on a vertical face, of its level
-const SUN_WARM = lin("#ffb98f"); // the afterglow on faces turned to the sunset
-const SUN_FILL = 0.5; // its level at sunset, of the sky's
-const LIT_GAMMA = 1.0; // masonry's log contrast about the plate's mid
-const LIT_CEIL = 0.3; // and the soft ceiling on its albedo
 
 function lerpParams(a, b, k) {
   const out = {};
@@ -534,13 +441,11 @@ export async function createBlueHour(host, { embedded = false } = {}) {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const still = fixed != null || params.has("still");
 
-  const [ambImg, emitImg, auxImg, cloudImg, facadeImg, domeImg] = await Promise.all([
+  const [ambImg, emitImg, auxImg, cloudImg] = await Promise.all([
     bitmap("/lab/blue-hour/ambient.webp"),
     bitmap("/lab/blue-hour/lights.png"),
     bitmap("/lab/blue-hour/aux.png"),
     bitmap("/lab/blue-hour/cloud.webp"),
-    bitmap("/lab/blue-hour/facade.png"),
-    bitmap("/lab/blue-hour/dome.webp"),
   ]);
 
   host.style.background = "#f2f0eb";
@@ -606,18 +511,6 @@ export async function createBlueHour(host, { embedded = false } = {}) {
   // the cloud's light: full resolution, no mips, so every billow is read at
   // the texel it was baked at
   const cloudTex = upload(gl, cloudImg, gl.LINEAR);
-  // the facades' material and bearing, and the hemisphere their glass
-  // mirrors, mipmapped (the mirror is read a mip soft)
-  const mipped = (img) => {
-    const t = upload(gl, img, gl.LINEAR);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    return t;
-  };
-  const facadeTex = mipped(facadeImg);
-  const domeTex = mipped(domeImg);
-  const domeN = domeImg.width;
-  const domeF = domeN / 2 / (VIEW.k * Math.tan((DOME_FOV * Math.PI) / 180 / 2 / VIEW.k));
   gl.deleteProgram(decode.p);
   const texW = auxImg.width;
   const texH = auxImg.height;
@@ -625,8 +518,6 @@ export async function createBlueHour(host, { embedded = false } = {}) {
   emitImg.close?.();
   auxImg.close?.();
   cloudImg.close?.();
-  facadeImg.close?.();
-  domeImg.close?.();
 
   const scene = compile(gl, VS, SCENE_FS);
   const blit = compile(gl, VS, BLIT_FS);
@@ -830,20 +721,6 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, cloudTex);
     gl.uniform1i(u.uCloud, 3);
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D, facadeTex);
-    gl.uniform1i(u.uFacade, 4);
-    gl.activeTexture(gl.TEXTURE5);
-    gl.bindTexture(gl.TEXTURE_2D, domeTex);
-    gl.uniform1i(u.uDome, 5);
-    gl.uniform1f(u.uDomeF, domeF);
-    gl.uniform1f(u.uDomeN, domeN);
-    gl.uniform1f(u.uF0, GLASS_F0);
-    gl.uniform1f(u.uSkyFill, SKY_FILL);
-    gl.uniform3fv(u.uSunWarm, SUN_WARM.map((c) => c * SUN_FILL));
-    gl.uniform1f(u.uLitGamma, LIT_GAMMA);
-    gl.uniform1f(u.uLitCeil, LIT_CEIL);
-    gl.uniform1f(u.uGlassBody, GLASS_BODY);
     gl.uniform2f(u.uSize, sceneT.w, sceneT.h);
     gl.uniform2f(u.uTexSize, texW, texH);
     gl.uniformMatrix3fv(u.uRot, false, rot);
@@ -985,7 +862,7 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     destroy() {
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("keydown", onKey);
-      for (const t of [ambTex, emitTex, auxTex, cloudTex, facadeTex, domeTex]) gl.deleteTexture(t);
+      for (const t of [ambTex, emitTex, auxTex, cloudTex]) gl.deleteTexture(t);
       for (const t of [sceneT, filmT]) {
         if (!t) continue;
         gl.deleteTexture(t.tex);
