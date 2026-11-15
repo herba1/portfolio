@@ -758,7 +758,6 @@ SKY_PLATES = os.environ.get("SKY_PLATES", _PL + "g2_3840.jpg:0.4,0.5,300,1100,40
 LEAN = float(os.environ.get("LEAN", "0.35"))  # 0 a flat turn, 1 verticals all through ZEN
 PLATE_FEATHER = float(os.environ.get("PLATE_FEATHER", "90"))  # a plate's edge, print px
 PL_EXP = float(os.environ.get("PL_EXP", "0.66"))
-PL_EDGE = int(os.environ.get("PL_EDGE", "4"))  # a cloud's edge, print px, lit from inside it
 PL_WHITE = float(os.environ.get("PL_WHITE", "0.55"))  # whiteness that is all cloud
 PL_CLOUD_GAIN = float(os.environ.get("PL_CLOUD_GAIN", "0.0"))  # share of the sky's light gain the cloud takes (none: its exposure is PL_EXP)
 
@@ -855,19 +854,17 @@ def _sky_plates(spec):
         op = smoothstep(0.0, 1.0, np.clip((wh - wS) / np.maximum(PL_WHITE - wS, 1e-3), 0, 1)).astype(np.float32)
         # its sky graded to the print's: a gain (T / S) per channel where it
         # is clear, so the photograph's own grain and drawing ride on the
-        # cobalt. The cloud over it by its share (op, choked a little), and
-        # at its edge in the light of the cloud just inside it, pushed out
-        # (an edge pixel is part cloud and part whatever was behind it, a
-        # slate base as often as sky: unmixed, it drew a dark rim round the
-        # towers), untinted, at its own exposure (PL_EXP) times the light's
-        # gain to PL_CLOUD_GAIN
+        # cobalt. The cloud over it by its share (op), as photographed right
+        # out to its edge, untinted, at its own exposure (PL_EXP) times the
+        # light's gain to PL_CLOUD_GAIN. An edge pixel is part cloud and part
+        # whatever was behind it, a slate base as often as sky; _plate_tone
+        # takes the dark end of the cloud's light to the sky round it, so that
+        # mix fades into the blue. (The cloud's light pushed out over its
+        # edge from just inside, to hide the slate, laid a pale band along
+        # every base, and the slate showed through just past it: a tide line.)
         g_sky = T / S
         g_lum = ((T @ LUMA) / np.maximum(S @ LUMA, 1e-5))[..., None] ** PL_CLOUD_GAIN
-        inner = cv2.erode((op > 0.9).astype(np.float32), disk(PL_EDGE + 2))
-        lgP = np.log(np.maximum(P, 1e-4)).astype(np.float32)
-        Cin = np.exp(cv2.GaussianBlur(pushpull(lgP * inner[..., None], inner), (0, 0), 1.5))
-        wi = smoothstep(0.6, 1.0, cv2.GaussianBlur(cv2.erode(op, disk(PL_EDGE)), (0, 0), PL_EDGE / 2))[..., None]
-        C = (P * wi + Cin * (1 - wi)) * g_lum
+        C = P * g_lum
         ac = smoothstep(0.12, 1.0, op)[..., None]
         k = smoothstep(0.0, 0.3, op)[..., None]
         G = P * g_sky * (1 - k) + (T * (1 - ac) + C * ac) * k
@@ -881,52 +878,59 @@ def _sky_plates(spec):
     return np.clip(out, 0, 1).astype(np.float32), op_all
 
 
-# The plates' light, kept as photographed: the towers' own sunlit tops and
-# shaded undersides and all their local contrast, only toned for the print.
-# The sunlit tops (sRGB luma past PL_HI) turn a warm neutral (HI_COL) on a
-# shoulder that peaks at TOP, under paper white; the shaded undersides
-# (cloud under PL_SH) take the skylight's hue (SHADE_COL) at their own light,
-# a blue-grey rather than a slate; nothing is blurred and nothing relit.
-PL_HI = float(os.environ.get("PL_HI", "0.62"))
-PL_SH = float(os.environ.get("PL_SH", "0.6"))
-PL_SH_MIX = float(os.environ.get("PL_SH_MIX", "0.55"))
-PL_CONTRAST = float(os.environ.get("PL_CONTRAST", "1.5"))
-PL_FLOOR = float(os.environ.get("PL_FLOOR", "0.6"))
+# The plates' light, kept as photographed and graded as cumulus in sun: each
+# pixel's light (log luminance, its fine modelling steepened by PL_DETAIL
+# over PL_DETAIL_PX) placed on a ramp, per channel in log light, from a
+# shadow end to a sunlit end. The sunlit end is a warm white (PL_TOP_COL) at
+# sRGB luma PL_TOP, under paper white, where the print's shoulder takes it
+# on to a glow without clipping. The shadow end is the skylight: the clear
+# sky round the cloud (the print's own cobalt to cyan), greyed by
+# PL_SH_DESAT and lifted by PL_SH_LIFT stops well inside a tower, so its
+# shaded undersides and folds are a lighter, softer blue than the sky beside
+# them, never a slate. At the cloud's edge (within about PL_IN_PX of it) the
+# shadow end is the local sky itself, and the ramp starts PL_EDGE_STOPS over
+# the sky's own light: the slate base and the grey mix of base and sky that
+# the photograph had along a tower's underside go to the blue round it, and
+# the base fades into the sky instead of ending on a dark rim.
+PL_TOP = float(os.environ.get("PL_TOP", "0.93"))
+PL_TOP_COL = _hex(os.environ.get("PL_TOP_COL", "#fff6ea"))
+PL_GAMMA = float(os.environ.get("PL_GAMMA", "1.6"))  # >1 keeps the lower half of the ramp in shade
+PL_DETAIL = float(os.environ.get("PL_DETAIL", "0.6"))
+PL_DETAIL_PX = float(os.environ.get("PL_DETAIL_PX", "10"))
+PL_SH_LIFT = float(os.environ.get("PL_SH_LIFT", "0.1"))
+PL_SH_DESAT = float(os.environ.get("PL_SH_DESAT", "0.4"))
+PL_IN_PX = float(os.environ.get("PL_IN_PX", "24"))
+PL_EDGE_STOPS = float(os.environ.get("PL_EDGE_STOPS", "0.6"))
+PL_KNEE = 0.15  # the ramp's toe, so the edge's threshold draws no contour
 
 
 def _plate_tone(L, op):
-    # the cloud's own modelling steepened in log light about its sunlit
-    # level (PL_CONTRAST), so the print's shoulder, which lifts everything
-    # past its knee, lifts the tops and not the folds between them
-    opb = cv2.GaussianBlur(op, (0, 0), 1.5)
-    Y0 = np.maximum(L @ LUMA, 1e-5)
-    ref = 0.85 * PL_EXP
-    f = np.minimum(Y0 / ref, 1.0) ** (PL_CONTRAST - 1)
-    L = L * (1 + (f - 1) * smoothstep(0.3, 0.9, opb))[..., None]
-    # a base in deep shade is lit by the whole dome of blue round it: lifted
-    # to no less than PL_FLOOR of the clear sky's light beside it (a slate
-    # slab darker than the cobalt read as a hole in the sky)
-    Y1 = np.maximum(L @ LUMA, 1e-5)
-    YT = _sky_target(*op.shape) @ LUMA
-    lift = np.maximum(PL_FLOOR * YT - Y1, 0) * smoothstep(0.2, 0.9, cv2.GaussianBlur(op, (0, 0), 12))
-    L = L * ((Y1 + lift) / Y1)[..., None]
-    g = l2s(L)
-    Y = g @ LUMA
-    knee = TOP - 0.22
-    Yt = np.where(Y < knee, Y, knee + (TOP - knee) * np.tanh((Y - knee) / (TOP - knee)))
-    g = g * (Yt / np.maximum(Y, 1e-4))[..., None]
-    Y = Yt
-    hl = HI_COL / float(HI_COL @ LUMA)
-    w_hi = (smoothstep(PL_HI, TOP, Y) * opb)[..., None]
-    g = g * (1 - w_hi) + (Y[..., None] * hl) * w_hi
-    sl = SHADE_COL / float(SHADE_COL @ LUMA)
-    w_sh = (PL_SH_MIX * (1 - smoothstep(PL_SH * 0.6, PL_SH, Y)) * smoothstep(0.4, 0.9, opb))[..., None]
-    g = g * (1 - w_sh) + (Y[..., None] * sl) * w_sh
+    T = _sky_target(*op.shape)
+    YT = np.maximum(T @ LUMA, 1e-5)
+    lY = np.log2(np.maximum(L @ LUMA, 1e-5))
     cl = op > 0.6
+    # the cloud's own range of light, darkest shade to brightest top
+    lo_c, hi_c = np.percentile(lY[cl], [1, 99.7])
+    # how deep inside the cloud: 0 at and past its edge, 1 well inside
+    inside = smoothstep(0.6, 0.97, cv2.GaussianBlur(op, (0, 0), PL_IN_PX))
+    lo = (np.log2(YT) + PL_EDGE_STOPS) * (1 - inside) + lo_c * inside
+    lYd = lY + PL_DETAIL * (lY - cv2.GaussianBlur(lY, (0, 0), PL_DETAIL_PX))
+    x = (lYd - lo) / (hi_c - lo)
+    x = 0.5 * (x + np.sqrt(x * x + PL_KNEE * PL_KNEE)) - 0.5 * PL_KNEE
+    t = (np.clip(x, 0, 1) ** PL_GAMMA)[..., None]
+    d = (PL_SH_DESAT * inside)[..., None]
+    sh = (T * (1 - d) + YT[..., None] * d) * (2 ** (PL_SH_LIFT * inside))[..., None]
+    top = PL_TOP_COL / float(PL_TOP_COL @ LUMA) * float(s2l(np.float32(PL_TOP)))
+    G = np.exp(np.log(np.maximum(sh, 1e-5)) * (1 - t) + np.log(top) * t)
+    # over the sky where there is any cloud, reaching a little past it (the
+    # ramp's foot there is the sky itself)
+    wc = smoothstep(0.0, 0.1, cv2.dilate(cv2.GaussianBlur(op, (0, 0), 1.5), disk(6)))[..., None]
+    out = np.clip(L * (1 - wc) + G * wc, 0, 1)
     if cl.any():
-        print("plates: cloud px", round(float(cl.mean()), 3), "top sRGB max", np.round(g[cl].max(0) * 255, 1),
-              "p99.9", np.round(np.percentile(g[cl], 99.9, axis=0) * 255, 1))
-    return s2l(np.clip(g, 0, 1)).astype(np.float32)
+        g = l2s(out[cl])
+        print("plates: cloud px", round(float(cl.mean()), 3), "log2 lum range", np.round([lo_c, hi_c], 2),
+              "sRGB max", np.round(g.max(0) * 255, 1), "p99.5 luma", round(float(np.percentile(g @ LUMA, 99.5) * 255), 1))
+    return out.astype(np.float32)
 
 
 def _sky_target(h=H, w=W):
