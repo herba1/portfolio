@@ -53,6 +53,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // silhouettes against the glow. The film only diffuses what is past its thresholds;
 // its pyramid has long wings, so the disc goes in heavily filtered.
 //
+// The crowns are backlit: the sun is behind them, so from below they show
+// their shaded undersides, dark and cool in the skylight, and the light
+// comes through them only where they are thin (their edges against the
+// sky, round their gaps, the gap the tuft opens) and, by the disc, through
+// the clumps that catch it: amber-gold transmission that grows towards the
+// sun and comes up in full as the tuft swings clear, so a gust lights the
+// crown round the sun, not only the disc.
+//
 // The lower canopy, the cypresses and far pines against the low sky, was
 // rebaked from the HDRI at full resolution (the capture's own sun stood
 // among them, and its flare had cost them their edges), so they keep their
@@ -210,6 +218,40 @@ const CLOUD_GRADE = {
 // to a true black against the sky, their sunlit needles keeping a little
 // light, so they are the sharp dark that frames the glow.
 const SILHOUETTE = { strength: 1, knee: 0.1 };
+// Backlight. The sun stands behind the crowns, so what the eye sees of
+// them from below is their shaded underside, lit only by the sky: the
+// overhead crown's needles go down by near stops (the middle crowns, a
+// little further from the sun, by mid), cooled towards the skylight that
+// fills them (the sky's own tint to the cool power, per unit luminance),
+// and the capture's own sunlit needles roll off above a knee, pivoting on
+// the crown's middle tone, so no part of the underside reads front-lit.
+// The wood of the forks drops by bark stops and keeps its warmth.
+// Where the crown thins, along its edges against the sky, round its gaps
+// and in the gap the tuft opens, and by the disc through the clumps that
+// catch the light (forward scatter), sunlight passes through the needles
+// and replaces their shaded underside: gold by the disc, amber further
+// out. Three reaches from the sun (e-folding, asset widths, with their
+// peaks in scene light): gold-white in the needles round the disc, amber
+// through the heart of the crown, a trace out to its rims. At rest the
+// first two run at the rest share, a star-lit glow round the pinpoint; a
+// gust that swings the tuft clear brings them up to full round the
+// opening disc.
+const BACKLIGHT = {
+  near: 1.5,
+  mid: 1.2,
+  cool: 0.2,
+  bark: 1.8,
+  roll: [0.04, 0.014], // highlight knee and the pivot it keeps, scene light
+  gold: [1.0, 0.56, 0.16], // by the disc
+  rim: [1.0, 0.45, 0.1], // through the crown
+  reach: [0.07, 0.13, 0.3],
+  peaks: [1.7, 0.6, 0.06],
+  rest: 0.45,
+  edge: 1.0, // edges against the sky (coverage gradient, every layer)
+  thin: 0.9, // round the gaps (the crown's coverage blurred to a clump)
+  midRim: 0.5, // the middle crowns' share
+  body: 0.9, // forward scatter through the thick of the crown by the disc
+};
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -257,6 +299,15 @@ uniform vec3 uCKey;          // sunlit tops
 uniform vec4 uCGrade;        // sky share in the shade, fill, gain, detail
 uniform vec4 uCRoll;         // knee, top, unused, unused
 uniform vec2 uCGlow;         // own colour share, forward scatter
+uniform sampler2D uLayersBlur; // the mattes, mipmapped sampler
+uniform sampler2D uCanopyBlur; // the foliage light, mipmapped sampler
+uniform vec4 uBack;          // stops down: near, mid; cool power; bark stops
+uniform vec2 uBackRoll;      // highlight roll-off: knee, pivot (scene light)
+uniform vec3 uRim;           // transmission through the crown, colour
+uniform vec4 uRimW;          // reach by the disc, through the crown, to its rims; rest share
+uniform vec3 uRimK;          // each reach's peak
+uniform vec3 uRimGold;       // colour by the disc
+uniform vec4 uRimMix;        // edge share, thin share, mid crowns' share, body share
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${ASPECT.toFixed(6)};
 
@@ -326,6 +377,35 @@ float coverAt(vec2 s) {
 
 vec3 withLuma(vec3 tint, float y) {
   return tint * (y / dot(tint, LUMA));
+}
+
+// A crown's shaded underside: down by its stops and cooled towards the
+// skylight that is all that reaches it; the sunlit wood of the forks (warm,
+// redder than it is green) drops less and keeps its colour.
+vec3 underside(vec3 c, float stops, vec3 sky) {
+  float bark = smoothstep(1.0, 1.2, c.r / max(c.g, 1e-5));
+  vec3 cool = pow(sky / dot(sky, LUMA), vec3(uBack.z));
+  // The capture's own sunlit needles (its sun stood low, under the crowns)
+  // roll off, pivoting on the crown's middle tone, so the underside is
+  // one even shade and nothing in it reads front-lit.
+  float y = dot(c, LUMA);
+  vec3 u = c * cool * exp2(-stops) * (1.0 + uBackRoll.y / uBackRoll.x) / (1.0 + y / uBackRoll.x);
+  return mix(u, c * exp2(-uBack.w * stops / uBack.x), bark);
+}
+// The clumps of needles that catch the light: the foliage light here
+// against its own blur over a few clumps, in stops (the log encoding's
+// mips are geometric means).
+float clumps(vec2 p) {
+  float v = dot(textureLod(uCanopyBlur, p, 1.0).rgb, LUMA);
+  float m = dot(textureLod(uCanopyBlur, p, 4.0).rgb, LUMA);
+  return (v - m) * (uLog.y - uLog.x);
+}
+// How thin the overhead crown is round a point: its matte blurred to a
+// few clumps' width, with the tuft's share following the tuft.
+float nearThick(vec2 ub, vec2 ut, float lod) {
+  float sb = clamp((tuftMask(ub) - 0.5) * 2.5 + 0.5, 0.0, 1.0);
+  float st = clamp((tuftMask(ut) - 0.5) * 2.5 + 0.5, 0.0, 1.0);
+  return textureLod(uLayersBlur, ub, lod).b * (1.0 - sb) + textureLod(uLayersBlur, ut, lod).b * st;
 }
 
 void main() {
@@ -421,17 +501,15 @@ void main() {
   c0 *= mix(vec3(1.0), c0 / (c0 + uSil.y), sil);
   c1 *= mix(vec3(1.0), c1 / (c1 + uSil.y), sil);
   col = mix(col, c0, a0);
+  // Backlit: the crowns between the lens and the sun show their shaded
+  // undersides. The middle ones fade out of it into the silhouettes below.
+  c1 = mix(c1, underside(c1, uBack.y, skyTint), 1.0 - sil);
   col = mix(col, c1, a1);
   if (a2 > 0.0) {
     vec3 c2 = (canopy(ub) * ab + canopy(ut) * at) / (ab + at);
-    col = mix(col, c2, a2);
+    col = mix(col, underside(c2, uBack.x, skyTint), a2);
   }
 
-  // Glare: the light that scatters inside the lens and off the emulsion
-  // right next to the disc, in front of everything; it tracks how much of
-  // the disc the needles leave open, so it flickers with them. (The film's
-  // own scatter is far wider: fed the full disc it fogs the canopy.)
-  float rh = length(dv) / px / uRes.y;
   // How much of the disc the needles leave open: the centre and a ring of
   // taps just past the limb, through every layer.
   float open = 0.0;
@@ -447,6 +525,65 @@ void main() {
     c *= 1.0 - nearCover(s, sb, st, sab, sat);
     open += c * (i == 0 ? 0.2 : 0.1);
   }
+
+  // Transmission: sunlight through the needles where the crown is thin
+  // enough to pass it, amber-gold, strongest towards the sun, in three
+  // reaches: gold-white in the needles right round the disc, amber through
+  // the heart of the crown, a trace out to its rims. At rest it glows round
+  // the pinpoint; as the tuft swings clear it comes up in full round the
+  // opening disc. Before the glare, which lies over everything.
+  float swing = mix(uRimW.w, 1.0, open);
+  vec3 reach = uRimK * exp(-sd / uRimW.xyz) * vec3(swing, swing, 1.0);
+  float sunW = reach.x + reach.y + reach.z;
+  if (sunW > 0.02 && a1 + a2 > 0.01) {
+    // Edge: where the canopy, every layer as it stands this frame, meets
+    // open sky, a few pixels across: the tuft and the gap it opens
+    // included, the overlaps of one crown on another not.
+    vec2 hn = 3.0 * vec2(uCrop.z / uRes.x, uCrop.w / uRes.y);
+    vec2 gn = vec2(coverAt(uv + vec2(hn.x, 0.0)) - coverAt(uv - vec2(hn.x, 0.0)),
+                   coverAt(uv + vec2(0.0, hn.y)) - coverAt(uv - vec2(0.0, hn.y)));
+    float edgeN = smoothstep(0.1, 0.7, length(gn));
+    // Thin: the canopy round the point blurred to a clump's width, so the
+    // light comes through round every gap and along the rims, and the body
+    // of a clump stays dark.
+    float tn = clamp(0.6 * nearThick(ub, ut, 1.0) + 0.4 * nearThick(ub, ut, 2.5), 0.0, 1.0);
+    float tm = textureLod(uLayersBlur, u1, 1.5).g;
+    float thinN = 1.0 - smoothstep(0.55, 1.0, 1.0 - (1.0 - tn) * (1.0 - tm));
+    // On the needle's side of the edge only (light added over a sky gap
+    // would grey it), and broken up by the needles themselves: the clumps
+    // that catch the light pass it, the dark gaps between them stay, so a
+    // rim reads as needles, not a stroke.
+    float nb = smoothstep(-0.4, 1.1, clumps(ub));
+    nb *= nb * nb;
+    // Through the body of the crown only near the sun; further out only
+    // its rims against the sky pass any.
+    float inner = smoothstep(0.05, 0.6, reach.x + reach.y);
+    // And by the disc, forward scatter: the clumps that catch the light
+    // glow through even where the crown is thick.
+    float tN = smoothstep(0.35, 0.95, a2) * max(max(uRimMix.x * edgeN, uRimMix.y * thinN * inner), uRimMix.w * inner * inner)
+      * (0.16 + 0.84 * nb);
+    // The middle crowns, behind it, only where the overhead crown leaves
+    // them seen.
+    float thin1 = 1.0 - smoothstep(0.55, 1.0, tm);
+    float n1 = smoothstep(-0.4, 1.1, clumps(u1));
+    n1 *= n1 * n1;
+    float t1 = smoothstep(0.35, 0.95, a1) * (1.0 - a2) * uRimMix.z * max(edgeN, thin1 * inner) * (1.0 - sil) * (0.06 + 0.94 * n1);
+    // Gold by the disc, deeper amber further out, where the light has come
+    // through more needles.
+    vec3 rc = (reach.x * uRimGold + reach.y * uRim + reach.z * uRim * vec3(1.0, 0.8, 0.6));
+    // Lit from behind, a needle shows the light it passes, not its
+    // skylit underside with the light on top (that would grey it): the
+    // underside gives way as the transmission comes up.
+    float T = min(tN + t1, 1.0);
+    float lit = T * smoothstep(0.0, 0.06, dot(rc, LUMA));
+    col = col * (1.0 - 0.85 * lit) + rc * T;
+  }
+
+  // Glare: the light that scatters inside the lens and off the emulsion
+  // right next to the disc, in front of everything; it tracks how much of
+  // the disc the needles leave open, so it flickers with them. (The film's
+  // own scatter is far wider: fed the full disc it fogs the canopy.)
+  float rh = length(dv) / px / uRes.y;
   // A white-hot core that clips, a warm bloom and a thin red-orange ring of
   // halation, all growing as the gap opens: shut, a pinpoint; open, the sun
   // in full. None of it is a veil: the light is added only where it can
@@ -777,7 +914,11 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     bitmap(`${ASSET}clouds.webp`),
   ]);
   const texCanopy = imageTexture(gl, canopyImg);
+  gl.bindTexture(gl.TEXTURE_2D, texCanopy);
+  gl.generateMipmap(gl.TEXTURE_2D);
   const texLayers = imageTexture(gl, layersImg);
+  gl.bindTexture(gl.TEXTURE_2D, texLayers);
+  gl.generateMipmap(gl.TEXTURE_2D);
   const texBranches = imageTexture(gl, branchImg);
   const texClouds = imageTexture(gl, cloudImg);
   gl.bindTexture(gl.TEXTURE_2D, texClouds);
@@ -998,6 +1139,17 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     bind(4, texClouds, "uClouds");
     bind(5, texClouds, "uCloudsBlur");
     gl.bindSampler(5, blurSampler);
+    bind(6, texLayers, "uLayersBlur");
+    gl.bindSampler(6, blurSampler);
+    bind(7, texCanopy, "uCanopyBlur");
+    gl.bindSampler(7, blurSampler);
+    gl.uniform4f(u.uBack, BACKLIGHT.near, BACKLIGHT.mid, BACKLIGHT.cool, BACKLIGHT.bark);
+    gl.uniform2fv(u.uBackRoll, BACKLIGHT.roll);
+    gl.uniform3fv(u.uRim, BACKLIGHT.rim);
+    gl.uniform4f(u.uRimW, BACKLIGHT.reach[0], BACKLIGHT.reach[1], BACKLIGHT.reach[2], BACKLIGHT.rest);
+    gl.uniform3fv(u.uRimK, BACKLIGHT.peaks);
+    gl.uniform3fv(u.uRimGold, BACKLIGHT.gold);
+    gl.uniform4f(u.uRimMix, BACKLIGHT.edge, BACKLIGHT.thin, BACKLIGHT.midRim, BACKLIGHT.body);
     gl.uniform3fv(u.uSkyHor, SKY_GRADE.horizon);
     gl.uniform3fv(u.uSkyZen, SKY_GRADE.zenith);
     gl.uniform3f(u.uSkyGrade, SKY_GRADE.depth[0], SKY_GRADE.depth[1], SKY_GRADE.knee);
@@ -1034,6 +1186,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.viewport(0, 0, L.pw, L.ph);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindSampler(5, null);
+    gl.bindSampler(6, null);
+    gl.bindSampler(7, null);
 
     film.render(
       sceneT.tex,
