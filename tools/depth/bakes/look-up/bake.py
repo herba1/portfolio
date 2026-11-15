@@ -11,7 +11,7 @@ src, skysrc, outdir = sys.argv[1], sys.argv[2], sys.argv[3]
 if len(sys.argv) > 4: P.update(json.loads(sys.argv[4]))
 os.makedirs(outdir, exist_ok=True)
 eq = np.load(src).astype(np.float32)
-sky2 = align_sky2(np.load(skysrc).astype(np.float32), eq, P['sky2Yaw'])
+sky2 = align_sky2(np.load(skysrc).astype(np.float32), eq, P['sky2Yaw'], P)
 g, _, _, cap = grade(eq, P, sky2)
 del eq, sky2
 h, w, _ = g.shape
