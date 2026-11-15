@@ -55,7 +55,12 @@ the galvanised spire, the mechanism box and its pipe off the boom's card
 (p3.webp) along the mast's edge and rebuilds the town card (p1.webp) right of
 the mast as one quilted tree line over a plain ground (no doubled house or
 boom's foot), with both mattes, the town's faded out at its right edge so
-its held edge texel throws no horizontal shadow band on the sky.
+its held edge texel throws no horizontal shadow band on the sky, and then
+signalmatte.py takes the maintenance ladder (a thin pale rail and its
+rungs, which read as a translucent ghost pole) off the signal card (p5.webp)
+and its streak off the town card's gable (p1.webp), and chokes the signal's
+alpha a px and carries its own colour out to the new edge, so no dark keyed
+rim stays round the lamps and the clamps.
 """
 import sys
 import os

@@ -240,7 +240,9 @@ const FILM = {
 // light that went through to the base and bounced back exposes the red layer
 // a hair round every bright thing, so a dark edge cut against the sky (the
 // crossbuck, the pole, the eave, the wires, the lamp hoods) takes a thin warm
-// line, 2-4 css px, instead of meeting the blue clean. Real halation is linear
+// line, a css px or two, instead of meeting the blue clean. Wider or heavier
+// it saturates into a brown outline round the near-black lamps and clamps
+// that reads as a keyed fringe, a cut-out's rim, not light on the film. Real halation is linear
 // in the light, so every bright pixel sends some (floor), and the light past
 // FILM.halationThreshold's soft knee sends all of it: the cloud and the pale
 // low sky ring hard, the deep cobalt only a little. Only covered pixels send
@@ -248,13 +250,13 @@ const FILM = {
 // added in linear light before the film, which then softens and develops it
 // with everything else.
 const RING = {
-  radius: 3.2, // css px
+  radius: 1.6, // css px
   floor: 0.6, // the share of all the light that halates, below the knee
   amount: 4,
   // The ring's ceiling (linear): a dark edge saturates toward it, so a wire
   // over the lit crown takes a warm line, not an orange one, and an edge on
   // the deep cobalt still rings nearly as clearly.
-  max: 0.14,
+  max: 0.07,
   color: [1, 0.42, 0.14], // linear: red-orange, the red layer with some green, never pink on the blue
 };
 // Query overrides for the ring, as for the film: ?ringAmount=, ?ringRadius=,
