@@ -225,6 +225,20 @@ vec3 cloudGrade(vec3 c, float zen) {
   vec3 sunC = SUN * L;
   return mix(shadeC, sunC, top);
 }
+// The cumulus's edge, in the air (cloud.py: the edge). Its coverage (sky.png
+// B) falls off over ~10-14 plate px, reaching into its silhouette, and what
+// is left of the cloud in that falloff is thin cloud lit by the same air as
+// the cobalt round it: it takes the sky's hue, and loses its own contrast and
+// saturation toward the sky's, so the edge passes from cloud through
+// sky-tinted haze into the blue, never as a pale rim of the cloud's own
+// skylight shade on the cobalt (a cut-out sticker's fringe).
+vec3 cloudAir(vec3 c, vec3 sky, float b) {
+  float air = 1.0 - smoothstep(0.0, 0.9, b);
+  vec3 ch = rgb2hsv(c);
+  vec3 sh = rgb2hsv(sky);
+  vec3 thin = hsv2rgb(vec3(sh.x, mix(ch.y, sh.y, 0.5), mix(ch.z, sh.z, 0.35)));
+  return mix(c, thin, air * 0.85);
+}
 // The concrete, seen from directly beneath: the face the camera sees is the
 // shaft's underside, in its own shade against a bright sky, so the pole is the
 // frame's one firm dark silhouette, cut across the glowing tower behind it.
@@ -290,6 +304,34 @@ vec3 unmix(vec3 withIt, vec3 behind, float a) {
   return clamp((withIt - (1.0 - a) * behind) / max(a, 0.2), 0.0, 1.0);
 }
 
+// The cumulus's value, debanded. Half the tower lives in its shade, in the
+// bake's 0.5-0.6 (some 25 steps of 8 bits), which the grade stretches (x1.8,
+// and its skylight saturation with it), so the steps came up on screen as
+// flat, hard-edged plateaus: a posterised, oil-paint body. Each pixel is
+// averaged with the cloud round it (8 taps, 3 and 6 texels out, turned per
+// pixel) but only with taps within a step or two of its own value, so a
+// plateau's edge becomes the soft ramp it stands for and a billow's real
+// edge (several steps at once) stays drawn. (Not in the sun, over ~0.62,
+// where the grade compresses the steps and every one is the billows' drawing.)
+vec3 cloudTex(vec2 pp) {
+  vec3 c0 = texture(uCloud, pp / uPlate).rgb;
+  float v0 = dot(c0, LUMA);
+  if (v0 > 0.64) return c0;
+  float sh = 1.0 - smoothstep(0.6, 0.64, v0);
+  float r0 = fract(sin(dot(floor(pp), vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
+  vec3 acc = c0;
+  float w = 1.0;
+  for (int k = 0; k < 8; k++) {
+    float ang = r0 + float(k) * 0.7854;
+    vec2 o = vec2(cos(ang), sin(ang)) * ((k & 1) == 0 ? 3.0 : 6.0);
+    vec3 c = texture(uCloud, (pp + o) / uPlate).rgb;
+    float wk = sh * (1.0 - smoothstep(1.5 / 255.0, 3.5 / 255.0, abs(dot(c, LUMA) - v0)));
+    acc += c * wk;
+    w += wk;
+  }
+  return acc / w;
+}
+
 void main() {
   vec2 pp = vec2(vUv.x, 1.0 - vUv.y) * uPlate;
   ivec2 ip = ivec2(floor(pp));
@@ -329,7 +371,7 @@ void main() {
   if (skyA > 0.002) {
     vec3 behind = plate(3, pp, rk);
     vec3 graded = skyGrade(behind, sk.g);
-    if (sk.b > 0.002) graded = mix(graded, cloudGrade(texture(uCloud, pp / uPlate).rgb, sk.g), sk.b);
+    if (sk.b > 0.002) graded = mix(graded, cloudAir(cloudGrade(cloudTex(pp), sk.g), graded, sk.b), sk.b);
     col = clamp(col + skyA * (graded - behind), 0.0, 1.0);
   }
   // what of this pixel is still sky (skyW) and of that the cumulus (cloudW),

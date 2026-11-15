@@ -44,7 +44,10 @@
 # regraded cobalt at coverage a, so where a crown thins into the blue it is
 # cloud thinning into cobalt, with no pale band of the HDRI's sky between
 # them. Its shade side, lit by the sky, is a little blue itself, so the body
-# is made solid inside its silhouette.
+# is made solid inside its silhouette. Its edge, all round the tower, is
+# then feathered from its signed distance over ~13-17 plate px reaching into
+# the silhouette, its value losing its contrast toward it, and the comp
+# turns the falloff to the sky's hue (the edge, below; COMP cloudAir).
 #
 # Tone: linear radiance, each turret set against its neighbours and each
 # billow's own light and shade lifted (most in the shade side, where the
@@ -344,7 +347,7 @@ print(f"specks: {n - 1} dark spots, {speck.sum()} px filled")
 C = np.where(speck[..., None], push_pull(C.astype(np.float32), (~speck).astype(np.float32)), C)
 
 # ---------------------------------------------------------------- tone
-RELIEF_FOLD, RELIEF_BILLOW = 1.2, 1.5
+RELIEF_FOLD, RELIEF_BILLOW, RELIEF_SHADE = 1.2, 1.5, 2.2
 CY = C @ np.array([0.2126, 0.7152, 0.0722])
 ref = np.percentile(CY[a > 0.9], 99.5)
 x = CY / ref
@@ -357,12 +360,20 @@ x = CY / ref
 # the shade side, where the HDRI's billows are faintest. (Not along the anvil
 # shelf's underside, where it would bring the streaks back.)
 lx = np.log(np.maximum(x, 1e-4)).astype(np.float32)
+# First a light low-frequency pass. Lifted as it is cut (x2.5-4 on the
+# billows in the shade side), the HDRI's finest grain, its sensor noise and
+# the remap's ringing, came up as blotches with hard borders: a posterised,
+# oil-paint body. Pulled SMOOTH of the way toward its own low-pass (SMOOTH_S
+# px) first, the lift draws the billows' soft, bleeding volume and not the
+# grain between them.
+SMOOTH, SMOOTH_S = 0.5, 1.6
+lx = lx + SMOOTH * (cv2.GaussianBlur(lx, (0, 0), SMOOTH_S) - lx)
 ls = cv2.GaussianBlur(lx, (0, 0), 0.7)  # its drawing, not the HDRI's noise
 lb = cv2.GaussianBlur(lx, (0, 0), 10)
 lB = cv2.GaussianBlur(lx, (0, 0), 48)
 inshade = 1 - np.clip((np.exp(lb) - 0.35) / 0.4, 0, 1)
 inshade = inshade * (1 - 0.8 * band[..., 0])
-x = np.exp(lB + (lb - lB) * (RELIEF_FOLD + 1.2 * inshade) + (ls - lb) * (RELIEF_BILLOW + 2.5 * inshade))
+x = np.exp(lB + (lb - lB) * (RELIEF_FOLD + 1.2 * inshade) + (ls - lb) * (RELIEF_BILLOW + RELIEF_SHADE * inshade))
 x = x / np.percentile(x[a > 0.5], 99.97)  # the brightest crown at 1
 print("relief x: " + "  ".join(f"p{p} {np.percentile(x[a > 0.9], p):.3f}" for p in (1, 5, 10, 25, 50, 75, 95)))
 # Over a floor: the live grade (cloudGrade) holds everything under 0.5 at 0.5
@@ -394,13 +405,9 @@ disp = FLOOR + (SH - FLOOR) * np.clip(x, 0, 1) ** GX
 #   inside it (the HDRI's own darker margin, its cloud thinning over its
 #   sky, unmixed, drew a dark outline), the darkening rolls off a little
 #   there and it lifts a touch: lit through, never an outline;
-# - the matte's edge is rebuilt from its signed distance as a soft logistic
-#   falloff, ~9 px from half coverage to clear sky on the base (~13 px
-#   10-90%) and ~6 on the flank's other edges, so it dissolves into the
-#   cobalt instead of being cut.
+# - (its edge, and the rest of the tower's, is feathered below: the edge)
 UND_REG = ((1450.0, 1750.0), (760.0, 900.0))
 UND_L, UND_L2, UND_DARK, UND_RIM = 40.0, 150.0, 0.075, 6.0
-UND_S = (2.0, 3.0)  # logistic scale, plate px: up/side-facing edge, underside
 sm = lambda e0, e1, v: np.clip((v - e0) / (e1 - e0), 0, 1) ** 2 * (3 - 2 * np.clip((v - e0) / (e1 - e0), 0, 1))
 reg = ((1 - sm(*UND_REG[0], xs)) * sm(*UND_REG[1], ys)).astype(np.float32)
 solid = (a_shape > 0.5).astype(np.uint8)
@@ -439,12 +446,41 @@ d2 = d2 - UND_DARK * base * (1 - 0.35 * rim) + 0.012 * rim
 d2 = np.maximum(d2, FLOOR + 0.004)
 disp = disp + (d2 - disp) * reg
 print(f"underside: {np.mean((reg * base > 0.3) & (sd > 0)) * 100:.2f}% of the frame darkened toward the base")
-# the soft edge: rebuilt from the signed distance, scaled by which way it faces
-s_ = UND_S[0] + (UND_S[1] - UND_S[0]) * under
-a_soft = 1 / (1 + np.exp(-(sd - 0.5) / s_))
-# away from the edge the matte keeps its own holes and wisps
-a_soft = np.where(np.abs(sd) > 8 * s_, a_shape, a_soft)
-a = np.clip(a + (a_soft * fade - a) * reg, 0, 1).astype(np.float32)
+
+# ---------------------------------------------------------------- the edge
+# Cut at the HDRI's own resolution the matte goes from clear sky to solid
+# cloud in ~3 plate px all round the tower, so its silhouette (the anvil's
+# most of all) read as a cut-out laid on the cobalt, with a pale rim of the
+# cloud's lightest value on it. A cloud's edge is where it thins: its
+# coverage falls off over a few metres of air, and what is left of it there
+# is lit like the air round it, losing its own light and shade to the sky's.
+# - The coverage is rebuilt, all round the tower, from the signed distance
+#   to its half-coverage contour (smoothed, so the contour carries no pixel
+#   steps): a smoothstep from FEATHER_OUT px outside it to FEATHER_IN px
+#   inside it (wider where the edge faces down, the base, which dissolves
+#   into the blue more than a sunlit crown does), so the falloff reaches
+#   into the silhouette rather than blurring out of it. Inside it the
+#   matte keeps its own holes; outside the ramp its own wisps come back.
+# - Its value loses its contrast toward the edge: within HAZE_D px of it, it
+#   is pulled (HAZE at the edge) toward its own wide local mean, so no
+#   billow's light or shade runs out to the silhouette; outside the contour
+#   it takes the margin's own value, never the brighter fill the unmixing
+#   left there. The live comp (COMP) then turns what is left of it there to
+#   the sky's hue at the coverage's falloff, the edge sitting in the same air
+#   as the cobalt.
+FEATHER_OUT, FEATHER_IN = 3.0, (10.0, 14.0)  # plate px: up/side-facing edge, underside
+HAZE_D, HAZE, HAZE_S = 22.0, 0.65, 8.0
+sds = cv2.GaussianBlur(sd, (0, 0), 2.0)
+fin = FEATHER_IN[0] + (FEATHER_IN[1] - FEATHER_IN[0]) * under
+a_f = sm(-FEATHER_OUT, fin, sds)
+a_edge = np.where(sds >= 0, np.minimum(a_f, a_shape), np.maximum(a_f, a_shape * sm(FEATHER_OUT, FEATHER_OUT + 6, -sds)))
+a = np.clip(a_edge * fade, 0, 1).astype(np.float32)
+inner = (sds > 2).astype(np.float32)
+dl = cv2.GaussianBlur(disp.astype(np.float32) * inner, (0, 0), HAZE_S) / np.maximum(cv2.GaussianBlur(inner, (0, 0), HAZE_S), 1e-3)
+hz = HAZE * (1 - sm(0.0, HAZE_D, sds))
+disp = np.where(inner > 0, disp + (dl - disp) * hz, disp)
+disp = np.where(sds <= 2, fill(disp, sds > 2), disp)
+print(f"edge: {np.mean((a > 0.02) & (a < 0.98)) * 100:.2f}% of the frame in the falloff")
 
 chroma = C / np.maximum(CY, 1e-6)[..., None]
 # the HDRI's own tint, a little softened, for the value below
