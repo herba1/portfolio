@@ -38,7 +38,10 @@ Then cumulus.py re-plates the sky with real cumulus on a card of its own
 (clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match, and
 wires.py redraws p2.webp with every wire as one whole catenary, and
 crossbuck.py takes the pale hood out from behind the crossbuck head on
-p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline.
+p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline,
+and townmatte.py keys the old sky out of the town card's top (p1.webp and
+its matte), ends it on the ridge tiles and refills what the signal hides
+there from the town alone.
 """
 import sys
 import os
