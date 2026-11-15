@@ -17,23 +17,25 @@
 #     the plate's own clear-sky pixels, so its gradient, hue and the cobalt it
 #     deepens to at the top stay the photograph's; a fine, luma-only grain
 #     measured off the plate's sky goes back on top of it.
-#  3. One towering cumulus is taken from a second photograph (the clean side
-#     of the tower in cumulus-pole.jpg, left of it a pole and wires) and set
-#     the way it was shot, lit from the left like the steel: its crown just
-#     under the frame top on the left, behind the gantry apex and the near
-#     pole's upper half, its billowed flank stepping down to the right behind
-#     the truss, the side cut at the source's pole lying past the frame's left
-#     edge. Its own sky is unmixed out of it (cloud opacity from the
-#     red-to-blue ratio, then again along each edge pixel's colour line), so
-#     its thin edges take this sky, not that one, and it is laid over this
-#     sky through a soft matte (FEATHER), so no contour of either is left.
-#     Its body is re-lit as a volume from its own light (the form term:
-#     sunlit billows warm paper, the shaded side and the body under the
-#     tower skylight blue; the brightest tops about 236-240 here, nothing at
-#     255). Below a base line
-#     drawn from where the flank leaves the source the cloud gives way to sky
-#     on its own light, so the source's flat lower haze and its cut right
-#     edge never show and nothing is carried on by reflection.
+#  3. One towering cumulus is taken from a second photograph: only the
+#     crisp cauliflower crown of the tower in cumulus-pole.jpg (right of its
+#     pole), set the way it was shot, lit from the left like the steel, at
+#     about two thirds the size it was first staged at. Its whole crown
+#     stands clear against open cobalt in the gap between the mast top and
+#     the feeder, its top about a tenth of the frame down; its flank steps
+#     down to the right, and only its lower body passes behind the truss and
+#     the far pole. Left of it, behind the transformer, is open sky over the
+#     tower's shaded foot. Its own sky is unmixed out of it (cloud opacity
+#     from the red-to-blue ratio, then again along each edge pixel's colour
+#     line), so its thin edges take this sky, not that one, and it is laid
+#     over this sky through a narrow matte (FEATHER), crisp, with no contour
+#     of either. Its body is re-lit as a volume from its own light (the form
+#     term: sunlit billows warm paper, the shaded side and the body under
+#     the crown skylight blue; the crown keeps more of its own light than the
+#     flat body; the brightest tops about 236-240 here, nothing at 255).
+#     Where the source's pole and its soft, veiled base were, lines drawn
+#     around the tower (CUTS) give the cloud back to sky on its own light,
+#     so it ends on lobes and nothing is carried on by reflection.
 #  4. The new sky goes in behind the steel by difference: each pixel adds
 #     (1 - steel) times the change of background under it, against the old
 #     background filled in under the steel, so a mast edge that was mixed
@@ -55,23 +57,43 @@ for name in ("plate", "key"):
         shutil.copy(f"{PUB}/{name}.webp", f"{WORK}/{name}-shot.webp")
 
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
-# The cumulus: the source columns kept (left of them the pole), the scale
-# (plate px per source px) and the plate point the source's (SRC_X0, 0) lands
-# on. Not mirrored: SRC_X0 sits on the plate's left edge, the crown (source
-# row ~142) lands ~40px under the frame top, and the flank leaves the source's
-# right edge at source row ~940. The scale is what puts the flank behind most
-# of the truss; below ~1.9 the truss's far half stands on bare sky.
-SRC_X0 = 1000
-SCALE = 2.0
-LEFT = 0  # plate column of source column SRC_X0
-TOP = -244  # plate row of the source's row 0
-# The base line, plate px: from where the flank leaves the source (source
-# (2399, 940)) down to the frame's left edge. BASE_FADE is how far inside the
-# line the cloud starts to give way; LOBE how far its own light moves that.
-BASE_A = (LEFT + (2399 - SRC_X0) * SCALE, TOP + 940 * SCALE)
-BASE_B = (0.0, 2300.0)
-BASE_FADE = 260.0
-LOBE = 6.0
+# The cumulus: its crown. Only the source's cauliflower top is staged, the
+# part right of its pole (SRC_X0) and above where its flank goes soft; the
+# flat, veiled base and the haze under it never show. Not mirrored: lit from
+# the left, like the steel. SCALE is plate px per source px; (LEFT, TOP) the
+# plate point the source's (SRC_X0, 0) lands on. At this size and place the
+# whole crown stands clear in the gap between the mast top and the feeder,
+# about 0.25-0.65 of the frame's width, its top (source row ~140) about a
+# tenth of the frame down, and only its lower body passes behind the truss
+# and the far pole; left of it, behind the transformer, is open sky.
+SRC_X0 = 975
+SCALE = 1.3
+LEFT = 1234  # plate column of source column SRC_X0
+TOP = 52  # plate row of the source's row 0
+
+
+def at(x, y):
+    # source px -> plate px
+    return (LEFT + (x - SRC_X0) * SCALE, TOP + y * SCALE)
+
+
+# Where the tower gives way to sky, as lines in source px, each with how far
+# inside it the cloud starts to give way (plate px) and how far its own
+# light moves the line (lobe): a lobe brighter than its surroundings reaches
+# past it, the hollows between lobes give way first, so the tower ends on
+# lobes, not on a line. The base runs from where the flank leaves the source
+# (its right edge, row ~940) back under the crown. The side closes the
+# crown's left, where the source's pole and the lobe beside it were: it
+# starts in the notch left of the crown's peak and widens down to the left,
+# so the tower stands on its body; its top is held to a plain shoulder, or
+# the thin bright neck that joined the crown to the lobe beside its pole
+# would reach out past it as a wisp.
+CUTS = [
+    ((2399, 940), (975, 1300), 200.0, 6.0),  # the base
+    ((1130, 150), (980, 1000), 60.0, 12.0),  # the left side
+    ((1170, 110), (1000, 380), 40.0, 0.0),  # the crown's left shoulder
+]
+INSIDE = (1400, 380)  # a source point well inside the crown
 # Developed brighter: linear gain on the cloud, premultiplied.
 GAIN = 1.2
 
@@ -217,12 +239,15 @@ am = np.clip(cv2.remap(a, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLIC
 # ends on lobes, not on a line or a ramp. Nothing outside the source is used.
 cy = lin_to_srgb(np.clip(Pm @ LUMA, 0, 1) / np.maximum(am, 1e-3)) * am
 lobe = cv2.GaussianBlur(cy, (0, 0), 5) - cv2.GaussianBlur(cy, (0, 0), 40)
-(xa, ya), (xb, yb) = BASE_A, BASE_B
-nx, ny = ya - yb, xb - xa
-s_in = ((gx - xa) * nx + (gy - ya) * ny) / np.hypot(nx, ny)
-s_in *= np.sign(-xa * nx - ya * ny)  # positive on the frame's top-left side
 edge = np.minimum(sW - 1 - sx, sH - 1 - sy_)
-fade = smooth(0.3, 0.7, s_in / BASE_FADE + LOBE * lobe) * smooth(0.0, 24.0, edge)
+fade = smooth(0.0, 24.0, edge)
+ix, iy = at(*INSIDE)
+for a_, b_, width, lobe_k in CUTS:
+    (xa, ya), (xb, yb) = at(*a_), at(*b_)
+    nx, ny = ya - yb, xb - xa
+    s_in = ((gx - xa) * nx + (gy - ya) * ny) / np.hypot(nx, ny)
+    s_in *= np.sign((ix - xa) * nx + (iy - ya) * ny)  # positive inside
+    fade *= smooth(0.3, 0.7, s_in / width + lobe_k * lobe)
 fade = cv2.GaussianBlur((fade * (sy_ >= 0) * (sx >= SRC_X0)).astype(np.float32), (0, 0), 1.5)
 am *= fade
 Pm *= fade[..., None]
@@ -245,7 +270,9 @@ if n > 2:
 # toward that colour. The matte is then softened over FEATHER of the frame
 # width (sky to full cloud), so the thin edge is a linear-light mix of the
 # cloud's own white and this sky, light all the way out, with no contour.
-FEATHER = 0.015
+# Only just: a wider feather (it was 0.015) spread the edge into a pale
+# glow band outside a soft cut-out; a crown in sun stands sharp.
+FEATHER = 0.004
 Sm = cv2.remap(sl, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 Km = cv2.remap(ssky, sx, sy_, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 dense = smooth(0.6, 0.95, cv2.erode(am, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))))
@@ -269,8 +296,15 @@ af = cv2.GaussianBlur(a2.astype(np.float32), (0, 0), FEATHER * W / 4)
 # away, or under the tower, it takes skylight (SKYLIGHT: hue, saturation,
 # value as it should land in the print, dimmed by FORM_SHADE here, since the
 # film and print lift it), a little less in the folds between lobes. The
-# cloud's own fine texture rides on top. FORM is how far the body takes it.
-FORM = 0.9
+# cloud's own fine texture rides on top. FORM is how far the body takes it:
+# the crown, crisp and lit as photographed, keeps most of its own light; the
+# body under it (source rows BODY), flat as shot, takes FORM_BODY of it and
+# loses BODY_SHADE of the sun, so the tower stands sunlit on top of a
+# skylight-blue lower body.
+FORM = 0.45
+FORM_BODY = 0.9
+BODY = (480, 1150)  # source rows: the crown's foot, the lowest body shown
+BODY_SHADE = 0.55
 SUN = 125  # degrees, toward the sun (0 right, 90 up), as PLATE in the engine
 FORM_ELEV = 30
 FORM_RELIEF = (10.0, 4.0)  # normal gain on the lobes, on the matte
@@ -278,7 +312,7 @@ FORM_DEPTH = 0.3
 SHADOWED = 0.8  # how much of the sun the deepest body loses
 TOP = (0xF6, 0xF3, 0xEC)
 TOP_Y = 0.92  # linear luma of a fully lit billow
-SKYLIGHT = (205, 0.32, 0.75)  # its saturation set over, the print eases chroma off
+SKYLIGHT = (207, 0.4, 0.72)  # its saturation set over, the print eases chroma off
 FORM_SHADE = 0.76
 
 
@@ -325,6 +359,8 @@ od = gauss(od, 10)
 # A crest turned to the sun still catches it inside the shadowed body.
 facing = smooth(0.3, 0.85, ndl)
 sunlit = smooth(-0.3, 0.58, ndl) * (1 - SHADOWED + SHADOWED * np.exp(-FORM_DEPTH * od) ** (1 - 0.6 * facing))
+under = smooth(BODY[0], BODY[1], cv2.resize(sy_, h2, interpolation=cv2.INTER_AREA))
+sunlit *= 1 - BODY_SHADE * under
 ao = np.clip(1 + 2.5 * (gauss(Ys, 4) - gauss(Ys, 32)), 0.75, 1.1)
 top = srgb_to_lin(np.array(TOP, np.float32) / 255)
 top *= TOP_Y / float(top @ LUMA)
@@ -332,7 +368,8 @@ shade = srgb_to_lin(hsv_rgb(*SKYLIGHT)) * FORM_SHADE
 lo = shade * ao[..., None] * (1 - sunlit[..., None]) + top * sunlit[..., None]
 lo = cv2.resize(lo, (W, H), interpolation=cv2.INTER_CUBIC)
 detail = np.clip(ylin / np.maximum(gauss(ylin, 4), 1e-4), 0.85, 1.15)
-col = (1 - FORM) * GAIN * col + FORM * lo * detail[..., None]
+form = (FORM + (FORM_BODY - FORM) * cv2.resize(under, (W, H), interpolation=cv2.INTER_LINEAR))[..., None]
+col = (1 - form) * GAIN * col + form * lo * detail[..., None]
 if os.environ.get("DEBUG"):
     cv2.imwrite(WORK + "/form-sunlit.png", (np.clip(sunlit, 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(WORK + "/form-ndl.png", (np.clip(ndl * 0.5 + 0.5, 0, 1) * 255).astype(np.uint8))
