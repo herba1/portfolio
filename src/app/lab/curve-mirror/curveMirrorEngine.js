@@ -519,7 +519,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   // edges (the frame's outer lip, the band) and low on the pole where things
   // hit it, never on a sheltered face.
   float edge = id == 1.0 ? smoothstep(0.3, 0.9, abs(dot(n, uN))) * 0.3 + smoothstep(A + FRAME_W - 0.008, A + FRAME_W, length(q.xy)) : 0.0;
-  float chipBias = id == 4.0 ? 0.25 * smoothstep(1.4, 0.0, p.y - uGround) + 0.12 : id == 5.0 ? 0.4 : id == 3.0 ? 0.3 : id == 1.0 ? 0.06 + 0.16 * edge : 0.08;
+  float chipBias = id == 4.0 ? 0.25 * smoothstep(1.4, 0.0, p.y - uGround) + 0.12 : id == 5.0 ? 0.4 : id == 3.0 ? 0.3 : id == 1.0 ? 0.06 + 0.16 * edge + 0.22 * smoothstep(0.8, 0.95, dot(n, uN)) : 0.08;
   vec2 cw = wc * 48.0;
   cw += vec2(fbm(cw * 0.7 + 3.1), fbm(cw * 0.7 + 8.4)) * 1.4;
   float cn = fbm(cw) + 0.35 * dirt + chipBias * 0.45;
@@ -551,40 +551,88 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 Esky = Es * (dot(Ei, LUMA) / max(dot(Es, LUMA), 1e-4));
   const vec3 FILL = vec3(0.4, 0.56, 0.78);
   vec3 amb = mix(Ei, Esky, 0.5) * FILL * occ;
-  // under the visor the paint faces the dome, and the dome throws the sky
-  // back up into it: the hood's underside is the frame's colour in shade,
-  // not a black slot
-  if (id == 1.0) {
-    vec3 rad = normalize(uX * q.x + uU * q.y + vec3(1e-5));
-    float inner = smoothstep(0.2, -0.7, dot(n, rad)) * smoothstep(ZF - 0.01, ZF + 0.015, q.z);
-    amb += irradiance(uN) * FILL * 0.45 * inner;
-  }
   vec3 sunC = vec3(1.0, 0.96, 0.88);
-  vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
 
   // The head (frame, visor and shell) is twenty years of roadside sun on
-  // baked enamel: the binder chalked, the gloss gone, a rough dielectric.
-  // Roughness 0.55..0.65 (a little higher on bare steel), F0 0.04, and its
-  // specular is the panorama prefiltered to that lobe's width, a mip read and
-  // weighted by the split-sum's analytic fit (Karis), not a sun lobe: the sky
-  // and street lay a faint sheen across it, and the sunlit side is simply
-  // paint in sun, so a head turned to the light reads as matte steel, never a
-  // flashlight spot. The pole and bracket below keep their rain-polished
-  // streak.
+  // baked enamel: the binder chalked, the gloss gone, a rough dielectric,
+  // roughness 0.55..0.65, F0 0.04. It is lit the way the plate's own sunlit
+  // objects are, and measured against them (the hero still, sRGB): the
+  // crossing's sunlit plaster prints about 212, its shade under the eave about
+  // 110, two stops down; the mirror's own pole, the same enamel, 215/104/69 on
+  // its sun side and 91/60/54 in its shade. So the sun-facing enamel is
+  // driven by the sun's direct term at the plate's full strength, diffuse and
+  // a broad specular lobe both, and the averted side is held at about two
+  // stops under it, in the open sky's cold light: a shade, not a black slot.
   if (id == 1.0 || id == 2.0) {
+    vec3 radW = normalize(uX * q.x + uU * q.y + vec3(1e-5));
+    // The band's front is roll-formed, not a flat washer: its 36 mm crown
+    // turns from the glass (the inner lip rolls in toward the gasket) out to
+    // the outer edge, some 45 degrees either way, so the sun lays a gradient
+    // across it and a catch along whichever edge turns to the light, and the
+    // edge turned away goes down into the shade. Without it the lit face was
+    // one flat value all the way round, an outline stroke.
+    vec3 nb = n;
+    float lip = 0.0;
+    if (id == 1.0) {
+      float front = smoothstep(0.25, 0.85, dot(n, uN));
+      float s = clamp((rq - (A + 0.006)) / (FRAME_W - 0.006), 0.0, 1.0);
+      // a circular-arc crown: the slope runs from -0.9 at the lip to +1.1 at
+      // the outer edge (about 42 and 48 degrees)
+      float tiltB = (s - 0.45) * 2.0;
+      tiltB = tiltB / sqrt(max(1.0 - 0.55 * tiltB * tiltB, 0.05)) * 0.75;
+      nb = normalize(n + radW * tiltB * front);
+      // contact: where the dome seats into the band the gasket and the
+      // acrylic's wall shut out the sky, the last centimetre of the lip
+      // darkening into the joint
+      lip = front * (1.0 - smoothstep(A + 0.004, A + 0.019, rq));
+    }
+    float ndlB = max(dot(nb, uSun), 0.0);
+    // the shadow follows the true surface, the shading the crowned one
+    float shB = ndl > 0.0 ? sh : ndlB > 0.0 ? softShadow(p + n * 0.003, uSun, 0.004, 3.0, 64.0) : 0.0;
+    shB *= smoothstep(-0.05, 0.12, dot(n, uSun) + 0.12);
+    float cOcc = occ * (1.0 - 0.72 * lip);
+
+    // Shade: the sky's light, cooled, at about two stops under the sun side.
+    // The enamel's vermilion drinks the blue, so the chalk's bloom carries it:
+    // the averted faces read as the same orange gone dusky and cold, the way
+    // the pole's shade side does.
+    vec3 skyE = mix(Ei, Esky, 0.65) * vec3(0.55, 0.74, 1.06);
+    vec3 albS = mix(alb, vec3(dot(alb, LUMA)) * vec3(0.9, 1.0, 1.15), 0.16);
+    vec3 ambH = skyE * cOcc * 1.9;
+    // under the visor the paint faces the dome, and the dome throws the sky
+    // back up into it: the hood's underside is the frame's colour in shade,
+    // not a black slot
+    if (id == 1.0) {
+      float inner = smoothstep(0.2, -0.7, dot(n, radW)) * smoothstep(ZF - 0.01, ZF + 0.015, q.z);
+      ambH += irradiance(uN) * vec3(0.55, 0.68, 0.9) * 0.55 * inner * cOcc;
+    }
+    vec3 diffH = albS * ambH / PI + alb * sunC * sunE / PI * ndlB * shB * (1.0 - 0.5 * lip);
+
     float rH = clamp(0.6 + 0.08 * (n1 - 0.5) + 0.1 * max(dirt, 0.0) + 0.12 * chip, 0.55, 0.72);
-    float ndvH = max(dot(n, v), 1e-3);
+    float ndvH = max(dot(nb, v), 1e-3);
     const vec4 C0 = vec4(-1.0, -0.0275, -0.572, 0.022);
     const vec4 C1 = vec4(1.0, 0.0425, 1.04, -0.04);
     vec4 rr = rH * C0 + C1;
     float a004 = min(rr.x * rr.x, exp2(-9.28 * ndvH)) * rr.x + rr.y;
     vec2 AB = vec2(-1.04, 1.04) * a004 + rr.zw;
-    // the lobe's width in the 4096 px panorama: about 60 degrees across at
-    // this roughness, a mip of 8 to 9
-    vec3 rH3 = reflect(-v, n);
-    vec3 specH = env(rH3, 5.2 + 5.5 * rH) * (0.04 * AB.x + AB.y) * occ * (1.0 - gasket);
-    return paintShoulder(diff + specH);
+    // the panorama's sheen, prefiltered to the lobe (a mip of 8 to 9)
+    vec3 rH3 = reflect(-v, nb);
+    vec3 specH = env(rH3, 5.2 + 5.5 * rH) * (0.04 * AB.x + AB.y) * cOcc * (1.0 - gasket);
+    // and the sun's own lobe on it, GGX at the same roughness, at the plate's
+    // full strength: broad, a sheen that rides the crown toward the light
+    float aH = rH * rH, aH2 = aH * aH;
+    vec3 hH = normalize(uSun + v);
+    float ndhH = max(dot(nb, hH), 0.0);
+    float DH = aH2 / (PI * pow(ndhH * ndhH * (aH2 - 1.0) + 1.0, 2.0));
+    float FH = 0.04 + 0.96 * pow(1.0 - max(dot(v, hH), 0.0), 5.0);
+    float kH = aH * 0.5;
+    float GH = ndlB / (ndlB * (1.0 - kH) + kH) * ndvH / (ndvH * (1.0 - kH) + kH);
+    // (the chalk's powder masks a share of it, as it does the pole's streak)
+    specH += sunC * sunE * shB * DH * FH * GH / (4.0 * ndvH) * (1.0 - gasket) * (1.0 - chip) * (1.0 - lip) * 0.55;
+    return paintShoulder(diffH + specH);
   }
+
+  vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
 
   // The roughness map: the enamel keeps its gloss only where it is intact.
   // Chalk, grime, the plaster-tooth dirt and every chip take it away, so the
@@ -660,9 +708,12 @@ float smudgeAt(vec2 q) {
 // ground's bounce, and the sky the dome itself throws back up into it
 vec3 headSeen(vec3 nl) {
   vec3 n = normalize(uX * nl.x + uU * nl.y + uN * nl.z);
+  // (in the same cold sky light, and as light, as paint() gives the hood
+  // where the eye sees it directly, so the two read as one surface)
   vec3 alb = vec3(0.807, 0.089, 0.0123) * 0.7;
-  vec3 E = (irradiance(n) * 0.6 + irradiance(uN) * 0.45) * vec3(0.4, 0.56, 0.78);
-  return alb * (E + vec3(1.0, 0.96, 0.88) * uSunE * 1.45 * max(dot(n, uSun), 0.0) * 0.5) / PI;
+  vec3 albS = mix(alb, vec3(dot(alb, LUMA)) * vec3(0.9, 1.0, 1.15), 0.16);
+  vec3 E = (irradiance(n) * 0.6 + irradiance(uN) * 0.45) * vec3(0.55, 0.74, 1.06) * 1.4;
+  return (albS * E + alb * vec3(1.0, 0.96, 0.88) * uSunE * 1.45 * max(dot(n, uSun), 0.0) * 0.5) / PI;
 }
 
 // How much of the hood a reflected ray r from face-local q meets, over a
@@ -950,6 +1001,16 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // dust and smudge scatter the sky a little into what the face returns
   vec3 sky = irradiance(Nn) / PI;
   c = c * (1.0 - 0.06 * dust - 0.12 * smudge) + (dust * 0.006 + smudge * 0.035) * sky * lipAO;
+
+  // The visor's shadow. Twenty years outdoors have hazed the acrylic's face,
+  // and the haze, the dust and the smudge scatter a little of the direct sun
+  // they take back out as a faint warm veil; where the visor and the lip
+  // shut the sun off the upper glass that veil is gone, so its shadow lies
+  // across the top of the dome as a soft, slightly deeper, clearer band, the
+  // sign that the head stands in the same sun as the house.
+  float veilK = 0.0035 + 0.02 * dust + 0.05 * smudge;
+  c += vec3(1.0, 0.95, 0.86) * uSunE / PI * lit * sunVis * veilK * lipAO;
+  c *= 1.0 - 0.16 * lit * (1.0 - sunVis) * topW;
 
   // The sun. Everything it puts on the face is gathered apart from the
   // glass's image of the world, so it is developed as light instead of added
