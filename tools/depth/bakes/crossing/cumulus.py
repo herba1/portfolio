@@ -179,6 +179,16 @@ CLOSE_R, ERODE, FEATHER = 6, 5, (1.6, 2.2)
 # edge, so the outline is carved into the cloud and never pushed out past
 # the HDRI's own texture.
 LOBES = ((70.0, 1.0, 3), (30.0, 1.0, 4), (12.0, 0.95, 5))
+# The tower's lower right (east of RIGHT_LON, under RIGHT_LAT, deg, both
+# eased) faces the sun but is a straight cut and a plumb flank: its outline is
+# rebuilt too, from RIGHT_LOBES, each lobe's seat wandering RIGHT_JIT of its
+# radius in or out, so the side steps down in rounded billows; first it is
+# tapered (RIGHT_TAPER: from lat, to lat, deg in), so it steps in toward the
+# base instead of dropping plumb.
+RIGHT_LON, RIGHT_LAT = (147.0, 150.0), (29.0, 31.0)
+RIGHT_LOBES = ((95.0, 1.15, 13), (40.0, 1.0, 14), (15.0, 0.95, 15))
+RIGHT_JIT = 0.45
+RIGHT_TAPER = (30.0, 20.5, 4.5)
 # FLAT_K, FLAT_D, FLAT_LON: the hazy tail cut off the tower's lower left (see
 # the silhouette); only west of FLAT_LON, where the tail is
 FLAT_K, FLAT_D, FLAT_LON = 0.45, 60, 139.0
@@ -202,11 +212,14 @@ TONE_GAMMA = 1.0  # <1 lifts the mid tones toward the lit white
 # tower (SUN_XY: weight of across, to the right, and of up, both 0..1 over
 # the tower's own extent), its relief facing the sun and its own brightness
 # (SUN_REL, SUN_T), is eased between SUNLIT; the rest of the tower takes its
-# tone in skylight shade, SHADE_T on the ramp (its billows kept), deeper
-# by SHADE_LOW toward its base.
+# tone in skylight shade: each billow a skylight-blue core (SHADE_CORE on the
+# ramp) with a lit crest (SHADE_LIT) and a deeper hollow (SHADE_DEEP), from
+# the HDRI's own billows at full local contrast (SHADE_BANDS), the core
+# deeper by SHADE_LOW toward the base.
 SUN_XY, SUN_REL, SUN_T = (0.6, 0.9), 0.35, 0.25
 SUNLIT = (1.0, 1.4)
-SHADE_T, SHADE_LOW = (0.0, 0.27), 0.4
+SHADE_CORE, SHADE_LIT, SHADE_DEEP, SHADE_LOW = 0.13, 0.4, 0.13, 0.07
+SHADE_BANDS, SHADE_GAIN, SHADE_FLOOR = ((60.0, 0.55), (24.0, 0.3), (8.0, 0.15)), 0.7, 0.03
 CRISP_SIG, CRISP = (1.5, 5.0, 16.0), (0.35, 0.35, 0.15)
 # The tower's own form, lit from the sun (up and right, as in the photo): its
 # silhouette's relief, so the lobes the outline gains are modelled, and the
@@ -440,41 +453,69 @@ if WORK:
 m = ((ae > 0.5) & ~cut).astype(np.uint8)
 m = cv2.morphologyEx(m, cv2.MORPH_OPEN, disk(10))
 del tex, edge_d, cut
-for R, inset, seed in LOBES:
-    rng = np.random.default_rng(seed)
-    hs = cv2.GaussianBlur(m.astype(np.float32), (0, 0), R / 2)
-    nx_ = cv2.Sobel(hs, cv2.CV_32F, 1, 0, ksize=3)
-    ny_ = cv2.Sobel(hs, cv2.CV_32F, 0, 1, ksize=3)
-    nn = np.sqrt(nx_ * nx_ + ny_ * ny_) + 1e-6
-    # (the pockets of sky inside the cloud keep their own shape: only the
-    # outer edge is rebuilt)
-    fl = np.pad(m, 1).copy()
-    cv2.floodFill(fl, np.zeros((fl.shape[0] + 2, fl.shape[1] + 2), np.uint8), (0, 0), 2)
-    pocket = fl[1:-1, 1:-1] == 0
-    lob = cv2.erode((m | pocket).astype(np.uint8), disk(int(R * 0.9)))
-    cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    for c in cs:
-        c = c[:, 0, :]
-        if len(c) < 8:
-            continue
-        seg = np.sqrt((np.diff(c, axis=0, append=c[:1]) ** 2).sum(1))
-        arc = np.concatenate([[0.0], np.cumsum(seg)[:-1]])
-        nxt = rng.uniform(0, R)
-        for i in range(len(c)):
-            if arc[i] < nxt:
+
+
+def lobed(m, w, lobes, jit=0.0):
+    """Rebuild the outer edge of m (uint8) where w is high as a chain of round
+    lobes (lobes: radius, inset, seed per scale; jit: how far each lobe's
+    seat wanders deeper in or out, as a share of its radius)."""
+    for R, inset, seed in lobes:
+        rng = np.random.default_rng(seed)
+        hs = cv2.GaussianBlur(m.astype(np.float32), (0, 0), R / 2)
+        nx_ = cv2.Sobel(hs, cv2.CV_32F, 1, 0, ksize=3)
+        ny_ = cv2.Sobel(hs, cv2.CV_32F, 0, 1, ksize=3)
+        nn = np.sqrt(nx_ * nx_ + ny_ * ny_) + 1e-6
+        # (the pockets of sky inside the cloud keep their own shape: only the
+        # outer edge is rebuilt)
+        fl = np.pad(m, 1).copy()
+        cv2.floodFill(fl, np.zeros((fl.shape[0] + 2, fl.shape[1] + 2), np.uint8), (0, 0), 2)
+        pocket = fl[1:-1, 1:-1] == 0
+        lob = cv2.erode((m | pocket).astype(np.uint8), disk(int(R * 0.9)))
+        cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        for c in cs:
+            c = c[:, 0, :]
+            if len(c) < 8:
                 continue
-            nxt = arc[i] + R * rng.uniform(1.0, 1.6)
-            x, y = int(c[i, 0]), int(c[i, 1])
-            r = R * rng.uniform(0.7, 1.25)
-            dx, dy = nx_[y, x] / nn[y, x], ny_[y, x] / nn[y, x]  # into the cloud
-            cv2.circle(lob, (int(round(x + dx * inset * r)), int(round(y + dy * inset * r))), int(round(r)), 1, -1, cv2.LINE_AA)
-    lob[pocket] = 0
-    # blend in signed distance, so the lobed and the native outline meet
-    # without a seam where lobe_w turns
-    sd_m = cv2.distanceTransform(m, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - m, cv2.DIST_L2, 5)
-    sd_l = cv2.distanceTransform(lob, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - lob, cv2.DIST_L2, 5)
-    m = ((sd_m * (1 - lobe_w) + sd_l * lobe_w) > 0).astype(np.uint8)
-    del hs, nx_, ny_, nn, lob, sd_m, sd_l, fl, pocket
+            seg = np.sqrt((np.diff(c, axis=0, append=c[:1]) ** 2).sum(1))
+            arc = np.concatenate([[0.0], np.cumsum(seg)[:-1]])
+            nxt = rng.uniform(0, R)
+            for i in range(len(c)):
+                if arc[i] < nxt:
+                    continue
+                nxt = arc[i] + R * rng.uniform(1.0, 1.6)
+                x, y = int(c[i, 0]), int(c[i, 1])
+                r = R * rng.uniform(0.7, 1.25)
+                k = inset + (jit * rng.uniform(-1.0, 1.0) if jit else 0.0)
+                dx, dy = nx_[y, x] / nn[y, x], ny_[y, x] / nn[y, x]  # into the cloud
+                cv2.circle(lob, (int(round(x + dx * k * r)), int(round(y + dy * k * r))), int(round(r)), 1, -1, cv2.LINE_AA)
+        lob[pocket] = 0
+        # blend in signed distance, so the lobed and the native outline meet
+        # without a seam where w turns
+        sd_m = cv2.distanceTransform(m, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - m, cv2.DIST_L2, 5)
+        sd_l = cv2.distanceTransform(lob, cv2.DIST_L2, 5) - cv2.distanceTransform(1 - lob, cv2.DIST_L2, 5)
+        m = ((sd_m * (1 - w) + sd_l * w) > 0).astype(np.uint8)
+    return m
+
+
+m = lobed(m, lobe_w, LOBES)
+# The tower's lower right is the straight cut where its puff was parted off
+# at the neck (and, under it, the HDRI's own flank, nearly plumb): it faces
+# the sun, so the pass above leaves it, and on the card it dropped as one
+# near-vertical keyed wall from the crown to the bank. It is rebuilt the same
+# way (RIGHT_LOBES), from bigger lobes whose seats wander in and out
+# (RIGHT_JIT), so the side steps down in rounded billows instead.
+# Its plumb line is tapered first: under RIGHT_TAPER[0] (deg) the side is cut
+# back along a slant that has come RIGHT_TAPER[2] degrees in by
+# RIGHT_TAPER[1], so the lobes step in toward the base as a cumulus's do.
+rows = (SLAT > RIGHT_TAPER[0] - 2) & (SLAT < RIGHT_TAPER[0]) & (m > 0)
+east = float(np.percentile(SLON[rows], 99.5))
+m = (m * (SLON < east - RIGHT_TAPER[2] * smoothstep(RIGHT_TAPER[0], RIGHT_TAPER[1], SLAT))).astype(np.uint8)
+del rows
+rside = smoothstep(*RIGHT_LON, SLON) * (1 - smoothstep(*RIGHT_LAT, SLAT)) * near_t
+rside = smoothstep(0.3, 0.7, cv2.GaussianBlur(rside, (0, 0), 12))
+m = lobed(m, rside, RIGHT_LOBES, RIGHT_JIT)
+lobe_w = np.maximum(lobe_w, rside)
+del rside
 # (and no island the lobes leave standing off the edge)
 nI, lI, stI, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
 m = np.where((stI[:, cv2.CC_STAT_AREA] < 20000)[lI], 0, m).astype(np.float32)
@@ -515,7 +556,16 @@ del mb, lgR
 top = float(np.percentile(lg[inside], 97))
 low = float(np.percentile(lg[inside], 3))
 t = (lg - low) / (top - low)
-del lg
+# The billows for the shade: the HDRI's log luminance band-passed at the
+# lobes' scale and at the billows' (SHADE_BANDS: sigma px, weight), each over
+# its own local RMS, so every lobe in the lower body comes out at the same
+# full contrast as the crown's, however hazy and flat the HDRI is there.
+bil = np.zeros_like(t)
+for sg, w in SHADE_BANDS:
+    hp = lg - mblur(lg, sg)
+    bil += w * np.tanh(SHADE_GAIN * hp / (np.sqrt(mblur(hp * hp, 1.5 * sg)) + SHADE_FLOOR))
+bil = cv2.GaussianBlur(bil, (0, 0), 1.5)
+del lg, hp
 # The silhouette's relief (its blurred coverage, at the scale of the big
 # lobes, the lobes and the billows), lit from the sun's side: the turrets'
 # upper right faces catch the sun, their lower left falls into shade, and
@@ -537,15 +587,22 @@ t = np.where(t > 0, np.abs(t) ** TONE_GAMMA, t)
 # the tower to the right and, more, up it (its own extent, 0..1 each way),
 # and with the relief and brightness of each billow, so the light ends on
 # the lobes' own forms rather than along a line. Under it the tower is in
-# skylight shade, its billows kept as relief within SHADE_T.
+# skylight shade, its billows kept at full contrast (bil, above).
 lo_a, lo_b = np.percentile(SLON[inside], (1, 99))
 la_a, la_b = np.percentile(SLAT[inside], (1, 99))
 xn = np.clip((SLON - lo_a) / (lo_b - lo_a), 0, 1)
 yn = np.clip((SLAT - la_a) / (la_b - la_a), 0, 1)
 sun = smoothstep(*SUNLIT, SUN_XY[0] * xn + SUN_XY[1] * yn + SUN_REL * rel + SUN_T * (t - 0.6))
 del xn
-# (the shade deepens down the tower, by SHADE_LOW at its base, into the bank)
-t = SHADE_T[0] + (SHADE_T[1] - SHADE_T[0]) * np.clip(t, 0, 1) * (1 - SHADE_LOW * (1 - yn)) * (1 - sun) + t * sun
+# In the shade each billow has a lit edge and a skylight-blue core: the core
+# at SHADE_CORE on the ramp (between #7f9bbd and #9fb6d0), the billows'
+# crests lit up by SHADE_LIT, their hollows down by SHADE_DEEP, and the
+# silhouette's relief modelling the lobes as on the crown. The core deepens
+# down the tower, by SHADE_LOW at its base, into the bank; the billows keep
+# their full contrast all the way down.
+ts = SHADE_CORE - SHADE_LOW * (1 - yn) + np.where(bil > 0, SHADE_LIT, SHADE_DEEP) * bil + FORM * rel
+t = ts * (1 - sun) + t * sun
+del ts, bil
 del yn
 if WORK:
     os.makedirs(WORK, exist_ok=True)

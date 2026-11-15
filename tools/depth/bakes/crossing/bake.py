@@ -41,7 +41,8 @@ crossbuck.py takes the pale hood out from behind the crossbuck head on
 p5.webp (and photo.webp, mattes.png) and rebuilds the pole cap's outline,
 and townmatte.py keys the old sky out of the town card's top (p1.webp and
 its matte), ends it on the ridge tiles and refills what the signal hides
-there from the town alone.
+there from the town alone, and lamphood.py takes the bristly fringe off the
+signal lamps' outline on p5.webp (and its matte).
 """
 import sys
 import os
