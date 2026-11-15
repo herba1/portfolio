@@ -251,10 +251,12 @@ def strip_mask(n):
     inside = ((xx >= x0) & (xx < x1) & (yy >= y0) & (yy < y1)).astype(float)
     return ndi.gaussian_filter(inside, f / 2.5)
 
-def foliage(pix, a8, old_ink, old_a, raw, rng):
+def foliage(pix, a8, old_ink, old_a, raw, rng, crown_w=None):
+    """crown_w, when given, replaces the weight that leaves the crown round the hidden sun
+    to crown.py (reaim.py lifts it where the old bake holds no crown to carry over)."""
     n = pix.shape[0]
     _, g = deepen.geometry()
-    w = smooth(g, *CROWN_DEG)
+    w = smooth(g, *CROWN_DEG) if crown_w is None else crown_w
     a, B, F, _ = coverage(raw)
     a_s = a * smooth(a, *A_DEAD)
     a_s = np.clip(a_s / A_FULL, 0, 1) * w
