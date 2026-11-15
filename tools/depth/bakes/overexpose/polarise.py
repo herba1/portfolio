@@ -68,6 +68,19 @@
 # Pipeline: runs last, after sunburst.py (pass copies, never the outputs):
 #             python3 polarise.py <scene.webp> <optics.png> [preview_dir]
 # With preview_dir it writes scene.png / optics.png there and leaves public/ alone.
+#
+# Relay (once, on the shipped swap.py bake, which laid SHIP_ZEN / SHIP_RIM as its open sky):
+#             python3 polarise.py --relay <scene.webp> <trees.webp> <optics.png> [preview_dir]
+# The dome swap.py laid (SHIP_ZEN / SHIP_RIM) printed a pale cerulean at the +1.33 hero,
+# a median rgb(131,181,222), with too little depth for the clouds and crowns to read
+# against. relay() reads each pixel's cloud depth back from alpha (cumulus.py's key,
+# with reaim.sun()'s glow key under it, divided out) and swaps that old dome for the
+# current, deeper one (ZEN / RIM) in the sky share (1 - depth) only, the grain riding
+# along as the pixel's own ratio to the old field; the cloud's own light is untouched,
+# so the whites, the skylight-blue shadows and the 0% clipping hold. The optics take
+# the change's own blur, seen through (1 - the pines' matte). Re-encoded with TPDF
+# dither, so the deeper gradient stays continuous. swap.py, run again, lays the new
+# dome directly.
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image
@@ -78,10 +91,24 @@ import relight
 
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 LN = 0.035                                   # the needles' own luminance (resun.py)
-ZEN = np.array([0.0515, 0.1311, 0.2166])     # overhead: prints ~rgb(32,104,184) at 0 EV
-RIM = np.array([0.1716, 0.2793, 0.4513])     # at Z_RIM: prints ~rgb(106,167,228)
+# The dome, as a strong polariser takes it: the sky's own light pulled down about 2.3
+# stops from the field below and its chroma raised, so the cumulus and the crowns have a
+# deep field to read against. Solved through the piece's negative + print (and checked
+# with the Pro-Mist veil on): at the +1.33 hero the zenith prints about rgb(21,86,162),
+# the median open sky about rgb(35,113,188) and the low sky by the mid-edges about
+# rgb(80,140,190), hue 207-212 all the way out; at 0 EV the zenith is a dense navy-cobalt
+# rgb(20,55,90); at +3 it thins to a clear rgb(64,162,210) (hue ~200), never lavender.
+# The red record's floor (its cross-talk from green) keeps the deepest red near 20.
+ZEN = np.array([0.0116, 0.0480, 0.0830])     # overhead: prints ~rgb(21,86,162) at +1.33 EV
+RIM = np.array([0.0433, 0.0935, 0.1402])     # at Z_RIM: prints ~rgb(61,137,206) at +1.33 EV
 Z_RIM, ZPOW = 60.0, 2.8                      # zenith angle of the mid-edge rim (deg); dome power (half-way ~45 deg)
 Z_CAP, CAP_M = 1.1, 4.0                      # soft cap past the rim (share of the rim's opening), its knee
+# the field swap.py laid on the shipped bake before relay() deepened it (printed
+# rgb(32,104,184) overhead at 0 EV, a pale cerulean rgb(131,181,222) median at +1.33);
+# relay() takes exactly this field back out of each pixel's sky share
+SHIP_ZEN = np.array([0.0515, 0.1311, 0.2166])
+SHIP_RIM = np.array([0.1716, 0.2793, 0.4513])
+SHIP_ZPOW = 2.8
 AUR_A, AUR_W = 17.0, 3.0                     # aureole: x the target sky at the sun, e-fold (deg)
 AUR_B, AUR_W2 = 0.8, 6.0                     # its soft outer edge, in the sky's own blue (so no grey skirt)
 AUR_WHITE, AUR_WK = 0.75, 2.0                 # its colour: up to this far towards white, half-way at AUR_WK x the sky
@@ -109,6 +136,7 @@ DIM_STOPS = (0.35, 1.1)                      # below the local brightest light (
 THICK_PX, HI_PX = 14.0, 41                   # thickness blur; window of the brightest light around (px)
 TOP_W, TOP_CHROMA, TOP_LIFT = 1.0, 1.3, 0.3  # tops: weight, chroma push (past the target, as the print bleaches it), lift (stops)
 CORE_W, CORE_CHROMA, CORE_SINK = 1.0, 1.4, 0.45 # cores: weight, chroma push, sink (stops)
+RELAY_GRAIN_D = 0.1                           # relay(): cloud depth by which the grain ratio has eased to 1
 SUN_SPARE = 9.0                              # deg around the hidden sun the grade leaves alone
 
 def smooth(a, lo, hi):
@@ -118,11 +146,14 @@ def smooth(a, lo, hi):
 def mblur(a, m, s):
     return ndi.gaussian_filter(a * m, s) / np.maximum(ndi.gaussian_filter(m, s), 1e-6)
 
-def sky_field(z):
+def sky_field(z, zen=None, rim=None, zpow=None):
     """The open sky with no sun: a function of zenith angle alone, a broad dome."""
+    zen = ZEN if zen is None else zen
+    rim = RIM if rim is None else rim
+    zpow = ZPOW if zpow is None else zpow
     cap = lambda v: v / (1 + (v / Z_CAP) ** CAP_M) ** (1 / CAP_M)
-    k = (cap((np.asarray(z) / Z_RIM) ** ZPOW) / cap(1.0))[..., None]
-    return np.exp(np.log(ZEN) + (np.log(RIM) - np.log(ZEN)) * k)
+    k = (cap((np.asarray(z) / Z_RIM) ** zpow) / cap(1.0))[..., None]
+    return np.exp(np.log(zen) + (np.log(rim) - np.log(zen)) * k)
 
 def aureole(T, g):
     """The hidden sun's aureole over the sky field T: its excess light, cyan-white
@@ -328,6 +359,70 @@ def polarise(pix):
     print('cloud depth > 0.5: %.3f of the frame; tops %.3f, cores %.3f (mean weight on cloud)' % (
         float((cd > 0.5).mean()), float(top[cd > 0.5].mean()), float(core[cd > 0.5].mean())))
     return out
+
+def relay(pix, a8, ta, zen=None, rim=None, zpow=None):
+    """The shipped bake's dome swapped for the current one, in the sky share only.
+    swap.py composed each open pixel as (1 - d) x dome x grain + d x cloud light and
+    keyed d into alpha (with the hidden sun's glow key under it, reaim.sun()), so d is
+    read back exactly from alpha and the trees' matte; the old dome comes out and the
+    new one goes in on that share, the grain riding along as the pixel's own ratio to
+    the old field wherever the pixel is open sky. Cloud light is untouched."""
+    import crown
+    import sunburst
+    import swap
+    deepen.U, deepen.V = swap.sun_uv()
+    elev, g = deepen.geometry()
+    z = 90.0 - elev
+    share = 1 - np.clip((a8.astype(np.float64) - 3) / 252, 0, 1)
+    ksky = np.clip(ndi.gaussian_filter(1 - ta, 1.5), 0, 1)
+    key = sunburst.KEY_A * np.exp(-g / sunburst.KEY_DEG) * (sunburst.KEY_NEEDLE + (1 - sunburst.KEY_NEEDLE) * ksky)
+    d = np.clip((share - key) / np.maximum(1 - key, 1e-3), 0, 1)
+    T0 = sky_field(z, SHIP_ZEN, SHIP_RIM, SHIP_ZPOW)
+    T1 = sky_field(z, zen, rim, zpow)
+    N0, N1 = T0 + crown.aureole(T0, g), T1 + crown.aureole(T1, g)
+    # the grain: the pixel's own ratio to the old field on open sky, 1 (the local mean) in a cloud's edge
+    gr = np.clip(pix / N0, 0.5, 2.0)
+    gr = 1 + (gr - 1) * (1 - smooth(d, 0.0, RELAY_GRAIN_D))[..., None]
+    out = pix + ((1 - d)[..., None]) * gr * (N1 - N0)
+    out = np.maximum(out, np.maximum(d[..., None] * 0.5 * pix, 2.0 ** bw.LO))
+    return out, d, z, g
+
+def relay_main(argv):
+    """python3 polarise.py --relay <scene.webp> <trees.webp> <optics.png> [preview_dir]"""
+    s = np.asarray(Image.open(argv[0]).convert('RGBA'))
+    s8, a8 = s[..., :3], s[..., 3]
+    ta = np.asarray(Image.open(argv[1]).convert('RGBA'))[..., 3] / 255.0
+    g8 = np.asarray(Image.open(argv[2]).convert('RGB'))
+    pix = bw.dec_log(s8)
+    out, d, z, _ = relay(pix, a8, ta)
+    rng = np.random.default_rng(71)
+    changed = np.abs(np.log2(out / pix)).max(-1) > 1e-3
+    s8n = np.where(changed[..., None], bw.enc_log(out, rng), s8).astype(np.uint8)
+    # the optics were baked from the visible scene (the pines' ink laid over the plate):
+    # the change is seen only through (1 - the trees' matte)
+    d_opt = bw.optics((1 - ta)[..., None] * (out - pix))
+    glow = np.maximum(bw.dec_log(g8) + d_opt, 2.0 ** bw.LO)
+    g8n = np.where((np.abs(d_opt) > 1e-5).any(-1, keepdims=True), bw.enc_log(glow, rng), g8).astype(np.uint8)
+    sky = (d < 0.01) & (ta < 0.01)
+    for zz in (5, 20, 35, 50, 65):
+        m = sky & (np.abs(z - zz) < 2)
+        if m.sum():
+            print(f'open sky z {zz:2d}: {np.round(np.median(pix[m], 0), 4)} -> {np.round(np.median(out[m], 0), 4)}')
+    print(f'changed px {float(changed.mean()):.3f}')
+    if len(argv) > 3:
+        Image.fromarray(np.dstack([s8n, a8]), 'RGBA').save(os.path.join(argv[3], 'scene.webp'), 'WEBP',
+                                                           quality=95, alpha_quality=100, method=6, exact=True, use_sharp_yuv=True)
+        Image.fromarray(g8n, 'RGB').save(os.path.join(argv[3], 'optics.png'), optimize=True)
+        print('preview written to', argv[3])
+        return
+    Image.fromarray(np.dstack([s8n, a8]), 'RGBA').save(os.path.join(bw.OUT, 'scene.webp'), 'WEBP',
+                                                       quality=95, alpha_quality=100, method=6, exact=True, use_sharp_yuv=True)
+    bw.save_optics(g8n)
+    print('wrote', bw.OUT)
+
+if __name__ == '__main__' and len(sys.argv) > 1 and sys.argv[1] == '--relay':
+    relay_main(sys.argv[2:])
+    sys.exit(0)
 
 if __name__ == '__main__':
     s = np.asarray(Image.open(sys.argv[1]).convert('RGBA'))
