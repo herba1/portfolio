@@ -42,7 +42,7 @@ import { NODES, createWorld, drawnY, locate, offsetAt, pitchView, pullShape } fr
 // ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, halNarrow, halWide,
-// diffuse, diffuseR, diffuseSteel, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
+// diffuse, diffuseR, diffuseSteel, diffuseCap, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
 // override the grade; halThr sets the HALO pass's threshold; print and
 // printPin the PRINT curve.
 
@@ -163,13 +163,16 @@ const SUN = 125;
 // is the bloom's core; two rings of it, DIFFUSE_RADIUS (fractions of the
 // image width) out, are its long tail, so the cloud's light veils the cobalt
 // a cloud's width round it and slips softly over the steel's edges. The
-// steel takes DIFFUSE_STEEL of it: enough that the bloom overlaps a member
-// beside the cloud, not so much that the one silhouette goes grey.
-// Lowered with the one big cloud: a frame-wide veil at the old strength
-// greyed the truss and the far pole where they cross it.
-const DIFFUSE = 0.25;
+// steel takes DIFFUSE_STEEL of it, and however much that comes to, it may
+// lift a member no further than DIFFUSE_CAP times its own (linear) value: the
+// far pole, the far truss and the insulators stay dark graphite where they
+// cross the cumulus (about 60,64,70 after the print, not the 75,81,92
+// lavender a 0.25/0.28 veil milked them to), the bloom only easing over
+// their edges, and the warm fringe there left to the halation (HALO).
+const DIFFUSE = 0.15;
 const DIFFUSE_RADIUS = 1.3; // scale on the rings (0.022, 0.05 of the width)
-const DIFFUSE_STEEL = 0.28;
+const DIFFUSE_STEEL = 0.08;
+const DIFFUSE_CAP = 1.15;
 // The cloud's edge (see PLATE): the warm tint is keyed tight on the modelled
 // cloud light (gamma, WARM_KEY from-to), so only the sunlit cores warm; below
 // the key, EDGE_BLUE of each fringe pixel's shortfall in blue is made up
@@ -295,7 +298,7 @@ vec3 graphite(vec3 c) {
 // The bloom's spread (see DIFFUSE): the wide key at the pixel, then two
 // rings of it further out. Sampled at the resting image position, so the
 // plate and the live wires take the same veil.
-const MIST = `uniform vec3 uMist;   // ring radius scale, steel share, unused
+const MIST = `uniform vec3 uMist;   // ring radius scale, steel share, steel cap
 float mist(sampler2D k, vec2 uv) {
   vec2 r = vec2(1.0, float(textureSize(k, 0).x) / float(textureSize(k, 0).y)) * uMist.x;
   float m1 = 0.0, m2 = 0.0;
@@ -534,12 +537,17 @@ void main() {
     float a = float(k) * 0.7853982;
     rIn += texture(uKey, uv + vec2(cos(a), sin(a)) * vec2(5.0) / vec2(textureSize(uKey, 0))).r;
   }
-  float bare = 1.0 - (1.0 - uMist.y) * min(key.r, rIn / 8.0);
+  float onSteel = min(key.r, rIn / 8.0);
+  float bare = 1.0 - (1.0 - uMist.y) * onSteel;
   // Its colour follows the same key: warm paper off the sunlit cores,
   // skylight over the cobalt, so the veil never greys the blue it lifts.
   vec3 skyl = uCloudShade * (dot(uCloudTop, LUMA) / dot(uCloudShade, LUMA));
   vec3 veil = mix(skyl, uCloudTop, core) * mist(uKey, uv) * uGlow.y * bare;
-  c = 1.0 - (1.0 - c) * (1.0 - veil);
+  // On the steel the lift is held under uMist.z of the member's own value,
+  // so a dark member over bright cloud stays dark (eased in with the same
+  // mask, so the bloom still slips over its edge).
+  vec3 lifted = 1.0 - (1.0 - c) * (1.0 - veil);
+  c = mix(lifted, min(lifted, c * uMist.z), onSteel);
   outColor = vec4(c, 1.0);
 }`;
 
@@ -656,7 +664,8 @@ void main() {
   // (the lower a little less, its flank turned to the ground), so neither
   // stops on a dark line.
   col += sky * (0.02 + 0.3 * pow(1.0 - nz, 3.0)) * smoothstep(0.2, 1.0, abs(x)) * (x > 0.0 ? 1.0 : 0.75);
-  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * mist(uKey, kuv) * uGlow.y * uMist.y);
+  // The diffusion over the wire, held under the same cap as the steel's.
+  col = min(1.0 - (1.0 - col) * (1.0 - uCloudTop * mist(uKey, kuv) * uGlow.y * uMist.y), col * uMist.z);
   outColor = vec4(col, a);
 }`;
 
@@ -978,7 +987,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
   ];
   const cloudTop = CLOUD_TOP.map((v, i) => toLin(v / 255) * CLOUD_AIM[i]);
   const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("diffuse", DIFFUSE), 0, 1)];
-  const mistU = [clamp(num("diffuseR", DIFFUSE_RADIUS), 0, 3), clamp(num("diffuseSteel", DIFFUSE_STEEL), 0, 1), 0];
+  const mistU = [clamp(num("diffuseR", DIFFUSE_RADIUS), 0, 3), clamp(num("diffuseSteel", DIFFUSE_STEEL), 0, 1), clamp(num("diffuseCap", DIFFUSE_CAP), 1, 4)];
   const halo = [
     clamp(num("hal", HAL), 0, 4),
     clamp(num("halNarrow", HAL_NARROW[1]), 0, 2),
