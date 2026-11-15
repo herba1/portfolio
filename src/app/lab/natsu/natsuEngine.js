@@ -188,6 +188,11 @@ const vec3 SKYLIT = vec3(0.86, 1.0, 1.24);
 // the sun through a thin edge
 const vec3 RIM = vec3(1.0, 0.76, 0.5);
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// Where the lens magnifies the photograph: how much the lobe band (4 px over
+// 20 px smoothing) is deepened, and over how many of its texels the cloud's
+// cut edge at the foot is feathered.
+const float LOBE = 0.6;
+const float FEATHER = 4.0;
 // deep cobalt straight up (linear light, before the film)
 const vec3 ZENITH = vec3(0.0006, 0.053, 0.29);
 
@@ -286,6 +291,26 @@ vec2 growth(vec2 q) {
   return (q - o) * 0.06 * uGrow * f * mix(0.45, 1.0, side);
 }
 
+// The plate through a Catmull-Rom kernel (nine bilinear taps): where the lens
+// magnifies it, bilinear lays the texels down as flat diamonds; this keeps
+// the photograph's own curvature between them.
+vec3 plateCR(vec2 uv) {
+  vec2 sp = uv * PLATE - 0.5;
+  vec2 t1 = floor(sp) + 0.5;
+  vec2 f = sp + 0.5 - t1;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 o12 = w2 / w12;
+  vec2 a = (t1 - 1.0) / PLATE, b = (t1 + o12) / PLATE, c = (t1 + 2.0) / PLATE;
+  vec3 r = (textureLod(uPlate, vec2(a.x, a.y), 0.0).rgb * w0.x + textureLod(uPlate, vec2(b.x, a.y), 0.0).rgb * w12.x + textureLod(uPlate, vec2(c.x, a.y), 0.0).rgb * w3.x) * w0.y
+         + (textureLod(uPlate, vec2(a.x, b.y), 0.0).rgb * w0.x + textureLod(uPlate, vec2(b.x, b.y), 0.0).rgb * w12.x + textureLod(uPlate, vec2(c.x, b.y), 0.0).rgb * w3.x) * w12.y
+         + (textureLod(uPlate, vec2(a.x, c.y), 0.0).rgb * w0.x + textureLod(uPlate, vec2(b.x, c.y), 0.0).rgb * w12.x + textureLod(uPlate, vec2(c.x, c.y), 0.0).rgb * w3.x) * w3.y;
+  return max(r, 0.0);
+}
+
 float capsule(vec2 p, vec2 a, vec2 b) {
   vec2 pa = p - a, ba = b - a;
   float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
@@ -305,6 +330,15 @@ void main() {
   float zen = smoothstep(0.05, 1.3, elev);
   vec3 skyN = mix(sky0, ZENITH, zen * zen * (3.0 - 2.0 * zen) * 0.92);
   vec3 col = skyN;
+
+  // How many of the photograph's texels each pixel spans. High up, the lens
+  // magnifies the photograph's lower cloud two- to threefold (fp 0.3-0.5):
+  // there bilinear stretch already softens it, and any further diffusion
+  // stacked on top smears it into paste, so the boil and its mist step aside
+  // (mag -> 1) and the photograph is read sharp, with its curd restored.
+  vec2 fdx = dFdx(pS), fdy = dFdy(pS);
+  float fp = sqrt(max(dot(fdx, fdx), dot(fdy, fdy)));
+  float mag = 1.0 - smoothstep(0.55, 0.85, fp);
 
   // --- cloud ---
   vec2 pc = pS;
@@ -329,7 +363,7 @@ void main() {
   vec2 q = p1 - d;
   vec2 qb = q / PLATE;
   vec4 fl = texture(uFields, qb);
-  float act = fl.r * uBoil * (1.0 - foot);
+  float act = fl.r * uBoil * (1.0 - foot) * (1.0 - mag);
   vec3 base = texture(uLow20, qb).rgb;
 
   // Lobes: curl flow at ~90 px, 11 s re-seed; curd: ~34 px, 6.5 s.
@@ -353,6 +387,31 @@ void main() {
   float nM = mix(1.0, inversesqrt(wM0 * wM0 + wM1 * wM1), clamp(length(vM) * PM * 0.5 / 14.0, 0.0, 1.0));
   float nF = mix(1.0, inversesqrt(wF0 * wF0 + wF1 * wF1), clamp(length(vF) * PF * 0.5 / 5.0, 0.0, 1.0));
   vec3 cl = max(base + (wM0 * mid0 + wM1 * mid1) * nM + (wF0 * fin0 + wF1 * fin1) * nF, 0.0);
+  if (mag > 0.0) {
+    // Magnified: the boil has stepped aside, so cl is the plate itself. Read
+    // it through the cubic, then give back the curd the stretch flattened:
+    // its luma minus a three-tap blur ~1.5 texels wide, more the more each
+    // texel is stretched. Luma only, so the colour stays the photograph's.
+    vec3 sharp = plateCR(qb);
+    // Behind where the silhouettes stood the plate is inpainted, and its
+    // finest band there is streaks, not curd: those texels, stretched, are
+    // the brush strokes. There the cloud is read from its 4 px smoothing and
+    // takes only the lobes.
+    vec2 sil = textureLod(uLayers, qb, 1.5).rg;
+    float inp = smoothstep(0.04, 0.25, max(sil.r, sil.g));
+    sharp = mix(sharp, texture(uLow4, qb).rgb, inp);
+    vec2 r = 1.5 / PLATE;
+    float yb = (dot(textureLod(uPlate, qb + r * vec2(0.0, 1.0), 0.0).rgb, LUMA)
+              + dot(textureLod(uPlate, qb + r * vec2(0.866, -0.5), 0.0).rgb, LUMA)
+              + dot(textureLod(uPlate, qb + r * vec2(-0.866, -0.5), 0.0).rgb, LUMA)) / 3.0;
+    float ys = dot(sharp, LUMA);
+    float det = (ys - yb) * 0.6 * clamp(1.0 - fp, 0.0, 1.0) * (1.0 - inp);
+    // and the lobes: the band between the 4 px and 20 px smoothings, which the
+    // inpainting behind the silhouettes never streaked
+    det += (dot(texture(uLow4, qb).rgb - texture(uLow20, qb).rgb, LUMA)) * LOBE;
+    sharp *= max(ys + det, 0.0) / max(ys, 1e-4);
+    cl = mix(cl, sharp, mag);
+  }
 
   // Relight: the photograph's own shading times new light over old.
   vec3 cn = textureLod(uCloud, qb, 3.2).rgb;
@@ -431,7 +490,16 @@ void main() {
   // smoothed light (lobes, not curd) so they keep whole, crisp outlines.
   float exL = dot(texture(uLow4, qb).rgb * R - skyQ, LUMA) / 0.55;
   float thr = foot * 1.15 - 0.05;
-  float keep = mix(1.0, smoothstep(thr - 0.04, thr + 0.04, exL), smoothstep(0.0, 0.2, foot));
+  // Where the lens magnifies, an edge a texel or two wide on the plate is a
+  // bright plateau stopping dead a few pixels on screen, a cut matte: feather
+  // it over FEATHER of the photograph's texels (from the change in exL across
+  // 1.5 of them), and never tighter than a lobe's own falloff, so the dim
+  // base thins into the sky like the edge of a film image.
+  vec2 r15 = 1.5 / PLATE;
+  float kx = dot(textureLod(uLow4, qb + vec2(r15.x, 0.0), 0.0).rgb * R - skyQ, LUMA) / 0.55 - exL;
+  float ky = dot(textureLod(uLow4, qb + vec2(0.0, r15.y), 0.0).rgb * R - skyQ, LUMA) / 0.55 - exL;
+  float hw = mix(0.04, max(0.07, 0.5 * length(vec2(kx, ky)) * FEATHER / 1.5), mag);
+  float keep = mix(1.0, smoothstep(thr - hw, thr + hw, exL), smoothstep(0.0, 0.2, foot));
   col = mix(skyN, col, keep);
   occ *= keep;
   thin *= keep;
