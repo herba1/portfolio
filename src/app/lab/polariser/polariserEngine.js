@@ -27,7 +27,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // left, the red mast stands up from the foot of the print and a second glass
 // block comes in from the bottom right, and the dark band 90° from the sun
 // arcs across the open sky in the middle of that canyon. The roll keeps the
-// quay's chevron hoarding off the print, so the mast is its only warm colour.
+// quay's chevron hoarding off the print, and the orphaned fragments at the
+// edges (the construction block and red tower crane top right, lamp arms, the
+// far quay's office row) are filled with the plate's own sky
+// (tools/depth/bakes/polariser/clean.py), so each edge carries one whole
+// tower or open sky and the mast is the print's only warm colour.
 // Each pixel's view direction is rebuilt from the camera through the same
 // projection, so γ is exact.
 //
