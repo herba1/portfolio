@@ -113,6 +113,11 @@ uniform float uFgGamma;     // and its log contrast about the plate's mid
 uniform float uGlow;        // sun-side brightening
 uniform float uZenDeep;     // stops the zenith sits below the low sky
 uniform float uLod;         // mip level: sharp, only as soft as the print needs
+uniform vec3 uRampZen;      // the zenith ramp: deep cobalt overhead (linear, luminance 1)
+uniform vec3 uRampRim;      // and a paler, cyaner blue towards the roofs
+uniform vec2 uRampV;        // their levels, relative to the time's sky exposure
+uniform float uRampMax;     // zenith angle (rad) where the ramp reaches the rim colour
+uniform float uRampK;       // how far the ramp has taken over from the sunset gradient
 uniform float uB[${MAX_LIGHTS}];
 uniform vec3 uTint[${MAX_LIGHTS}];
 out vec4 o;
@@ -157,11 +162,27 @@ void main(){
   // Blue-hour skylight is a clean, saturated blue all the way down, not a
   // grey haze: push the gradient's chroma out (colours are luminance 1).
   col = max(mix(vec3(1.0), col, uSkySat), 0.0);
-  float lum = uSkyLum * (1.0 + uGlow * g * g * facing);
+  float lum = uSkyLum * (1.0 + uGlow * g * g * facing * mix(1.0, 0.45, uRampK));
   // Looking almost straight up the gradient is the picture: the zenith is
   // the deepest, most saturated blue and the sky pales towards the roofs.
   float ze = smoothstep(0.4, 1.0, e);
-  lum *= exp2(uZenDeep * (0.45 - ze));
+  float lumOld = exp2(uZenDeep * (0.45 - ze));
+  // The zenith ramp. Its parameter is this ray's angle from the zenith on
+  // the view sphere (not its distance from the print's centre, which sits
+  // some way below the zenith), eased so the cobalt holds overhead and the
+  // paling gathers towards the roofs. Both ends are luminance-1 colours
+  // times a level, all riding the time's sky exposure (uSkyLum), so the
+  // shape and the hues hold while the light falls.
+  float zth = acos(clamp(-d.y, -1.0, 1.0));
+  float kr = pow(clamp(zth / uRampMax, 0.0, 1.0), 1.6);
+  vec3 rampC = mix(uRampZen, uRampRim, kr);
+  rampC /= dot(rampC, LUMA);
+  col = mix(col, rampC, uRampK);
+  // the open sky's level here; the sun's light on a cloud top does not
+  // depend on where the cloud sits, so the cloud's sun term keeps the
+  // unramped level (lumSun)
+  float lumSun = lum;
+  lum *= mix(lumOld, mix(uRampV.x, uRampV.y, kr), uRampK);
   // Cloud: cover and light over the clear sky, one field of cumulus from a
   // sky-only panorama through this same view (clouds.py), so the gaps between
   // puffs are clean sky and the zenith deepens by the gradient above alone,
@@ -232,9 +253,15 @@ void main(){
   // it by blue hour (slate under cobalt). Its level: just over the sky on
   // thin wisps and lit flanks, just under it in a thick lee, and a touch
   // under overall as the night comes (uCloudSkyK).
-  vec3 skyTint = mix(vec3(1.0), col, mix(0.5, 0.78, uS)) * vec3(0.93, 0.99, 1.14);
-  skyTint = max(skyTint, 0.0) / dot(max(skyTint, 0.0), LUMA);
+  // That colour is the local sky's, ramp included, so a puff overhead is
+  // floored in the deep zenith cobalt and one by the roofs in the paler
+  // cyan; its shaded mass keeps more of that chroma than its lit flanks.
   float thick = body * (1.0 - sunny);
+  vec3 skyTint = mix(vec3(1.0), col, mix(0.5, 0.78, uS) + 0.12 * uRampK * (1.0 - sunny));
+  // the ramp's cobalt is already the blue a shaded puff needs; only the
+  // sunset gradient's cyan wants pushing (more would turn it violet)
+  skyTint *= mix(vec3(0.93, 0.99, 1.14), vec3(0.98, 1.0, 1.03), uRampK);
+  skyTint = max(skyTint, 0.0) / dot(max(skyTint, 0.0), LUMA);
   // the flank towards the set sun faces the brighter half of the sky
   vec3 skyC = skyTint * clamp(mix(1.1, 0.88, thick) * mix(0.93, 1.07, lit), 0.85, 1.12);
   // while the afterglow lasts the lit tops scatter its peach through as well
@@ -254,7 +281,7 @@ void main(){
   // narrower, but held a little longer than the solved core: the last of
   // the sun is a line on the very tops, not a dimming of the whole cloud
   sunC *= 1.0 + 1.4 * uS * topK;
-  vec3 cl = (skyC + sunC) * uCloudSkyK * lum;
+  vec3 cl = (skyC * lum + sunC * lumSun) * uCloudSkyK;
   // No cloud may print past the film's white: the brightest channel rolls
   // into uCloudCeil (scene units, before the camera's exposure), so the
   // tops stay modelled at sunset instead of a flat clipped plate.
@@ -265,6 +292,10 @@ void main(){
   // premultiplied over: the cloud's radiance times its alpha, plus the sky
   // it lets through
   vec3 sky = col * lum * (1.0 - cw) + cl * cw;
+  // Dither after the ramp: interleaved gradient noise, about one 8-bit
+  // step of the print either way, so the long, slow ramp never bands.
+  float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  sky *= 1.0 + (ign - 0.5) * 0.022;
 
   // The city is the frame, not the subject: about a stop down and a harder
   // log contrast about the plate's mid, so towers, crane and brick read as
@@ -391,6 +422,22 @@ const smooth = (a, b, x) => {
 // +20 minutes (cobalt overhead, a cleaner, lighter blue low down).
 const SKY0 = { zen: lin("#5b9ddc"), mid: lin("#8bbae6"), horSun: lin("#f0caa0"), horAnti: lin("#b7d0e6"), lum: 0.72, sat: 1.25, glow: 0.55, zenDeep: 0.6 };
 const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, sat: 0.95, glow: 1.4, zenDeep: 1.5 };
+// The zenith ramp (sRGB hue, saturation, value): deep, saturated cobalt
+// straight overhead, paling to a cyaner blue about 65 deg off the zenith,
+// where the roofs cut the shaft. Value is relative to the time's sky level.
+const RAMP = { zen: [216, 0.82, 0.5], rim: [199, 0.38, 1.6], max: 65 };
+// sRGB hsv -> linear rgb at luminance 1, and its value
+function hsvLin([h, sat]) {
+  const c = sat;
+  const hp = (h % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  const m = 1 - c;
+  const hex = "#" + [r, g, b].map((v) => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("");
+  return lin(hex);
+}
+const RAMP_ZEN = hsvLin(RAMP.zen);
+const RAMP_RIM = hsvLin(RAMP.rim);
 const CLOUD_WHITE0 = lin("#f4e9df"); // peach-white, the sun still on the tops
 const CLOUD_WHITE1 = lin("#cfb8ae"); // a faint warm grey: what sun is left on the tops
 const CLOUD_PEACH = lin("#ffb98f");
@@ -723,6 +770,11 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform1f(u.uFgGamma, 1.7);
     gl.uniform1f(u.uGlow, sky.glow);
     gl.uniform1f(u.uZenDeep, sky.zenDeep);
+    gl.uniform3fv(u.uRampZen, RAMP_ZEN);
+    gl.uniform3fv(u.uRampRim, RAMP_RIM);
+    gl.uniform2f(u.uRampV, RAMP.zen[2], RAMP.rim[2]);
+    gl.uniform1f(u.uRampMax, (RAMP.max * Math.PI) / 180);
+    gl.uniform1f(u.uRampK, smooth(0, 0.15, t));
     gl.uniform1f(u.uLod, Math.max(0, Math.log2(texH / sceneT.h) - 0.7));
     gl.uniform1fv(u.uB, B);
     gl.uniform3fv(u.uTint, TINT);
