@@ -41,7 +41,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    grown out to it.
 //
 // A front sweeps that key, far to near (press on the sky) or near to far
-// (press on the pole). Behind it, the photograph. Ahead of it:
+// (press on the pole). From the pole the structure owns the first half of
+// the drag (the pole climbs, then the knot, then the spans) while the sky
+// waits latent and defocused, and the sky's focus pull runs over the second
+// half (reachFrontOf, skyFrontOf). Behind it, the photograph. Ahead of it:
 //  - the sky is out of focus, a real disc gather (scatter-as-gather, cat's-
 //    eye towards the corners) whose circle of confusion grows with the depth
 //    still to cover, a plain energy-conserving average, because cloud is a
@@ -58,10 +61,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    device pixels of its length, so each member grows out of the
 //    pole as one unbroken stroke with a short soft end, and each span past
 //    the knot comes up whole.
-// The front itself is the film's halation: a thin amber line along the
-// depth's iso-band only, a few device pixels wide, weighted by the light
-// under it, so it glows where it crosses cloud, all but vanishes over the
-// blue and is nothing on dark steel or wire. On the sky the developed and
+// The front itself is the film's halation: on the sky a soft, wide amber
+// band (skyHalo, about 60 print px across) riding just behind the front,
+// weighted by the light under it, so it glows where it crosses cloud, all
+// but vanishes over the blue and is nothing on dark steel or wire. On the sky the developed and
 // latent states meet in a soft band (an eighth of the sky's key, never
 // narrower on screen than a few dozen pixels where the key is steep) with no
 // light of its own. Release and it carries the hand's speed with friction.
@@ -99,43 +102,79 @@ const SIGMA = 0.016; // the front's band at rest (speed widens it by uSig / SIGM
 // the cables draw out over the rest.
 const REACH_GAMMA = 1.8;
 // The soft end of a growing member, in device px of its length.
-const FEATHER_PX = 10;
+const FEATHER_PX = 32;
 // Past the knot a span is not grown but comes up whole, out to the frame's
 // edge (reach.png B, the bake's span_of), its density building over this
-// much of the structure's key from the moment the cable's growing end
-// reaches it: a cable never ends in mid-air short of the frame.
-const SPAN_BAND = 0.008;
+// much of the structure's reach (KNOT_R..1, about a twentieth of the drag)
+// once the knot is up: a cable never ends in mid-air short of the frame.
+const SPAN_BAND = 0.08;
 const SKY_BAND = 0.12; // sky band width, in the sky's own key (0..1)
 const SKY_PX = 80; // ...and never narrower on screen than this, in print px
-const HALO = 0.22; // the front's halation line over cloud, linear
+const HALO = 0.22; // the front's halation line on the structure, linear
 const ISO = 0.02; // ...drawn only within this key distance of the front
 const LINE_PX = 2.5; // ...and this wide on screen (device px, Gaussian)
+// On the sky the front is a soft, wide halation band, not a line: a
+// Gaussian HALO_PX print px wide (sigma; about 60 px across at half height)
+// measured on the print through the sky key's smooth gradient, its peak
+// HALO_SKY over cloud, sitting HALO_LAG print px behind the front, on the
+// developed side, where the light has just arrived.
+const HALO_SKY = 0.3;
+const HALO_PX = 24;
+const HALO_LAG = 10;
 const F_START = -0.1;
 const F_END = 1.06;
 
 // Drag progress to the front. The key runs structure 1..FG_LO and sky
-// SKY_SPAN..0 (from the pole) or the other way (from the far sky). From the
-// pole the structure takes the first SPLIT of the drag and the sky the rest.
-// The sky key is rank-equalised, so its share behind the front is
-// t^SKY_GAMMA; but the sky reads as developed well ahead of the front (its
-// defocus closes over AHEAD of the key), so the front itself is held back:
-// at mid-drag about a sixth of the sky is behind it, by three quarters
-// under half, by nine tenths about three quarters, and the far sky is
-// still coming into focus over the last tenth of the drag. (At an even
-// pace the frame read as done by 0.4 and the back half of the drag did
-// nothing.) The last few hundredths carry the band off the far edge.
+// SKY_SPAN..0 (from the pole) or the other way (from the far sky).
+//
+// From the pole (the default) the two layers get a front each, timed apart,
+// so the drag reads as a print coming up rather than a focus pull:
+//  - the structure's front runs along its reach (reachFrontOf), and owns the
+//    first half of the drag: the wood climbs from its foot over p 0..0.42
+//    (eased in a little, as a print takes a moment to start), the knot of
+//    crossarms comes up over 0.42..0.52, and the spans past it come up after
+//    it, web by web, over 0.52..0.62 (spanReach). A still at p 0.3 is about
+//    two thirds of the pole, sharp, on a latent sky.
+//  - the sky's front (skyFrontOf) waits AHEAD short of the nearest cloud, so
+//    the sky is fully latent and at its widest defocus through the whole
+//    structure leg, and the focus pull runs over the second half only:
+//    from p 0.5 it enters the cloud and crosses the sky's (rank-equalised)
+//    key at an even pace, the last few hundredths carrying the band off the
+//    far edge.
+// From the far sky in, one front runs the sky first and then the structure
+// (frontOf), its reach eased by REACH_GAMMA, as before.
 const SPLIT = 0.3;
-const SKY_GAMMA = 2.2;
 const GAP = 0.52; // between the layers, from the far sky
-const knotOf = (dir) => (dir < 0 ? [SPLIT, 1 - SKY_SPAN] : [1 - SPLIT, GAP]);
-const frontOf = (p, dir) => {
-  const [k, fk] = knotOf(dir);
-  if (p <= k) return F_START + (fk - F_START) * (p / k);
-  const t = (p - k) / (1 - k);
-  if (dir > 0) return fk + (F_END - fk) * t;
-  return fk + SKY_SPAN * Math.pow(t, SKY_GAMMA) + (F_END - 1) * t ** 8;
+const frontOf = (p) => {
+  const k = 1 - SPLIT;
+  if (p <= k) return F_START + (GAP - F_START) * (p / k);
+  return GAP + (F_END - GAP) * ((p - k) / (1 - k));
 };
-// The opening stops partway through the first layer, handing over.
+// The structure's front, from the pole, in reach units (reach.png 0..1,
+// the knot's last tips compressed under KNOT_R by knotR in the shader).
+const POLE_P = 0.42; // the wood is up to the knot by here
+const POLE_R = 0.33; // ...the reach where the pole's wood meets the knot
+const KNOT_P = 0.52; // the knot is up by here
+const KNOT_R = 0.66; // ...its reach (knotReach's ceiling)
+const SPANS_P = 0.62; // and the last span by here
+const reachFrontOf = (p) => {
+  if (p <= POLE_P) return -0.02 + (POLE_R + 0.02) * Math.pow(Math.max(p, 0) / POLE_P, 1.2);
+  if (p <= KNOT_P) return POLE_R + ((KNOT_R - POLE_R) * (p - POLE_P)) / (KNOT_P - POLE_P);
+  return KNOT_R + ((1 - KNOT_R) * (p - KNOT_P)) / (SPANS_P - KNOT_P);
+};
+// The sky's front, from the pole: held AHEAD short of the nearest sky (key
+// 1 - SKY_SPAN) until SKY_P, then across it.
+const SKY_P = 0.5;
+const SKY_GAMMA = 1.1;
+const skyFrontOf = (p) => {
+  const f0 = 1 - SKY_SPAN - AHEAD;
+  if (p <= SKY_P) return f0 - 0.04 * (1 - p / SKY_P);
+  const t = (p - SKY_P) / (1 - SKY_P);
+  return f0 + (1 - f0) * Math.pow(t, SKY_GAMMA) + (F_END - 1) * t ** 8;
+};
+// The opening stops partway up the pole (from the pole) or partway through
+// the sky (from the far sky), handing over.
+const OPEN_P = 0.2;
 const OPEN_FRONT = 0.29;
 
 const COC = 15; // max circle of confusion, half-res px of the print
@@ -178,7 +217,8 @@ uniform sampler2D uPlate;  // sRGB texture: reads linear
 uniform sampler2D uFill;   // sRGB texture
 uniform sampler2D uAlpha;
 uniform sampler2D uKey;    // b g sky key (16 bit); r (the old depth key) is not read
-uniform float uFront;
+uniform float uFront;      // the sky's front (from the far sky, the one front)
+uniform float uReachFront; // from the pole: the structure's front, in reach
 uniform float uDir;
 uniform float uCoC;
 uniform float uTime;
@@ -366,6 +406,10 @@ const vec3 AMBER = vec3(1.0, 0.5, 0.12);
 const float SKY_LAT = 0.2;
 const float LINE_PX = ${f(LINE_PX)};
 const float ISO = ${f(ISO)};
+const float HALO_SKY = ${f(HALO_SKY)};
+const float HALO_PX = ${f(HALO_PX)};
+const float HALO_LAG = ${f(HALO_LAG)};
+const float KNOT_R = ${f(KNOT_R)};
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -453,6 +497,22 @@ float isoLine(float d) {
   float px = abs(d) / fw;
   float inBand = 1.0 - smoothstep(0.6 * ISO, ISO, abs(d));
   return exp(-(px * px) / (LINE_PX * LINE_PX)) * inBand;
+}
+
+// The front on the sky: a soft, wide band of the film's halation riding it,
+// never a contour. The key's iso-lines through the cumulus are tight loops
+// (its gradient there is shallow and changes fast), and drawn as a line a
+// few pixels wide they read as stray contours; this is the front's distance
+// on the print, d over the key's gradient taken from taps 16 print px either
+// side (smooth, where fwidth is per-quad and ragged), floored so a plateau
+// in the key gives a soft wash, not a blot, and spread over HALO_PX.
+float skyHalo(vec2 iuv, float d) {
+  vec2 e = vec2(16.0 / 2400.0, 16.0 / 1600.0);
+  float gx = skyKey(iuv + vec2(e.x, 0.0)) - skyKey(iuv - vec2(e.x, 0.0));
+  float gy = skyKey(iuv + vec2(0.0, e.y)) - skyKey(iuv - vec2(0.0, e.y));
+  float g = max(length(vec2(gx, gy)) / 32.0, 6e-5);
+  float x = d / g + HALO_LAG;
+  return exp(-0.5 * x * x / (HALO_PX * HALO_PX));
 }
 
 // A smooth read of a coarse level: cubic B-spline from four bilinear taps,
@@ -550,7 +610,14 @@ void main() {
   // The structure's key: its reach along itself from the pole's foot,
   // 16 bit across r (high byte) and g (low), linear filtering exact.
   float reach = dot(texture(uReach, iuv).rg, vec2(65280.0, 255.0) / 65535.0);
-  float dF = ahead(toFg(1.0 - pow(reach, REACH_GAMMA)));
+  // From the pole the structure has its own front, in reach (uReachFront):
+  // the last tips of the knot past about 0.54 compressed under KNOT_R, so
+  // the knot is up when the front reaches KNOT_R. The distance is put back
+  // on the key's scale (1 - FG_LO), so the band's widths hold.
+  float knotR = reach < 0.54 ? reach : 0.54 + (KNOT_R - 0.54) * (1.0 - exp(-(reach - 0.54) / (KNOT_R - 0.54)));
+  bool fromPole = uDir < 0.0;
+  float dF = fromPole ? (1.0 - FG_LO) * (knotR - uReachFront)
+                      : ahead(toFg(1.0 - pow(reach, REACH_GAMMA)));
   vec4 fg = vec4(pm, a);
   // Where the structure is, dilated, so the latent sky's lift never lands on
   // a wire's edge.
@@ -576,8 +643,14 @@ void main() {
   // (From the far sky in, the cables already grow from the frame's edges
   // inward, anchored there, so they keep their reach.)
   float isSpan = step(0.5, spanB) * step(uDir, 0.0);
-  float dS = ahead(toFg(1.0 - pow(max(spanB - 1.0, 0.0) / 254.0, REACH_GAMMA)));
-  float devS = 1.0 - smoothstep(-SPAN_BAND * uSig / SIGMA, 0.0, dS);
+  // The spans come up after the knot, not with it: the webs that leave the
+  // knot's top (entry reach ~0.48..0.58) are laid out past KNOT_R in the
+  // order they leave it, each building over SPAN_BAND of the reach; a
+  // cable that leaves low on the pole comes up just after it.
+  float entry = max(spanB - 1.0, 0.0) / 254.0;
+  float spanR = entry < 0.45 ? entry + 0.02 : KNOT_R + 0.02 + 2.0 * (entry - 0.48);
+  float dS = (1.0 - FG_LO) * (spanR - uReachFront);
+  float devS = 1.0 - smoothstep(-(1.0 - FG_LO) * SPAN_BAND * uSig / SIGMA, 0.0, dS);
   devF = mix(devF, devS, isSpan);
   float dLine = mix(dF, dS, isSpan);
 
@@ -603,11 +676,11 @@ void main() {
   // The front: a thin halation line on each layer's iso-band, by cover,
   // weighted by the light under it (none on steel or wire, a little over the
   // blue, full over cloud), added as amber, never a filter on what is there.
-  float line = mix(isoLine(dB), isoLine(dLine), fg.a);
   float lum = dot(col, LUMA);
   float glow = mix(0.12, 1.0, smoothstep(0.3, 0.75, lum)) * smoothstep(0.08, 0.25, lum);
   float leak = 0.75 + 0.25 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
-  col += AMBER * (HALO * line * glow * leak * (uBand / BAND));
+  float line = mix(HALO_SKY * skyHalo(iuv, dB), HALO * isoLine(dLine), fg.a);
+  col += AMBER * (line * glow * leak * (uBand / BAND));
 
   col = finish(col, iuv, mix(devB, devF, fg.a), cap, fg.a);
   o = vec4(grain(shoulder(col)), 1.0);
@@ -912,11 +985,11 @@ export async function createDevelop(host, { embedded = false } = {}) {
     speed: 0,
   };
   let opening = fixed == null && !still ? { t: -0.5, dur: 2.6 } : null;
-  // where the opening leaves the front (the inverse of frontOf's first leg)
-  const openTo = () => {
-    const [k, fk] = knotOf(st.dir);
-    return ((OPEN_FRONT - F_START) / (fk - F_START)) * k;
-  };
+  // where the opening leaves the front
+  const openTo = () =>
+    st.dir < 0
+      ? OPEN_P
+      : ((OPEN_FRONT - F_START) / (GAP - F_START)) * (1 - SPLIT);
   if (fixed == null && (still || reduced)) st.p = openTo();
   let drag = null;
   let dirty = true;
@@ -1007,7 +1080,8 @@ export async function createDevelop(host, { embedded = false } = {}) {
     gl.uniform1i(u.uFill, 1);
     gl.uniform1i(u.uAlpha, 2);
     gl.uniform1i(u.uKey, 3);
-    gl.uniform1f(u.uFront, frontOf(st.p, st.dir));
+    gl.uniform1f(u.uFront, st.dir < 0 ? skyFrontOf(st.p) : frontOf(st.p));
+    gl.uniform1f(u.uReachFront, reachFrontOf(st.p));
     gl.uniform1f(u.uDir, st.dir);
     gl.uniform1f(u.uCoC, (COC * pw) / 2 / 1100);
     gl.uniform1f(u.uTime, time);
