@@ -39,10 +39,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // up the sky each pixel looks, from the camera), with skylight-blue shade and
 // warm sunlit tops on the cloud; the film then adds only its optics: a thin
 // diffusion and a warm halation ring keyed on luminance (GLOW), the ring the
-// only glow round the cumulus's edge, then its curve. The shaft and hardware
-// are graded as their own element (solidGrade): from directly beneath, the
-// concrete is in its own shade against a bright sky, a neutral-warm dark grey
-// with one narrow sunlit sliver, the firm dark anchor in front of the cloud.
+// only glow round the cumulus's edge, then its curve. The shaft, hardware and
+// wires are graded as their own element (solidGrade): from directly beneath,
+// the concrete is in its own shade against a bright sky, lit only by it, a
+// deep blue-grey near-silhouette in the cobalt's own fill, its outermost
+// pixel or two wrapped in the sky behind it, the one crisp, cool, dark anchor
+// in front of the cloud (and on it only a thin warm ring where the brightest
+// crowns touch it).
 //
 // Behind the pole stands a real towering cumulus, rising out of the bottom of
 // the frame behind the shaft and filling the right half of it, its crown up
@@ -87,7 +90,7 @@ const STREAK_SAMPLES = 14;
 // cloudRing: the same two off the cumulus. Its spread white light on the
 // cobalt reads as a pale matte fringe round the tower, so it is kept low, and
 // the glow at its edge is the warm ring.
-const OPTIC = { diffusion: 0.2, halation: 0.75, halationColor: [1, 0.66, 0.32], solid: [0.05, 0.3], cloudRing: 0.55, cloudDiff: 0.3 };
+const OPTIC = { diffusion: 0.2, halation: 0.75, halationThin: 0.05, halationColor: [1, 0.66, 0.32], solid: [0.05, 0.3], cloudRing: 0.55, cloudDiff: 0.3 };
 
 // The pole's rebuilt top meets its clean run at plate row SEAM; the run below
 // it (to row 1590) is mirrored up over the rebuild, and the cone's half-width
@@ -240,23 +243,27 @@ vec3 cloudAir(vec3 c, vec3 sky, float b) {
   return mix(c, thin, air * 0.85);
 }
 // The concrete, seen from directly beneath: the face the camera sees is the
-// shaft's underside, in its own shade against a bright sky, so the pole is the
-// frame's one firm dark silhouette, cut across the glowing tower behind it.
-// The scan has it lit and pale (its sunlit two thirds at ~0.66-0.86, the
-// shade third ~0.27-0.37, both close to the cumulus's ~0.8-0.98). Its value
-// is pulled down and compressed: the shade third to ~0.2, the body to a
-// deep neutral-warm grey (~0.21-0.27, ~25-30% luma on screen), and only the
-// last sliver on the lit side, where the scan is brightest, rises to ~0.5. Its darks (bolts, wires across
-// it, the transformers' undersides) keep their own value. Colour: a neutral
-// warm grey (hue ~35, chroma near zero), with a trace of the scan's own so
-// its stains and seams stay in it. The hardware's lit faces take the same.
+// shaft's underside, in its own shade, against a bright summer sky, so the
+// pole, its hardware and its wires are the frame's one firm dark silhouette,
+// cut across the glowing tower behind them (the dark, cool, backlit pole of a
+// noon sky photographed straight up). Nothing but the sky lights that face:
+// the scan has it lit and pale (its sunlit two thirds at ~0.66-0.86, the
+// shade third ~0.27-0.37, close to the cumulus's ~0.8-0.98), so its value is
+// pulled right down and compressed to a near-silhouette (~0.12-0.17, its
+// darks, bolts and the transformers' undersides keeping their own), and its
+// colour is the skylight fill: a deep blue-grey (hue ~214, the cobalt's own,
+// at low chroma), never the warm brown of the scan's concrete. Only a trace of
+// the scan's own colour stays, so its stains and seams are still in it, and the
+// last sliver on the lit side, where the scan is brightest, rises only a
+// little (a cool edge, not a sunlit face: nothing on it is bright enough to
+// flare). Wires take the same grade (they are already near it).
+const vec3 FILL = vec3(0.845, 1.025, 1.206);
 vec3 solidGrade(vec3 c) {
   float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float body = 0.21 + 0.06 * smoothstep(0.22, 0.8, v);
-  float g = min(body, v + 0.02) + 0.26 * smoothstep(0.87, 0.93, v);
-  vec3 tint = vec3(1.022, 0.998, 0.968);
+  float body = 0.125 + 0.045 * smoothstep(0.22, 0.8, v);
+  float g = min(body, v * 0.85 + 0.012) + 0.06 * smoothstep(0.87, 0.95, v);
   vec3 chroma = (c - vec3(v)) * (g / max(v, 0.05));
-  return clamp(g * tint + 0.12 * chroma, 0.0, 1.0);
+  return clamp(g * FILL + 0.04 * chroma, 0.0, 1.0);
 }
 // A wire's matte at a plate point, filtered bilinearly over its own texels
 // only, so a wire moved by a fraction of a pixel keeps its sub-pixel width
@@ -332,6 +339,19 @@ vec3 cloudTex(vec2 pp) {
   return acc / w;
 }
 
+// how much of a plate pixel is still covered by a standing piece (a wire,
+// the hardware, the shaft), for the light wrap round their edges
+float standCov(ivec2 p) {
+  ivec2 q = clamp(p, ivec2(0), ivec2(uPlate) - 1);
+  ivec4 e = ids(q);
+  vec3 al = texelFetch(uAlpha, q, 0).rgb;
+  float c = 0.0;
+  if (e.x > 0 && rest(0, e.x)) c = max(c, al.r);
+  if (e.y > 0 && rest(1, e.y)) c = max(c, al.g);
+  if (e.z > 0 && rest(2, e.z)) c = max(c, al.b);
+  return c;
+}
+
 void main() {
   vec2 pp = vec2(vUv.x, 1.0 - vUv.y) * uPlate;
   ivec2 ip = ivec2(floor(pp));
@@ -349,16 +369,20 @@ void main() {
   if (e.x > 0 && s == 0) cov = max(cov, al0.r);
   if (e.y > 0 && rest(1, e.y)) cov = max(cov, al0.g);
   if (e.z > 0 && rest(2, e.z)) cov = max(cov, al0.b);
-  // the standing shaft and hardware, regraded as concrete: only their own
-  // share of the pixel (unmixed against the sky behind everything), so their
-  // rim keeps the sky's share for the sky's grade below
+  // the standing shaft, hardware and wires, regraded as one silhouette: only
+  // their own share of the pixel (cov, unmixed against the sky behind
+  // everything), so their rim keeps the sky's share for the sky's grade
+  // below. One share for all of them, so a wire across the hardware or the
+  // shaft is graded once, never twice over.
   float cs = 0.0;
   if (e.y > 0 && rest(1, e.y)) cs = max(cs, al0.g);
   if (e.z > 0 && rest(2, e.z)) cs = max(cs, al0.b);
-  if (cs > 0.002) {
-    vec3 obj = unmix(col, plate(3, pp, rk), cs);
-    col = clamp(col + cs * (solidGrade(obj) - obj), 0.0, 1.0);
+  float cw = e.x > 0 && s == 0 ? al0.r : 0.0;
+  if (cov > 0.002) {
+    vec3 obj = unmix(col, plate(3, pp, rk), cov);
+    col += cov * (solidGrade(obj) - obj);
   }
+  col = clamp(col, 0.0, 1.0);
   // The sky is regraded under whatever still stands in front of it, not
   // through it: a standing piece's rim is a mix of it and the scan's teal sky
   // (photo = a x object + (1 - a) x sky), so only the sky's share is moved,
@@ -368,11 +392,27 @@ void main() {
   // shows, the cloud is laid over the regraded sky at its own coverage (b).
   vec3 sk = texture(uSky, pp / uPlate).rgb;
   float skyA = sk.r * (1.0 - cov);
-  if (skyA > 0.002) {
-    vec3 behind = plate(3, pp, rk);
-    vec3 graded = skyGrade(behind, sk.g);
-    if (sk.b > 0.002) graded = mix(graded, cloudAir(cloudGrade(cloudTex(pp), sk.g), graded, sk.b), sk.b);
-    col = clamp(col + skyA * (graded - behind), 0.0, 1.0);
+  vec3 behind = plate(3, pp, rk);
+  vec3 graded = skyGrade(behind, sk.g);
+  if (sk.b > 0.002) graded = mix(graded, cloudAir(cloudGrade(cloudTex(pp), sk.g), graded, sk.b), sk.b);
+  if (skyA > 0.002) col = clamp(col + skyA * (graded - behind), 0.0, 1.0);
+  // Light wrap: the sky behind a standing piece spills round its edge, so
+  // its outermost plate pixel or two take the local sky's colour (the cobalt
+  // beside the cobalt, the cloud's white beside the cloud) and the silhouette
+  // sits in the same light as what is behind it, not pasted over it. How
+  // much: the share of the open sky in a 2 px neighbourhood. A wire (2-3 px
+  // across, all edge) takes much less of it, so it stays a dark line.
+  float occ = max(cs, cw);
+  if (occ > 0.002 && sk.r > 0.002) {
+    float openSky = 0.0;
+    for (int k = 0; k < 8; k++) {
+      ivec2 o = ivec2(k == 0 || k == 3 || k == 5 ? -1 : (k == 2 || k == 4 || k == 7 ? 1 : 0),
+        k < 3 ? -1 : (k > 4 ? 1 : 0));
+      openSky += (1.0 - standCov(ip + o)) + 0.5 * (1.0 - standCov(ip + o * 2));
+    }
+    openSky /= 12.0;
+    float amt = mix(0.18, 0.62, cs / occ);
+    col = mix(col, graded, clamp(amt * openSky * occ * sk.r, 0.0, 1.0));
   }
   // what of this pixel is still sky (skyW) and of that the cumulus (cloudW),
   // after everything moving in front of it: the optics' keys (GLOW)
@@ -434,7 +474,7 @@ void main() {
     float l0 = dot(plate(2, csrc, srk), LUMA);
     float lb = 0.25 * (dot(plate(2, csrc + dir * 3.0, srk), LUMA) + dot(plate(2, csrc - dir * 3.0, srk), LUMA)
       + dot(plate(2, csrc + dir * 7.0, srk), LUMA) + dot(plate(2, csrc - dir * 7.0, srk), LUMA));
-    obj = clamp(obj + clamp(l0 - lb, -0.12, 0.12) * 0.9, 0.0, 1.0);
+    obj = clamp(obj + clamp(l0 - lb, -0.12, 0.12) * 0.5, 0.0, 1.0);
     col = mix(col, obj, al);
     skyW *= 1.0 - al;
     cloudW *= 1.0 - al;
@@ -533,7 +573,7 @@ void main() {
     int srk = ids(bestP).w / 64;
     vec2 bc = vec2(bestP) + 0.5;
     float ba = texelFetch(uAlpha, bestP, 0).r;
-    vec3 ink = unmix(plate(0, bc, srk), plate(1, bc, srk), ba);
+    vec3 ink = solidGrade(unmix(plate(0, bc, srk), plate(1, bc, srk), ba));
     col = mix(col, ink, A);
     skyW *= 1.0 - A;
     cloudW *= 1.0 - A;
@@ -627,6 +667,7 @@ uniform vec2 uTexel;
 uniform float uDiff;
 uniform float uHal;
 uniform vec3 uHalC;
+uniform float uHalThin;
 ${LIN}
 vec3 toSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
@@ -653,16 +694,32 @@ void main() {
   float keep = 1.0 - smoothstep(0.04, 0.25, hair);
   float sx = shares(t.a).x;
   // diffusion: the highlights' own light, spread; it lands off them, so the
-  // billows inside a crown keep their shadows (and lands less on the concrete,
-  // whose edge against the crowns stays cut)
-  l += g.rgb * uDiff * (1.0 - self) * mix(1.0, keep, 0.6) * mix(0.4, 1.0, sx);
+  // billows inside a crown keep their shadows, and hardly at all on the
+  // concrete, whose edge against the crowns stays cut (a white veil there
+  // reads as a halo round a pasted layer)
+  l += g.rgb * uDiff * (1.0 - self) * mix(1.0, keep, 0.6) * mix(0.12, 1.0, sx);
   // halation: the ring outside the bright edge, in the sun's warm colour, on
-  // what is darker than the cloud's shade (the cobalt, the hardware), never
-  // filling the cloud's own folds
-  // (on the concrete, now darker than the crowns behind it, a thinner one: a
-  // warm edge, not a flare across the shaft)
-  float ring = max(g.a - self, 0.0) * (1.0 - smoothstep(0.2, 0.5, y)) * keep * mix(0.5, 1.0, sx);
-  l += uHalC * ring * uHal;
+  // what is darker than the cloud's shade (the cobalt), never filling the
+  // cloud's own folds. On the shaft, the hardware and the wires (not sky) the
+  // wide ring is gone: what is left is a thin one, a texel or two in from an
+  // edge that has the brightest of the sky (the sunlit crowns, nothing less)
+  // right beside it, so the dark silhouette stays dark and crisp and carries
+  // no second warm accent.
+  float wide = max(g.a - self, 0.0) * (1.0 - smoothstep(0.2, 0.5, y)) * keep * sx;
+  float thin = 0.0;
+  if (sx < 0.99) {
+    for (int k = 0; k < 8; k++) {
+      float a = float(k) * 0.7853982;
+      vec2 d = vec2(cos(a), sin(a)) * uTexel;
+      vec4 n1 = texture(uTex, vUv + d * 1.5);
+      vec4 n2 = texture(uTex, vUv + d * 2.5);
+      float k1 = smoothstep(0.72, 0.93, dot(toLin(n1.rgb), vec3(0.2126, 0.7152, 0.0722))) * shares(n1.a).x;
+      float k2 = smoothstep(0.72, 0.93, dot(toLin(n2.rgb), vec3(0.2126, 0.7152, 0.0722))) * shares(n2.a).x;
+      thin = max(thin, max(k1, 0.3 * k2));
+    }
+    thin *= (1.0 - sx) * (1.0 - smoothstep(0.1, 0.35, y));
+  }
+  l += uHalC * (wide * uHal + thin * uHalThin);
   outColor = vec4(toSrgb(l), 1.0);
 }`;
 
@@ -1163,6 +1220,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       gl.uniform1f(P.glow.u.uDiff, OPTIC.diffusion);
       gl.uniform1f(P.glow.u.uHal, OPTIC.halation);
       gl.uniform3fv(P.glow.u.uHalC, OPTIC.halationColor);
+      gl.uniform1f(P.glow.u.uHalThin, OPTIC.halationThin);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       film.render(
@@ -1184,10 +1242,15 @@ export async function createDenchuka(host, { embedded = false } = {}) {
           bloom: 0.07,
           bloomThreshold: 0.6,
           // Halation from the same highlights, warm rather than red: the sun's
-          // own colour come back through the red and green layers, a thin
-          // ring bleeding off the cloud's edge and the shaft into the blue.
-          halation: 0.3,
-          halationThreshold: 0.8,
+          // own colour come back through the red and green layers. The film's
+          // is wide (1-3% of the frame), so it is kept to a trace off the very
+          // brightest crowns: anything more lays a thick orange bloom over the
+          // dark hardware in front of them and warms the shaft's edge, a second
+          // warm accent on what should be the frame's one cool dark anchor.
+          // The ring that shows is the optics' own (GLOW): warm off the
+          // cumulus into the cobalt, a texel or two on the concrete.
+          halation: 0.06,
+          halationThreshold: 0.92,
           halationColor: [1, 0.52, 0.24],
           // the crowns (~0.95 linear in the scene) land at ~250-252
           whitePoint: 1.0,
