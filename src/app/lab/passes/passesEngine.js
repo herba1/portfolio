@@ -15,16 +15,13 @@ import { createStage, clamp } from "../_kit/stage";
 // key of the tower's box (tools/depth/bakes/passes/lattice.py) is taken over
 // it by max, with the steel in its gaps unmixed from the haze the same way.
 //
-// The drag is the sun: across is which wall it lights, up and down its
-// elevation. Drag toward a wall and the sun swings round behind the opposite
-// shoulder to rake it (straight ahead, behind the tower, in the middle). The
-// concrete faces and the tower's lattice take a warm key from it, shaded by
-// the MoGe normals and kept out of the creases the depth map finds, and a
-// fill in the open sky's own colour: on the walls, a warm grey concrete in
-// full colour, the sunlit face prints a warm stone and the one turned away
-// the sky's own blue, each falling off across the face with the sky it sees,
-// its creases, and the light the sunlit wall across the canyon bounces back.
-// Dragging across swaps light and shade across the canyon.
+// The drag is the sun: across is its azimuth around the camera (straight
+// ahead, behind the tower, in the middle; behind your shoulder at either
+// edge), up and down its elevation. The concrete faces and the tower's
+// lattice take a warm key from it, shaded by the MoGe normals and kept out of
+// the creases the depth map finds, and a fill from the open sky: on the walls
+// a warm-neutral sun and the sky's light held near grey, so lit concrete is
+// a warm stone and only the faces turned from the sun lean cool.
 //
 // The plate's own sky was flat haze, so inside the sky matte it is replaced by
 // a photographed summer cumulus dome (Poly Haven, Rural Asphalt Road, Alexander Scholten, CC0;
@@ -32,22 +29,15 @@ import { createStage, clamp } from "../_kit/stage";
 // blue-shadowed bases, towering, with clear deep blue over them. Each
 // pixel looks it up along its true camera ray, the plate's pitch and lens, so
 // the clouds converge on the same vanishing point as the buildings. The dome
-// is fixed to the world, its tallest bank behind the tower and to its left,
-// filling the canyon's lower half, and the open canyon above stays cobalt.
-// Dragging moves only the light: the clouds stay where they are and are lit
-// as a volume by the walls' own sun, their density taken as a surface on the
-// screen and its slope as a normal, so their sunward flanks go to a warm
-// cream with a soft rim on the blue and their far sides and bases fall to
-// the sky's blue at a bit over half its light. The sun itself is drawn
-// where the light stands.
+// turns with the dragged sun so its tallest bank stands on the sun's side
+// of the canyon, filling its lower half behind the tower, and the open
+// canyon above stays cobalt. The sun itself is drawn where the light stands.
 //
-// Plate and dome are then developed as one emulsion: the film over the
-// matted frame spreads its highlights through a half-size blur pyramid (a
-// warm Pro-Mist diffusion), lays a tight blur of their red layer back as a
-// thin orange-red halation on the dark side of every bright edge, prints
-// through a toe that lifts the blacks to a cool charcoal and a shoulder that
-// rolls the highlights off warm, and lays one luminance grain field, in the
-// midtones, stepping at 24 fps, over sky and concrete alike.
+// Plate and dome are then developed as one exposure: a single film pass over
+// the matted frame spreads its highlights (a warm Pro-Mist diffusion), throws
+// a thin red halation ring onto the dark side of every bright edge, and lays
+// one fine luminance grain field, stepping at 24 fps, over sky and concrete
+// alike.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -81,15 +71,15 @@ const float LENS = 1.034;
 // The sky dome: where its tallest cumulus bank stands across the equirect.
 const float SKY_U = 0.24;
 // The clouds are graded as lit volumes, not shown as the photograph's white:
-// their sunlit flanks a warm cream well under paper, their bodies a pale
-// grey-blue, their far sides and bases the open sky's blue at some 57% luma. All three are given as the
+// their sunlit crowns a warm white just under paper, their bodies a pale
+// grey-blue, their bases the open sky's light. All three are given as the
 // print would show them (display rgb) and taken back through the tone
 // curve, so the range lands exactly there and is not piled into the crown.
 // The crowns glow: the film's diffusion and halation take what is over 0.84
 // in luma.
-const vec3 CLOUD_LIT = vec3(240.0, 232.0, 215.0) / 255.0;
-const vec3 CLOUD_BODY = vec3(186.0, 201.0, 219.0) / 255.0;
-const vec3 CLOUD_SHADE = vec3(120.0, 150.0, 190.0) / 255.0;
+const vec3 CLOUD_LIT = vec3(252.0, 248.0, 238.0) / 255.0;
+const vec3 CLOUD_BODY = vec3(200.0, 214.0, 230.0) / 255.0;
+const vec3 CLOUD_SHADE = vec3(143.0, 180.0, 216.0) / 255.0;
 // The open sky as the print shows it, by the ray's elevation: a clear
 // cerulean just over the wall tops (the frame's lowest sky, 38 degrees up)
 // deepening to cobalt at the top of the frame (72 degrees). The dome's own
@@ -104,30 +94,27 @@ const float EXPO = 1.35;
 // gained and stored over WALL_RANGE.
 const float WALL_RANGE = 1.5;
 const float WALL_MID = 0.6;
-// The walls are one pale concrete, a warm grey with a colour of its own,
-// under two lights of different colour temperature, and the canyon is the
-// split between them: the one gesture is moving the sun, so which wall
-// glows has to be the loudest thing it does. CONCRETE is that albedo's hue,
-// the plate's own warm grey (its grade had pushed it olive). The fill is
-// the open sky's light, and it lands on every face, lit or not. It is set
-// as the print should show it: SHADE, a face turned from the sun at the
-// canyon's middle, is the concrete in the sky's own blue, hue 205 at about
-// a third of full saturation, a cool shade with colour in it, never the
-// desaturated grey of a black-and-white print, and well down from the lit
-// face. The key is then what a face standing KEY_NDL to the sun (a wall's
-// own share with the sun behind your shoulder) needs over that fill to
-// print STONE, a warm sunlit stone at hue 36: the sun carries the face
-// about half again up in luma, so dragging across swaps a warm wall and a
-// blue one, not two greys a few percent apart. SUN_HIGH is the luma and
-// SUN_HUE_HIGH the hue of sunFor's colour with the sun high: a weaker sun
-// takes the key down by the square root of its share, and a setting one
-// ambers it by its own hue's shift from the high sun's.
-const vec3 CONCRETE = vec3(198.0, 191.0, 184.0) / 255.0;
-const vec3 STONE = vec3(224.0, 202.0, 166.0) / 255.0;
-const vec3 SHADE = vec3(90.0, 145.0, 170.0) / 255.0;
-const float KEY_NDL = 0.6;
+// The walls are one pale concrete under two lights of different colour
+// temperature, and the canyon is the split between them. The sun's key is
+// a warm neutral, about 5300 K (KEY_WARM, #FFE8C4), not an amber: sunlit
+// concrete prints a warm stone, hue 30 to 45 at low chroma, and the sky
+// stays the one saturated blue in the frame. The sky's light on the walls is
+// read from the dome over each face, but desaturated before it touches the
+// concrete: on a face the sun reaches it is all but neutral (AMB_LIT_SAT,
+// saturation in light), so it cannot wash the stone in the sky's hue; only a
+// face turned from the sun keeps a little of its blue (AMB_SHADE_SAT), and
+// prints a cool grey, never the cobalt behind it. Levels, as the print
+// shows them: SHADE_P is a vertical face of concrete at WALL_MID in the
+// sky's light alone, KEY_P one square to the high sun, about 200 in luma,
+// well under the crowns. SUN_HIGH is the luma of sunFor's colour with the
+// sun high: a weaker sun takes the key down by the square root of its
+// share, and a setting one turns the key from KEY_WARM toward its own amber.
+const vec3 KEY_WARM = vec3(255.0, 232.0, 196.0) / 255.0;
+const float AMB_LIT_SAT = 0.02;
+const float AMB_SHADE_SAT = 0.36;
+const float SHADE_P = 0.47;
+const float KEY_P = 0.87;
 const float SUN_HIGH = 2.52;
-const vec3 SUN_HUE_HIGH = vec3(1.0, 0.78, 0.6);
 // Where a vertical face's sky visibility sits (skyVis with n level).
 const float SKY_VERT = 0.55;
 
@@ -136,6 +123,14 @@ vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
 // Its inverse: the light that prints as y.
 vec3 untone(vec3 y){ vec3 t = pow(y, vec3(2.2)); return t / (1.0 - t) / EXPO; }
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// c with its saturation (max minus min over max, in light) held to at most
+// s, drawn toward its brightest channel, at its own luminance.
+vec3 capSat(vec3 c, float s){
+  float m = max(max(c.r, c.g), c.b);
+  float sat = 1.0 - min(min(c.r, c.g), c.b) / max(m, 1e-5);
+  vec3 d = vec3(m) + (c - vec3(m)) * min(1.0, s / max(sat, 1e-5));
+  return d * luma(c) / max(luma(d), 1e-5);
+}
 // The dome's layers as stored: x = K s / (1 - s), s = y ^ 2.2.
 vec3 skyDecode(vec3 y, float k){ vec3 s = min(pow(y, vec3(2.2)), vec3(0.9975)); return k * s / (1.0 - s); }
 // The equirect's coordinate for a direction in the dome's frame.
@@ -144,22 +139,11 @@ vec2 domeST(vec3 D){ return vec2(SKY_U + atan(D.y, D.x) / 6.2831853, 1.0 - asin(
 // clouds' layer is already what they add over the clear sky, so its
 // luminance is the cloud alone. A fixed mip, so the seam needs no care.
 float density(vec3 D, float lod){ return luma(skyDecode(textureLod(uSky, domeST(D), lod).rgb, 4.0)); }
-
-// The cloud as a surface on the screen. Its density, read a few mips soft
-// along the ray through a plate point, is taken as a height: thin cloud
-// low, a dense body up near 1 (k sets how fast it fills). Its slope across
-// the screen, x right and y up like the camera's, is what a normal is made
-// of. e is the step in plate widths, the same angle on both axes.
-float cloudH(vec2 p, float lod, float k){
-  vec3 R = normalize(vec3((p.x - 0.5) * LENS, -(p.y - 0.5) * LENS / ASPECT, -1.0));
-  float d = density(R * uDome, lod);
-  // k < 0: the body's own relief, on a log scale, so the lobes inside a
-  // dense bank are not flattened where the edge's height has filled.
-  return k > 0.0 ? 1.0 - exp(-d / k) : log2(1.0 + d / -k) * 0.25;
-}
-vec2 cloudSlope(vec2 p, float e, float lod, float k){
-  vec2 ex = vec2(e, 0.0), ey = vec2(0.0, e * ASPECT);
-  return vec2(cloudH(p + ex, lod, k) - cloudH(p - ex, lod, k), cloudH(p - ey, lod, k) - cloudH(p + ey, lod, k)) * 0.5 / e;
+// D turned toward T by a (radians), along the great circle between them.
+vec3 toward(vec3 D, vec3 T, float a){
+  vec3 t = T - D * dot(T, D);
+  float l = length(t);
+  return l < 1e-4 ? D : normalize(D * cos(a) + t / l * sin(a));
 }
 
 // The photographed bank is soft, lit from behind, with little inside it, so
@@ -248,8 +232,7 @@ void main(){
   // clouds keep their light, warmed toward the key. The clouds are read a
   // mip sharp: the derivatives halved, so their sunlit edges stay hard and
   // the cumulus is not a blurred mip pasted over the canyon.
-  vec3 cloudRaw = textureGrad(uSky, st, sx * 0.5, sy * 0.5).rgb;
-  vec3 cloud = skyDecode(cloudRaw, 4.0);
+  vec3 cloud = skyDecode(textureGrad(uSky, st, sx * 0.5, sy * 0.5).rgb, 4.0);
   // Low in the dome the frame magnifies it (two pixels to a texel), so no
   // mip is sharp enough: the edges and lobes are given back by an unsharp
   // mask against the same layer spread over a few texels (or a few pixels,
@@ -258,23 +241,6 @@ void main(){
   vec3 cloudB = skyDecode(0.25 * (textureGrad(uSky, st + r * vec2(0.92, 0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(-0.38, 0.92), sx, sy).rgb
                                 + textureGrad(uSky, st + r * vec2(-0.92, -0.38), sx, sy).rgb + textureGrad(uSky, st + r * vec2(0.38, -0.92), sx, sy).rgb), 4.0);
   cloud = max(cloud + 0.8 * (cloud - cloudB), 0.0);
-  // The photograph's own structure inside the cloud: its luminance as
-  // printed (the layer as stored) against its average over a patch a few
-  // dozen pixels across, the size of a billow on the screen. That ratio is
-  // the cumulus's modelling, the lobes, crevices and shadowed undersides,
-  // and it is kept through the relighting below instead of being replaced
-  // by one tint per side. Three bands: the bulges, the lobes, and the
-  // bank's shading across them.
-  vec2 skyTs = vec2(textureSize(uSky, 0));
-  float rho = max(length(vec2(sx.x, sy.x) * skyTs.x), length(vec2(sx.y, sy.y) * skyTs.y));
-  float lpS = luma(textureLod(uSky, st, log2(max(rho * 4.0, 1.0))).rgb);
-  float lpM = luma(textureLod(uSky, st, log2(max(rho * 24.0, 1.0))).rgb);
-  float lpL = luma(textureLod(uSky, st, log2(max(rho * 96.0, 1.0))).rgb);
-  float lpX = luma(textureLod(uSky, st, log2(max(rho * 320.0, 1.0))).rgb);
-  // Low in the dome the bank is magnified and soft: its billows are there
-  // but a few percent apart, so each band is taken up as well as kept.
-  float detail = 2.2 * log2(max(lpS, 0.02) / max(lpM, 0.06)) + 2.6 * log2(max(lpM, 0.02) / max(lpL, 0.06))
-               + 1.8 * log2(max(lpL, 0.02) / max(lpX, 0.06));
   float beta = skyDecode(textureGrad(uSkyBlue, st, sx, sy).rrr, 1.0).r;
   // The blue layer's own variation, against its average a few degrees
   // round: kept as a texture inside the gradient, never allowed to flatten
@@ -287,8 +253,7 @@ void main(){
   // fades out wherever cloud stands within a few degrees.
   float betaSoft = skyDecode(textureLod(uSkyBlue, st, 4.0).rrr, 1.0).r;
   float mr = log2(max(beta, 1e-4) / max(betaSoft, 1e-3));
-  float dWide = density(D, 5.5);
-  float near = smoothstep(0.01, 0.12, dWide);
+  float near = smoothstep(0.01, 0.12, density(D, 5.5));
   float mottle = exp2(mr / (1.0 + abs(mr) / 0.12) * (1.0 - near));
   // Paler only with the ray's own elevation: the sky does not know where the
   // walls stand, and paling it toward them drew a lit band along every edge
@@ -305,88 +270,84 @@ void main(){
   // wisps a partial veil, the body opaque.
   float cl = luma(cloud);
   float mask = sqrt(smoothstep(0.03, 0.9, cl));
-  // Then how it is lit, as a volume and by the walls' own sun. The cloud's
-  // density, read soft, is a heightfield on the screen, and its slope at
-  // three sizes (the bank, its lobes, the bulges on them) is a normal in
-  // the camera's frame: x right, y up, toward the viewer, the frame uSun
-  // and the walls' normals are in. A flank whose density falls away toward
-  // the sun faces it.
-  vec2 gL = cloudSlope(uv, 0.03, 5.5, 1.5);
-  vec2 gM = cloudSlope(uv, 0.012, 3.8, -1.0);
-  vec2 gF = cloudSlope(uv, 0.005, 2.5, -1.0);
-  // The photographed bank is soft, with little inside it, so its body
-  // takes laid-in lobes (about 5 and 2 degrees) as relief on the same
-  // surface: the camera never moves, so they are laid on the plate.
-  vec2 pq = vec2(uv.x, -uv.y / ASPECT);
-  vec2 bg = billow(pq / 0.09) / 0.09 + 0.45 * billow(pq / 0.037 + 17.0) / 0.037;
-  float d0 = density(D, 4.5);
-  float body = smoothstep(0.8, 3.5, d0) * mask;
-  vec3 nC = normalize(vec3(-(0.2 * gL + 0.3 * gM + 0.12 * gF + 0.012 * bg * body), 1.0));
-  // And what stands between it and the sun: cloud piled toward the sun
-  // across the screen shades it, so the far side and the dense base fall
-  // into the shade, not just the far edge. Scaled by how far across the
-  // screen the sun stands; with it straight behind the frame nothing is
-  // between.
-  float sAcross = length(uSun.xy);
-  vec2 sS = uSun.xy / max(sAcross, 1e-3);
-  float occ = (0.3 * density(normalize(V + vec3(sS * 0.03 * LENS, 0.0)) * uDome, 4.5)
-             + 0.4 * density(normalize(V + vec3(sS * 0.07 * LENS, 0.0)) * uDome, 5.0)
-             + 0.3 * density(normalize(V + vec3(sS * 0.15 * LENS, 0.0)) * uDome, 5.5)) * sAcross;
-  float shadow = exp(-0.3 * occ);
-  // A wrapped Lambert: light scatters into a cloud well past its terminator.
-  float cNdl = dot(nC, uSun);
-  float sunLit = clamp((cNdl + 0.55) / 1.55, 0.0, 1.0);
-  sunLit = sunLit * sunLit * (3.0 - 2.0 * sunLit) * mix(0.45, 1.0, shadow);
-  // The open sky over it lights the faces turned up; the photograph's own
-  // modelling stays as detail inside that.
-  float skyLit = 0.5 + 0.5 * nC.y;
-  float model = clamp(log2(max(cl, 1e-3) / max(d0, 0.05)), -1.5, 1.5);
-  // Close to the sun the cloud is lit from behind: its thin parts glow.
+  // Then which way each part faces, from the cloud's own density read soft
+  // and a few degrees off along the ray: a part with less cloud between it
+  // and the sun is the sunlit face; one with clear sky under it and cloud
+  // over it is a belly. The sun as the dome sees it is DOME_SUN.
   vec3 DOME_SUN = uSun * uDome;
+  const vec3 ZEN = vec3(0.0, 0.0, 1.0);
+  float d0 = density(D, 4.5);
+  float dSun = 0.6 * density(toward(D, DOME_SUN, 0.035), 4.5) + 0.4 * density(toward(D, DOME_SUN, 0.08), 5.5);
+  float dUp = 0.6 * density(toward(D, ZEN, 0.035), 4.5) + 0.4 * density(toward(D, ZEN, 0.08), 5.5);
+  float dDown = 0.6 * density(toward(D, -ZEN, 0.035), 4.5) + 0.4 * density(toward(D, -ZEN, 0.08), 5.5);
+  // And the same, finer: the lobes inside the body, each bulge with its
+  // own lit face and its own shade under it.
+  float d1 = density(D, 2.0);
+  float fine = clamp((d1 - density(toward(D, DOME_SUN, 0.008), 2.0)) + (density(toward(D, -ZEN, 0.008), 2.0) - density(toward(D, ZEN, 0.008), 2.0)), -2.0, 2.0) / max(d1, 0.6);
+  float norm = max(d0, 0.6);
+  float sunEdge = clamp((d0 - dSun) / norm, -1.0, 1.0);
+  float topEdge = clamp((dDown - dUp) / norm, -1.0, 1.0);
+  // The photograph's own modelling, kept as detail inside that: a part
+  // brighter than the cloud round it was lit in the photograph too.
+  float model = clamp(log2(max(cl, 1e-3) / max(d0, 0.05)), -1.5, 1.5);
+  // And the volume as a whole: the side toward the sun (the dot of the ray
+  // with DOME_SUN) carries more light, and the cloud thickens toward its
+  // base, low in the dome, where the light that gets in is the sky's.
   float facing = dot(D, DOME_SUN);
-  float aureole = smoothstep(0.75, 0.95, facing) * (1.0 - body);
-  float light = 1.05 * sunLit + 0.2 * skyLit + 0.3 * model + 0.3 * aureole - 0.12;
-  // The photograph's modelling, in the cloud's dense body only: at its
-  // edge the patch average takes in the clear sky and every rim would read
-  // as a lobe.
-  float det = detail * smoothstep(0.35, 0.65, lpX) * smoothstep(0.3, 0.6, lpL) * mask;
-  // On the far side the sun's term is flat, so the lobes laid in above are
-  // modelled by the open sky instead: each turned up and toward the viewer
-  // catches more of it, its underside and the crevice under it less.
-  // Measured against the bank's own slope, so it only adds the lobes and
-  // never darkens the bank as a whole.
-  vec2 gB = 0.2 * gL + 0.3 * gM + 0.12 * gF;
-  vec3 Ls = normalize(vec3(0.15, 0.75, 0.65));
-  float lobe = dot(normalize(vec3(-gB - 0.02 * bg, 1.0)), Ls) - dot(normalize(vec3(-gB, 1.0)), Ls);
-  det += 1.0 * lobe * body * (1.0 - smoothstep(0.2, 0.7, light));
-  det = det / (1.0 + abs(det) / 0.9);
-  // Its lobes that catch more light sit a little further up the grade:
-  // the relit factor is the volume's light and the photograph's together.
-  float t = clamp(light + 0.3 * det, 0.0, 1.0);
-  // Graded in print values on three stops: the sun-facing flank a warm
-  // cream under paper white, the body a pale grey-blue, and the far side
-  // and the base the sky's own blue at a bit over half its light. The low
-  // sun warms the crowns and dims the shade.
-  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.97, 0.92), 1.0 - uDay);
+  float low = 1.0 - smoothstep(0.05, 0.5, D.z);
+  float thick = smoothstep(1.5, 6.0, d0);
+  // Where in the tower of cloud this part stands: cloud under it and clear
+  // sky over it is a crown, cloud piled over it is the bank's shaded base.
+  // Read wide (up to 12 degrees each way), so a bank that fills the canyon
+  // keeps one gradient from its sunlit tops down to its blue base, not a
+  // flat slab with lobes drawn on it.
+  float above = 0.45 * density(toward(D, ZEN, 0.05), 5.0) + 0.35 * density(toward(D, ZEN, 0.11), 5.5) + 0.2 * density(toward(D, ZEN, 0.2), 6.0);
+  float below = 0.45 * density(toward(D, -ZEN, 0.05), 5.0) + 0.35 * density(toward(D, -ZEN, 0.11), 5.5) + 0.2 * density(toward(D, -ZEN, 0.2), 6.0);
+  float height = clamp((below - above) / max(max(below, above), 0.8), -1.0, 1.0);
+  // And between those scales, the lobes a bank is built of, each a bulge a
+  // degree or two across with its own lit top and its own shade under it.
+  float dm = density(D, 3.5);
+  float lobe = clamp((dm - density(toward(D, DOME_SUN, 0.02), 3.5)) + (density(toward(D, -ZEN, 0.02), 3.5) - density(toward(D, ZEN, 0.02), 3.5)), -2.0, 2.0) / max(dm, 0.6);
+  // The laid-in lobes, two sizes (about 5 and 2 degrees), on the dome's
+  // own sky, so they turn with it. Each is lit as a surface: the sun and the
+  // open sky over it, in the frame of the ray (right, up, toward the
+  // viewer), against what a flat face would take, so they model the bank
+  // without changing its level. Only in its body: the edges keep the
+  // photograph's own.
+  float delev = asin(clamp(D.z, -1.0, 1.0));
+  vec2 q = vec2(atan(D.y, D.x) * cos(delev), delev);
+  vec2 bg = billow(q / 0.085) + 0.6 * billow(q / 0.034 + 17.0);
+  vec3 bE = normalize(vec3(-D.y, D.x, 0.0) + vec3(1e-5, 0.0, 0.0));
+  vec3 bN = cross(D, bE);
+  vec3 Ls = vec3(dot(DOME_SUN, bE), dot(DOME_SUN, bN), -dot(DOME_SUN, D));
+  vec3 nb = normalize(vec3(-bg * 0.6, 1.0));
+  float bump = (dot(nb, Ls) - Ls.z) + 0.6 * (dot(nb, vec3(0.0, 0.6, 0.8)) - 0.8);
+  float body = smoothstep(0.8, 3.5, d0) * mask;
+  // A bank the sun faces (behind or beside the viewer) is lit down its whole
+  // face, the lobes modelling it; one the sun stands behind keeps its light
+  // in the crowns and the rims, and its body is the sky's.
+  float front = smoothstep(-0.6, 0.4, Ls.z);
+  float light = 0.36 + 0.12 * front + 0.28 * sunEdge + 0.2 * topEdge + 0.65 * fine + 0.55 * lobe + 0.55 * model + mix(0.32, 0.2, front) * height + 0.12 * facing - 0.1 * low * thick - 0.1 * thick + mix(0.45, 0.7, front) * bump * body;
+  // The sun-side tops are lifted: a face that looks toward the sun with
+  // little cloud between it and the sun is the crown, and it carries more
+  // light than the modelling alone gives it.
+  float sunSide = smoothstep(-0.3, 0.5, facing);
+  light += (0.22 * max(sunEdge, 0.0) + 0.16 * max(topEdge, 0.0) + 0.12 * max(height, 0.0)) * sunSide;
+  // No shoulder that piles the body into the crown: the light runs through
+  // the whole range on one soft S, so the bank keeps its blue base, its
+  // pale grey-blue middle and only its tops at the warm white.
+  float t = smoothstep(-0.15, 1.55, light);
+  // The crown warms toward the key when the sun is low; the belly takes the
+  // open sky's light. Graded in print values on three stops (base, body,
+  // crown), then taken back to light. The low sun dims the shade side; the
+  // lit crown keeps its light, warmer.
+  vec3 crown = mix(CLOUD_LIT, CLOUD_LIT * vec3(1.0, 0.975, 0.935) + vec3(0.006, 0.0, 0.0), 1.0 - uDay);
   float dusk = mix(0.72, 1.0, uDay);
-  vec3 cloudG = mix(mix(CLOUD_SHADE, CLOUD_BODY, smoothstep(0.0, 0.55, t)), crown, smoothstep(0.45, 0.95, t));
-  // Then the tint is a grade on the photograph's own luminance, not a flat
-  // fill: the print value is multiplied by the source's local contrast, all
-  // of it on the far side (where the relighting has nothing else to model
-  // the billows with) and never under 60% of it toward the sun.
-  // A crevice falls into bluer light than the lobe over it (the sky is all
-  // that reaches it), so the red goes first.
-  cloudG *= exp2(det * mix(1.0, 0.6, smoothstep(0.3, 0.9, t)) * mix(vec3(1.0), vec3(1.25, 1.0, 0.75), step(det, 0.0)));
-  vec3 cloudP = tone(untone(clamp(cloudG, vec3(0.0), vec3(0.98))) * mix(dusk, 1.0, t * t));
+  vec3 cloudG = mix(mix(CLOUD_SHADE, CLOUD_BODY, t), mix(CLOUD_BODY, crown, t), t);
+  vec3 cloudP = tone(untone(min(cloudG, vec3(0.98))) * mix(dusk, 1.0, t * t));
   // The open sky dims less than the clouds' shade with a low sun: it is
   // the zenith's light, not the sun's.
   vec3 skyP = blueP * pow(mottle, 0.45) * mix(0.93, 1.0, uDay);
-  // Where a sunlit flank meets the cobalt the light spills a little past
-  // it, a soft rim of the crown's own cream on the blue, so the edge rolls
-  // off into the sky instead of standing on it like a cut-out.
-  vec3 nRim = normalize(vec3(-0.2 * gL, 1.0));
-  float rim = (1.0 - mask) * smoothstep(0.05, 1.0, dWide) * smoothstep(-0.1, 0.6, dot(nRim, uSun));
-  skyP = mix(skyP, crown, 0.4 * rim * mix(0.6, 1.0, uDay));
   // The clouds stand in front of the blue: where they are dense they hide
   // it, where thin they veil it. The veil is laid in print values: in light,
   // a crown's red, high up the shoulder, swamped the blue's green and turned
@@ -415,8 +376,8 @@ void main(){
   vec3 steelP = texture(uSteel, lb, bias).rgb;
   steelW *= 1.0 - solid * smoothstep(0.04, 0.12, length(steelP - albP));
   vec3 alb = toLin(mix(albP, steelP, steelW));
-  // The walls clip at a pale concrete, near white, in CONCRETE's warm grey:
-  // the light colours it, but it keeps its own hue under both. Their texture
+  // The walls clip at a pale concrete, near white, and have no colour of
+  // their own: what warmth or cool is on them is the light's. Their texture
   // is spread about its middle as it comes up, since sunlit, high on the
   // curve, the shoulder takes most of it back: the panel joints, the tie
   // holes and the louvre's slats stay drawn. They read the denoised bake,
@@ -426,8 +387,7 @@ void main(){
   // members and the half-lit steel behind them would all clip to the same
   // flat cream, and the lattice would go to a milky mush with no members in it.
   float wl = pow(texture(uWall, uv).r, 2.2) * WALL_RANGE;
-  vec3 concrete = toLin(CONCRETE) / luma(toLin(CONCRETE));
-  vec3 wallAlb = min(WALL_MID * pow(wl / WALL_MID, 1.25), 0.9) * concrete;
+  vec3 wallAlb = vec3(min(WALL_MID * pow(wl / WALL_MID, 1.25), 0.9));
   vec3 towerAlb = 0.86 * (1.0 - exp(-alb * 3.4 / 0.86));
   alb = mix(wallAlb, towerAlb, tower);
 
@@ -507,69 +467,26 @@ void main(){
   // The tower: its paint under the sun's own colour and the sky's cyan.
   vec3 towerL = alb * (uSunCol * key + vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis + bounce) + uSunCol * spec;
 
-  // The walls, as light over that albedo. Each term is a light, not a tint,
-  // and each falls off across a face.
-  //
-  // Occlusion, the depth map's creases read wide as well as sharp: a face
-  // set back behind its surroundings (under the balcony, the inside corner
-  // of a reveal, the wall behind the pole) sees less of both lights.
-  float bendW = (textureLod(uDepth, uv, 4.0).b - 0.5) * 2.0;
-  // (The sharp crease is already in vis and skyVis.)
-  float ao = 1.0 - 0.35 * smoothstep(0.02, 0.18, -bendW);
-  // How open the sky is round a pixel: the share of sky in a wide patch of
-  // the frame. Looking up a canyon, a wall's top stands against the sky and
-  // its foot, nearer the frame's edge, sees mostly the wall opposite, so the
-  // sky's light falls off down each face and the bounce takes over.
-  float open = smoothstep(0.0, 0.35, (textureLod(uMatte, uv, 5.5).b + textureLod(uMatte, uv, 6.5).b + textureLod(uMatte, uv, 7.5).b) / 3.0);
-  // Sky: the light that prints SHADE on the concrete at the canyon's middle,
-  // a little whiter where the bank stands over the face (read very soft
-  // along the face's own upward view): a face that sees the cloud's white
-  // takes less of the open blue.
+  // The walls, under the two temperatures. The sky's light comes from the
+  // dome toward the half of it over the face, read very soft: its blue, or
+  // its clouds' grey where the bank stands there. Its hue is held near
+  // neutral on a face the sun reaches and keeps some blue only on one turned
+  // from it (or a recess the sun does not get into), and its level is the
+  // shade's, so the dome sets only which way the grey leans.
   vec3 Dn = normalize(n + uUp) * uDome;
-  float bank = smoothstep(0.2, 3.0, density(Dn, 7.5));
-  vec3 fillMid = untone(SHADE) / (WALL_MID * concrete);
-  vec3 skyHue = mix(fillMid, vec3(luma(fillMid)), 0.3 * bank);
-  vec3 skyFill = skyHue * mix(0.6, 1.0, uDay) * skyVis / SKY_VERT * mix(0.55, 1.3, open) * ao;
-  // A recess the sun does not get into still sees the sky, a little less.
-  skyFill *= 1.0 - 0.3 * recess;
-  // MoGe's own normal, read soft, still holds how each face turns across the
-  // frame (the walls are not quite planes, and the lens bends them), where
-  // the facade bake is one smooth field to a face and alone lights it
-  // evenly. Its tilt toward the sky, against the bake's at the same
-  // softness, is laid over the fill as a gentle gradient.
-  vec3 nMs = normalize(textureLod(uNormal, uv, 5.0).rgb * 2.0 - 1.0);
-  vec3 nFs = normalize(nF4);
-  skyFill *= clamp(1.0 + 1.5 * (dot(nMs, uUp) - dot(nFs, uUp)), 0.75, 1.25);
-  // The key, scaled by how square the face stands to the sun, no wrap: a
-  // plane takes none past edge-on. It is what a face at KEY_NDL needs over
-  // the fill (at the canyon's middle) to print STONE: so the stone is the
-  // sum, and the sky's blue on a sunlit face is in it. Unclamped past
-  // KEY_NDL, a low sun square to a face carries it up the shoulder, toward a
-  // pale gold, not to paper.
-  // A setting sun ambers it, but only by half its own shift: the walls
-  // stay stone, and the warmth in the frame stays the tower's.
-  vec3 keyTint = mix(vec3(1.0), uSunCol / max(uSunCol.r, 1e-3) / SUN_HUE_HIGH, 0.5);
-  vec3 sunKey = max(untone(STONE) / (WALL_MID * concrete) - fillMid, vec3(0.0)) / KEY_NDL;
-  // That difference is an orange with no blue in it, right for the sum at
-  // KEY_NDL but a sodium lamp wherever a face stands squarer to the sun:
-  // the key is taken a little way back to its own grey, so a face full on
-  // to a low sun prints a sunlit stone, not a sepia.
-  sunKey = mix(sunKey, vec3(luma(sunKey)), 0.15);
-  sunKey *= keyTint * luma(sunKey) / max(luma(sunKey * keyTint), 1e-4);
-  sunKey *= sqrt(max(luma(uSunCol), 1e-3) / SUN_HIGH);
-  // The same over the key: MoGe's N.L against the bake's, as a ratio, so
-  // where the bake puts the sun edge-on the gradient goes with it and
-  // MoGe's wander never becomes the whole key.
-  float ndlS = dot(nFs, L);
-  float grad = clamp(1.0 + 1.6 * (dot(nMs, L) - ndlS) / max(abs(ndlS), 0.25), 0.7, 1.3);
-  float keyW = max(ndl, 0.0) * mix(grad, 1.0, tower) * vis * ao;
-  // Bounce: the wall across the canyon, where the sun is on it, lights this
-  // one with its own stone colour, most at the foot of the face, where it
-  // fills the view, and almost none at the top.
-  vec3 nH = normalize(n - uUp * dot(n, uUp) + vec3(1e-4, 0.0, 0.0));
-  float opposite = max(dot(-nH, L), 0.0);
-  vec3 bounceW = 0.08 * opposite * (1.0 - 0.85 * open) * WALL_MID * concrete * sunKey * KEY_NDL * ao;
-  vec3 wallL = alb * (sunKey * keyW + skyFill + bounceW) + sunKey * spec;
+  vec3 skyHueW = mix(toLin(SKY_LOW), toLin(CLOUD_BODY), smoothstep(0.2, 3.0, density(Dn, 7.5)));
+  float sunFace = smoothstep(0.0, 0.08, ndl) * vis;
+  vec3 ambW = capSat(skyHueW, mix(AMB_SHADE_SAT, AMB_LIT_SAT, sunFace));
+  float shadeL = untone(vec3(SHADE_P)).g / WALL_MID;
+  ambW *= shadeL / luma(ambW) * mix(0.6, 1.0, uDay) * skyVis / SKY_VERT;
+  // The key, a warm neutral scaled by how square the face stands to the sun,
+  // no wrap: a plane takes none past edge-on. A low sun ambers it and dims
+  // it, by the square root of its strength, so at noon a sun stronger than
+  // the reference does not carry the lit faces to paper.
+  vec3 keyHue = mix(uSunCol / max(luma(uSunCol), 1e-3), toLin(KEY_WARM) / luma(toLin(KEY_WARM)), smoothstep(0.3, 1.0, uDay));
+  float keyL = (untone(vec3(KEY_P)).g / WALL_MID - shadeL) * sqrt(max(luma(uSunCol), 1e-3) / SUN_HIGH);
+  vec3 sunKey = keyHue * keyL;
+  vec3 wallL = alb * (sunKey * max(ndl, 0.0) * vis + ambW + bounce) + sunKey * spec;
   vec3 litP = mix(tone(wallL), tone(towerL), tower);
 
   // The sky goes over the plate after the tone curve, as a print would be
@@ -582,17 +499,9 @@ void main(){
 }`;
 
 // The film the whole frame shares, plate and dome alike, so they read as one
-// emulsion. It runs in four steps after the light: the bright pass, a blur
-// pyramid built from it (the diffusion), a tight blur of its red layer (the
-// halation), and the print itself.
-//
-// First what scatters, at half size: the light over about 0.7 in luma, eased
-// in on a soft knee so no edge of it shows. The walls' sunlit plaster sits
-// right on that threshold. It is a matte surface, not a highlight, so it
-// gives a little less, and the film keeps its halation out of the walls'
-// own joints (the scene's alpha is 1 on the walls): there, a red ring in
-// every panel joint and window frame read as a sepia line drawing. Where
-// the lit facade meets the open sky the fringe still lands, on the sky.
+// exposure. First the light that scatters, at half size: only what is over
+// 0.78 in luma, for the diffusion (the open sky never reaches it), and the
+// near-white that halates in a.
 // Four bilinear taps cover the 4x4 block, so a bright hairline does not
 // shimmer in and out of it.
 const PREP = `#version 300 es
@@ -601,11 +510,17 @@ uniform sampler2D uScene;
 uniform vec2 uTexel;      // the scene's texel
 out vec4 o;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-// rgb is the diffusion's source; a is the halation's, the red layer alone.
+// The walls' sunlit plaster prints just under the crowns' white, on the
+// threshold, but it is a matte surface, not a highlight: its halation laid a
+// red ring in every panel joint and window frame, a sepia line drawing, and
+// its warm diffusion a cream veil over the recesses. So it takes no part in
+// the halation and only a little in the diffusion (the scene's alpha is 1 on
+// the walls); the clouds, the sun and the tower's white paint keep both.
 vec4 src(vec2 uv){
   vec4 s = texture(uScene, uv);
-  vec3 lin = pow(s.rgb, vec3(2.2)) * smoothstep(0.6, 0.9, luma(s.rgb));
-  return vec4(lin * (1.0 - 0.35 * s.a), lin.r * (1.0 - 0.15 * s.a));
+  float l = luma(s.rgb);
+  vec3 lin = pow(s.rgb, vec3(2.2));
+  return vec4(lin * smoothstep(0.78, 0.97, l) * (1.0 - 0.7 * s.a), smoothstep(0.84, 0.97, l) * (1.0 - s.a));
 }
 void main(){
   vec2 uv = gl_FragCoord.xy * 2.0 * uTexel;
@@ -613,87 +528,19 @@ void main(){
   o = 0.25 * (src(uv + vec2(-t.x, -t.y)) + src(uv + vec2(t.x, -t.y)) + src(uv + vec2(-t.x, t.y)) + src(uv + t));
 }`;
 
-// The pyramid, down: each level half the last, five taps (the centre and
-// four diagonals a source texel out), so it spreads as it shrinks with no
-// box in it.
-const DOWN = `#version 300 es
-precision highp float;
-uniform sampler2D uSrc;
-uniform vec2 uTexel;      // the source's texel
-uniform vec2 uOut;        // this level's size
-out vec4 o;
-void main(){
-  vec2 uv = gl_FragCoord.xy / uOut;
-  vec2 t = uTexel;
-  o = (4.0 * texture(uSrc, uv) + texture(uSrc, uv + vec2(-t.x, -t.y)) + texture(uSrc, uv + vec2(t.x, -t.y))
-       + texture(uSrc, uv + vec2(-t.x, t.y)) + texture(uSrc, uv + t)) / 8.0;
-}`;
-
-// And up: the coarser level spread on a tent of eight taps and laid over
-// this level's own, weighted, so the sum is a tight core with a long soft
-// tail, the way a Pro-Mist's scatter falls off.
-const UP = `#version 300 es
-precision highp float;
-uniform sampler2D uSrc, uBase;
-uniform vec2 uTexel;      // the coarser level's texel
-uniform vec2 uOut;
-uniform float uW;         // this level's own share
-uniform float uS;         // the coarser level's (its own, at the coarsest)
-out vec4 o;
-void main(){
-  vec2 uv = gl_FragCoord.xy / uOut;
-  vec2 t = uTexel;
-  vec4 s = texture(uSrc, uv + vec2(-2.0 * t.x, 0.0)) + texture(uSrc, uv + vec2(2.0 * t.x, 0.0))
-         + texture(uSrc, uv + vec2(0.0, -2.0 * t.y)) + texture(uSrc, uv + vec2(0.0, 2.0 * t.y))
-         + 2.0 * (texture(uSrc, uv + vec2(-t.x, -t.y)) + texture(uSrc, uv + vec2(t.x, -t.y))
-                + texture(uSrc, uv + vec2(-t.x, t.y)) + texture(uSrc, uv + t));
-  o = uS * s / 12.0 + uW * texture(uBase, uv);
-}`;
-
-// The halation's source: the bright pass's red layer alone, blurred tight,
-// a Gaussian of about two half-size texels (4 px at DPR 2, a ring 3 to 6 px
-// wide at 1x), one axis at a time.
-const HALO = `#version 300 es
-precision highp float;
-uniform sampler2D uSrc;
-uniform vec2 uStep;       // one texel along the axis
-uniform int uCh;          // which channel holds it: the bright pass's a, then r
-uniform vec2 uOut;
-out vec4 o;
-void main(){
-  vec2 uv = gl_FragCoord.xy / uOut;
-  float s = 0.0, w = 0.0;
-  for (int i = -6; i <= 6; i++) {
-    float k = exp(-float(i * i) / 8.0);
-    s += k * texture(uSrc, uv + uStep * float(i))[uCh];
-    w += k;
-  }
-  o = vec4(s / w, 0.0, 0.0, 1.0);
-}`;
-
-// Then the print. Diffusion: about a tenth of the pyramid laid back, warmer
-// than the light it took, a share of each highlight's own light taken out
-// where it left so a wide cloud keeps its level, and the cloud's crowns and
-// the sunlit wall glow softly out into the cobalt. Halation: the blurred
-// red laid back warm orange-red wherever it lands on something darker than
-// what threw it, so a thin warm fringe stands where the cloud, the lit
-// facade and the white bands of the spire meet the deep blue. Then the
-// curve: a toe that lifts the blacks off zero to a cool charcoal (a window
-// recess prints about #2a2f36, not a hole), and a shoulder that rolls the
-// highlights off warm, the blue layer first, rather than flattening them.
-// A breath of vignette, and one grain field for the whole frame, luminance
-// only, strongest in the midtones, stepping at 24 fps.
+// Then the frame itself: a Pro-Mist diffusion from those highlights (a few
+// px at DPR 2, warm, since the filter's scatter is warmer than the light it
+// takes), a thin red-orange halation on the dark side of every bright edge
+// (the tower and the walls against the cloud), a breath of vignette, a lifted
+// toe, and one grain field for the whole frame, stepping at 24 fps.
 const FILM = `#version 300 es
 precision highp float;
-uniform sampler2D uScene, uDiffuse, uHalo;
+uniform sampler2D uScene, uBright;
 uniform vec2 uRes;        // canvas px
-uniform float uNorm;      // the pyramid's total weight
+uniform vec2 uHalf;       // uBright's texel
 uniform float uSeed;
 uniform float uDay;
 out vec4 o;
-const vec3 TOE = vec3(34.0, 38.0, 44.0) / 255.0;
-const vec3 WHITE = vec3(0.995, 0.98, 0.95);
-const float HALO_GAIN = 1.0;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float vnoise(vec2 p){
@@ -701,53 +548,55 @@ float vnoise(vec2 p){
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
-// The shoulder, per layer: linear to the knee, then an exponential roll to
-// that layer's white, so nothing reaches 255 and the top of the range
-// keeps its modelling instead of piling into one flat value.
-vec3 shoulder(vec3 c){
-  const float K = 0.8, END = 1.05;
-  vec3 a = ((END - K) - (WHITE - K)) / ((END - K) * (END - K));
-  vec3 x = clamp(c, K, END) - K;
-  return mix(c, K + x - a * x * x, step(K, c));
+// The bright layer spread at a mip: four taps a texel of that level apart,
+// turned off the pixel grid, so the mips' boxes do not show.
+vec4 spread(vec2 uv, float lod){
+  vec2 r = uHalf * exp2(lod) * 0.75;
+  return 0.25 * (textureLod(uBright, uv + r * vec2(0.92, 0.38), lod) + textureLod(uBright, uv + r * vec2(-0.38, 0.92), lod)
+               + textureLod(uBright, uv + r * vec2(-0.92, -0.38), lod) + textureLod(uBright, uv + r * vec2(0.38, -0.92), lod));
 }
 void main(){
   vec2 uv = gl_FragCoord.xy / uRes;
-  vec4 sc = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0);
-  vec3 lin = pow(sc.rgb, vec3(2.2));
-  float l = luma(sc.rgb);
-  float wall = sc.a;
+  vec3 c = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec3 lin = pow(c, vec3(2.2));
+  float l = luma(c);
 
-  // Diffusion.
-  vec3 own = lin * smoothstep(0.6, 0.9, l);
-  vec3 diff = texture(uDiffuse, uv).rgb / uNorm;
-  lin += 0.12 * (diff * vec3(1.0, 0.95, 0.86) - 0.5 * own * (1.0 - 0.35 * wall));
+  // Only the half and quarter size levels: a tight kernel, a few px at
+  // DPR 2. Read wider, the bright deck and the bank spread into the open
+  // sky round the tower as a pale glow.
+  vec4 b0 = textureLod(uBright, uv, 0.0);
+  vec4 b1 = spread(uv, 0.0);
+  vec4 b2 = spread(uv, 1.0);
 
-  // Halation, on the dark side of the edge only, and not inside the walls.
-  float hal = texture(uHalo, uv).r;
-  float land = (1.0 - smoothstep(0.45, 0.88, l)) * (1.0 - 0.85 * wall);
-  // The red layer it exposes sits over the blue one, so where it lands on
-  // the cobalt it also holds back a little of the blue: the fringe reads
-  // warm, not lilac.
-  float h = max(hal - 0.7 * own.r, 0.0) * land * HALO_GAIN * mix(0.8, 1.0, uDay);
-  lin = lin * (1.0 - min(h, 0.5) * vec3(0.0, 0.15, 0.5)) + vec3(1.0, 0.42, 0.1) * h;
+  // Diffusion: a share of the highlight leaves its pixel and lands spread
+  // round it, so the cloud's white veils softly over the steel and the wall
+  // edges in front of it, and the tops lose their paper-cut edge. It only
+  // moves light, so a wide cloud keeps its level; what lands outside the
+  // highlight is warmer than what left.
+  vec3 d = b1.rgb * 0.5 + b2.rgb * 0.5 - b0.rgb;
+  lin += 0.4 * (max(d, 0.0) * vec3(1.0, 0.93, 0.82) + min(d, 0.0));
 
-  vec3 c = pow(max(lin, 0.0), vec3(1.0 / 2.2));
-  // Toe, then shoulder.
-  c += TOE * pow(max(1.0 - luma(c) / 0.55, 0.0), 2.4);
-  c = shoulder(c);
+  // Halation: light through the emulsion off the base and back through the
+  // red layer. A ring, not a glow: the spread source minus what is already
+  // white here, only where the pixel is darker than the source.
+  float ring = max(b1.a * 0.4 + b2.a * 0.6 - b0.a * 0.85, 0.0) * (1.0 - smoothstep(0.45, 0.9, l));
+  lin += vec3(1.0, 0.3, 0.08) * ring * 0.32 * mix(0.75, 1.0, uDay);
+
+  c = pow(max(lin, 0.0), vec3(1.0 / 2.2));
+  c = mix(vec3(0.018, 0.016, 0.02), vec3(1.0), c);
   vec2 cv = uv - 0.5;
-  c *= 1.0 - 0.14 * dot(cv, cv);
+  c *= 1.0 - 0.16 * dot(cv, cv);
 
-  // Grain: fine, about a pixel across at DPR 2 (a per-pixel hash reads as
-  // a sensor's salt and pepper, and clumps of five read as blotches in the
-  // flat sky), the same step on every channel. Weighted to the midtones,
-  // where a negative's grain shows, and thinning in the darks and the
-  // highlights. One law for sky and concrete.
+  // Grain: soft clumps about a pixel and two across at DPR 2, no per-pixel
+  // hash (that read as a sensor's salt and pepper), luminance only, the same
+  // step on every channel. Weighted to the midtones, where a negative's
+  // grain shows, and thinning to a quarter in the darks and the highlights,
+  // so it never clumps in a shadow. One law for sky and concrete.
   vec2 p = gl_FragCoord.xy + uSeed * vec2(37.1, 91.7);
-  float g = (vnoise(p / 0.9) - 0.5) + 0.5 * (vnoise(p / 1.7 + 41.7) - 0.5);
+  float g = (vnoise(p / 1.1) - 0.5) + 0.6 * (vnoise(p / 2.3 + 41.7) - 0.5);
   float lc = luma(c);
-  float mid = smoothstep(0.0, 0.35, lc) * (1.0 - smoothstep(0.7, 1.0, lc));
-  c += g * 0.03 * (mid * 0.8 + 0.2);
+  float mid = lc * (1.0 - lc) * 4.0;
+  c += g * 0.024 * (mid * 0.75 + 0.25);
   o = vec4(c, 1.0);
 }`;
 
@@ -756,9 +605,8 @@ const IMG_ASPECT = 2048 / 1536;
 // The camera looks up this far above the horizon.
 const PITCH = (55 * Math.PI) / 180;
 // Where the sun rests, in drag coordinates (0..1 across and down the frame):
-// toward the left wall, so the sun stands low behind your right shoulder:
-// it rakes the left wall warm, leaves the right one in the sky's blue, and
-// catches the tower's right legs.
+// low in the west behind your left shoulder, so it rakes the right wall
+// warm, leaves the left one a cool grey, and catches the tower's left legs.
 const REST = { x: 0.15, y: 0.55 };
 
 function loadImage(url) {
@@ -772,14 +620,12 @@ function loadImage(url) {
 }
 
 // The sun for a point of the drag. Across: azimuth relative to where the
-// camera faces, mirrored so the drag points at the wall it lights: from 165
-// degrees right (the left wall square to it) through straight ahead to 165
-// left (the right wall).
+// camera faces, from 165 degrees left through straight ahead to 165 right.
 // Down: elevation, from 78 degrees to 3. Returns its direction in camera
 // space, its colour and intensity (warmer and weaker near the horizon), how
 // high it is, and its azimuth and elevation.
 function sunFor(x, y) {
-  const az = (0.5 - x) * 2 * ((165 * Math.PI) / 180);
+  const az = (x - 0.5) * 2 * ((165 * Math.PI) / 180);
   const el = ((78 - (78 - 3) * clamp(y, 0, 1)) * Math.PI) / 180;
   const sx = Math.cos(el) * Math.sin(az);
   const sh = Math.cos(el) * Math.cos(az);
@@ -794,28 +640,32 @@ function sunFor(x, y) {
   return { dir, col, day, az, el };
 }
 
-// The dome is the world's, not the sun's: it is laid once and never turns.
-// Its cumulus bank stands behind the tower and to its left (DOME_HEADING,
-// turned from the camera's heading), over the left wall's tops and filling
-// the lower canyon. Dragging moves only the light: the same clouds stay in
-// the same places, and their lit sides swing round with the warm wall.
-const DOME_HEADING = (-18 * Math.PI) / 180;
+// The dome's cumulus bank follows the sun round, a share of its azimuth
+// (DOME_TURN) and never more than DOME_REACH off the camera's heading: so it
+// stands on the sun's side, between the sun and the tower, and at either
+// edge of the drag it waits at the wall tops instead of swinging out of
+// frame or across the canyon.
+const DOME_TURN = 0.35;
+const DOME_REACH = (18 * Math.PI) / 180;
 // And it is sunk only this far, tilted down on its own side, so its tallest
 // tops (60 degrees up in the photograph) stand at about 57 behind the tower,
 // well over the wall tops: the bank fills the lower half of the canyon and
 // the open sky above it stays deep blue. Sunk further, the bank was a row of
-// small blobs along the wall tops.
+// small blobs along the wall tops. The tilt does not follow the sun's
+// height: lifting the dome to meet a low sun swung its clouds up across the
+// whole canyon, an overcast sheet.
 const DOME_SINK = (3 * Math.PI) / 180;
 
-// The dome's orientation: turned about the zenith to DOME_HEADING, then
-// tilted down toward the bank. Returned as the three columns of uDome: unit
-// vectors, in camera space, toward the bank along the ground, to its right,
-// and up.
-function domeFrame() {
+// The dome's orientation for a sun: turned about the zenith to put its bank
+// on the sun's side, then tilted down toward the bank. Returned as the three
+// columns of uDome: unit vectors, in camera space, toward the bank along the
+// ground, to its right, and up.
+function domeFor(az) {
   const sp = Math.sin(PITCH);
   const cp = Math.cos(PITCH);
-  const sa = Math.sin(DOME_HEADING);
-  const ca = Math.cos(DOME_HEADING);
+  const turn = clamp(az * DOME_TURN, -DOME_REACH, DOME_REACH);
+  const sa = Math.sin(turn);
+  const ca = Math.cos(turn);
   // Heading (0, -sp, -cp) and right (1, 0, 0) span the ground; up is (0, cp, -sp).
   const toward = [sa, -sp * ca, -cp * ca];
   const right = [ca, sp * sa, cp * sa];
@@ -858,22 +708,18 @@ export async function createPasses(host) {
     return p;
   };
   const prepProg = program(PREP);
-  const downProg = program(DOWN);
-  const upProg = program(UP);
-  const haloProg = program(HALO);
   const filmProg = program(FILM);
   const prog = program(FS);
   gl.useProgram(prog);
   const U = (n) => gl.getUniformLocation(prog, n);
   const u = { res: U("uRes"), map: U("uMap"), sun: U("uSun"), sunCol: U("uSunCol"), up: U("uUp"), day: U("uDay"), dome: U("uDome") };
-  const loc = (p, ...names) => Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)]));
-  const up = loc(prepProg, "uTexel");
-  const ud = loc(downProg, "uTexel", "uOut", "uSrc");
-  const uu = loc(upProg, "uTexel", "uOut", "uW", "uS", "uSrc", "uBase");
-  const uh = loc(haloProg, "uStep", "uOut", "uSrc", "uCh");
-  const uf = loc(filmProg, "uRes", "uNorm", "uSeed", "uDay");
-  // The dome is fixed to the world: set once, never per frame.
-  gl.uniformMatrix3fv(u.dome, false, domeFrame());
+  const up = { texel: gl.getUniformLocation(prepProg, "uTexel") };
+  const uf = {
+    res: gl.getUniformLocation(filmProg, "uRes"),
+    half: gl.getUniformLocation(filmProg, "uHalf"),
+    seed: gl.getUniformLocation(filmProg, "uSeed"),
+    day: gl.getUniformLocation(filmProg, "uDay"),
+  };
 
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -932,34 +778,19 @@ export async function createPasses(host) {
   dome(skyCloud, 6, "uSky");
   dome(skyBlue, 8, "uSkyBlue");
 
-  // The film's targets: the matted frame at full size; the bright pass at
-  // half; the pyramid's levels down to a thirty-second, with one level per
-  // step on the way back up; and the halation's two axes at half size. Half
-  // floats where the GPU can render to them, so the spread light keeps its
-  // darks without banding. Allocated whenever the canvas changes size.
-  const half = gl.getExtension("EXT_color_buffer_float");
-  const fmt = half ? [gl.RGBA16F, gl.HALF_FLOAT] : [gl.RGBA8, gl.UNSIGNED_BYTE];
-  const LEVELS = 5;
-  // Each level's own share on the way up, finest first: a tight core and a
-  // long tail.
-  const LEVEL_W = [1.0, 0.9, 0.8, 0.7, 0.55];
-  const NORM = LEVEL_W.reduce((a, b) => a + b, 0);
-  const rt = () => ({ tex: gl.createTexture(), fbo: gl.createFramebuffer(), w: 0, h: 0 });
-  const scene = rt();
-  const down = Array.from({ length: LEVELS }, rt);
-  const ups = Array.from({ length: LEVELS - 1 }, rt);
-  const haloA = rt();
-  const haloB = rt();
-  const all = [scene, ...down, ...ups, haloA, haloB];
+  // The film's targets: the matted frame at full size (unit 10), and the
+  // light that scatters from it at half size, with mips to spread it (11).
+  // Allocated whenever the canvas changes size.
+  const scene = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
+  const bright = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
   let fw = 0;
   let fh = 0;
-  const alloc = (t, w, h, f) => {
-    t.w = w;
-    t.h = h;
-    gl.activeTexture(gl.TEXTURE15);
+  const alloc = (t, unit, w, h, mips) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, f[0], w, h, 0, gl.RGBA, f[1], null);
-    params2d(false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+    params2d(mips);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
   };
@@ -967,39 +798,15 @@ export async function createPasses(host) {
     if (W === fw && Hc === fh) return;
     fw = W;
     fh = Hc;
-    alloc(scene, W, Hc, [gl.RGBA8, gl.UNSIGNED_BYTE]);
-    for (let i = 0; i < LEVELS; i++) {
-      const d = 2 ** (i + 1);
-      alloc(down[i], Math.max(1, Math.ceil(W / d)), Math.max(1, Math.ceil(Hc / d)), fmt);
-      if (i < LEVELS - 1) alloc(ups[i], down[i].w, down[i].h, fmt);
-    }
-    alloc(haloA, down[0].w, down[0].h, fmt);
-    alloc(haloB, down[0].w, down[0].h, fmt);
+    alloc(scene, 10, W, Hc, false);
+    alloc(bright, 11, Math.ceil(W / 2), Math.ceil(Hc / 2), true);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   };
-  // A post step: into one target, reading others on units 13 and up.
-  const into = (t) => {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
-    gl.viewport(0, 0, t.w, t.h);
-  };
-  const bind = (unit, t) => {
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, t.tex);
-  };
-  // The scene stays on unit 10 for the bright pass and the film.
   gl.useProgram(prepProg);
   gl.uniform1i(gl.getUniformLocation(prepProg, "uScene"), 10);
-  gl.useProgram(downProg);
-  gl.uniform1i(ud.uSrc, 13);
-  gl.useProgram(upProg);
-  gl.uniform1i(uu.uSrc, 13);
-  gl.uniform1i(uu.uBase, 14);
-  gl.useProgram(haloProg);
-  gl.uniform1i(uh.uSrc, 13);
   gl.useProgram(filmProg);
   gl.uniform1i(gl.getUniformLocation(filmProg, "uScene"), 10);
-  gl.uniform1i(gl.getUniformLocation(filmProg, "uDiffuse"), 13);
-  gl.uniform1i(gl.getUniformLocation(filmProg, "uHalo"), 14);
+  gl.uniform1i(gl.getUniformLocation(filmProg, "uBright"), 11);
 
   let dirty = true;
   stage.onResize(() => {
@@ -1079,48 +886,17 @@ export async function createPasses(host) {
     gl.uniform3f(u.up, 0, Math.cos(PITCH), -Math.sin(PITCH));
     gl.uniform1f(u.day, S.day);
     day = S.day;
+    gl.uniformMatrix3fv(u.dome, false, domeFor(S.az));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // What scatters, at half size, then its pyramid down and back up, and
-    // its red layer blurred for the halation.
-    bind(10, scene);
-    into(down[0]);
+    // What scatters, at half size, spread through its mips.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bright.fbo);
     gl.useProgram(prepProg);
-    gl.uniform2f(up.uTexel, 1 / W, 1 / Hc);
+    gl.viewport(0, 0, Math.ceil(W / 2), Math.ceil(Hc / 2));
+    gl.uniform2f(up.texel, 1 / W, 1 / Hc);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.useProgram(downProg);
-    for (let i = 1; i < LEVELS; i++) {
-      bind(13, down[i - 1]);
-      into(down[i]);
-      gl.uniform2f(ud.uTexel, 1 / down[i - 1].w, 1 / down[i - 1].h);
-      gl.uniform2f(ud.uOut, down[i].w, down[i].h);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
-    gl.useProgram(upProg);
-    for (let i = LEVELS - 2; i >= 0; i--) {
-          // The coarsest level enters at its own share.
-      const src = i === LEVELS - 2 ? down[LEVELS - 1] : ups[i + 1];
-      bind(13, src);
-      bind(14, down[i]);
-      into(ups[i]);
-      gl.uniform2f(uu.uTexel, 1 / src.w, 1 / src.h);
-      gl.uniform2f(uu.uOut, ups[i].w, ups[i].h);
-      gl.uniform1f(uu.uW, LEVEL_W[i]);
-      gl.uniform1f(uu.uS, i === LEVELS - 2 ? LEVEL_W[LEVELS - 1] : 1);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
-    gl.useProgram(haloProg);
-    gl.uniform2f(uh.uOut, down[0].w, down[0].h);
-    bind(13, down[0]);
-    into(haloA);
-    gl.uniform1i(uh.uCh, 3);
-    gl.uniform2f(uh.uStep, 1 / down[0].w, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    bind(13, haloA);
-    into(haloB);
-    gl.uniform1i(uh.uCh, 0);
-    gl.uniform2f(uh.uStep, 0, 1 / down[0].h);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE11);
+    gl.generateMipmap(gl.TEXTURE_2D);
   }
 
   // The film, to the canvas: cheap, so it alone runs for each grain step.
@@ -1130,20 +906,17 @@ export async function createPasses(host) {
     if (W !== fw || Hc !== fh) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.useProgram(filmProg);
-    bind(10, scene);
-    bind(13, ups[0]);
-    bind(14, haloB);
     gl.viewport(0, 0, W, Hc);
-    gl.uniform2f(uf.uRes, W, Hc);
-    gl.uniform1f(uf.uNorm, NORM);
-    gl.uniform1f(uf.uSeed, seed);
-    gl.uniform1f(uf.uDay, day);
+    gl.uniform2f(uf.res, W, Hc);
+    gl.uniform2f(uf.half, 1 / Math.ceil(W / 2), 1 / Math.ceil(Hc / 2));
+    gl.uniform1f(uf.seed, seed);
+    gl.uniform1f(uf.day, day);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   return {
     destroy() {
-      all.forEach((t) => {
+      [scene, bright].forEach((t) => {
         gl.deleteFramebuffer(t.fbo);
         gl.deleteTexture(t.tex);
       });
