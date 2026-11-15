@@ -61,7 +61,11 @@ After it, clouds.py clears the plate's puffs and lays a photographed
 cumulus in their place (cumulus.py) and re-lights the panorama's as sunlit
 heaps (warm tops, blue bellies), once, then match.py (the panorama printed
 to the plate's sun, the same cumulus over the road behind the lens), then
-grade.py.
+grade.py, then reproject.py (the panorama toward the crossing and round to
+the left rebuilt from the plate alone: its point map marched as a surface
+from the mirror, the far side of the crossing turned over a plane through
+the lens, the plate's cobalt over both; it supersedes the splatted photo
+layer above, and needs match.py's env.webp kept beside it to run again).
 """
 import json
 import os

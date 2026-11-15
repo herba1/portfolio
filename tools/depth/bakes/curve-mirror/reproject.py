@@ -1,0 +1,316 @@
+"""Curve mirror, the last step: the glass's world rebuilt from the plate.
+
+    python3 -I tools/depth/bakes/curve-mirror/reproject.py SRC OUT
+
+      SRC: match.py's output (env.webp, envd.png, envc.png) beside the plate
+           as shipped (photo.webp, aux.png, scene.json)
+      OUT: public/lab/curve-mirror (env.webp, envd.png, envc.png)
+
+The panorama the bake gathers has two parts that never matched: the plate's
+own pixels, splatted from where the mirror stands (sparse, its depth edges
+torn open, so a far yaw showed the dark of whatever filled the holes), and,
+everywhere else, a 360 of another street under another sky. This step
+rebuilds everything above the road toward the crossing from the plate alone:
+
+  - the plate as a surface. aux.png's log depth is a height field over the
+    photo; each panorama ray from the mirror is marched through it (in z,
+    geometric steps) to its first crossing, kept only where the surface is
+    within a few percent of the ray there (a crossing found across a depth
+    edge is the ray passing behind a pole, not a hit), and the plate is
+    read where it hits. A ray the plate never saw (behind a pole, a lamp, the
+    crossbuck, the eave, from the mirror's side) is marched again through a
+    background plate: its foreground (anything well nearer than the far
+    side of a ~120 px neighbourhood) taken out and filled from round it. So
+    nothing is a hole, and nothing is splatted.
+  - the other side of the crossing. A crossing has its signal on both sides,
+    and the lens stands on it: the world beyond a vertical plane through the
+    lens, at the plate's left edge (PLANE_AZ), is the plate's own scene
+    turned over that plane, the same house, crossbuck, lamps and cumulus
+    behind the viewer's left shoulder, seen from where the mirror stands.
+    The two meet along the plane, where the plate's left edge meets itself.
+  - above both, out of the frame, the plate's graded clear sky by elevation
+    (sky_grade.target), deepening to the zenith: the cobalt round the mirror.
+    The plate's own edges fade into it over a few degrees.
+  - below the road's horizon and round behind the lens to the right (the
+    street the mirror watches at rest), the developed 360 stays as it was.
+
+The distances (envd) are the ray's own, so the engine's parallax across the
+0.8 m face holds; the cumulus matte (envc) is cleared where the plate now
+is, since the engine finds the plate's own cloud there by projecting
+(and turns a point beyond the plane back over it first: PLANE_AZ is in the
+engine too).
+"""
+import json
+import os
+import sys
+
+import cv2
+import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+import kit  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sky_grade  # noqa: E402
+
+SRC, OUT = sys.argv[1], sys.argv[2]
+PLANE_AZ = -36.0  # the turning plane's azimuth from the lens, degrees (+ right of its heading)
+STEPS = 150  # ray-march steps, geometric in distance
+T0, T1 = 0.15, 1600.0  # m
+THICK = (0.06, 0.06)  # a hit: |ray z - surface z| under 6 % + 6 cm
+BG_K = 121  # the background plate's neighbourhood, px at half resolution
+FEATHER = 5.0  # degrees: the plate's frame edge into the sky round it
+REGION = (-150.0, 52.0)  # azimuths (from the lens's heading) the plate's world replaces, degrees
+ZENITH = 58.0  # and everything above this elevation
+
+T = kit.Timer()
+sc = json.load(open(f"{SRC}/scene.json"))
+R = np.array(sc["R"], np.float64)
+f = sc["f"]
+cx, cy = sc["c"]
+PW, PH = sc["photo"]
+M = np.array(sc["mirror"], np.float64)
+D0, D1 = sc["dist"]
+dec = lambda c: np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).astype(np.float32)
+enc = lambda c: np.where(c <= 0.0031308, c * 12.92, 1.055 * np.power(np.clip(c, 0.0031308, None), 1 / 2.4) - 0.055)
+
+env = dec(cv2.imread(f"{SRC}/env.webp", cv2.IMREAD_COLOR)[..., ::-1].astype(np.float32) / 255)
+EH, EW = env.shape[:2]
+envd = cv2.imread(f"{SRC}/envd.png", cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+envc = cv2.imread(f"{SRC}/envc.png", cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+aux = cv2.imread(f"{SRC}/aux.png", cv2.IMREAD_COLOR)[..., ::-1].astype(np.float32) / 255
+AH, AW = aux.shape[:2]
+s2 = AW / PW  # aux is at half the plate's resolution
+plate = dec(cv2.imread(f"{SRC}/photo.webp", cv2.IMREAD_COLOR)[..., ::-1].astype(np.float32) / 255)
+plate_h = cv2.resize(plate, (AW, AH), interpolation=cv2.INTER_AREA)
+T.mark("load")
+
+# ---------------------------------------------------------------- the two layers
+# z (along the lens's axis) from the log code; the sky is the far plane
+L2 = lambda c: np.log2(D0) + c * (np.log2(1000.0) - np.log2(D0))
+dcode = aux[..., 0]
+sky = aux[..., 2]
+dcode = np.where(sky > 0.5, 1.0, dcode).astype(np.float32)
+lz0 = L2(dcode).astype(np.float32)  # log2 z
+# background: what stands well in front of the far side of its neighbourhood
+# is taken out and filled from what is round it, colour and depth alike
+far = cv2.dilate(dcode, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (BG_K, BG_K)))
+fg = dcode < far - 0.035
+# the sky right round a surface is its edge (its antialiasing, the scan's
+# sharpening halo): at infinity, from the mirror, it would hang beside the
+# surface as a pale outline of it, so it is filled from the sky further out
+solid = dcode < 0.98
+ring = kit.dilate(solid, 4) & ~solid
+keep = (~kit.dilate(fg, 4) & ~ring).astype(np.float32)
+lz1 = kit.pushpull(lz0, keep).astype(np.float32)
+plate_b = kit.pushpull(plate_h, keep).astype(np.float32)
+lz1 = np.maximum(lz1, lz0)  # never nearer than the plate itself
+plate_h = np.where(ring[..., None], plate_b, plate_h).astype(np.float32)
+# a depth edge (over a stop across 3 px) is no surface to hit: a ray that
+# crosses there is passing a silhouette, and goes on to the background
+edge = (cv2.dilate(lz0, np.ones((3, 3), np.uint8)) - cv2.erode(lz0, np.ones((3, 3), np.uint8)) > 1.0).astype(np.float32)
+print("background plate: %.1f%% of the frame taken out as foreground" % (100 * fg.mean()))
+T.mark("layers")
+
+# ---------------------------------------------------------------- panorama rays
+def dirs(w, h):
+    u = (np.arange(w, dtype=np.float32) + 0.5) / w
+    v = (np.arange(h, dtype=np.float32) + 0.5) / h
+    uu, vv = np.meshgrid(u, v)
+    lon = (uu - 0.5) * 2 * np.pi
+    lat = (0.5 - vv) * np.pi
+    return np.stack([np.cos(lat) * np.sin(lon), np.sin(lat), -np.cos(lat) * np.cos(lon)], -1).astype(np.float32)
+
+
+E = dirs(EW, EH)
+el = np.degrees(np.arcsin(np.clip(E[..., 1], -1, 1)))
+az = np.degrees(np.arctan2(E[..., 0], -E[..., 2]))
+# the turning plane: vertical, through the lens, at PLANE_AZ; its normal
+# points to the plate's side
+pa = np.radians(PLANE_AZ)
+nP = np.array([np.cos(pa), 0.0, np.sin(pa)])  # horizontal, perpendicular to (sin a, 0, -cos a)
+assert abs(nP @ np.array([np.sin(pa), 0, -np.cos(pa)])) < 1e-9
+if nP @ np.array([np.sin(np.radians(10)), 0, -np.cos(np.radians(10))]) < 0:
+    nP = -nP
+refl = lambda v: v - 2 * (v @ nP)[..., None] * nP
+assert M @ nP > 0, "the mirror stands on the plate's side of the plane"
+Mr = refl(M[None])[0]
+
+
+def samp(img, u, v):
+    """Bilinear reads of img at the points (u, v), px: in rows of 1024 (remap's own limit)."""
+    n = len(u)
+    if n == 0:
+        return np.zeros((0,) + img.shape[2:], np.float32)
+    m = -(-n // 1024) * 1024
+    uu = np.zeros(m, np.float32)
+    vv = np.zeros(m, np.float32)
+    uu[:n] = u
+    vv[:n] = v
+    r = cv2.remap(img, uu.reshape(-1, 1024), vv.reshape(-1, 1024), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return r.reshape(m, -1)[:n] if img.ndim == 3 else r.reshape(m)[:n]
+
+
+def march(O, Dv, tmin, tmax, lz, col, thick, edges=None):
+    """First crossing of rays O + t D (t in [tmin, tmax]) through the height
+    field lz (log2 z over the half-res plate). Returns colour, t, hit."""
+    n = len(Dv)
+    out = np.zeros((n, 3), np.float32)
+    th = np.full(n, np.inf, np.float32)
+    hit = np.zeros(n, bool)
+    ts = np.geomspace(T0, T1, STEPS).astype(np.float32)
+    prev = np.full(n, np.nan, np.float32)
+    prev_t = np.zeros(n, np.float32)
+    Rt = R.astype(np.float32)
+    for t in ts:
+        act = ~hit & (t >= tmin) & (t <= tmax * 1.0001)
+        idx = np.nonzero(act)[0]
+        if len(idx) == 0:
+            if (t > tmax).all():
+                break
+            continue
+        X = O[idx] + Dv[idx] * t if O.ndim == 2 else O[None] + Dv[idx] * t
+        cam = X @ Rt  # camera coordinates (world = R cam)
+        z = -cam[:, 2]
+        ok = z > 0.05
+        zs = np.maximum(z, 0.05)
+        u = (cx + f * cam[:, 0] / zs) * s2 - 0.5
+        v = (cy - f * cam[:, 1] / zs) * s2 - 0.5
+        inside = ok & (u >= 0) & (u <= AW - 1) & (v >= 0) & (v <= AH - 1)
+        ls = samp(lz, u, v)
+        diff = np.where(inside, np.log2(zs) - ls, np.nan).astype(np.float32)
+        p = prev[idx]
+        cross = inside & (p < 0) & (diff >= 0)
+        if cross.any():
+            # refine: linear in log z between the two samples
+            k = np.nonzero(cross)[0]
+            w = p[k] / (p[k] - diff[k])
+            tt = prev_t[idx[k]] * (1 - w) + t * w
+            Xk = (O[idx[k]] if O.ndim == 2 else O[None]) + Dv[idx[k]] * tt[:, None]
+            ck = Xk @ Rt
+            zk = np.maximum(-ck[:, 2], 0.05)
+            uk = ((cx + f * ck[:, 0] / zk) * s2 - 0.5).astype(np.float32)
+            vk = ((cy - f * ck[:, 1] / zk) * s2 - 0.5).astype(np.float32)
+            zsk = np.exp2(samp(lz, uk, vk))
+            good = np.abs(zk - zsk) < thick[0] * zsk + thick[1]
+            if edges is not None:
+                good &= samp(edges, uk, vk) < 0.5
+            g = idx[k[good]]
+            out[g] = samp(col, uk[good], vk[good])
+            th[g] = tt[good]
+            hit[g] = True
+            # the frame's edge, for the feather: px in from the nearest side
+        prev[idx] = diff
+        prev_t[idx] = t
+    return out, th, hit
+
+
+def frame_in(O, Dv, t):
+    """How far inside the plate's frame each hit lands, degrees (f px/deg)."""
+    X = (O if O.ndim == 2 else O[None]) + Dv * t[:, None]
+    cam = X @ R.astype(np.float32)
+    z = np.maximum(-cam[:, 2], 0.05)
+    u = cx + f * cam[:, 0] / z
+    v = cy - f * cam[:, 1] / z
+    pin = np.minimum(np.minimum(u, PW - u), np.minimum(v, PH - v))
+    return pin / (f * np.pi / 180)
+
+
+# the rays to trace: above the road, toward the crossing and round the left
+rows = (el > -20) & (el < 75)
+front = rows & (az > -70) & (az < 70)
+d_all = E.reshape(-1, 3)
+dn = d_all @ nP.astype(np.float32)
+Mn = float(M @ nP)
+t_pl = np.where(dn < -1e-6, Mn / np.maximum(-dn, 1e-6), np.inf).astype(np.float32)  # where a ray meets the plane
+
+col = np.zeros((EH * EW, 3), np.float32)
+tt = np.full(EH * EW, 1000.0, np.float32)
+cov = np.zeros(EH * EW, np.float32)
+has = np.zeros(EH * EW, bool)  # the plate's side is seen first: a ray hits it before the plane
+
+for name, sel, O, Dfun, tlim in (
+    ("front", front.reshape(-1), M.astype(np.float32), lambda d: d, lambda i: (np.zeros(len(i), np.float32), t_pl[i])),
+    ("turned", (rows & (dn.reshape(EH, EW) < 0)).reshape(-1), Mr.astype(np.float32), lambda d: refl(d).astype(np.float32), lambda i: (t_pl[i], np.full(len(i), np.inf, np.float32))),
+):
+    ids = np.nonzero(sel & ~has)[0]
+    print(name, len(ids), "rays", flush=True)
+    for c0 in range(0, len(ids), 400000):
+        i = ids[c0:c0 + 400000]
+        Dv = Dfun(d_all[i])
+        tmin, tmax = tlim(i)
+        c1, t1, h1 = march(O, Dv, tmin, tmax, lz0, plate_h, THICK, edge)
+        miss = np.nonzero(~h1)[0]
+        if len(miss):
+            c2, t2, h2 = march(O, Dv[miss], tmin[miss], tmax[miss], lz1, plate_b, (0.25, 0.3))
+            c1[miss[h2]] = c2[h2]
+            t1[miss[h2]] = t2[h2]
+            h1[miss[h2]] = True
+        hi = np.nonzero(h1)[0]
+        pin = frame_in(O, Dv[hi], t1[hi])
+        w = kit.smoothstep(0.0, FEATHER, pin).astype(np.float32)
+        col[i[hi]] = c1[hi]
+        tt[i[hi]] = t1[hi]
+        cov[i[hi]] = w
+        has[i[hi]] = True
+    T.mark(name)
+
+col = col.reshape(EH, EW, 3)
+tt = tt.reshape(EH, EW)
+cov = cov.reshape(EH, EW)
+
+# ---------------------------------------------------------------- the 360's print
+# What stays of the 360 (the street behind the lens to the right) is printed
+# nearer the plate: shot under cloud and lifted in its development, it still
+# read as a grey street pasted into the glass. Its surfaces (not its sky,
+# which is already the plate's) are taken down through the mids (L^1.25, so
+# the median lands about a fifth lower and lit faces keep their white), and
+# given a little more of their own colour, warmed toward the lit side, as a
+# sunlit street under this sky has.
+def street_print(c, el):
+    s_ = np.clip(enc(c), 0, 1).astype(np.float32)
+    lab = cv2.cvtColor(s_, cv2.COLOR_RGB2Lab)
+    x = lab[..., 0] / 100
+    chs = (s_[..., 2] - s_[..., 0]) / np.maximum(s_[..., 2], 1e-3)
+    w = (1 - kit.smoothstep(0.12, 0.25, chs) * kit.smoothstep(-4, 2, el)) * kit.smoothstep(45, 35, el)
+    w = cv2.GaussianBlur(w.astype(np.float32), (0, 0), 1.5)
+    lab2 = np.dstack([100 * np.clip(x, 0, 1) ** 1.25, lab[..., 1] * 1.15, lab[..., 2] * 1.15 + 2.5 * np.clip(2 * x, 0, 1)]).astype(np.float32)
+    o = dec(np.clip(cv2.cvtColor(lab2, cv2.COLOR_Lab2RGB), 0, 1))
+    return c * (1 - w[..., None]) + o * w[..., None]
+
+
+env = street_print(env, el)
+T.mark("street")
+
+# ---------------------------------------------------------------- compose
+# the plate's world: its sky by elevation where the plate does not reach,
+# the plate where it does
+skyc = sky_grade.target(el).astype(np.float32)
+world = skyc * (1 - cov[..., None]) + col * cov[..., None]
+dist = np.where(cov > 0.5, tt, 1000.0)
+# where it replaces the 360: toward the crossing and round to the left, above
+# the road's horizon, and the whole sky overhead; feathered in angle
+azw = kit.smoothstep(REGION[0], REGION[0] + 8, az) * kit.smoothstep(REGION[1], REGION[1] - 6, az)
+elw = kit.smoothstep(-3.0, 3.0, el)
+reg = np.maximum(azw * elw, kit.smoothstep(ZENITH - 6, ZENITH, el))
+# below the horizon, the plate still wins where it reaches (the road under the
+# crossing is the plate's own, wherever the frame saw it)
+reg = np.maximum(reg, cov * azw).astype(np.float32)
+reg = cv2.GaussianBlur(reg, (0, 0), 1.5)
+env2 = env * (1 - reg[..., None]) + world * reg[..., None]
+
+dold = np.exp2(L2(cv2.resize(envd, (EW, EH), interpolation=cv2.INTER_LINEAR)))
+dnew = np.exp(np.log(dold) * (1 - reg) + np.log(np.maximum(dist, D0)) * reg)
+code = np.clip((np.log2(np.minimum(dnew, 1000)) - np.log2(D0)) / (np.log2(1000) - np.log2(D0)), 0, 1)
+code = cv2.resize(code.astype(np.float32), (envd.shape[1], envd.shape[0]), interpolation=cv2.INTER_AREA)
+regs = cv2.resize(reg, (envc.shape[1], envc.shape[0]), interpolation=cv2.INTER_AREA)
+envc2 = envc * (1 - regs)
+T.mark("compose")
+
+os.makedirs(OUT, exist_ok=True)
+kit.save_rgb(f"{OUT}/env.webp", enc(np.clip(env2, 0, 1)), quality=84)
+kit.save_gray(f"{OUT}/envd.png", code)
+kit.save_gray(f"{OUT}/envc.png", envc2)
+prev = cv2.resize(enc(np.clip(env2, 0, 1)), (2048, 1024), interpolation=cv2.INTER_AREA)
+kit.save_rgb(f"{SRC}/env-reproject-preview.jpg", prev, quality=88)
+T.mark("write")

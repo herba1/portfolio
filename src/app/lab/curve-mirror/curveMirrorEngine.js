@@ -4,20 +4,25 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // Curve mirror (カーブミラー): a roadside convex traffic mirror on an orange
 // pole, standing in a real photograph of a Kyoto level crossing. Drag to turn
 // it on its bracket (as far as a real one turns, against sprung stops) and
-// the reflection sweeps the street behind you, the house, the crossing and
-// the sky; at one angle it catches the sun.
+// the reflection sweeps the street behind you, the house, the far side of
+// the crossing and the sky; at one angle it catches the sun.
 //
 // The photograph is measured: MoGe-2 gives every pixel a metric position, the
 // poles' vanishing point gives the true vertical (the lens is tilted up 22.6
 // degrees), the house's shading gives the sun. Offline, everything the mirror
 // can see is gathered into one panorama centred on it: in front of the lens,
-// the photograph's own pixels re-projected from where the mirror stands; behind
-// the lens and below the frame, a 360 of a Japanese residential street, poles
-// and wires, given the photo's summer sky (bake: tools/depth/bakes/curve-mirror).
+// the photograph itself, its depth marched as a surface from where the mirror
+// stands (reproject.py: no holes, no splats); beyond a vertical plane through
+// the lens at the plate's left edge, the far side of the crossing, the
+// plate's own scene turned over that plane (its house, crossbuck and cumulus
+// behind the viewer's left shoulder); over both the plate's cobalt by
+// elevation; and behind the lens to the right and below the road's horizon,
+// a 360 of a Japanese residential street, poles and wires, given the photo's
+// summer sky and printed nearer the plate (bake: tools/depth/bakes/curve-mirror).
 //
 // Every frame, per pixel:
-//  - the mirror is traced exactly: a sphere cap, 800 mm across with a 1.6 m
-//    radius of curvature (a real acrylic road mirror's), the view ray
+//  - the mirror is traced exactly: a sphere cap, 800 mm across with a 1 m
+//    radius of curvature (the strongly convex, wide-angle kind), the view ray
 //    reflected off it, corrected for parallax across the face with the
 //    panorama's distances, filtered by its own spread (ray differentials);
 //  - the frame (a deep band with a visor over its top), back shell, bracket
@@ -72,7 +77,7 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 // into the sky round the frame and leave a pale rim there.
 //
 // Query: ?aim=yaw,pitch (degrees) holds the mirror still, no reveal;
-// ?aim=sun holds it on the sun.
+// ?aim=sun holds it on the sun; ?aim=hero on the far side of the crossing.
 
 const BASE = "/lab/curve-mirror/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -80,7 +85,7 @@ const DEG = Math.PI / 180;
 
 // mirror geometry, metres
 const A = 0.4; // face radius (800 mm)
-const RC = 1.6; // radius of curvature
+const RC = 1.0; // radius of curvature: a strongly convex dome, the wide-angle kind
 // The mount, as real ones are built: the pole ends in a capped top with a
 // clamp band; a bracket arm runs forward from the band, rising a little, to a
 // yoke that holds the hinge knuckle bolted to the shell's back. The head
@@ -105,8 +110,17 @@ const FRAME_D = 0.07;
 const FRAME_W = 0.036;
 const HOOD = 0.11;
 const HOOD_ARC = 80;
+// The other side of the crossing: beyond a vertical plane through the lens
+// at this azimuth (degrees right of its heading, the plate's left edge) the
+// panorama is the plate's own scene turned over it (reproject.py, which
+// holds the same number).
+const PLANE_AZ = -36;
 // rest aim (relative to facing the lens) and limits, degrees
 const REST = [20, -15];
+// The hero aim (?aim=hero): turned toward the far side of the crossing and
+// tipped up, so the glass holds the crossbuck and the cumulus behind the
+// viewer against the deep cobalt over them.
+const HERO = [-40, 5];
 // What the bracket can do. The arm's clamp band turns on the pole, but the
 // yoke's stops (and the street the mirror is bolted to watch) hold the face
 // within 65 degrees of the lens either way, so its back, the bare pressed
@@ -187,6 +201,7 @@ uniform float uPx;         // angular size of one render pixel (rad)
 
 const float A = ${A.toFixed(4)};
 const float RC = ${RC.toFixed(4)};
+const vec3 PLANE_N = vec3(${Math.cos(PLANE_AZ * DEG).toFixed(5)}, 0.0, ${Math.sin(PLANE_AZ * DEG).toFixed(5)});
 const float HINGE = ${HINGE.toFixed(4)};
 const float ARM = ${ARM.toFixed(4)};
 const float POLE_DROP = ${POLE_DROP.toFixed(4)};
@@ -725,7 +740,11 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // 360's distances only hold below it, so there the two are told by their
   // neighbourhood, warm or grey, not blue and bright.
   float dE = envDist(dir);
-  vec3 cam = transpose(uR) * (uM + dir * dE);
+  // beyond the turning plane the world is the plate's scene turned over it
+  // (reproject.py): a point there is the plate's, turned back
+  vec3 X = uM + dir * dE;
+  X -= 2.0 * min(dot(X, PLANE_N), 0.0) * PLANE_N;
+  vec3 cam = transpose(uR) * X;
   vec2 ppx = uC + uF * vec2(cam.x, -cam.y) / max(-cam.z, 1e-4);
   float pin = min(min(ppx.x, uPhotoSize.x - ppx.x), min(ppx.y, uPhotoSize.y - ppx.y));
   float fromPhoto = cam.z < 0.0 ? smoothstep(0.0, 160.0, pin) : 0.0;
@@ -1754,7 +1773,10 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
 
   let held = false;
   let aimInit = [...REST];
-  if (aimQ === "sun") {
+  if (aimQ === "hero") {
+    held = true;
+    aimInit = [...HERO];
+  } else if (aimQ === "sun") {
     held = true;
     aimInit = sunAim;
     console.log("curve-mirror sunAim", sunAim.map((x) => x.toFixed(1)).join(","));
