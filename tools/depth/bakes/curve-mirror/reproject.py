@@ -4,7 +4,7 @@
 
       SRC: match.py's output (env.webp, envd.png, envc.png) beside the plate
            as shipped (photo.webp, aux.png, scene.json)
-      OUT: public/lab/curve-mirror (env.webp, envd.png, envc.png)
+      OUT: public/lab/curve-mirror (env.webp, envd.png, envc.png, envb.webp)
 
 The panorama the bake gathers has two parts that never matched: the plate's
 own pixels, splatted from where the mirror stands (sparse, its depth edges
@@ -51,11 +51,27 @@ rebuilds everything above the road toward the crossing from the plate alone:
 
     REPROJECT_CACHE=/path/march.npz keeps the march between runs.
 
-The distances (envd) are the ray's own, so the engine's parallax across the
-0.8 m face holds; the cumulus matte (envc) is cleared where the plate now
-is, since the engine finds the plate's own cloud there by projecting
-(and turns a point beyond the plane back over it first: PLANE_AZ is in the
-engine too).
+The distances (envd's red) are the ray's own, so the engine's parallax across
+the 0.8 m face holds: it marches each reflected ray through them, read
+unfiltered, to its first true surface, so they are taken down by the nearest
+surface, never averaged across a silhouette. What a near board hides from the
+panorama's centre (a ray from the face that slips behind it) is read from a
+far layer (envb.webp, its distance in envd's green): the panorama with its
+thin foreground taken out and filled over the clear sky by elevation. envd's
+blue is the panorama's own sky matte, which the engine reads behind the plane
+(the plate projected from where it was shot puts its roofs where the mirror
+sees the far side's low sky). The cumulus matte (envc) is cleared where the
+plate now is, since the engine finds the plate's own cloud there by
+projecting (and turns a point beyond the plane back over it first: PLANE_AZ
+is in the engine too). On the far side the plate's own cloud is cleared:
+the tower is its one cloud there.
+
+The march: each crossing is bisected (REFINE) before it is tested, and on a
+depth edge the height field is read at its nearest pixel, never blended, with
+a board's thickness (EDGE_THICK) and only on a body, not a wire (THIN): the
+turned crossbuck and its poles are one opaque first hit, not a pole broken
+into dashes over the sky. A ray carried on through the background plate
+reads the background's sky matte, so the fill behind the crossbuck is sky.
 """
 import json
 import os
@@ -77,13 +93,19 @@ import sky_grade  # noqa: E402
 SRC, OUT = sys.argv[1], sys.argv[2]
 PLANE_AZ = -36.0  # the turning plane's azimuth from the lens, degrees (+ right of its heading)
 STEPS = 150  # ray-march steps, geometric in distance
+REFINE = 6  # halvings of a crossing's bracket before it is tested
 T0, T1 = 0.15, 1600.0  # m
 THICK = (0.06, 0.06)  # a hit: |ray z - surface z| under 6 % + 6 cm
+EDGE_THICK = (0.01, 0.03)  # and on a depth edge, a board's or a pole's thickness
+THIN = 13  # of the 25 px round a pixel, fewer than this at its depth: a wire, not a body
 BG_K = 121  # the background plate's neighbourhood, px at half resolution
 FEATHER = 5.0  # degrees: the plate's surfaces at its frame edge into the sky round it
 SKY_FEATHER = 12.0  # degrees: a cloud eroded toward a cut (the frame's edge, the heap's)
 WOBBLE = (3.0, 4.0)  # that cut's line roughened: degrees, and the noise's scale (degrees)
 HEAP_CUT = 2800.0  # px in match.py's virtual camera: where its heap's source frame cut it
+ENVD = (2048, 1024)  # the distance panorama's size (env.webp's over 2), and the far layer's
+BG_E = 81  # px (4096 equirect, 7 degrees): the far layer's neighbourhood
+FG_NEAR = 80.0  # m: only what is nearer than this is foreground to it
 REGION = (-150.0, 52.0)  # azimuths (from the lens's heading) the plate's world replaces, degrees
 REGION_SKY = 22.0  # degrees: the crossfade in azimuth where both sides are sky
 ZENITH = (40.0, 70.0)  # and everything above, crossfaded over these elevations
@@ -138,11 +160,19 @@ ring = kit.dilate(solid, 4) & ~solid
 keep = (~kit.dilate(fg, 4) & ~ring).astype(np.float32)
 lz1 = kit.pushpull(lz0, keep).astype(np.float32)
 plate_b = kit.pushpull(plate_h, keep).astype(np.float32)
+sky_b = kit.pushpull(sky, keep).astype(np.float32)
 lz1 = np.maximum(lz1, lz0)  # never nearer than the plate itself
 plate_h = np.where(ring[..., None], plate_b, plate_h).astype(np.float32)
-# a depth edge (over a stop across 3 px) is no surface to hit: a ray that
-# crosses there is passing a silhouette, and goes on to the background
+# a depth edge (over a stop across 3 px): there the height field is read at
+# its nearest pixel, never blended (sampx), so the pole stands on one side of
+# it at its own depth and the sky on the other, and a ray that crosses there
+# is a hit on the pole only if it lands on it (passing behind, it goes on)
 edge = (cv2.dilate(lz0, np.ones((3, 3), np.uint8)) - cv2.erode(lz0, np.ones((3, 3), np.uint8)) > 1.0).astype(np.float32)
+# thin: a pixel with few neighbours at its own depth (THIN: fewer than
+# that many of the 5 x 5 round it within a third of a stop), a wire
+lzp = cv2.copyMakeBorder(lz0, 2, 2, 2, 2, cv2.BORDER_REPLICATE)
+same = sum((np.abs(lzp[2 + dy:2 + dy + AH, 2 + dx:2 + dx + AW] - lz0) < 0.33).astype(np.uint8) for dy in range(-2, 3) for dx in range(-2, 3))
+thin = (same < THIN).astype(np.float32)
 print("background plate: %.1f%% of the frame taken out as foreground" % (100 * fg.mean()))
 T.mark("layers")
 
@@ -171,7 +201,7 @@ assert M @ nP > 0, "the mirror stands on the plate's side of the plane"
 Mr = refl(M[None])[0]
 
 
-def samp(img, u, v):
+def samp(img, u, v, interp=cv2.INTER_LINEAR):
     """Bilinear reads of img at the points (u, v), px: in rows of 1024 (remap's own limit)."""
     n = len(u)
     if n == 0:
@@ -181,8 +211,20 @@ def samp(img, u, v):
     vv = np.zeros(m, np.float32)
     uu[:n] = u
     vv[:n] = v
-    r = cv2.remap(img, uu.reshape(-1, 1024), vv.reshape(-1, 1024), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    r = cv2.remap(img, uu.reshape(-1, 1024), vv.reshape(-1, 1024), interp, borderMode=cv2.BORDER_REPLICATE)
     return r.reshape(m, -1)[:n] if img.ndim == 3 else r.reshape(m)[:n]
+
+
+def sampx(img, u, v, edges):
+    """samp, but on a depth edge (edges: 1 within a pixel of one) the nearest
+    pixel instead: a bilinear read there is a blend of the pole and the sky
+    behind it, a surface that is neither, and the colour of neither."""
+    lin = samp(img, u, v)
+    if edges is None or len(u) == 0:
+        return lin
+    e = samp(edges, u, v, cv2.INTER_NEAREST) > 0.5
+    nn = samp(img, u, v, cv2.INTER_NEAREST)
+    return np.where(e[:, None] if lin.ndim == 2 else e, nn, lin)
 
 
 def march(O, Dv, tmin, tmax, lz, col, thick, edges=None):
@@ -211,37 +253,79 @@ def march(O, Dv, tmin, tmax, lz, col, thick, edges=None):
         u = (cx + f * cam[:, 0] / zs) * s2 - 0.5
         v = (cy - f * cam[:, 1] / zs) * s2 - 0.5
         inside = ok & (u >= 0) & (u <= AW - 1) & (v >= 0) & (v <= AH - 1)
-        ls = samp(lz, u, v)
+        ls = sampx(lz, u, v, edges)
         diff = np.where(inside, np.log2(zs) - ls, np.nan).astype(np.float32)
         p = prev[idx]
         cross = inside & (p < 0) & (diff >= 0)
         if cross.any():
-            # refine: linear in log z between the two samples
+            # refine: bisected to the crossing (REFINE halvings), then linear
+            # in log z across the last bracket. A linear step across the
+            # whole bracket mixed two surfaces whenever the step straddled a
+            # silhouette (the background's depth before it, the pole's after),
+            # landed between them and failed the test below, so a pole seen
+            # from the turned side broke up into dashes over the sky.
             k = np.nonzero(cross)[0]
-            w = p[k] / (p[k] - diff[k])
-            tt = prev_t[idx[k]] * (1 - w) + t * w
-            Xk = (O[idx[k]] if O.ndim == 2 else O[None]) + Dv[idx[k]] * tt[:, None]
+            g_ = idx[k]
+            O_ = O[g_] if O.ndim == 2 else O[None]
+            lo_t, hi_t = prev_t[g_].copy(), np.full(len(k), t, np.float32)
+            lo_d, hi_d = p[k].copy(), diff[k].copy()
+            for _ in range(REFINE):
+                mt = 0.5 * (lo_t + hi_t)
+                md = depth_diff(O_, Dv[g_], mt, lz, edges)
+                below = ~(md >= 0)  # in front of the surface (or off the plate: keep the far end)
+                lo_t = np.where(below, mt, lo_t)
+                lo_d = np.where(below, md, lo_d)
+                hi_t = np.where(below, hi_t, mt)
+                hi_d = np.where(below, hi_d, md)
+            lo_d = np.nan_to_num(lo_d, nan=-1.0)
+            w = np.clip(lo_d / np.minimum(lo_d - hi_d, -1e-6), 0, 1)
+            tt = lo_t * (1 - w) + hi_t * w
+            Xk = O_ + Dv[g_] * tt[:, None]
             ck = Xk @ Rt
             zk = np.maximum(-ck[:, 2], 0.05)
             uk = ((cx + f * ck[:, 0] / zk) * s2 - 0.5).astype(np.float32)
             vk = ((cy - f * ck[:, 1] / zk) * s2 - 0.5).astype(np.float32)
-            zsk = np.exp2(samp(lz, uk, vk))
-            good = np.abs(zk - zsk) < thick[0] * zsk + thick[1]
+            zsk = np.exp2(sampx(lz, uk, vk, edges))
+            # kept only on the surface: a crossing at a silhouette that ends
+            # far behind it is the ray passing behind the pole, not a hit
+            # (on an edge to a board's or a pole's own thickness, EDGE_THICK:
+            # any more and the board is extruded back along the ray into a slab)
+            tk = thick
             if edges is not None:
-                good &= samp(edges, uk, vk) < 0.5
+                on_e = samp(edges, uk, vk, cv2.INTER_NEAREST) > 0.5
+                tk = (np.where(on_e, EDGE_THICK[0], thick[0]), np.where(on_e, EDGE_THICK[1], thick[1]))
+            good = np.abs(zk - zsk) < tk[0] * zsk + tk[1]
+            if edges is not None:
+                # a wire is a pixel or two across the height field, too thin
+                # to be hit at its nearest pixel more than here and there:
+                # it would land in the sky as a trail of dots, so on an edge
+                # only a body (THIN) is a hit; the wire is drawn by the sky's
+                # own pixels, which carry it
+                good &= ~(on_e & (samp(thin, uk, vk, cv2.INTER_NEAREST) > 0.5))
             g = idx[k[good]]
-            out[g] = samp(col, uk[good], vk[good])
+            out[g] = sampx(col, uk[good], vk[good], edges)
             th[g] = tt[good]
             hit[g] = True
-            # the frame's edge, for the feather: px in from the nearest side
         prev[idx] = diff
         prev_t[idx] = t
     return out, th, hit
 
 
-def frame_in(O, Dv, t):
+def depth_diff(O, Dv, t, lz, edges=None):
+    """log2 of the ray's z over the surface's at O + t D (nan off the plate)."""
+    X = O + Dv * t[:, None]
+    cam = X @ R.astype(np.float32)
+    z = -cam[:, 2]
+    zs = np.maximum(z, 0.05)
+    u = (cx + f * cam[:, 0] / zs) * s2 - 0.5
+    v = (cy - f * cam[:, 1] / zs) * s2 - 0.5
+    inside = (z > 0.05) & (u >= 0) & (u <= AW - 1) & (v >= 0) & (v <= AH - 1)
+    return np.where(inside, np.log2(zs) - sampx(lz, u.astype(np.float32), v.astype(np.float32), edges), np.nan).astype(np.float32)
+
+
+def frame_in(O, Dv, t, sky):
     """How far inside the plate's frame each hit lands, degrees (f px/deg),
-    and the plate's sky matte there (the hit is open sky or cloud)."""
+    and the sky matte sky there (the hit is open sky or cloud)."""
     X = (O if O.ndim == 2 else O[None]) + Dv * t[:, None]
     cam = X @ R.astype(np.float32)
     z = np.maximum(-cam[:, 2], 0.05)
@@ -287,13 +371,24 @@ for name, sel, O, Dfun, tlim in () if cached else (
         tmin, tmax = tlim(i)
         c1, t1, h1 = march(O, Dv, tmin, tmax, lz0, plate_h, THICK, edge)
         miss = np.nonzero(~h1)[0]
+        bgh = np.zeros(len(i), bool)
         if len(miss):
             c2, t2, h2 = march(O, Dv[miss], tmin[miss], tmax[miss], lz1, plate_b, (0.25, 0.3))
             c1[miss[h2]] = c2[h2]
             t1[miss[h2]] = t2[h2]
             h1[miss[h2]] = True
+            bgh[miss[h2]] = True
         hi = np.nonzero(h1)[0]
-        p_, k_ = frame_in(O, Dv[hi], t1[hi])
+        p_, k_ = frame_in(O, Dv[hi], t1[hi], sky)
+        # a ray carried on through the background plate reads its sky matte:
+        # behind the crossbuck and the poles (filled from round them) that is
+        # sky, not the board's 0, or the fill behind them, a flat smear of
+        # cloud seen past the board from the turned side, stood in the far
+        # side's sky as an opaque surface: a pale sheet the cloud matte could
+        # not touch, cut to the board's and the pole's outline
+        hb = np.nonzero(bgh[hi])[0]
+        if len(hb):
+            k_[hb] = frame_in(O, Dv[hi[hb]], t1[hi[hb]], sky_b)[1]
         col[i[hi]] = c1[hi]
         tt[i[hi]] = t1[hi]
         pin[i[hi]] = p_
@@ -492,6 +587,7 @@ FAR_PLACE = {"x": 300.0, "y": 180.0, "k": 0.56}
 # belly thins into the cobalt like a cloud's lee side.
 FAR_CUT = {"left": [[480, 800], [300, 1588]], "right": [[2300, 845], [2420, 1588]], "feather": 130, "foot": [1200, 1520]}
 FAR_WOB = (70.0, 110.0)  # px: the cuts' roughness, and its noise's scale
+FAR_DENSE = (0.45, 0.25)  # the density a shaded part keeps of a sunlit one's, and its break-up noise
 
 
 def far_heap(c, sk):
@@ -525,7 +621,24 @@ def far_heap(c, sk):
 
     ramp = side(FAR_CUT["left"], FAR_W) * side(FAR_CUT["right"], 0)
     ramp = ramp * kit.smoothstep(FAR_CUT["foot"][1], FAR_CUT["foot"][0], ys + wob)
-    k = erode_by(A, ramp.astype(np.float32))
+    # Eroded by its density, not its matte: inside the heap the matte is 1
+    # throughout, so taken off the matte the ramp was a sheet fading as one
+    # (the flat white belly over the cobalt, its flank a ruled line). A
+    # cumulus is densest in its sunlit florets and thinnest in the shaded
+    # gaps between them and in its belly, so the density is the matte
+    # weighted by the cloud's own lightness (its florets lit, its shade not),
+    # broken by a fine noise: the gaps and the belly go first, the turrets
+    # last, and the heap ends on its own lumpy outline (FAR_DENSE).
+    lum = kit.luma(C) / np.maximum(A, 1e-3)
+    lum = cv2.GaussianBlur(lum.astype(np.float32), (0, 0), 6.0)
+    lo_, hi_ = np.percentile(lum[A > 0.9], [8, 92])
+    lit = np.clip((lum - lo_) / max(hi_ - lo_, 1e-4), 0, 1)
+    nf = cv2.GaussianBlur(rng.standard_normal((FAR_H // 4, FAR_W // 4)).astype(np.float32), (0, 0), 3.0)
+    nf = cv2.resize(nf / nf.std(), (FAR_W, FAR_H), interpolation=cv2.INTER_CUBIC)
+    dens = np.clip(A * (FAR_DENSE[0] + (1 - FAR_DENSE[0]) * lit) * (1 + FAR_DENSE[1] * nf), 0, 1).astype(np.float32)
+    k = np.clip(dens - (1 - ramp), 0, 1) / np.maximum(dens, 1e-3)
+    k = np.where(A > 0.02, k, ramp).astype(np.float32)
+    k = cv2.GaussianBlur(k, (0, 0), 1.5)
     A, C = A * k, C * k[..., None]
     new = v_lin * (1 - A[..., None]) + C
     out, _ = clouds._lay_over(v_lin, new.astype(np.float32), v_sky, clouds.SHRINK)
@@ -546,6 +659,18 @@ cov = kit.smoothstep(0.0, FEATHER, pin).astype(np.float32)
 ramp = kit.smoothstep(-1.0, SKY_FEATHER - 1.0, pin + wob).astype(np.float32)
 aw = kit.smoothstep(1.03, 1.6, kit.luma(col) / Lsky)
 kw = erode_by(aw, ramp)
+# The far side's sky is cleared of the plate's own cloud: turned over the
+# plane, the scrap the plate's frame cut at its right edge stood low on the
+# far side, a flat pale wash with the frame's straight edge under the belly
+# of the tower laid there (far_heap), and in the glass at the hero aim it
+# was the white sheet with a ruled edge at the lower left of the dome. The
+# tower is the far side's one cloud; a wire across that sky stays.
+turned = ((dn.reshape(EH, EW) < 0) & (tt > t_pl.reshape(EH, EW) * 0.999) & (pin > -90)).astype(np.float32)
+turned = cv2.GaussianBlur(turned, (0, 0), 3.0)
+lr_ = kit.luma(col) / Lsky
+sat_ = lambda c: (c.max(-1) - c.min(-1)) / np.maximum(c.max(-1), 1e-4)
+cloudy = np.maximum(kit.smoothstep(0.99, 1.12, lr_), kit.smoothstep(0.08, 0.3, 1 - sat_(col) / np.maximum(sat_(skyc), 1e-3)) * kit.smoothstep(0.8, 0.95, lr_))
+kw = kw * (1 - turned * cloudy)
 world = skyc * (1 - cov[..., None]) + col * cov[..., None]
 world_sky = skyc + (col - skyc) * kw[..., None]
 world = world * (1 - skh[..., None]) + world_sky * skh[..., None]
@@ -575,20 +700,63 @@ env2 = env * (1 - reg[..., None]) + world * reg[..., None]
 # (one carried on through the background plate behind the crossbuck or a
 # pole reads that surface's own sky matte, 0, but sees the sky)
 far_sky = np.maximum(sky_w, kit.smoothstep(150.0, 400.0, dist))
-env2, far_a = far_heap(env2, reg * far_sky + (1 - reg) * sky360)
+sky_all = np.clip(reg * far_sky + (1 - reg) * sky360, 0, 1).astype(np.float32)
+env2, far_a = far_heap(env2, sky_all)
 T.mark("far heap")
 
 dold = np.exp2(L2(cv2.resize(envd, (EW, EH), interpolation=cv2.INTER_LINEAR)))
 dnew = np.exp(np.log(dold) * (1 - reg) + np.log(np.maximum(dist, D0)) * reg)
 code = np.clip((np.log2(np.minimum(dnew, 1000)) - np.log2(D0)) / (np.log2(1000) - np.log2(D0)), 0, 1)
-code = cv2.resize(code.astype(np.float32), (envd.shape[1], envd.shape[0]), interpolation=cv2.INTER_AREA)
+# envd is read unfiltered by the engine's march, which needs every texel to
+# be one surface's distance: averaged down, a texel on the crossbuck's edge
+# held a distance between the board's and the sky's, and every ray passing
+# behind the board at that distance found the board's edge there, a ghost
+# outline of it at the wrong parallax beside the board itself. So it is
+# taken down by the nearest surface (a pixel's grown by one first, so the
+# board's antialiased rim in env.webp travels with the board), at ENVD.
+k_ = EW // ENVD[0]
+code = code.astype(np.float32)
+code_n = cv2.erode(code, np.ones((3, 3), np.uint8))
+code_n = code_n.reshape(EH // k_, k_, EW // k_, k_).min((1, 3))
+# The far layer (envb.webp, and its distance in envd's green). From a point
+# of the face off the panorama's centre a near board stands against another
+# part of the sky than the one it hides from the centre, and the march finds
+# rays that slip behind it: what they see the panorama cannot hold, so it
+# holds it beside: the panorama with its thin foreground (anything well
+# nearer than the far side of a BG_E neighbourhood, within FG_NEAR: the
+# crossbuck, the poles, the lamps, the wires) taken out and filled from
+# round it, as the background plate is. Behind the board, the cobalt and
+# the tower; never the board again.
+farc = cv2.dilate(code, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (BG_E, BG_E)))
+fgE = (code < farc - 0.06) & (dnew < FG_NEAR)
+keepE = (~kit.dilate(fgE, 3)).astype(np.float32)
+# filled as what stands over the clear sky by elevation (skyc), so a gap low
+# behind the board takes the cobalt of its own elevation, not the paler sky
+# under the board or the heap's belly beside it
+envb = np.maximum(skyc + kit.pushpull((env2 - skyc).astype(np.float32), keepE), 0).astype(np.float32)
+code_b = np.maximum(kit.pushpull(code, keepE), code)
+envb = cv2.resize(envb, ENVD, interpolation=cv2.INTER_AREA)
+code_b = cv2.resize(code_b.astype(np.float32), ENVD, interpolation=cv2.INTER_AREA)
+print("far layer: %.1f%% of the panorama taken out as foreground" % (100 * fgE.mean()))
 regs = cv2.resize(reg, (envc.shape[1], envc.shape[0]), interpolation=cv2.INTER_AREA)
 envc2 = np.maximum(envc * (1 - regs), cv2.resize(far_a, (envc.shape[1], envc.shape[0]), interpolation=cv2.INTER_AREA))
 T.mark("compose")
 
 os.makedirs(OUT, exist_ok=True)
 kit.save_rgb(f"{OUT}/env.webp", enc(np.clip(env2, 0, 1)), quality=84)
-kit.save_gray(f"{OUT}/envd.png", code)
+# envd: red, the nearest surface's distance (the march); green, the far
+# layer's; blue, the panorama's own sky matte. The engine told the sky in the
+# glass by projecting it back into the plate, which holds only from about
+# where the plate was shot: turned over the plane, the far side's low sky,
+# seen from the mirror over the roofs, projected onto the plate's roofs and
+# lamps, missed the cobalt's grade and stood pale, cut along the plate's
+# roofline (the flat white with a straight edge at the lower left of the
+# dome at the hero aim). Behind the plane it reads this matte instead.
+# (grown a pixel, as the red is, so the sky right at a board's rim, which the
+# march finds at the board's distance, is graded as the sky round it)
+sky_d = cv2.resize(cv2.dilate(sky_all, np.ones((3, 3), np.uint8)), ENVD, interpolation=cv2.INTER_AREA)
+kit.save_rgb(f"{OUT}/envd.png", np.dstack([code_n, code_b, sky_d]))
+kit.save_rgb(f"{OUT}/envb.webp", enc(np.clip(envb, 0, 1)), quality=80)
 kit.save_gray(f"{OUT}/envc.png", envc2)
 prev = cv2.resize(enc(np.clip(env2, 0, 1)), (2048, 1024), interpolation=cv2.INTER_AREA)
 kit.save_rgb(f"{SRC}/env-reproject-preview.jpg", prev, quality=88)

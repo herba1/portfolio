@@ -170,6 +170,7 @@ uniform sampler2D uEnvD;   // log distance code
 uniform sampler2D uAux;    // r: log z code, g: sunlit, b: sky
 uniform sampler2D uGrade;  // the plate's enamels: r yellow, g orange-red, b green (grade.py)
 uniform sampler2D uEnvC;   // the panorama's cumulus matte (match.py)
+uniform sampler2D uEnvB;   // its far layer: the foreground taken out (reproject.py)
 uniform vec4 uView;        // photo px: x0, y0 (top), w, h
 uniform vec2 uPhotoSize;
 uniform float uF;
@@ -251,9 +252,75 @@ vec3 env(vec3 d, float lod) { return textureLod(uEnv, envUv(d), lod).rgb; }
 // squeeze instead of the whole footprint being blurred to its widest axis.
 vec2 gEnvGx = vec2(0.0), gEnvGy = vec2(0.0);
 vec3 envGrad(vec3 d, float k) { return textureGrad(uEnv, envUv(d), gEnvGx * k, gEnvGy * k).rgb; }
-float envDist(vec3 d) {
-  float c = textureLod(uEnvD, envUv(d), 0.0).r;
+vec3 envGradB(vec3 d, float k) { return textureGrad(uEnvB, envUv(d), gEnvGx * k, gEnvGy * k).rgb; }
+// the far layer's distance (envd's green)
+float envDistB(vec3 d) {
+  float c = textureLod(uEnvD, envUv(d), 0.0).g;
   return exp2(mix(uDist.x, uDist.y, c));
+}
+// The distances read unfiltered: a bilinear read across a silhouette is
+// every distance between the board's and the sky's, and some ray passing
+// behind the board at each of them would find a surface there and smear the
+// board's edge along the parallax (the bake takes envd down by its nearest
+// surface for the same reason).
+float envDistN(vec3 d) {
+  ivec2 sz = textureSize(uEnvD, 0);
+  ivec2 ip = ivec2(floor(envUv(d) * vec2(sz)));
+  ip = ivec2((ip.x % sz.x + sz.x) % sz.x, clamp(ip.y, 0, sz.y - 1));
+  return exp2(mix(uDist.x, uDist.y, texelFetch(uEnvD, ip, 0).r));
+}
+// The first surface a ray from o (metres from the panorama's centre) along r
+// meets in the distance panorama: the point o + r t seen from the centre is
+// direction o s + r for s = 1/t, so stepping s evenly steps the direction
+// evenly across the face's whole parallax (from 0.8 m out to the sky). A
+// crossing (the point passing from in front of the panorama's surface to
+// behind it) is bisected to the surface and kept only if it lands on it: a
+// ray that slips behind a silhouette, many metres past the board, is not a
+// hit, and goes on to what lies behind it. A ray that ends behind a surface
+// without meeting anything (the panorama cannot know what the board hides
+// from its centre) takes the sky just beside the silhouette it slipped
+// behind, never the board's colour along its own direction, which drew the
+// board a second time, unshifted, beside the true one: it is read from the
+// far layer (uEnvB, the panorama with its foreground taken out) instead, at
+// that layer's own distance, and hid says so. Returns the direction from the
+// centre and, in dist, that surface's distance.
+vec3 envMarch(vec3 o, vec3 r, out float dist, out bool hid) {
+  const int NS = 56;
+  const float SMAX = 1.0 / 0.8;
+  float sp = SMAX, gp = -1.0;
+  hid = false;
+  for (int i = 0; i <= NS; i++) {
+    float s = max(SMAX * (1.0 - float(i) / float(NS)), 1.0e-3);
+    vec3 X = o * s + r;
+    float e = envDistN(normalize(X));
+    float g = length(X) / s - e;
+    if (g >= 0.0 && gp < 0.0) {
+      float lo = sp, hi = s, eh = e, gh = g;
+      if (i > 0) {
+        for (int k = 0; k < 6; k++) {
+          float m = 0.5 * (lo + hi);
+          vec3 Xm = o * m + r;
+          float em = envDistN(normalize(Xm));
+          float gm = length(Xm) / m - em;
+          if (gm >= 0.0) { hi = m; eh = em; gh = gm; } else lo = m;
+        }
+      }
+      if (gh < 0.12 * eh + 0.15 || s <= 1.0e-3) {
+        dist = eh;
+        hid = false;
+        return normalize(o * hi + r);
+      }
+      hid = true;
+    }
+    sp = s;
+    gp = g;
+  }
+  vec3 d = r;
+  for (int i = 0; i < 2; i++) {
+    dist = envDistB(d);
+    d = normalize(o + r * dist);
+  }
+  return d;
 }
 vec3 irradiance(vec3 n) {
   float x = n.x, y = n.y, z = n.z;
@@ -807,13 +874,18 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   vec2 w = vec2(sin(q.x * 31.0 + q.y * 7.0) + 0.6 * sin(q.y * 47.0 - q.x * 13.0), sin(q.y * 29.0 - q.x * 11.0) + 0.6 * sin(q.x * 53.0 + q.y * 5.0));
   vec3 Nn = normalize(Ng + (uX * w.x + uU * w.y) * 0.0009);
   vec3 r = reflect(d, Nn);
-  // parallax: the panorama is centred on the mirror at rest, the face is 0.8 m wide
+  // parallax: the panorama is centred on the mirror at rest, the face is
+  // 0.8 m wide, and the far side's crossbuck stands 3 to 4 m off it, so a
+  // point of the face sees it some six degrees from where the centre does.
+  // The reflected ray is marched through the distance panorama to its first
+  // true crossing (envMarch), so a near surface is found once, whole and
+  // opaque, rather than by a fixed-point guess that, across a silhouette,
+  // read the board's colour with the sky's distance and back (a ghosted,
+  // doubled crossbuck with the sky through it).
   vec3 o = P - uM;
-  vec3 dir = r;
-  for (int i = 0; i < 2; i++) {
-    float t = envDist(dir);
-    dir = normalize(o + r * t);
-  }
+  float dE;
+  bool hid;
+  vec3 dir = envMarch(o, r, dE, hid);
   // footprint of this pixel in the panorama (ray differentials), opened a
   // third of a mip past the box footprint: the plate is a scan of film, its
   // finest edge spread over a couple of pixels, and a reflection drawn any
@@ -821,7 +893,7 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // this street. (A wire is still one dark line, as the plate's own are.)
   float dust = dustAt(q.xy);
   float smudge = smudgeAt(q.xy);
-  vec3 c = envGrad(dir, exp2(0.35 + 2.5 * smudge));
+  vec3 c = hid ? envGradB(dir, exp2(0.35 + 2.5 * smudge)) : envGrad(dir, exp2(0.35 + 2.5 * smudge));
   // The 360 behind the lens is developed in the bake (develop.py): under the
   // photo's sun, colour-transferred band by band to the plate's sunlit walls
   // and paving, its road's highlights rolled off warm, its greens taken to
@@ -831,10 +903,10 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // above the horizon, where the 360 is surface rather than sky (above): the
   // 360's distances only hold below it, so there the two are told by their
   // neighbourhood, warm or grey, not blue and bright.
-  float dE = envDist(dir);
   // beyond the turning plane the world is the plate's scene turned over it
   // (reproject.py): a point there is the plate's, turned back
   vec3 X = uM + dir * dE;
+  float turned = step(dot(X, PLANE_N), 0.0);
   X -= 2.0 * min(dot(X, PLANE_N), 0.0) * PLANE_N;
   vec3 cam = transpose(uR) * X;
   vec2 ppx = uC + uF * vec2(cam.x, -cam.y) / max(-cam.z, 1e-4);
@@ -857,7 +929,14 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float el = degrees(asin(clamp(dir.y, -1.0, 1.0)));
   vec3 T0 = skyT(el);
   vec3 T1 = skyG(el);
-  float wPhoto = fromPhoto * texture(uAux, ppx / uPhotoSize).b;
+  // (behind the plane the panorama's own sky matte, envd's blue: the plate
+  // seen from where it was shot puts its roofs where the mirror sees sky)
+  float wPhoto = fromPhoto * mix(texture(uAux, ppx / uPhotoSize).b, textureLod(uEnvD, envUv(dir), 0.0).b, turned);
+  // a ray slipped behind a board reads the far layer, which is sky where it
+  // is blue: projected back to the plate from the centre it can land on the
+  // plate's own crossbuck and miss the sky's grade, a pale cut-out of it
+  // (its blue, and its cloud, brighter than the clear sky there)
+  if (hid) wPhoto = max(smoothstep(0.1, 0.25, (c.b - c.r) / max(c.b, 1e-3)), smoothstep(1.0, 1.3, dot(c, LUMA) / max(dot(T0, LUMA), 1e-4))) * smoothstep(-1.0, 4.0, el);
   float wPano = (1.0 - fromPhoto) * smoothstep(0.14, 0.26, nbC) * smoothstep(-1.0, 4.0, el) * (1.0 - above);
   float lr = dot(c, LUMA) / max(dot(T0, LUMA), 1e-4);
   float wSky = max(wPhoto, wPano) * smoothstep(0.35, 0.7, lr);
@@ -1737,7 +1816,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg] = await Promise.all([
+  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg, envbImg] = await Promise.all([
     fetch(BASE + "scene.json").then((r) => r.json()),
     loadImage(BASE + "photo.webp"),
     loadImage(BASE + "env.webp"),
@@ -1745,6 +1824,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     loadImage(BASE + "aux.png"),
     loadImage(BASE + "grade.png"),
     loadImage(BASE + "envc.png"),
+    loadImage(BASE + "envb.webp"),
   ]);
   const photo = imageTexture(gl, photoImg, { srgb: true, mips: true });
   const envT = imageTexture(gl, envImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
@@ -1754,6 +1834,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const aux = imageTexture(gl, auxImg);
   const gradeT = imageTexture(gl, gradeImg);
   const envC = imageTexture(gl, envcImg, { wrapS: gl.REPEAT });
+  const envB = imageTexture(gl, envbImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -2195,6 +2276,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       if (P === sceneP) bindTex(4, geoT.tex, u.uGeo);
       if (P === sceneP) bindTex(5, gradeT, u.uGrade);
       if (P === sceneP) bindTex(6, envC, u.uEnvC);
+      if (P === sceneP) bindTex(7, envB, u.uEnvB);
       gl.uniform2f(u.uRes, L.rw, L.rh);
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
       gl.viewport(0, 0, L.rw, L.rh);
