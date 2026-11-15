@@ -110,8 +110,8 @@ const FILM = {
 };
 // The plate is split three ways before the film (see PLATE), on a baked key
 // (tools/depth/bakes/catenary/key.py): R is the structure, the depth map's
-// near field snapped to the steel's edges; G and B are the sunlit cloud,
-// blurred thin and wide.
+// near field snapped to the steel's edges; G is the cumulus's feathered
+// matte (sky.py), B the sunlit cloud light, blurred wide.
 //  - Structure (mast, truss, platform, poles, and the live wires): as shot it
 //    carries the sky's cyan-cobalt, so the anchor sinks into it. It is drawn
 //    toward graphite, STRUCT of the way, keeping its own luminance texture,
@@ -154,7 +154,10 @@ const CLOUD_LIFT = 0.2;
 const CLOUD_FROM = 0.6;
 const SCULPT = 0.2;
 const SHADE_TINT = 0.6;
-const CLOUD_SHADE = [0x9d, 0xb6, 0xcf];
+// Hue 205, S 0.34: the film and the paper ease about a third of it off, so
+// the skylit body lands near S 0.25 (it was #9db6cf, which landed grey-blue
+// at S ~0.16 once the cumulus had a shaded side to show it).
+const CLOUD_SHADE = [0x8a, 0xb4, 0xd2];
 // Toward the sun, degrees in the photograph (0 right, 90 up): upper left,
 // where the cumulus tops are brightest as shot.
 const SUN = 125;
@@ -285,7 +288,9 @@ const PRINT_TOE_SAT = [0.6, 0.8];
 // Paper white, display values (luma-normalised at load). ?neutral=,
 // ?neutralFrom=, ?neutralTo= override PRINT_NEUTRAL.
 const PRINT_WHITE = [246, 243, 236];
-const PRINT_NEUTRAL = [196, 236, 0.92];
+// Neutral from 214: the cumulus's skylit body (sky.py's form term) sits at
+// about 190-220 and keeps its blue; only the sunlit billows go paper white.
+const PRINT_NEUTRAL = [214, 240, 0.92];
 
 // Structure toward graphite: luminance kept, lifted out of the black, a
 // slight warm bias. Shared by the plate and the live wires.
@@ -325,7 +330,7 @@ uniform vec2 uRes;   // device px
 uniform vec3 uMap;   // ox, oy, k (device px per view px)
 uniform mat3 uHom;   // view px -> image px: the turned camera
 uniform vec2 uImg;   // image px
-uniform sampler2D uKey; // R structure, G cloud light thin, B cloud light wide
+uniform sampler2D uKey; // R structure, G cloud matte, B cloud light wide
 uniform vec4 uStruct;  // amount, gain, floor, zenith
 uniform vec3 uStructTint;
 uniform vec3 uCloudTop; // linear
@@ -367,7 +372,10 @@ void main() {
   vec3 hm = rgb2hsv(pow(texture(uPlate, uv, 1.5).rgb, vec3(1.0 / 2.2)));
   float hue = hm.x * 360.0;
   float sky = smoothstep(0.08, 0.44, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
-            * smoothstep(0.25, 0.4, hm.z) * (1.0 - key.r);
+            * smoothstep(0.25, 0.4, hm.z) * (1.0 - key.r)
+            // Never the cloud itself (the bake's feathered matte): its skylit
+            // hollows are pale blue by chroma alone and would deepen to cobalt.
+            * (1.0 - key.g);
   // Toward the zenith: the top edge, leaning to the upper right.
   vec2 f = p / uRes;
   float z = clamp(0.82 * (1.0 - f.y) + 0.18 * f.x, 0.0, 1.0);
