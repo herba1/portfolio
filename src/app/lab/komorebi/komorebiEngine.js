@@ -64,9 +64,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // The lower canopy, the cypresses and far pines against the low sky, was
 // rebaked from the HDRI at full resolution (the capture's own sun stood
 // among them, and its flare had cost them their edges), so they keep their
-// real needle-sharp silhouettes; here they are pressed to a true black and
-// the scan's black kept low and neutral, so they frame the glowing sky as
-// the sharp dark under it rather than a grey-teal veil.
+// real needle-sharp silhouettes; here they are pressed down into
+// silhouette, so they frame the glowing sky as the sharp dark under it.
+// That dark is a negative's, not a digital black: every tree's shade takes
+// a skylight fill reflected off its needles (carrying their relief), and on
+// the print its black is lifted and tinted towards the sky's cobalt, so the
+// crowns and trunks keep their green-teal needles all the way down.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..2 a breath of that strength sets off at t = 0.5 s (1 a
@@ -269,6 +272,21 @@ const BACKLIGHT = {
   bark: 1.8,
   roll: [0.04, 0.014], // highlight knee and the pivot it keeps, scene light
 };
+// Skylight fill and the film's toe on the trees. Seen from below, the
+// crowns and trunks are lit only by the sky round them, so their shade is
+// never black: each layer takes the sky's own colour (the steady climb from
+// zenith to treeline, not the glow by the sun) at this share of its light,
+// far trees most (the air between), the overhead crown least, reflected
+// off the needles (albedo: their reflectance, in their own colour) and
+// carrying their relief (relief: how much of the needles' local contrast,
+// in stops, it keeps), so the shade still shows needles. The fill is paler
+// than the blue overhead (pale), being the whole sky, and a share of it
+// (leaf) has come through other needles on its way, taking their green
+// (leafColor), so the shade is green-teal, never a slate veil. On the print
+// the trees' black is a negative's: lifted to TREE_TOE (sRGB), tinted
+// towards the sky's cobalt, where the matte is.
+const FILL = { far: 0.12, mid: 0.1, near: 0.08, albedo: 0.45, pale: 0.5, leaf: 0.5, leafColor: [0.45, 1, 0.6], relief: 2 };
+const TREE_TOE = [18 / 255, 28 / 255, 40 / 255];
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -322,6 +340,10 @@ uniform vec4 uCGrade;        // sky share in the shade, fill, gain, detail
 uniform vec4 uCRoll;         // knee, top, unused, unused
 uniform vec2 uCGlow;         // own colour share, forward scatter
 uniform vec4 uBack;          // stops down: near, mid; cool power; bark stops
+uniform vec4 uFill;          // skylight fill: far, mid, near share; needle reflectance
+uniform float uRelief;       // share of the needles' relief the fill keeps
+uniform float uFillPale;     // how much paler the fill is than the sky overhead
+uniform vec4 uLeaf;          // the fill's green from other needles: rgb, share
 uniform vec2 uBackRoll;      // highlight roll-off: knee, pivot (scene light)
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${ASPECT.toFixed(6)};
@@ -446,6 +468,16 @@ vec3 underside(vec3 c, float stops, vec3 sky) {
   vec3 u = c * cool * exp2(-stops) * (1.0 + uBackRoll.y / uBackRoll.x) / (1.0 + y / uBackRoll.x);
   return mix(u, c * exp2(-uBack.w * stops / uBack.x), bark);
 }
+// Skylight on a layer's shade: the sky's light (skyF) reflected off the
+// needles' own colour at k of it, keeping their relief against the
+// surround, so the shade is lifted without going flat.
+vec3 skyFill(vec2 u, vec3 c, vec3 skyF, float k) {
+  vec3 cb = exp2(uLog.x + textureLod(uCanopyBlur, u, 3.0).rgb * (uLog.y - uLog.x));
+  float yb = max(dot(cb, LUMA), 1e-6);
+  float rel = clamp(log2(max(dot(c, LUMA), 1e-6) / yb), -2.0, 1.5);
+  vec3 alb = uFill.w * cb / yb;
+  return skyF * alb * exp2(rel * uRelief) * k;
+}
 void main() {
   vec2 p = vec2(vUv.x, 1.0 - vUv.y);
   vec2 uv = uCrop.xy + p * uCrop.zw;
@@ -455,6 +487,7 @@ void main() {
   // overhead (the asset's top is past the zenith), and luminous all the way.
   vec3 col = texture(uSky, uv).rgb;
   vec3 skyTint;
+  vec3 skyF;
   {
     float Y = dot(col, LUMA);
     Y = Y / (1.0 + Y / uSkyGrade.z);
@@ -465,6 +498,12 @@ void main() {
     float fl = uSkyFloor.x * exp2(uSkyFloor.y * smoothstep(0.0, 0.8, uv.y));
     Y = pow(pow(Y, 4.0) + pow(fl, 4.0), 0.25);
     vec3 tint = mix(uSkyHor, uSkyZen, h);
+    // the skylight that fills the trees' shade: the steady sky, no glow,
+    // paler than the blue overhead (it is the whole sky, the pale horizon
+    // and the clouds in it), part of it come through other needles
+    vec3 ft = mix(tint, vec3(1.0), uFillPale);
+    ft /= dot(ft, LUMA);
+    skyF = withLuma(mix(ft, uLeaf.rgb / dot(uLeaf.rgb, LUMA), uLeaf.a), fl);
     // round the sun the sky pales a little, as it does, towards a pale cyan
     tint = mix(tint, uSkyPale, 0.45 * exp(-sd / 0.07));
     skyTint = tint;
@@ -537,17 +576,23 @@ void main() {
   float sil = uSil.x * smoothstep(0.5, 0.95, uv.y);
   vec3 c0 = canopy(u0);
   vec3 c1 = canopy(u1);
+  vec3 f0 = skyFill(u0, c0, skyF, uFill.x);
+  vec3 f1 = skyFill(u1, c1, skyF, uFill.y);
   c0 *= mix(vec3(1.0), c0 / (c0 + uSil.y), sil);
   c1 *= mix(vec3(1.0), c1 / (c1 + uSil.y), sil);
+  // Their shade is never black: the sky round them fills it.
+  c0 += f0;
   col = mix(col, c0, a0);
   // Backlit: the crowns between the lens and the sun show their shaded
   // undersides. The middle ones fade out of it into the silhouettes below.
   c1 = mix(c1, underside(c1, uBack.y, skyTint), 1.0 - sil);
-  col = mix(col, c1, a1);
+  col = mix(col, c1 + f1, a1);
   if (a2 > 0.0) {
     vec3 c2 = (canopy(ub) * ab + canopy(ut) * at) / (ab + at);
-    col = mix(col, underside(c2, uBack.x, skyTint), a2);
+    col = mix(col, underside(c2, uBack.x, skyTint) + skyFill(ub, c2, skyF, uFill.z), a2);
   }
+  // How much of the print is tree here: the film's toe lifts it (blit).
+  float trees = 1.0 - (1.0 - a0) * (1.0 - a1) * (1.0 - a2);
 
   // The sun is a source behind the crown, never switched by it: sky with
   // sun times what the canopy lets through, the canopy's matte taken at its
@@ -585,7 +630,7 @@ void main() {
   col += g * E * lands;
   float hr = (rh / cw - uHalo.a) / (0.4 * uHalo.a);
   col += uHalo.rgb * E * E * E * exp(-hr * hr) * T;
-  outColor = vec4(col * uGain, 1.0);
+  outColor = vec4(col * uGain, trees);
 }`;
 
 const BLIT = `#version 300 es
@@ -596,8 +641,14 @@ uniform sampler2D uTex;
 uniform float uFade;
 uniform vec3 uPaper;
 uniform float uHueMax;       // hue ceiling for blues, in sixths of a turn
+uniform sampler2D uTrees;    // the scene: tree cover in a
+uniform vec3 uToe;           // the trees' lifted black, over the film's own
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
+  // The trees' black is a scanned negative's, lifted and tinted towards the
+  // sky's cobalt, so their shade keeps its needles; the sky is left as is.
+  float tr = texture(uTrees, vUv).a;
+  c = mix(c, uToe + (1.0 - uToe) * c, tr);
   // Blues past the ceiling (the pale veil by the sun, a thin cloud edge
   // under the warm bloom) are turned back to it at the same value and
   // chroma, so no pale sky reads lavender; deep blacks and real violets are
@@ -1101,6 +1152,10 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uDiff, DIFFUSE);
     gl.uniform4f(u.uBack, BACKLIGHT.near, BACKLIGHT.mid, BACKLIGHT.cool, BACKLIGHT.bark);
     gl.uniform2fv(u.uBackRoll, BACKLIGHT.roll);
+    gl.uniform4f(u.uFill, FILL.far, FILL.mid, FILL.near, FILL.albedo);
+    gl.uniform1f(u.uRelief, FILL.relief);
+    gl.uniform1f(u.uFillPale, FILL.pale);
+    gl.uniform4f(u.uLeaf, ...FILL.leafColor, FILL.leaf);
     gl.uniform3fv(u.uSkyHor, SKY_GRADE.horizon);
     gl.uniform3fv(u.uSkyZen, SKY_GRADE.zenith);
     gl.uniform3f(u.uSkyGrade, SKY_GRADE.depth[0], SKY_GRADE.depth[1], SKY_GRADE.knee);
@@ -1169,6 +1224,15 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.uniform1f(blit.u.uHueMax, SKY_HUE_MAX / 60);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.uniform1i(blit.u.uTrees, 1);
+    // Over the film's own black, so the trees' black lands on TREE_TOE.
+    const fb = FILM.toe;
+    gl.uniform3f(
+      blit.u.uToe,
+      ...TREE_TOE.map((t, i) => Math.max(0, (t - fb * FILM.toeColor[i]) / (1 - fb * FILM.toeColor[i]))),
+    );
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
