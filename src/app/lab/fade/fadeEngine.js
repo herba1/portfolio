@@ -61,8 +61,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Live, per pixel, with e = years x dose x susceptibility, where the dose is
 // the baked one on a power curve: paint holds below a threshold and fails
 // steadily above it, so the sunlit faces hold for their first few years (the
-// orange face under its eave for eight or so), give up about half of their
-// thirty years' change after year twelve and have reached their own residual
+// orange face under its eave for five or so), then fail steadily, and have
+// reached their own residual
 // tints by year thirty (pink to a dusty pink, orange to pale apricot), while
 // the low storeys in their slot of it and the coral wall facing north keep
 // theirs; every coat also loses a thin skin of yellow and magenta to the
@@ -153,13 +153,13 @@ const K_CHALK = 0.2;
 const CHALK_MAX = 1.05;
 // The induction is spent over a knee INK_KNEE wide, so a sunlit wall holds
 // for its first few years, then fails steadily (the orange face, the least
-// exposed of them, for eight or so: about half of its thirty years' change
-// lands after year twelve, instead of nearly all of it in the first decade).
-const INDUCTION = 8;
+// exposed of them, for five or so, so that a sunlit band of it is visibly on
+// its way to apricot by the middle of the clock and there by its end).
+const INDUCTION = 5;
 const INK_KNEE = 2;
 // Chalking needs the film itself to erode: only well-exposed paint gets there,
 // and it lags the ink by a year or two.
-const CHALK_INDUCTION = 8.5;
+const CHALK_INDUCTION = 5.5;
 const CHALK_KNEE = 2;
 // Fading is not linear in dose: below a threshold the UV absorbers and the
 // binder hold, above it the film erodes and each year takes more. The dose
@@ -170,8 +170,8 @@ const CHALK_KNEE = 2;
 // of an open south wall, never gets past the induction. The pivot is set so
 // thirty years are enough: the sunlit faces (a baked dose of a fifth to a
 // third) come to twenty to forty-five dose-years by year thirty, so the
-// orange face, failing from about year eight, has reached its pale apricot by
-// year thirty (half its loss of chroma after year twelve), and the pink top
+// orange face, failing from about year five, has reached its pale apricot by
+// year thirty, and the pink top
 // floor, open to the most sky, its dusty pink some years before. A year-thirty
 // still splits into bleached sun-side walls and the red slot wall.
 const DOSE_GAMMA = 2.5;
@@ -206,7 +206,7 @@ const RESIDUAL = 0.5;
 // chroma would leave it cream, and a pink wall that has faded for thirty
 // years still reads as pink. A coat paler than this keeps its tint and only
 // lightens.
-const RESIDUAL_MIN = 0.038;
+const RESIDUAL_MIN = 0.032;
 // The differential fade (the inks' own rates, the lime's warmth) may turn a
 // coat's hue by at most this much (Oklab hue, degrees): it loses chroma and
 // gains value, and keeps its family.
@@ -355,6 +355,20 @@ const ROOFS = [
 const ROOF_EAVE = 0.5;
 const ROOF_LANE = -1.5;
 const ROOF_SIDE = 0.6;
+// The wall the coral's eave falls on (the pink, and the bare stucco house
+// beside it along the lane): one level plane, n . X = d in camera space (m),
+// fitted to MoGe's points across it. MoGe's depth on it ripples by a hand
+// or two, and the eave's shadow taken at those points ripples with it; taken
+// where each pixel's ray meets this plane it is the straight line it is on
+// the real wall, level like the wall's own courses. Only for the rooflines
+// and the slot: the depth march keeps MoGe's own points.
+const WALL_PLANE = [0.99697, 0.01342, -0.07659, -6.795];
+const WALL_REACH = 0.6;
+// An eave is a straight edge parallel to the wall it shades, so the sun's
+// disc spreads its line only across the line, in the plane of the sun's
+// height over the lane, not over the whole slant run along the ray: the run
+// a fitted roofline's penumbra is drawn from, as a share of the ray's.
+const ROOF_PENUMBRA = 0.12;
 // The sweep's light is light, not a grade: it multiplies the faded albedo,
 // rendered = albedo x (sky + SWEEP_SUN x visibility x N.L x beam). The
 // photograph's own illumination S (light.webp G) is split into the lane's
@@ -367,9 +381,16 @@ const ROOF_SIDE = 0.6;
 const SWEEP_SKY = 0.45;
 const SWEEP_SUN = 1.5;
 const SWEEP_SUN_COLOR = [1.0, 0.995, 0.975];
-// the sweep's light on the bare stone, which does not fade: held to a share
-// of its contrast, so the light means something only where it leaves a mark
-const SWEEP_STONE = 0.35;
+// The beam on a wall goes as its cosine, but read on the paint (a lit render
+// scatters, it is no Lambertian mirror of the sun's angle) and across a
+// frame as a stop between sun and shade, the cosine is taken to this power:
+// the pink's afternoon sun, at a grazing third of square, still lands the
+// lit wall at about the photograph's exposure and its shade a stop under.
+const SWEEP_WRAP = 0.6;
+// the sweep's light on the bare stone, which does not fade: most of its
+// contrast, so the eave's line runs on unbroken from the pink across the
+// bare stucco beside it and reads as one shadow, not a change of paint
+const SWEEP_STONE = 0.8;
 // the sun's disc, 0.53 deg: the penumbra a blocker throws is this times the
 // run to it, so an eave's line is crisp under the eave and softens further out
 const SUN_DISC = 0.00925;
@@ -378,9 +399,11 @@ const SUN_DISC = 0.00925;
 const SLOT_EDGE = 0.06;
 // A still with a sun held (?years=N&sun=K) is the clock caught mid-drag:
 // the walls this sun stands on are at the clock's years, those in its shade
-// have only got this share of them, so the faded band sits against the
-// still-saturated paint along the shadow line.
-const STILL_SHADE_SHARE = 0.32;
+// have only got this share of them (the shade's rate against the sun's, as
+// the received years run while it sweeps: hardly started), so the chalked
+// band sits against the photograph's own saturated paint along the shadow
+// line, and the eave's line is the one seam between before and after.
+const STILL_SHADE_SHARE = 0.05;
 const K_LIT = 9;
 const K_DARK = 0.25;
 const K_SETTLE = 5;
@@ -816,6 +839,7 @@ uniform vec3 uSweepLight;
 uniform sampler2D uRecv;
 uniform float uUseRecv;
 uniform float uStillShade;
+uniform float uSunWrap;
 ${NOISE}
 ${DETAIL_PACK}
 vec3 toSrgb(vec3 c) {
@@ -1163,7 +1187,7 @@ void main() {
   // intact; in its shade a stop under. All of it goes back to the
   // photograph when the clock rests.
   if (uSweepAmp > 0.001) {
-    vec3 illum = uSweepLight.x + uSunColor * (uSweepLight.y * vis * cosi * uSunGain / max(S, 0.1));
+    vec3 illum = uSweepLight.x + uSunColor * (uSweepLight.y * vis * pow(max(cosi, 0.0), uSunWrap) * uSunGain / max(S, 0.1));
     illum = min(illum, vec3(2.5));
     float stone = clamp(max(m.a - m.b / 0.85, 0.0) / 0.35, 0.0, 1.0);
     outLin *= mix(vec3(1.0), illum, uSweepAmp * smoothstep(0.1, 0.6, sw.a) * mix(1.0, uSweepLight.z, stone));
@@ -1296,6 +1320,9 @@ const vec3 QG2[NQ] = ${glslVec3s(roofQuads.map((q) => q.g2))};
 const vec3 QS[NQ] = ${glslVec3s(roofQuads.map((q) => q.side))};
 const float QONE[NQ] = float[](${roofQuads.map((q) => q.one.toFixed(1)).join(", ")});
 const float SIDE = ${ROOF_SIDE.toFixed(2)};
+const vec4 WALL = vec4(${WALL_PLANE.map((v) => v.toFixed(5)).join(", ")});
+const float WALL_REACH = ${WALL_REACH.toFixed(2)};
+const float ROOF_PEN = ${ROOF_PENUMBRA.toFixed(3)};
 const vec3 RT = vec3(${WORLD_RT.map((v) => v.toFixed(5)).join(", ")});
 const vec3 BK = vec3(${WORLD_BK.map((v) => v.toFixed(5)).join(", ")});
 ivec2 gSize;
@@ -1356,15 +1383,28 @@ void main() {
     return;
   }
   vec3 O = P + n * 0.03;
+  vec4 own = texelFetch(uSlab, p, 0);
+  // on the pink's wall (not a leaf or a lantern on it), the rooflines and the
+  // slot are taken where this pixel's ray meets the wall's fitted plane, so
+  // the eave's line across it is straight and level, not MoGe's ripple
+  vec3 Ow = O;
+  float lift = 0.0;
+  if (own.b < 1.5 / 255.0 && abs(dot(P, WALL.xyz) - WALL.w) < WALL_REACH && dot(n, WALL.xyz) > 0.6) {
+    vec3 ray = normalize(P);
+    vec3 Pw = ray * (WALL.w / dot(ray, WALL.xyz));
+    Ow = Pw + WALL.xyz * 0.03;
+    lift = dot(P - Pw, uUp);
+  }
   float vis = 1.0;
   // how far along the ray the blocker stands (0: none), for the penumbra
   float tb = 0.0;
   float qz;
-  // the rooflines first: a clean edge, a straight shadow line
-  float tq = roofHit(O, uSun);
+  // the rooflines first: a clean edge, a straight shadow line, its penumbra
+  // drawn across the line only (ROOF_PEN of the slant run)
+  float tq = roofHit(Ow, uSun);
   if (tq > 0.0) {
     vis = 0.0;
-    tb = tq;
+    tb = tq * ROOF_PEN;
   }
   // 64 steps out to 60 m: at 28 a ray that crosses a house across the lane
   // between two samples (3.6 m apart at 12 m) slipped through it, and the
@@ -1387,7 +1427,6 @@ void main() {
       break;
     }
   }
-  vec4 own = texelFetch(uSlab, p, 0);
   // a wall pixel within reach of a leaf, a lantern, a sign or a cord
   if (vis > 0.0 && own.b > 0.5 / 255.0 && own.b < 1.5 / 255.0) {
     float hit = 0.0;
@@ -1407,6 +1446,9 @@ void main() {
   }
   // the far wall of the lane, which the frame leaves out
   float slot = a7(own.a) * SLOT;
+  // the far wall's eave stands where it stands: on the plane, its height
+  // above this pixel is taken from the plane's point
+  if (slot > 0.0) slot = max(slot + lift, 0.0);
   vec3 nh = n - dot(n, uUp) * uUp;
   // on a wall (not an occluder) the way it faces smoothed over a storey
   // (slab.webp G): the run across the lane goes as 1 / its cosine to the
@@ -2160,6 +2202,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSunGain, sunGain);
     gl.uniform3fv(u.uSunColor, SWEEP_SUN_COLOR);
     gl.uniform3f(u.uSweepLight, SWEEP_SKY, SWEEP_SUN, SWEEP_STONE);
+    gl.uniform1f(u.uSunWrap, SWEEP_WRAP);
     gl.uniform1f(u.uUseRecv, useRecv ? 1 : 0);
     gl.uniform1f(u.uStillShade, held && sunQ != null ? STILL_SHADE_SHARE : 0);
     gl.uniform1f(u.uDebug, debugQ === "recv" ? 8 : debugQ === "sun" ? 7 : debugQ === "render" ? 6 : debugQ === "cloud" ? 5 : debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
