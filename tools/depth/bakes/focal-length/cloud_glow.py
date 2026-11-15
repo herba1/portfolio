@@ -13,24 +13,34 @@
 #
 #  1. exposure  each cloud pixel is taken back out from under the plate's
 #               soft shoulder (comp.py's, on the brightest channel: knee
-#               0.625, ceiling 1.0 in plate light), given `stops` more light,
-#               and put back under a shoulder of the same shape that tops out
-#               at reCeil (0.93, knee 0.7) rather than 1.0: the film's per-channel curve
-#               maps plate 1.0 to paper white and bleaches anything near it
-#               to neutral, so the tops are held where it draws them at about
-#               250 and still warm, and nothing reaches 255.
-#  2. tone      every cloud pixel is re-toned at its new luminance on one
+#               0.625, ceiling 1.0 in plate light) and given `stops` more
+#               light. Its log luminance is split by a self-guided filter
+#               (radius baseDeg, about 16 px of the inset; eps baseEps stop^2,
+#               so the cloud's outline against the sky stays in the base and
+#               nothing haloes) into a large-scale base and a detail layer.
+#  2. shoulder  the base, not the pixel, goes through a long filmic shoulder
+#               designed on the screen (through a model of the engine's film
+#               curve): the film as it was up to level kD (200), then a tanh
+#               shoulder slope-matched there that nears aD (250) only
+#               asymptotically, 242 at 1.5 stops past the knee and 249 at 3.
+#               The detail goes back on top at `detail` (1.2) x the film's
+#               slope at the knee, so the sunlit tops keep their cauliflower
+#               cells and crevices instead of piling into one level (the old
+#               hard shoulder, ceiling 0.93 of plate white, put 10% of the
+#               cloud into a 3-level band at 244-246 and drew it as terraced
+#               flat-white islands at 20 mm). Detail peaks ease into dMax.
+#  3. tone      every cloud pixel is re-toned at its new luminance on one
 #               logistic key of its log luminance, centred on the cKey
 #               percentile of the (new) cloud luminance and cWidth stops wide:
-#               warm-neutral above, skylight blue (208 deg) below (the warm
-#               end is topPlate, #FFF1D9 in the plate, which the film's
-#               highlight tint and per-channel shoulder take to about #FFF4E6,
-#               250 244 232, on the developed sunlit tops). At
-#               0.8 stop the key runs across nearly the whole cloud range, so
-#               the lit-to-shadow transition is a continuous gradient through
-#               the body, not a contour. The old tone is replaced, not
-#               layered: the target is the new tone at the pixel's luminance.
-#  3. blend     the regraded pixel replaces the old one by the cloud weight,
+#               warm-neutral above (topPlate, #FFF1D9), skylight blue (208
+#               deg) below, continuous through the body, not a contour. The
+#               film's per-channel shoulder bleaches plate warmth to neutral,
+#               so on the lit tops (the key times a ramp hiA..hiB on the
+#               screen level) the screen colour itself is set warm (warmD,
+#               R > G > B by about 5 and 7 levels, toward #FFF4E6), and the
+#               plate value is found by running the target back through the
+#               film model, per channel, corrected for the pixel's own tint.
+#  4. blend     the regraded pixel replaces the old one by the cloud weight,
 #               so the translucent fringes and the thin wisps take a share of
 #               the lift in proportion to how much cloud they are.
 #
@@ -40,16 +50,20 @@
 # carried through untouched.
 #
 # python3 -I cloud_glow.py outer_in.webp inner_in.webp outdir '{params}' [debug.png]
-# as published: the defaults. Measured in the developed 10 / 14 / 20 mm
-# frames: luma p90 179 -> 189 / 208 / 220, brightest 0.5% 238 -> 246 / 247 /
-# 247 at about (249, 247, 241), nothing at 255.
+# as published: the defaults. Measured on the developed frames: at 20 mm the
+# cloud-pixel G histogram has no spike past 240 (the old 244-246 band held
+# 6x its neighbours; now 240-247 sits within 2x of 235), the lit tops
+# average (248, 243, 236), cloud p90 luma at 10 mm 229, nothing at 255 but
+# the caption and the dither's odd pixel.
 # Inputs are crown_cap.py's plates (the ones published before this pass):
 # running it on its own output would lift the clouds twice.
 import sys, json, numpy as np, cv2
 from PIL import Image
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 P = dict(q=93, stops=0.6, cKey=65, cWidth=0.8, cHue=208.0, cSat=0.36, topPlate='#fff1d9',
-         cS0=0.5, cS1=0.36, hiKnee=0.625, hiCeil=1.0, reKnee=0.7, reCeil=0.93, tqMax=0.985, innerDeg=47.5, thLo=84.0, thHi=90.0,
+         cS0=0.5, cS1=0.36, hiKnee=0.625, hiCeil=1.0, tqMax=0.985,
+         kD=200.0, aD=250.0, dTop=245.0, dMax=251.0, dCap=254.6, baseDeg=0.37, baseEps=0.09, detail=1.2,
+         hiA=205.0, hiB=238.0, warmD=[1.024, 1.0, 0.972], innerDeg=47.5, thLo=84.0, thHi=90.0,
          texDeg=0.07, poolDeg=0.23, texHi=0.035, growDeg=0.2, gapDeg=0.6, closeDeg=0.5, openDeg=0.35,
          texLoose=0.018, openLoose=0.6, thLoose=62.0, minDeg=2.0, feather=0.06)
 if len(sys.argv) > 4: P.update(json.loads(sys.argv[4]))
@@ -154,21 +168,66 @@ def cloud_w(X, m, th):
     Ss = 1 - v.min(-1) / (v.max(-1) + 1e-5)
     return (smooth(P['cS0'], P['cS1'], Ss) * m * (1 - smooth(P['thLo'], P['thHi'], th))).astype(np.float32)
 
-k1, c1 = P['hiKnee'], P['hiCeil']
+k1 = P['hiKnee']
 def unshoulder(X):
     Mx = X.max(-1)
-    tq = np.clip((Mx - k1) / (c1 - k1), 0, P['tqMax'])
-    Mo = np.where(Mx < k1, Mx, k1 + (c1 - k1) * tq / (1 - tq))
+    tq = np.clip((Mx - k1) / (P['hiCeil'] - k1), 0, P['tqMax'])
+    Mo = np.where(Mx < k1, Mx, k1 + (P['hiCeil'] - k1) * tq / (1 - tq))
     return X * (Mo / (Mx + 1e-6))[..., None]
-def shoulder(X):
-    k2, c2 = P['reKnee'], P['reCeil']
-    Mx = X.max(-1)
-    tq = np.maximum(Mx - k2, 0) / (c2 - k2)
-    Mn = np.where(Mx < k2, Mx, k2 + (c2 - k2) * tq / (1 + tq))
-    return X * (Mn / (Mx + 1e-6))[..., None]
+
+# ---- the film, as focalLengthEngine.js develops the plate (FILM there, and
+# _kit/film.js's composite), per pixel: diffusion, vignette and grain left
+# out. Scene light is plate * 2; whitePoint 2.0 lands plate white on paper
+# white. The shoulder below is designed on the screen, so it needs this.
+FA, FD, FW = 1.24, 0.95, 2.0
+_ad = FA * FD; _den = (FW ** _ad - 0.18 ** _ad) * 0.18
+FB = (-(0.18 ** FA) + FW ** FA * 0.18) / _den
+FC = (FW ** _ad * 0.18 ** FA - FW ** FA * 0.18 ** _ad * 0.18) / _den
+SH_T = np.array([0.9, 1, 1.08], np.float32); HI_T = np.array([1.02, 1, 0.965], np.float32)
+TOE = np.float32(0.035) * np.array([0.75, 1, 1.2], np.float32)
+def film(X):
+    col = X * np.float32(2.0)
+    z = smooth(-3, 2, np.log2(np.maximum(col @ LUMA, 1e-4) / 0.18))[..., None]
+    col = col * (SH_T + (HI_T - SH_T) * z)
+    yl = (col @ LUMA)[..., None]
+    col = np.maximum(yl + (col - yl) * (1.04 - 0.04 * smooth(0.4, 1.4, yl)), 0)
+    col = col ** FA / (col ** _ad * FB + FC)
+    return ((TOE + (1 - TOE) * l2s(col)) * 255).astype(np.float32)
+# a grey ramp through it: plate light -> screen level, per channel and luma
+pg = np.geomspace(1e-4, 1.0, 8192).astype(np.float32)
+dg = film(np.repeat(pg[:, None], 3, 1)); dgY = dg @ LUMA
+eg = np.log2(pg)
+
+# ---- the shoulder, on the screen. Below the knee (screen level kD) the
+# film draws the cloud as it always did; above it a long tanh shoulder,
+# slope-matched at the knee (and with no change of curvature there, so no
+# contour), rises toward aD and only reaches it asymptotically: 1.5 stops
+# past the knee it is 8 levels short of it, 3 stops past, 1. It is applied to the large-scale base of the cloud's log
+# luminance only (a self-guided filter, radius baseDeg, eps baseEps stop^2,
+# so the cloud's outline against the sky stays in the base and nothing
+# haloes), and the detail layer (log luminance minus base) goes back on top
+# at detail x the film's slope at the knee, so the sunlit tops keep their
+# cauliflower cells and crevices at full strength instead of being flattened
+# into one level by the shoulder.
+e0 = float(np.interp(P['kD'], dgY, eg))
+s0 = float(np.interp(e0, eg, np.gradient(dgY, eg)))   # screen levels per stop at the knee
+A = P['aD'] - P['kD']
+slope = np.gradient(dgY, eg)
+def tone_curve(B):
+    lo = np.interp(B, eg, dgY)
+    hi = P['kD'] + A * np.tanh((B - e0) * s0 / A)
+    return np.where(B < e0, lo, hi).astype(np.float32)
+def guided(L, r, eps):
+    k = (2 * r + 1,) * 2
+    m = cv2.blur(L, k); v = cv2.blur(L * L, k) - m * m
+    a = v / (v + eps); b = m - a * m
+    return (cv2.blur(a, k) * L + cv2.blur(b, k)).astype(np.float32)
+print(f'knee: screen {P["kD"]} at plate {2 ** e0:.3f} ({s0:.1f} levels/stop), asymptote {P["aD"]}; '
+      f'+0.75/1.5/3 stops -> {tone_curve(np.array([e0 + .75, e0 + 1.5, e0 + 3.0])).round(1)}')
 
 cl_t = unit(hsv2lin(P['cHue'], P['cSat']))
 hx = P['topPlate']; top_t = unit(s2l(np.array([int(hx[i:i + 2], 16) / 255 for i in (1, 3, 5)], np.float32)))
+warm = np.array(P['warmD'], np.float32); warm = warm / (warm @ LUMA)
 G = np.float32(2 ** P['stops'])
 
 # the key, from the outer plate's clouds at their new exposure
@@ -179,17 +238,45 @@ pc = np.percentile(Ysel, [25, 50, P['cKey'], 90, 99.5])
 LK = np.log2(pc[2])
 print('cloud px', int(sel.sum()), 'new cloud Y pct 25/50/key/90/99.5', pc.round(4)); del Ysel, sel
 
-def glow(X, cw):
-    X1 = unshoulder(X) * G
-    Y1 = X1 @ LUMA
-    kk = (1 / (1 + np.exp(-(np.log2(np.maximum(Y1, 1e-5)) - LK) / P['cWidth'])))[..., None]
-    tgt = shoulder((cl_t + (top_t - cl_t) * kk) * Y1[..., None]); del X1, kk
-    return X + (tgt - X) * cw[..., None]
+def inv(T, c):
+    # screen level -> plate light, per channel, on the grey ramp
+    return np.interp(np.minimum(T, P['dCap']), dg[:, c], pg).astype(np.float32)
 
-On = glow(O, cwO)
+def glow(X, cw, ppd):
+    L = np.log2(np.maximum((unshoulder(X) * G) @ LUMA, 1e-4)).astype(np.float32)
+    B = guided(L, max(2, int(round(P['baseDeg'] * ppd))), np.float32(P['baseEps']))
+    on = cw > 1e-3
+    L, B, Xs, w = L[on], B[on], X[on], cw[on]
+    # the screen level each cloud pixel is developed to: base through the
+    # shoulder, detail on at the knee's slope (the film's own below it)
+    d = tone_curve(B) + P['detail'] * np.interp(np.minimum(B, e0), eg, slope) * (L - B)
+    # past dTop, the odd detail peak eases into the cap, never clips
+    t0, sw = P['dTop'], P['dMax'] - P['dTop']
+    d = np.where(d > t0, t0 + sw * np.tanh((d - t0) / sw), d).astype(np.float32)
+    # tone as before (skylight blue below the key, warm above), at the plate
+    # light that develops to d, then read on the screen
+    Yn = np.interp(d, dgY, pg).astype(np.float32)
+    kk = (1 / (1 + np.exp(-(L - LK) / P['cWidth'])))[:, None]
+    R = film((cl_t + (top_t - cl_t) * kk) * Yn[:, None])
+    # the lit tops: the screen colour itself is set warm (R > G > B), since
+    # the film's per-channel shoulder bleaches plate warmth toward neutral
+    wh = kk * smooth(P['hiA'], P['hiB'], d)[:, None]
+    T = d[:, None] * (R / np.maximum(R @ LUMA, 1)[:, None] * (1 - wh) + warm * wh)
+    # back through the film to the plate: per channel on the grey ramp, then
+    # corrected for the pixel's own tint and saturation
+    tgt = np.stack([inv(T[:, c], c) for c in range(3)], -1)
+    for _ in range(3):
+        F = film(tgt)
+        tgt *= np.stack([inv(T[:, c], c) / np.maximum(inv(F[:, c], c), 1e-6) for c in range(3)], -1)
+        tgt = np.clip(tgt, 0, 1)
+    out = X.copy()
+    out[on] = Xs + (tgt - Xs) * w[:, None]
+    return out
+
+On = glow(O, cwO, ppdO)
 On *= (thO < 95 * 1.004)[..., None]
 cwI = cloud_w(I, mI, thI)
-In = glow(I, cwI)
+In = glow(I, cwI, ppdI)
 
 def enc(X, seed):
     v = l2s(X)
