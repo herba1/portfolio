@@ -96,8 +96,10 @@ const PLANES = [
   // on the sky behind it (a cloud is not paper). Almost at infinity, it
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
-  // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [-0.28613, 0.11062, 0.79785, 1.32301], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  // planes it stays a lit, glowing form, not a smear. Its mass runs on behind
+  // the signal post and out past the upper lamp (postflank.py), so the post
+  // never slides on to its flank: the card is wider on the right for it.
+  { file: "clouds", rect: [-0.28613, 0.11062, 0.89551, 1.32301], o: 0.6, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   // The town's travel is held (travel, below): looking up, the turned lens
   // would carry the far roofs down out of the window until only a defocused
   // sliver of roof was left streaking along its bottom edge.

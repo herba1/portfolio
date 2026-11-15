@@ -63,7 +63,11 @@ alpha a px and carries its own colour out to the new edge, so no dark keyed
 rim stays round the lamps and the clamps. billows.py (after cloudlight.py)
 breaks the cumulus's regular lobes into sub-billows of uneven size, in its
 tone and along its silhouette, and rebuilds the far-left turret's squared,
-faceted top as round billows, and rewrites the cloud's matte.
+faceted top as round billows, and rewrites the cloud's matte; and
+postflank.py (after billows.py) carries the cumulus on behind the signal
+post as round lobes under the crossbuck's arm and out past the upper lamp
+(widening the clouds card on the right), so a swing never slides the post
+on to the cloud's flank and leaves a bite of clear sky keyed along it.
 """
 import sys
 import os
