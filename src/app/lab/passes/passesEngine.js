@@ -34,7 +34,8 @@ import { createStage, clamp } from "../_kit/stage";
 // Plate and dome are then developed as one exposure: a single film pass over
 // the matted frame spreads its highlights (a warm Pro-Mist diffusion), throws
 // a thin red halation ring onto the dark side of every bright edge, and lays
-// one grain field, stepping at 24 fps, over sky and concrete alike.
+// one fine luminance grain field, stepping at 24 fps, over sky and concrete
+// alike.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -42,7 +43,7 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uLattice, uSteel, uSky, uSkyBlue;
+uniform sampler2D uAlbedo, uDepth, uNormal, uMatte, uLattice, uSteel, uSky, uSkyBlue, uWall;
 uniform vec2 uRes;        // canvas px
 uniform vec4 uMap;        // image uv = frag * uMap.xy + uMap.zw (cover fit)
 uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y up, z to the viewer)
@@ -86,13 +87,29 @@ const vec3 SKY_HIGH = vec3(16.0, 80.0, 148.0) / 255.0;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
 // The walls' albedo is brought up from the shade the plate was shot in by
-// this much, its contrast spread about WALL_MID.
-const float WALL_GAIN = 20.0;
+// twenty times, its contrast spread about WALL_MID. That luminance comes
+// denoised from its own bake (tools/depth/bakes/passes/walls.py), already
+// gained and stored over WALL_RANGE.
+const float WALL_RANGE = 1.5;
 const float WALL_MID = 0.6;
 // And the sun on them is opened this much over the tower's: the plate's
 // walls were exposed for shade, so sunlit concrete has to climb to a warm
 // white near the top of the curve, where the sun's colour thins out.
-const float WALL_KEY = 2.3;
+const float WALL_KEY = 2.6;
+// The walls are one pale concrete under two lights, the sun and the open
+// sky, the way the eye balances them: the sky's light on them is the colour
+// a shaded face prints (a cool slate, #9fb0c4, given as light of unit
+// luminance), and strong, as the whole blue canyon over them is. With it on
+// the sunlit faces too, the sun's warmth lands as a warm white (#e9e6df),
+// not cream, and the same plaster in shade is the same material, not grey
+// paper. WALL_SKY puts a vertical face in open shade at that slate.
+const vec3 SKY_LIGHT = vec3(0.706, 1.022, 1.644);
+const float WALL_SKY = 2.4;
+// The sun on the walls, balanced as daylight film balances it: its red kept,
+// its blue thinned (the sky's blue fill is already on the face), a little
+// green given back, so the sum of the two is a warm white and not a pink.
+// Applied at the sun's own luminance, so only its hue moves.
+const vec3 WALL_BAL = vec3(1.0, 1.1, 0.88);
 
 vec3 toLin(vec3 c){ return pow(c, vec3(2.2)); }
 vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
@@ -309,12 +326,12 @@ void main(){
   sunHue /= luma(sunHue);
   skyL += sunHue * (5.0 * smoothstep(0.0058, 0.0042, th) + 1.6 * exp(-th / 0.018) + 0.25 * exp(-th / 0.08)) * mix(0.6, 1.0, uDay);
 
-  // Surfaces. Albedo in linear light; the plate's grade left the concrete
-  // olive, so most of the chroma comes off the walls (not the tower's paint),
-  // and both are brought up from the shade they were photographed in.
-  // On the walls a half-step softer mip: brought up from shade, the plate's
-  // compression noise would otherwise come up with it. The lattice keeps the
-  // full mip, its members are a pixel or two wide.
+  // Surfaces. Albedo in linear light, brought up from the shade it was
+  // photographed in. The walls take theirs from their own denoised bake, a
+  // grey with no chroma (the plate's grade left the concrete olive); this is
+  // the tower's paint, and where the matte is soft at its edge, a half-step
+  // softer mip on the wall side. The lattice keeps the full mip, its members
+  // are a pixel or two wide.
   float bias = mix(0.6, 0.0, tower);
   // Where the choke closed a gap on the deck or the mast, the steel fills it,
   // but only as far as it agrees with the paint round it: unmixed from a gap
@@ -323,15 +340,18 @@ void main(){
   vec3 steelP = texture(uSteel, lb, bias).rgb;
   steelW *= 1.0 - solid * smoothstep(0.04, 0.12, length(steelP - albP));
   vec3 alb = toLin(mix(albP, steelP, steelW));
-  alb = mix(vec3(luma(alb)), alb, mix(0.06, 1.0, tower));
-  // The walls clip at a pale concrete, near white: the warmth on them is the
-  // sun's, not the surface's. Their texture is spread about its middle as it
-  // comes up, since sunlit, high on the curve, the shoulder takes most of it
-  // back: the panel joints, the tie holes and the louvre's slats stay drawn.
+  // The walls clip at a pale concrete, near white, and have no colour of
+  // their own: what warmth or cool is on them is the light's. Their texture
+  // is spread about its middle as it comes up, since sunlit, high on the
+  // curve, the shoulder takes most of it back: the panel joints, the tie
+  // holes and the louvre's slats stay drawn. They read the denoised bake,
+  // not the albedo: the plate's sensor noise, brought up twenty times, was a
+  // charcoal grit that clumped black in every window recess.
   // The tower's paint rolls off instead: brought up four times, its white
   // members and the half-lit steel behind them would all clip to the same
   // flat cream, and the lattice would go to a milky mush with no members in it.
-  vec3 wallAlb = min(WALL_MID * pow(alb * WALL_GAIN / WALL_MID, vec3(1.25)), vec3(0.9));
+  float wl = pow(texture(uWall, uv).r, 2.2) * WALL_RANGE;
+  vec3 wallAlb = vec3(min(WALL_MID * pow(wl / WALL_MID, 1.25), 0.9));
   vec3 towerAlb = 0.86 * (1.0 - exp(-alb * 3.4 / 0.86));
   alb = mix(wallAlb, towerAlb, tower);
 
@@ -351,9 +371,26 @@ void main(){
   vec3 L = uSun;
   float ndl = dot(n, L);
   float vis = 1.0 - 0.55 * smoothstep(0.04, 0.3, -bend) * (1.0 - 0.7 * tower);
+  // The depth map is too coarse to find the window recesses and the panel
+  // joints in the walls, but the walls' luminance does: what is dark on a
+  // pale facade, or darker than the facade round it, is set back into it,
+  // the glass, a reveal, a groove. The raking sun does not reach in there;
+  // the sky across the canyon does, so a recess goes to the cool of the
+  // shade, not to a warm charcoal.
+  // Only on the facades' planes, where the depth map is flat: the pole and
+  // the fence stand clear of the walls (their depth jumps), and are dark
+  // because they are dark, not because they are set back.
+  float wlC = pow(textureLod(uWall, uv, 5.0).r, 2.2) * WALL_RANGE;
+  float plane = 1.0 - smoothstep(0.03, 0.08, abs(bend));
+  // Read a little soft, so a joint a pixel or two wide is a shallow groove
+  // that dims, not a slot drawn in ink.
+  float wlS = pow(textureLod(uWall, uv, 1.5).r, 2.2) * WALL_RANGE;
+  float recess = max(smoothstep(0.3, 0.06, wlS), smoothstep(0.25, 0.65, 1.0 - wlS / max(wlC, 1e-3))) * plane * (1.0 - tower);
+  vis *= 1.0 - 0.92 * recess;
   // Key: the sun, with a touch of wrap so the terminator rolls off. Fill: the
-  // open sky, cyan, strongest on faces that look up into it, weaker in the
-  // creases behind a silhouette. Bounce: a little of the sun off the walls.
+  // open sky, cyan on the tower and the slate SKY_LIGHT on the walls,
+  // strongest on faces that look up into it, weaker in the creases behind a
+  // silhouette. Bounce: a little of the sun off the walls.
   float key = max((ndl + wrap) / (1.0 + wrap), 0.0) * vis;
   // On the walls even the faces turned down see a share of the sky across
   // the canyon, and what bounces onto them is the sunlit concrete opposite,
@@ -361,20 +398,23 @@ void main(){
   // undersides and the heads of the window reveals go to the same cool slate
   // as the wall in shade, not a brown-grey.
   float skyVis = clamp(0.55 + 0.45 * dot(n, uUp), mix(0.35, 0.0, tower), 1.0) * (1.0 - 0.35 * smoothstep(0.0, 0.3, -bend));
-  vec3 fill = vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis;
+  vec3 fill = mix(SKY_LIGHT * WALL_SKY, vec3(0.11, 0.27, 0.45), tower) * mix(0.6, 1.0, uDay) * skyVis;
   vec3 bounce = uSunCol * mix(0.02, 0.035 * (0.5 - 0.5 * dot(n, uUp)), tower);
   // Only on faces the sun reaches: with the sun behind the tower the half
   // vector turns round and would light the lattice from the front.
   vec3 h = normalize(L - V + vec3(0.0, 0.0, 1e-4));
   float spec = pow(max(dot(n, h), 0.0), 40.0) * vis * mix(0.03, 0.12, tower) * smoothstep(0.0, 0.2, ndl);
-  vec3 lit = alb * (uSunCol * key * mix(WALL_KEY, 1.0, tower) + fill + bounce) + uSunCol * spec;
+  vec3 sunW = uSunCol * WALL_BAL * (luma(uSunCol) / luma(uSunCol * WALL_BAL));
+  vec3 keyCol = mix(sunW * WALL_KEY, uSunCol, tower);
+  vec3 lit = alb * (keyCol * key + fill + bounce) + uSunCol * spec;
 
   // The sky goes over the plate after the tone curve, as a print would be
   // matted: the dome runs to a thousand times paper white at the sun, and
   // in linear light even the matte's last 1% inside the tower would carry
   // it through as white blotches. Diffusion, halation and grain come after,
   // in FILM, over the matted frame as one.
-  o = vec4(mix(tone(lit), tone(skyL), sky), 1.0);
+  // Alpha carries which pixels are wall, for the film: see PREP.
+  o = vec4(mix(tone(lit), tone(skyL), sky), (1.0 - sky) * (1.0 - tower));
 }`;
 
 // The film the whole frame shares, plate and dome alike, so they read as one
@@ -388,11 +428,17 @@ uniform sampler2D uScene;
 uniform vec2 uTexel;      // the scene's texel
 out vec4 o;
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// The walls' sunlit plaster prints just under the crowns' white, on the
+// threshold, but it is a matte surface, not a highlight: its halation laid a
+// red ring in every panel joint and window frame, a sepia line drawing, and
+// its warm diffusion a cream veil over the recesses. So it takes no part in
+// the halation and only a little in the diffusion (the scene's alpha is 1 on
+// the walls); the clouds, the sun and the tower's white paint keep both.
 vec4 src(vec2 uv){
-  vec3 c = texture(uScene, uv).rgb;
-  float l = luma(c);
-  vec3 lin = pow(c, vec3(2.2));
-  return vec4(lin * smoothstep(0.7, 0.95, l), smoothstep(0.84, 0.97, l));
+  vec4 s = texture(uScene, uv);
+  float l = luma(s.rgb);
+  vec3 lin = pow(s.rgb, vec3(2.2));
+  return vec4(lin * smoothstep(0.7, 0.95, l) * (1.0 - 0.7 * s.a), smoothstep(0.84, 0.97, l) * (1.0 - s.a));
 }
 void main(){
   vec2 uv = gl_FragCoord.xy * 2.0 * uTexel;
@@ -457,14 +503,16 @@ void main(){
   vec2 cv = uv - 0.5;
   c *= 1.0 - 0.16 * dot(cv, cv);
 
-  // Grain: clumps about 1.5 px across at DPR 2 with a finer hash through
-  // them, triangular, strongest in the midtones but never gone, the same law
-  // on the sky as on the concrete. A touch of colour between the layers.
+  // Grain: soft clumps about a pixel and two across at DPR 2, no per-pixel
+  // hash (that read as a sensor's salt and pepper), luminance only, the same
+  // step on every channel. Weighted to the midtones, where a negative's
+  // grain shows, and thinning to a quarter in the darks and the highlights,
+  // so it never clumps in a shadow. One law for sky and concrete.
   vec2 p = gl_FragCoord.xy + uSeed * vec2(37.1, 91.7);
-  float g = (vnoise(p / 1.5) - 0.5) * 1.5 + (hash(p) + hash(p + 17.3) - 1.0) * 0.55;
-  vec3 gc = vec3(g) + (vec3(hash(p + 3.1), hash(p + 5.7), hash(p + 9.3)) - 0.5) * 0.35;
+  float g = (vnoise(p / 1.1) - 0.5) + 0.6 * (vnoise(p / 2.3 + 41.7) - 0.5);
   float lc = luma(c);
-  c += gc * (0.06 * lc * (1.0 - lc) + 0.009);
+  float mid = lc * (1.0 - lc) * 4.0;
+  c += g * 0.024 * (mid * 0.75 + 0.25);
   o = vec4(c, 1.0);
 }`;
 
@@ -547,8 +595,8 @@ function domeFor(az) {
 }
 
 export async function createPasses(host) {
-  const [albedo, depth, normal, matte, lattice, steel, skyCloud, skyBlue] = await Promise.all(
-    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "lattice.png", "lattice-steel.webp", "sky-cloud.avif", "sky-blue.avif"].map(
+  const [albedo, depth, normal, matte, lattice, steel, skyCloud, skyBlue, wall] = await Promise.all(
+    ["albedo.webp", "depth.png", "normal.webp", "matte.png", "lattice.png", "lattice-steel.webp", "sky-cloud.avif", "sky-blue.avif", "wall.webp"].map(
       (f) => loadImage(SRC + f),
     ),
   );
@@ -617,6 +665,7 @@ export async function createPasses(host) {
   tex(matte, 4, "uMatte", true);
   tex(lattice, 5, "uLattice", true);
   tex(steel, 7, "uSteel", true);
+  tex(wall, 9, "uWall", true);
 
   // The sky dome's two layers: azimuth repeats, and anisotropic filtering
   // where the GPU has it, since the equirect stretches across toward the
