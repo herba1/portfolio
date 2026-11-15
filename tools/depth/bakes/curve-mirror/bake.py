@@ -57,9 +57,11 @@ Also: a distance panorama (for parallax across the 0.8 m face), SH9 irradiance
 of the panorama (for lighting the paint), and aux.png for the photo: log depth
 (for the mirror's shadow on the house) and how sunlit each pixel is.
 
-After it, clouds.py re-lights the cumulus in the plate and the panorama as
-sunlit heaps (warm tops, blue bellies), once, then match.py (the panorama
-printed to the plate's sun, its own cumulus), then grade.py.
+After it, clouds.py clears the plate's puffs and lays a photographed
+cumulus in their place (cumulus.py) and re-lights the panorama's as sunlit
+heaps (warm tops, blue bellies), once, then match.py (the panorama printed
+to the plate's sun, the same cumulus over the road behind the lens), then
+grade.py.
 """
 import json
 import os

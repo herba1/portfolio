@@ -6,7 +6,8 @@
       (the camera, the sun); writes photo.webp and env.webp, re-lit, and marks
       scene.json ("clouds": 1) so it cannot run twice on one bake. OUT defaults
       to public/lab/curve-mirror. SHEET: optional preview jpg of the plate's
-      matte, thickness, shading and result. PLATE_ONLY=1: the plate alone
+      cloud matte, its light and the result. CUMULUS: the cumulus' source
+      (cumulus.py). PLATE_ONLY=1: the plate alone
       (the panorama kept as it is), e.g. to re-light the plate from its
       pre-cloud bake (the sky-graded plate bake.py writes) without re-baking.
 
@@ -15,15 +16,16 @@
 
 The plate is not re-lit but re-composed (massing(), below): its own clouds,
 small scattered puffs and thin strips strung along the wires, go back to
-clear sky, and one towering cumulus is built in their place, rising from
-behind the roofs on the right between the crossing's pole and the barrier's,
-with a lower shoulder past the barrier: big turrets at its crown, smaller
-tufts down its flanks, a flat, darker base sitting low behind the roofs,
-and lit by a real sun term on its lobes (TOP on the faces turned to the
-sun, the skylight's SHADE a stop under on those turned from it), then laid
-over the sky with the photograph's sharpening halo round the crossbuck and
-the poles taken out. relight(), the rest of this note, lights the
-panorama's sky.
+clear sky, and one towering cumulus is laid in their place, rising from
+behind the roofs on the right, from the crossing's pole to the frame's
+edge: a photographed cumulus congestus (cumulus.py), cut from its own sky
+by an unmixing matte, graded to the plate's light (TOP over its sunlit
+crowns, toward the skylight's SHADE and the deep BASE_C below), mirrored
+so it is lit from the scene's sun's side, then laid over the sky with the
+photograph's sharpening halo round the crossbuck and the poles taken out.
+relight(), the rest of this note, lights the panorama's other clouds (the
+scraps the cloud plane carried over); match.py lays the same photographed
+cumulus over the road behind the lens.
 
 The plate's cumulus came through sky_grade.py with their own light kept, which
 was the light of a hazy spring sky: each puff a flat, slightly blue white
@@ -109,6 +111,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import kit  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cumulus  # noqa: E402
 import develop  # noqa: E402
 import sky_grade  # noqa: E402
 
@@ -423,99 +426,33 @@ def relight(lin, sky, ray, right, up, sun, ppd, aspect=None, keep=None, white=No
 # The plate's own cumulus, even re-lit, were small scattered puffs (and, low
 # on the right, thin strips strung between the wires): confetti on the
 # cobalt, a backdrop with sprites on it. A summer sky over a low town is
-# built on one big body: a towering cumulus rising from behind the roofs,
-# its cauliflower towers stacked up toward the zenith. So the plate's clouds
-# all go back to clear sky, and one massing is built in their place, behind
-# the roofs on the right, between the crossing's pole and the barrier's,
-# with a lower shoulder past the barrier to the frame's edge; the upper left
-# stays open cobalt, so the gradient to the zenith carries the depth.
+# built on one big body: a towering cumulus rising from behind the roofs.
+# So the plate's clouds all go back to clear sky, and one is laid in their
+# place, behind the roofs on the right, from the crossing's pole to the
+# frame's edge; the upper left stays open cobalt, so the gradient to the
+# zenith carries the depth.
 #
-# Each tower is a stack of tiers (y of its middle, half width, lobe radius,
-# px at 28 px/deg on the plate), its axis sheared a little downwind as it
-# rises, each tier's middle and width a little off the one under it, so no
-# flank is a ruled line; each tier a row of lobes (spheres, nearer the
-# viewer at the tower's middle than at its flanks), and each lobe a
-# cauliflower: smaller lobes budded on its upper rim and its sides, and
-# smaller ones again on theirs. The lobes grow toward the top: a towering
-# cumulus' crowns are a few big turrets, its flanks lower down many small
-# tufts, and it stands on a flat base (a tower's "floor", its condensation
-# level), cut level, darker, sitting low behind the roofs. The body is the
-# height field of the union (the nearest surface), its edge bumped with
-# smooth noise so no lobe is a circle.
+# It was built here, as a tower of budded spheres lit by the scene's sun,
+# for many rounds; however it was shaded it read as plaster or cotton wool:
+# smooth lobes of one size, soft round outlines, none of the cauliflower a
+# photographed cumulus has at every scale, no crisp sunlit rim. So it is a
+# photograph (cumulus.py: a summer cumulus congestus, cut from its own sky
+# by an unmixing matte so its frayed rims and wisps keep their share, graded
+# to TOP over its sunlit crowns and toward the skylight's SHADE and the deep
+# BASE_C below), mirrored so its sun is the scene's, laid over the cleared
+# sky and under every wire and eave (_lay_over).
 #
-# The light is a real sun on that surface, not a tone painted over a
-# silhouette (lit as one airbrushed body, every lobe the same grey-white, it
-# read as procedural cotton): each sphere's own normal (the floret's, and
-# its big lobe's dome over its buds, mixed), against scene.json's sun (high,
-# upper left, a little behind the lens: a hard side light, the terminator
-# across the middle of every lobe), wrapped a little for the scattering; the
-# sun marched through the height field, so a turret shades the florets under
-# it and to its right; the whole tower's far side, along the sun's line, in
-# its own shade. The sun-facing faces go to TOP, a warm off-white at the top
-# of the range; a face turned from the sun is lit by the sky alone, SHADE,
-# the skylight's blue a full stop under (sRGB ~#9FB6CC), less on a face
-# turned down, less again in the folds; the lowest reach a deep blue-grey
-# base. The photograph's own puff texture is quilted over it as a detail
-# layer. The edge is crisp and lumpy where it is sunlit, soft and thin in
-# the lee, flat and defined along the base; and it is laid over the sky
-# unmixed at every wire and eave, with the photograph's own bright
-# sharpening halo round the crossbuck and the poles taken out (_lay_over).
-TOWERS = (
-    # the main tower: rising from behind the station house's roof, between
-    # the crossing's pole and the barrier's, its crowns toward the zenith;
-    # small tufts low on its flanks, big turrets up top
-    {"x": 1905.0, "lean": 0.07, "seed": 11, "floor": 1325.0, "tiers": (
-        (1265, 455, 60), (1160, 445, 68), (1075, 430, 78), (985, 410, 90), (890, 390, 104),
-        (790, 362, 120), (685, 325, 138), (575, 280, 155), (468, 222, 168), (372, 150, 162), (296, 70, 140))},
-    # its shoulder: lower and further back, past the barrier to the edge
-    {"x": 2430.0, "lean": 0.10, "seed": 23, "floor": 1325.0, "tiers": (
-        (1265, 270, 58), (1150, 245, 70), (1055, 205, 86), (960, 150, 100), (878, 80, 104))},
-)
-BUD = ((0.52, 4, 0.74), (0.42, 2, 0.8))  # cauliflower: (radius, buds, distance) of each level, of its parent
-BUD_ARC = (-196.0, 16.0)  # where on its parent's rim a bud stands (degrees, image y down: -90 is straight up)
-TIER_JIT = (0.45, 0.1)  # each tier's middle off its axis (of its lobe radius) and its half width off its own (a share)
-ENVELOPE = 1.3  # a big lobe's dome over its buds, of its radius
-DEPTH_Z = 0.55  # how much nearer a lobe at a tower's middle stands than one at its flank
-WOBBLE = (7.0, 1.0)  # the edge's noise: px of coarse and fine displacement at 28 px/deg
-FLOOR_WAVE = 3.0  # px the flat base's line wanders
-# (scales below are px at 28 px/deg)
-M_OPQ = 4.0  # px of lobe height to opaque
-M_NORM = (0.7, 0.3, 0.45)  # the light's normal: the big lobe's dome, the floret's own, and the tower's round
-M_COL = 70.0  # the tower's round: its height field taken over this many px (sigma)
-M_WRAP = 0.25  # the light's wrap round a lobe (scattering), of the sun's cosine
-M_TERM = (0.2, 0.72)  # the wrapped cosine: in shade under here, full sun over here (a cloud's soft terminator)
-M_KZ = 1.0  # the sun's ray's rise toward the viewer, of the true one (scene.json's sun)
-M_STEP = 2.0  # px between the sun's ray's samples
-M_SOFT = 5.0  # px of height over which the ray goes from grazing a floret to inside it
-M_PEN = 0.2  # and more by this, per px along the ray
-M_REACH = 360.0  # how far toward the sun the massing is measured
-M_MFP = (18.0, 140.0)  # the sun's mean free path: one floret's crisp shade on the next; the body's scattered light
-M_POWDER = 0.55  # the short path's share
-M_FAR = 700.0  # how far along the sun's line the whole massing is measured
-M_FARSIDE = (0.35, 0.85, 0.55)  # the tower's far side: shaded from this share of it, fully by this, this deep
-M_FAR_S = 24.0  # the outline's softening for that measure
-M_AO = 26.0  # px of crevice (the height under its neighbourhood's) for full shade
-M_AO_R = 16.0  # the neighbourhood: px (sigma), a floret's fold, not the tower's
-M_AO_K = 0.32  # the shade a full crevice loses
-M_SKY = (0.86, 0.2)  # the skylight on a face: this much, and this much more by its turn up (less turned down)
-BASE_Y = (930.0, 1250.0)  # the base's belly when a tower has no floor: from y, full by y
-BASE_H = (300.0, 40.0)  # with a floor: the belly from this far over it, fully by this far over it
-BASE_SUN = 0.75  # how much of the sun the base loses
-BASE_FLAT = 0.8  # how much of its lobes' relief the base loses (to the tower's round)
-BASE_C = np.array([0.19, 0.245, 0.35], np.float32)  # the base's shade: a deep blue-grey (sRGB ~121, 136, 160)
-BASE_HAZE = 0.05  # at most this much of the sky's haze over the base
-SHADE = np.array([0.347, 0.468, 0.604], np.float32)  # a face lit by the sky alone: the skylight's blue, a stop under TOP (sRGB ~#9FB6CC)
-TEX_SIG = (1.6, 9.0)  # the photo's puff texture: its luminance between these px scales
-TEX_P = 32.0  # quilted in patches of this many px of the plate
-TEX_UP = 1.6  # and scaled up by this
-TEX_K = 0.07  # its gain in the light (log luminance, per its std)
-EDGE_SUN = (1.0, 0.7)  # the sunlit edge: px eroded, px feather (sigma)
-EDGE_LEE = (2.0, 2.2, 1.3)  # the lee edge: px eroded, px feather, and the power that thins it
-EDGE_W = (0.2, 0.55)  # the edge's light (sun_l) from lee to sunlit
-THIN_PX = 8.0  # px of thickness over which the lee edge's vapour is thin
-LEE_VEIL = (1.08, 0.35)  # the thin vapour of the lee edge: the sky behind it, lifted by the light it scatters, and its share
+# PLACE: the source's top-left corner (x, y) and its scale (k, image px per
+# source px), px at 28 px/deg; its belly runs out of the source's frame at
+# its left (after the mirror), so that edge is cut along the crossing's pole
+# (cut: a line the cloud is kept to the right of, and its feather), behind
+# which it stands; and its foot, in the haze low behind the roofs, faded.
+# match.py sets its own for the panorama's camera.
+PLACE = {"x": 1145.0, "y": 90.0, "k": 0.48, "cut": ((1540.0, 600.0), (1600.0, 1250.0), 2.0), "foot": (1290.0, 1357.0)}
 SHRINK = 2.5  # px the open-sky matte is shrunk before the cloud is laid over it
 HALO = (0.9, 1.15, 4.0)  # the plate's sharpening halo: unmixed share of sky from, fully by, and px from the foreground it reaches
+BASE_C = np.array([0.19, 0.245, 0.35], np.float32)  # the cloud's deepest shade, its base: a deep blue-grey (sRGB ~121, 136, 160)
+SHADE = np.array([0.347, 0.468, 0.604], np.float32)  # a face lit by the sky alone: the skylight's blue (sRGB ~#9FB6CC)
 
 
 def _clear(lin, sky, s):
@@ -542,166 +479,6 @@ def _clear(lin, sky, s):
     fill = fill * (1 + np.clip(grain, -0.12, 0.12))[..., None]
     out = lin * (1 - wc[..., None]) + fill * wc[..., None]
     return out.astype(np.float32), base, wc
-
-
-def _lobes(tower, s):
-    """The tower's lobes, (x, y, r, z, level): its tiers' rows (level 0),
-    each lobe budded (1, 2)."""
-    rng = np.random.default_rng(tower["seed"])
-    x0, lean = tower["x"] * s, tower["lean"]
-    y_base = tower["tiers"][0][0] * s
-    out = []
-    for i, (ty, hw, lr) in enumerate(tower["tiers"]):
-        ty, hw, lr = ty * s, hw * s, lr * s
-        # (each tier a little off the one under it, so a flank steps in and
-        # out rather than running as one ruled line)
-        xc = x0 + lean * (y_base - ty) + rng.uniform(-1, 1) * TIER_JIT[0] * lr
-        hw = hw * (1 + rng.uniform(-1, 1) * TIER_JIT[1])
-        n = max(int(np.ceil(2 * hw / (1.15 * lr))), 1)
-        xs = np.linspace(xc - hw + lr * 0.6, xc + hw - lr * 0.6, n) if n > 1 else np.array([xc])
-        for x in xs:
-            x = x + rng.uniform(-0.18, 0.18) * lr
-            y = ty + rng.uniform(-0.22, 0.22) * lr
-            r = lr * rng.uniform(0.75, 1.25)
-            # nearer at the tower's middle: a column, not a wall
-            z = DEPTH_Z * np.sqrt(max(hw * hw - (x - xc) ** 2, 0.0)) + rng.uniform(-0.1, 0.1) * lr
-            out.append((x, y, r, z, 0))
-    # cauliflower: buds on each lobe's upper rim and its sides (never down
-    # into the body), and buds on those
-    gen = out
-    for frac, nb, dist in BUD:
-        new = []
-        for (x, y, r, z, lvl) in gen:
-            for _ in range(nb):
-                ang = rng.uniform(*BUD_ARC)  # image y down: the upper half and the sides
-                rr = r * frac * rng.uniform(0.75, 1.2)
-                d = r * dist * rng.uniform(0.85, 1.05)
-                bx, by = x + d * np.cos(np.radians(ang)), y + d * np.sin(np.radians(ang))
-                # standing on the parent's surface there
-                bz = z + np.sqrt(max(r * r - d * d, 0.0)) * 0.9
-                new.append((bx, by, rr, bz, lvl + 1))
-        out += new
-        gen = new
-    return out
-
-
-def _heap_field(W, H, s, seed=5):
-    """The massing's height field (px, the nearest surface over the image
-    plane; -inf where there is none) and its normal there (the winning
-    sphere's own, x right, y up, z to the viewer); and the same of the
-    towers' big lobes alone (level 0), each grown by ENVELOPE to a dome over
-    its own buds."""
-    rng = np.random.default_rng(seed)
-    hf = np.full((H, W), -1e9, np.float32)
-    h0 = np.full((H, W), -1e9, np.float32)
-    nf = np.zeros((H, W, 3), np.float32)
-    n0 = np.zeros((H, W, 3), np.float32)
-    nf[..., 2] = n0[..., 2] = 1
-    xs, ys = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
-    # the edge's wobble: the whole field read through smooth noise, so no
-    # lobe is a circle and every rim has its own small puffs
-    disp = []
-    for k in range(2):
-        d = np.zeros((H, W), np.float32)
-        for sig, amp in ((14.0, WOBBLE[0]), (3.5, WOBBLE[1])):
-            n = cv2.GaussianBlur(rng.standard_normal((H, W)).astype(np.float32), (0, 0), sig * s)
-            d += amp * s * n / max(float(n.std()), 1e-6)
-        disp.append(d)
-    X, Y = xs + disp[0], ys + disp[1]
-
-    def put(hh, nn, sl, x, y, z, r, dx, dy, d2):
-        q = r * r - d2
-        h = np.where(q > 0, z + np.sqrt(np.maximum(q, 0)), -1e9)
-        win = h > hh[sl]
-        hh[sl] = np.where(win, h, hh[sl])
-        nv = np.stack([dx / r, -dy / r, np.sqrt(np.maximum(q, 0)) / r], -1)
-        nn[sl] = np.where(win[..., None], nv, nn[sl])
-
-    for t in TOWERS:
-        for (x, y, r, z, lvl) in _lobes(t, s):
-            re = r * (ENVELOPE if lvl == 0 else 1.0)
-            x0, x1 = int(max(x - re - 24 * s, 0)), int(min(x + re + 24 * s, W))
-            y0, y1 = int(max(y - re - 24 * s, 0)), int(min(y + re + 24 * s, H))
-            if x0 >= x1 or y0 >= y1:
-                continue
-            sl = (slice(y0, y1), slice(x0, x1))
-            dx, dy = X[sl] - x, Y[sl] - y
-            d2 = dx * dx + dy * dy
-            put(hf, nf, sl, x, y, z, r, dx, dy, d2)
-            if lvl == 0:
-                # the big lobe with its buds: one dome over them all
-                put(h0, n0, sl, x, y, z, re, dx, dy, d2)
-    return hf, nf, h0, n0, disp[0]
-
-
-def _nblur(x, sig, m):
-    """A Gaussian of x over the mask m alone (normalized), so the mask's own
-    edge is no slope."""
-    return cv2.GaussianBlur(x * m, (0, 0), sig) / np.maximum(cv2.GaussianBlur(m, (0, 0), sig), 1e-3)
-
-
-def _cloud_texture(lin, sky, base, s, seed=29):
-    """The photograph's own cumulus texture, for the massing's light: the
-    high-frequency luminance of the plate's puffs (each pixel's log
-    luminance over its own TEX_SIG px mean), inside the puffs' cores only,
-    quilted over the frame from random patches of it (TEX_P px, a Hann
-    window, half-overlapping, the sum normalized so the patches keep their
-    contrast; never flipped, so every puff keeps its sun on the upper left)
-    and scaled up TEX_UP, the massing being nearer than the puffs were.
-    Returns log-luminance detail, about zero mean; zeros if the plate has
-    too few puffs to sample."""
-    H, W = lin.shape[:2]
-    L, Lb = kit.luma(lin), kit.luma(base)
-    neutral = kit.smoothstep(-0.03, 0.02, lin[..., 2] - lin[..., 0])
-    a = kit.smoothstep(1.15, 1.6, L / np.maximum(Lb, 1e-4)) * (sky > 0.97) * neutral
-    core = cv2.erode((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8))
-    m = core.astype(np.float32)
-    lg = np.log(np.maximum(L, 1e-4)).astype(np.float32)
-    # (a band: under TEX_SIG[0] the plate's 8-bit, compressed sky is blocks,
-    # not cloud; a puff's dark specks, wires' ends and birds, clipped)
-    hf = np.clip((_nblur(lg, TEX_SIG[0] * s, m) - _nblur(lg, TEX_SIG[1] * s, m)) * m, -0.06, 0.12)
-    P = max(int(round(TEX_P * s)) // 2 * 2, 8)
-    valid = cv2.erode(core, np.ones((P + 1, P + 1), np.uint8))
-    ys, xs = np.nonzero(valid)
-    inb = (xs >= P // 2) & (xs < W - P // 2) & (ys >= P // 2) & (ys < H - P // 2)
-    ys, xs = ys[inb], xs[inb]
-    if len(xs) < 50:
-        return np.zeros((H, W), np.float32)
-    th, tw = int(np.ceil(H / TEX_UP)) + P, int(np.ceil(W / TEX_UP)) + P
-    acc = np.zeros((th + P, tw + P), np.float32)
-    w2 = np.zeros_like(acc)
-    win = np.outer(np.hanning(P + 2)[1:-1], np.hanning(P + 2)[1:-1]).astype(np.float32)
-    rng = np.random.default_rng(seed)
-    for y0 in range(0, th, P // 2):
-        for x0 in range(0, tw, P // 2):
-            k = rng.integers(len(xs))
-            cy, cx = ys[k] - P // 2, xs[k] - P // 2
-            acc[y0:y0 + P, x0:x0 + P] += win * hf[cy:cy + P, cx:cx + P]
-            w2[y0:y0 + P, x0:x0 + P] += win * win
-    tex = acc / np.sqrt(np.maximum(w2, 1e-4))
-    tex = tex[P // 2:P // 2 + th - P, P // 2:P // 2 + tw - P]
-    tex = cv2.resize(tex, (int(round(tex.shape[1] * TEX_UP)), int(round(tex.shape[0] * TEX_UP))), interpolation=cv2.INTER_CUBIC)[:H, :W]
-    tex = tex - float(tex.mean())
-    return (tex / max(float(tex.std()), 1e-6)).astype(np.float32)
-
-
-def _sun_path(h, ux, uy, kz, s):
-    """How far the sun's ray runs inside the massing from each point of its
-    surface: from (x, y, h) toward the sun, (ux, uy) across the image (+y
-    up) and rising kz per px toward the viewer, the length of it under the
-    massing's surface (h, the nearest surface over the image plane, the body
-    taken as solid behind it), softened over M_SOFT px of height."""
-    H, W = h.shape
-    xs, ys = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
-    step = M_STEP * s
-    od = np.zeros((H, W), np.float32)
-    for t in range(1, int(M_REACH * s / step) + 1):
-        d = t * step
-        hs = cv2.remap(h, (xs + ux * d).astype(np.float32), (ys - uy * d).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        # (the penumbra widens with the distance, so a far lobe's shade is
-        # soft, not a shaft of shadow ruled across the heap)
-        od += np.clip((hs - h - kz * d) / (M_SOFT * s + M_PEN * d), 0, 1)
-    return cv2.GaussianBlur(od * step, (0, 0), 1.0 * s)
 
 
 def _lay_over(lin, new, sky, shrink):
@@ -750,144 +527,27 @@ def _lay_over(lin, new, sky, shrink):
 
 
 def massing(lin, sky, right, up, sun, ppd):
-    """The plate's clouds cleared and the towering cumulus built in their
-    place. lin: linear RGB; sky: the 0..1 open-sky matte; right, up: per-pixel
-    world directions of the image's +x and -y; sun: unit world direction to
-    the sun. Returns the image and a dict of the maps."""
+    """The plate's clouds cleared and the photographed cumulus laid in their
+    place (PLACE). lin: linear RGB; sky: the 0..1 open-sky matte; right, up:
+    per-pixel world directions of the image's +x and -y; sun: unit world
+    direction to the sun. Returns the image and a dict of the maps."""
     s = ppd / 28.0
     H, W = sky.shape
     cleared, base, wc = _clear(lin, sky, s)
-    hf, nf, h0, n0, wave = _heap_field(W, H, s)
-    yy = np.broadcast_to(np.arange(H, dtype=np.float32)[:, None] / s, (H, W))
-    # the flat base: each tower cut level at its floor (the line wandering a
-    # few px), so the heap stands on its condensation level, not a haze
-    floors = [t["floor"] for t in TOWERS if t.get("floor")]
-    if floors:
-        floor = float(min(floors))
-        fl = floor + FLOOR_WAVE * wave / max(float(np.abs(wave).max()), 1e-6)
-        hf = np.where(yy < fl, hf, -1e9)
-    body = (hf > -1e8).astype(np.uint8)
-    # a bud that the wobble cut off from its parent is a speck, not a heap
-    nc, lc, stc, _ = cv2.connectedComponentsWithStats(body, connectivity=8)
-    big = np.zeros(nc, bool)
-    big[1:] = stc[1:, 4] >= 0.1 * float(stc[1:, 4].max())
-    body = big[lc].astype(np.float32)
-    hf = np.where(body > 0, hf, -1e9)
-    # the height over the image plane (0 at the massing's outer edge)
-    h = np.where(body > 0, np.maximum(hf, 0), 0).astype(np.float32)
-    dt = cv2.distanceTransform((body > 0).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
-    # the base, its lowest reach: a belly over the floor (or low in the frame)
-    if floors:
-        belly = 1 - kit.smoothstep(BASE_H[1], BASE_H[0], fl - yy)
-    else:
-        belly = kit.smoothstep(BASE_Y[0], BASE_Y[1], yy)
-    # the sun across the image (+y up) and toward the viewer
+    # the sun across the image: the source is mirrored to stand on its side
     lx = float(np.mean((right * sun).sum(-1)))
-    ly = float(np.mean((up * sun).sum(-1)))
-    lz = max(1 - lx * lx - ly * ly, 0.0) ** 0.5
-    l2 = max(np.hypot(lx, ly), 1e-3)
-    ux, uy = lx / l2, ly / l2
-
-    # 1. the sun on the surface: each floret's own sphere, and its big
-    # lobe's dome over its buds (so a turret is lit as one form, its buds
-    # catching the light on it), against the true sun; wrapped a little
-    # (scattering), and keyed so the terminator is soft but there
-    has0 = (h0 > -1e8)[..., None]
-    n = np.where(has0, M_NORM[0] * n0 + M_NORM[1] * nf, nf)
-    # (and the tower's own round, its column: the lobes stand nearer at its
-    # middle, so its right flank, lobes and all, turns from the sun)
-    gy, gx = np.gradient(_nblur(h, M_COL * s, body))
-    ncol = np.stack([-gx, gy, np.ones_like(gx)], -1)
-    ncol /= np.linalg.norm(ncol, axis=-1, keepdims=True)
-    n = n + M_NORM[2] * ncol
-    n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-6)
-    # (the base is flat: its lobes smoothed into the tower's round, so the
-    # underside reads as one level shelf, not a row of hanging lumps)
-    n = n + (ncol - n) * (BASE_FLAT * belly)[..., None]
-    n = cv2.GaussianBlur(n, (0, 0), 1.5 * s)
-    n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-6)
-    ndl = n[..., 0] * lx + n[..., 1] * ly + n[..., 2] * lz
-    lam = kit.smoothstep(M_TERM[0], M_TERM[1], np.clip((ndl + M_WRAP) / (1 + M_WRAP), 0, 1))
-
-    # 2. the sun through the massing: how far its ray from each surface
-    # point runs under the massing's own surface (a turret above and to the
-    # left of a floret shades it), through a short mean free path (the crisp
-    # shade of one floret on the next) and a long one (the light carried
-    # through the body by scattering, so the shade side is lit softly)
-    od = _sun_path(_nblur(h, 1.5 * s, body) * body, ux, uy, M_KZ * lz / l2, s)
-    tr = M_POWDER * np.exp(-od / (M_MFP[0] * s)) + (1 - M_POWDER) * np.exp(-od / (M_MFP[1] * s))
-    # and the tower's own side turned from the sun (its right and its low
-    # reach): where a pixel stands along the sun's line through the whole
-    # massing, the share of it between the pixel and the sun
-    soft = cv2.GaussianBlur(body, (0, 0), M_FAR_S * s)
-    nst = int(M_FAR * s / (3.0 * s))
-    d_sun = _march(soft, ux, uy, 3.0 * s, nst)
-    d_far = _march(soft, -ux, -uy, 3.0 * s, nst)
-    frac = _nblur(d_sun / np.maximum(d_sun + d_far, 1e-3), 16.0 * s, body)
-    far = 1 - M_FARSIDE[2] * kit.smoothstep(M_FARSIDE[0], M_FARSIDE[1], frac)
-    sun_l = np.clip(lam * tr * far, 0, 1)
-
-    # 3. the shade: lit by the sky alone, its blue, more on a face turned up
-    # to it than on one turned down; the folds between florets in their
-    # neighbours' shade; and the base a darker blue-grey belly, flat
-    nu = n[..., 1]
-    cav = _nblur(h, M_AO_R * s, body) - h
-    ao = 1 - M_AO_K * kit.smoothstep(0.0, M_AO * s, cav) * kit.smoothstep(4.0 * s, 16.0 * s, dt)
-    sun_l = sun_l * (1 - BASE_SUN * belly)
-    amb = (M_SKY[0] + M_SKY[1] * nu) * ao
-    shade = SHADE[None, None] * amb[..., None]
-    shade = shade + (BASE_C[None, None] * ao[..., None] - shade) * belly[..., None]
-    C = shade + (TOP[None, None] - shade) * sun_l[..., None]
-    # (carried out past the silhouette from inside it, so the edge's
-    # feather lays the edge's own light on the sky, not the light of a
-    # surface that is not there)
-    inner = cv2.erode(body, np.ones((3, 3), np.uint8))
-    C = C * inner[..., None] + kit.pushpull(C, inner) * (1 - inner[..., None])
-
-    # 4. the photograph's own cumulus texture over the light: its fine
-    # puffs and seams, strongest where the sun picks them out
-    tex = _cloud_texture(lin, sky, base, s)
-    tex = tex * kit.smoothstep(0.0, 6.0 * s, dt) * (1 - 0.6 * belly)
-    C = C * np.exp(TEX_K * tex * (0.4 + 0.6 * sun_l))[..., None]
-
-    # 5. the edge. Sunlit (a floret turned to the sun, at the upper left):
-    # crisp, a px of feather, its lumps standing on the cobalt. In shade
-    # (the lee side, the lower right): eroded, soft, a little thinned, the
-    # thin rim of vapour there lit by the sky through it; along the base,
-    # defined however it is lit (a cumulus' flat underside, not a haze)
-    sl = _nblur(sun_l, 4.0 * s, body)
-    sl = kit.pushpull(sl, cv2.erode(body, np.ones((3, 3), np.uint8)))
-    w_sun = np.maximum(kit.smoothstep(EDGE_W[0], EDGE_W[1], sl), belly)
-    thick = np.maximum(h, dt)
-    op0 = (1 - np.exp(-thick / (M_OPQ * s))) * body
-
-    def edge(e, f):
-        r = max(int(round(e * s)), 0)
-        o = cv2.erode(op0, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) if r else op0
-        return cv2.GaussianBlur(o.astype(np.float32), (0, 0), f * s)
-    op_sun = np.clip(edge(*EDGE_SUN) * 1.02, 0, 1)
-    op_lee = np.clip(edge(*EDGE_LEE[:2]), 0, 1) ** EDGE_LEE[2]
-    op = op_lee + (op_sun - op_lee) * w_sun
-    thin = np.exp(-thick / (THIN_PX * s)) * (1 - w_sun)
-    veil = cleared * LEE_VEIL[0]
-    C = C + (veil - C) * (LEE_VEIL[1] * thin)[..., None]
-    # the sunlit tops never over TOP; the shade may sit under its sky (it
-    # is a cloud's shade), but not under the deep base
-    C = np.clip(C, BASE_C[None, None] * 0.8, TOP[None, None] * 1.02)
-    # (a breath of the aerial haze over the lowest of it)
-    C = C + (base * 1.1 - C) * (BASE_HAZE * belly)[..., None]
-
-    # 6. the composite: on the open sky, the cleared sky under the cloud;
-    # a pixel part sky, part wire or eave, unmixed against the local sky,
-    # the photograph's halo round the boards and poles taken out
-    new = cleared * (1 - op[..., None]) + C * op[..., None]
+    C, A = cumulus.place(W, H, s, PLACE, lx, TOP, SHADE, BASE_C)
+    # the sky's own grain over it (the photograph's was resampled away)
+    L = kit.luma(cleared)
+    grain = np.clip(L / np.maximum(cv2.GaussianBlur(L, (0, 0), 2.0 * s), 1e-4) - 1, -0.08, 0.08)
+    C = C * (1 + grain)[..., None]
+    new = cleared * (1 - A[..., None]) + C
     out, halo = _lay_over(lin, new, sky, SHRINK * s)
     out = np.clip(out, 0, None).astype(np.float32)
-    if os.environ.get("CLOUDS_DEBUG"):  # a directory: each of the light's maps, as a png
-        for nm, x in (("lam", lam), ("far", far), ("lit", sun_l), ("tr", tr), ("ao", ao), ("belly", belly), ("wsun", w_sun), ("op", op), ("halo", halo), ("tex", 0.5 + 2 * tex)):
-            cv2.imwrite(os.path.join(os.environ["CLOUDS_DEBUG"], nm + ".png"), np.clip(x * 255, 0, 255).astype(np.uint8))
-    return out, {"a": op * np.clip(sky, 0, 1), "h": h / max(float(h.max()), 1e-3), "lit": sun_l, "tr": tr, "rm": wc, "base": base,
-                 "tex": np.clip(0.5 + 2.0 * tex, 0, 1), "w_sun": w_sun, "lam": lam, "ao": ao, "Lw": float(kit.luma(TOP[None, None])[0, 0])}
+    a = A * np.clip(sky, 0, 1)
+    lum = kit.luma(C / np.maximum(A, 1e-3)[..., None]) * (A > 0.02)
+    return out, {"a": a, "h": A, "lit": np.clip(lum / float(kit.luma(TOP[None, None])[0, 0]), 0, 1), "rm": wc, "base": base,
+                 "halo": halo, "Lw": float(kit.luma(TOP[None, None])[0, 0])}
 
 
 def main():
@@ -939,7 +599,7 @@ def main():
     if SHEET:
         sm = lambda x: cv2.resize(x, (W // 3, H // 3), interpolation=cv2.INTER_AREA)
         g = lambda m: np.repeat(sm(m)[..., None], 3, -1)
-        tiles = [(g(maps["a"]), "cloud"), (g(maps["h"]), "body"), (g(maps["lit"] * (maps["a"] > 0.2)), "light"), (g(maps["rm"]), "dropped"),
+        tiles = [(g(maps["a"]), "cloud"), (g(maps["h"]), "cumulus"), (g(maps["lit"] * (maps["a"] > 0.2)), "light"), (g(maps["rm"]), "dropped"),
                  (sm(develop.enc(photo)), "before"), (sm(develop.enc(lit_p)), "after")]
         kit.write_sheet(SHEET, kit.grid(tiles, 2))
 

@@ -42,13 +42,14 @@ And the sky:
 
   4. the cumulus: the panorama's sky behind the lens had only the scraps the
      cloud plane carried over (torn, small, a few degrees each). A towering
-     heap of its own is built there, rising from behind the roofs over the
+     heap of its own is laid there, rising from behind the roofs over the
      road behind the lens (where the glass looks at rest, turned up, and
      along the top of the glass when it is tipped down at the road), by
-     clouds.massing(), the plate's own cumulus model and light (the same
-     TOP and BELLY from the same sun, its towers budded, lit at the tower's
-     scale), in a virtual camera with the plate's own focal length and tilt,
-     so it has the plate's scale; it is composited only over the open sky
+     clouds.massing(): the plate's own photographed cumulus (cumulus.py,
+     the same source, the same grade to TOP from the same sun, here not
+     mirrored, as the sun stands to the right of this view), in a virtual
+     camera with the plate's own focal length and tilt (and wider, V_W), so
+     it has the plate's scale; it is composited only over the open sky
      (sky_of), so the apartment block, the trees and every wire stay in
      front of it, and then re-projected into the panorama.
   5. the circumsolar sky: the bake's aureole was the clear-sky target
@@ -95,21 +96,15 @@ SHARP = (1.1, 0.45)  # unsharp: px (sigma), amount
 # clouds.massing's scales hold; looking out over the road behind the lens
 V_LON = 88.0  # degrees (the equirect's longitude, u = 0.5 + lon / 360)
 V_PITCH = 22.6  # the plate's own tilt
-# the heap, in that camera's px (clouds.TOWERS' form: base x, lean, seed,
-# tiers (y, half width, lobe radius) from its base up). The main tower over
-# the road where it bends away (u ~3100), its crowns ~45 degrees up; a lower
-# shoulder to the left of it, over the apartment block (u ~2850), whose top
-# shows along the glass's crown when it is tipped at the road; a small heap
-# to the right, low over the far houses.
-V_TOWERS = (
-    {"x": 1420.0, "lean": -0.05, "seed": 31, "tiers": (
-        (1330, 430, 210), (1170, 420, 195), (1015, 405, 182), (870, 385, 170),
-        (735, 360, 160), (610, 325, 148), (495, 280, 134), (395, 215, 118), (315, 130, 98))},
-    {"x": 660.0, "lean": 0.08, "seed": 37, "tiers": (
-        (1330, 330, 170), (1185, 300, 155), (1050, 255, 140), (930, 190, 122), (845, 110, 100))},
-    {"x": 2160.0, "lean": -0.1, "seed": 41, "tiers": (
-        (1330, 240, 140), (1210, 200, 125), (1100, 140, 108), (1020, 70, 88))},
-)
+V_W = 3000  # its width, px: wider than the plate, so the heap and the sky round it fit
+# the heap, in that camera's px (clouds.PLACE's form: the source's top-left,
+# its scale): the photographed cumulus (cumulus.py), the plate's own, here
+# lit from the right as the sun stands there, so not mirrored; over the road
+# where it bends away, its crown ~45 degrees up, its left flank and the
+# belly the source's frame cuts off behind the apartment block (u ~2850),
+# its right, where the source's frame cuts it, faded (side), its foot
+# behind the far houses.
+V_PLACE = {"x": 1148.0, "y": 178.0, "k": 0.44, "side": 150.0, "foot": (1290.0, 1345.0)}
 WIRE = 15  # px in the virtual camera: wider than any wire, narrower than a cloud's bay
 AUREOLE = (3.0, 11.0)  # the circumsolar glow: e-folding widths, degrees (core, skirt)
 AUR_K = (0.4, 0.07)  # how far each goes to AUR_W
@@ -221,12 +216,12 @@ def cumulus(env, E, sun, f, W, H):
     v_sky = v_sky * kit.smoothstep(0.72, 0.93, Lv / np.maximum(Lc, 1e-4))
     right = np.broadcast_to(R[:, 0], rw.shape)
     up = np.broadcast_to(R[:, 1], rw.shape)
-    old = clouds.TOWERS
-    clouds.TOWERS = V_TOWERS
+    old = clouds.PLACE
+    clouds.PLACE = V_PLACE
     try:
         built, maps = clouds.massing(v_lin, v_sky, right, up, sun, f * np.pi / 180)
     finally:
-        clouds.TOWERS = old
+        clouds.PLACE = old
     delta, wt = from_view((built - v_lin).astype(np.float32), R, f, E)
     out = np.clip(env + delta * wt[..., None], 0, None)
     a, _ = from_view(maps["a"].astype(np.float32), R, f, E)
@@ -289,8 +284,8 @@ def main():
     w = develop.street_weight(OUT, E, env0)
     env = tone(env0, w)
     env = aureole(env, E, sun)
-    PW, PH = sc["photo"]
-    env, vbuilt, vlin, heap = cumulus(env, E, sun, sc["f"], PW, PH)
+    PH = sc["photo"][1]
+    env, vbuilt, vlin, heap = cumulus(env, E, sun, sc["f"], V_W, PH)
     kit.save_rgb(f"{OUT}/env.webp", develop.enc(env), quality=84)
     cm = cloud_matte(env, E, sun, heap)
     kit.save_gray(f"{OUT}/envc.png", cm)
