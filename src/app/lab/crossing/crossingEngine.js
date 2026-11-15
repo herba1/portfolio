@@ -106,8 +106,11 @@ const PLANES = [
   // the split (flat: false), as they do inside the photo.
   { file: "p2", rect: [-0.2998, 0.03466, 1.22021, 1.19027], o: 0.2, hold: false, ends: [true, false, false, true], flat: false }, // wires
   // the mechanism box is cut by the right edge and ends a few px past
-  // it (bake.py): that side is a cut-out end, not overscan to keep covered
-  { file: "p3", rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
+  // it (bake.py): that side is a cut-out end, not overscan to keep covered.
+  // Its orange and red band were regraded to a muted ochre and a dull brick
+  // (boomgrade.py) and it is a little soft (cocFor): one warm accent, the
+  // crossbuck.
+  { file: "p3", rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false], soft: 3 }, // barrier boom, mast
   // the house's margin is its edge column carried straight on (bake.py), which
   // holds as the beams running on for a short way and then reads as streaks
   { file: "p4", rect: [-0.1499, 0.44248, 0.50928, 1.14971], o: -0.06, clean: [-0.03, null, null, null] }, // the old house
@@ -173,6 +176,19 @@ const ASPECT_RANGE = [1 / 1.2, 1.3];
 // look into on every side before any card has to lean on its overscan.
 const ZOOM = 1.05;
 const APERTURE = 15; // CoC in css px for a plane at |z - zf| / z = 1, at split 1
+// A card's circle of confusion in css px: the lens's, opening with the split,
+// and for a card with its own softness (soft, css px) that much again
+// wherever the lens is not on it. The boom is soft: its ochre and brick sit
+// just out of focus beside the crossbuck and the lamp heads, which stay the
+// one sharp warm anchor. Flat it is the photograph, so it fades in with the
+// split; focus on the boom and it comes sharp.
+const SOFT_OFF = 0.03; // |z - zf| / z at which a soft card is fully soft
+const cocFor = (P, z, s, focusZ) => {
+  const off = Math.abs(z - focusZ) / z;
+  const lensCoc = APERTURE * s * off * (P.dof ?? 1);
+  const own = (P.soft ?? 0) * Math.min(1, s / 0.05) * Math.min(1, off / SOFT_OFF);
+  return Math.hypot(lensCoc, own);
+};
 const LIGHT = normalize([0.18, 0.28, 1]); // toward the sun: up, right (the eave's shadow on the wall), toward us
 const HAZE = [0.86, 0.93, 0.95];
 
@@ -836,7 +852,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     for (let k = 0; k < N; k++) {
       const P = PLANES[k];
       const z = G.zs[k];
-      const coc = APERTURE * s * (Math.abs(z - focusZ) / z) * dpr * (P.dof ?? 1);
+      const coc = cocFor(P, z, s, focusZ) * dpr;
       // the quad grows by the blur so a defocused edge is not cut
       const m = coc / dpr / G.printW;
       const r = P.rect;
@@ -973,7 +989,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     // The window: the eye stops where a card's overscan runs out, so no
     // card edge ever comes into it. A hand that pushes further is held at
     // the edge, as by the mat itself.
-    const cocs = G.zs.map((z, k) => APERTURE * s * (Math.abs(z - focusZ) / z) * stage.dpr * (PLANES[k].dof ?? 1));
+    const cocs = G.zs.map((z, k) => cocFor(PLANES[k], z, s, focusZ) * stage.dpr);
     const limP = swingLimit(G, 0, pitchDeg, cocs, true);
     pitchDeg *= limP;
     const limY = swingLimit(G, yawDeg, pitchDeg, cocs, false);

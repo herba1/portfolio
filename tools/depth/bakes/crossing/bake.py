@@ -17,7 +17,8 @@ Reads <workdir>/labels.npz from labels.py. For every plane, far to near:
              veil that slides over the cards behind as a ghost contour), the
              wires' alpha measured as how far each pixel is darkened toward
              the wire, and the town solid inside its outline.
-  colour     the photo where the plane is seen; its edge pixels are
+  colour     the photo where the plane is seen (the boom's regraded to a
+             muted ochre and brick by boomgrade.py); its edge pixels are
              un-mixed from what lies behind them (no sky fringe on a pole);
              hidden parts are inpainted: smooth colour from a push-pull
              pyramid plus real texture mirrored across the occlusion edge.
@@ -52,6 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import box, guided, dilate, erode, pushpull, smoothstep  # noqa: E402
 from shiftfill import shiftfill  # noqa: E402
 from skygrad import sky_gradient  # noqa: E402
+from boomgrade import regrade_boom  # noqa: E402
 
 WORK, OUT = sys.argv[1:3]
 os.makedirs(OUT, exist_ok=True)
@@ -179,6 +181,11 @@ img, SKY_G = regrade_sky(img, 1 - A[1])
 WIRE_K = 2  # the plane that holds the overhead wires
 TOWN_K = 1  # the far houses: the street's back flat
 BOOM_K = 3  # the barrier boom, its mast and mechanism
+# One warm accent, the crossbuck: the boom's saturated orange and red band go
+# to a muted ochre and a dull brick (boomgrade.py). Only the boom's share of
+# each pixel moves, so its card, its un-mixed edges and the flat photograph
+# (and so cumulus.py, wires.py and crossbuck.py after it) all carry it.
+img = regrade_boom(img, A[BOOM_K] - A[BOOM_K + 1])
 # Big holes with structure behind them (the house wall and fence behind the
 # camellia, the far houses behind the lamp heads) go to LaMa through
 # tools/depth/fill.py when the model is present; shiftfill otherwise.
