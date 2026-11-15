@@ -1,31 +1,47 @@
-"""Shutter bake: a locked-off cumulus time-lapse looking up a tower -> a looping
-viewfinder video, a time pyramid of block means for the long exposure, and a
-sharp still plate with a stillness matte.
+"""Shutter bake: a locked-off cumulus time-lapse looking straight up between
+towers -> a looping viewfinder video, a time pyramid of block means for the
+long exposure, and a sharp still plate with a stillness matte.
 
-    python3 -I tools/depth/bakes/shutter/bake.py <plate.mp4> <out_dir> [--work dir] [--drift drift.npy]
+    python3 -I tools/depth/bakes/shutter/drift.py <photo.jpg> <tower masks...> --out <work>/drift.mp4
+    python3 -I tools/depth/bakes/shutter/bake.py <work>/drift.mp4 <out_dir> --work <work>
         [--block-size 960x540] [--blocks-from <work>/blocks-lin.npy]
     sh tools/depth/bakes/shutter/encode.sh <work>/plate-master.mp4 public/lab/shutter
     python3 -I tools/depth/bakes/shutter/sky.py public/lab/shutter   (after encode: reads plate.mp4)
 
-Source: 84LENS (@84lens), "Time Lapse Video of Cloud Moving over a Building",
-Pexels 5124202, 3840x2160 24 fps, 257 frames (Evolution Tower, Moscow, from
-its foot, looking up), Pexels License.
-https://www.pexels.com/video/time-lapse-video-of-cloud-moving-over-a-building-5124202/
+Source: Harshit Joshi (@hpj1992), "a group of tall buildings standing next to
+each other", Unsplash trGhiLiRgsI (Hudson Yards, Manhattan, from the foot of
+five towers, looking straight up), Unsplash License.
+https://unsplash.com/photos/a-group-of-tall-buildings-standing-next-to-each-other-trGhiLiRgsI
+The photograph is one instant: drift.py turns it into a 1920x1080 time-lapse
+of its own clouds drifting behind the towers (see there), which is what this
+bake reads, exactly as it read the stock time-lapse it replaced (84LENS,
+Pexels 5124202, a telephoto crop of one tower's crown).
+
+The tower masks: SAM 2.1 (tools/depth/segment.py prompt) on the photo turned
+90 degrees clockwise (4000x3000), one per tower, in fractions of that frame:
+  t1 --box 0,0,0.495,0.4 --point 0.234,0.156 --point 0.08,0.25 --point 0.45,0.3 --neg 0.3,0.38
+  t2 --box 0.495,0,1,0.31 --point 0.56,0.10 --point 0.78,0.10 --point 0.66,0.25 --point 0.9,0.15
+  t3 --box 0,0.6,0.31,1 --point 0.156,0.81
+  t4 --box 0.25,0.52,0.56,1 --point 0.44,0.78 --point 0.47,0.58 --point 0.52,0.9
+  t5 --box 0.54,0.51,1,1 --point 0.74,0.73 --point 0.9,0.92 --point 0.6,0.6
+  t6 --box 0,0.2,0.21,0.32 --point 0.05,0.25 --point 0.15,0.27 --neg 0.1,0.33
+drift.py joins them into mask-tower.png (the frame's 1920x1080 band).
 
 Steps
-1. Stabilisation: corners on the tower tracked from the first frame to every
-   frame, the translation taken as the mode of their motions (see below; the
-   glass reflects moving cloud, so anything that averages the tower chases
-   the sky). The path is smoothed and applied sub-pixel at 4K when it drifts
-   more than 0.25 px (here it creeps about 2 px at 1080p over the clip).
-2. Each frame: 4K sRGB -> linear, shifted, area-downscaled to 1920x1080 in
-   linear light (no sharpening anywhere: the stock master is clean, and the
-   downscale alone keeps the tower's edges crisp), graded (grade.py: the flat
-   electric cobalt pulled to a zenith-deepening cyan-cobalt ramp).
+1. Stabilisation: corners on the towers tracked from the first frame to
+   every frame, the translation taken as the mode of their motions (see
+   below; the glass reflects the sky, so anything that averages a tower can
+   chase it). The path is smoothed and applied sub-pixel when it drifts more
+   than 0.25 px. drift.py's towers never move, so it reads as locked off;
+   the step stays for a real time-lapse.
+2. Each frame: sRGB -> linear, area-downscaled to 1920x1080 in linear light
+   when the source is larger (no sharpening anywhere), graded (grade.py: the
+   phone's flat daylight blue pulled to a cyan-cobalt that deepens toward the
+   zenith, radial about the towers' vanishing point).
 3. Shutter: every frame becomes the integral over its own interval, sampled
-   16 times along the optical flow to the next frame (the raw time-lapse
-   jumps ~1% of the frame per frame; a mean of raw frames is a strobe of
-   copies, not a smear).
+   16 times along the optical flow to the next frame (the clouds jump ~0.9%
+   of the frame per frame; a mean of raw frames is a strobe of copies, not a
+   smear).
    Loop: [start, start+N) with its last K frames cross-faded, in linear
    light, into the K frames before start.
 4. Outputs, all from that looped, graded, linear sequence:
@@ -39,18 +55,13 @@ Steps
      picture of the sky alone, and the still plate supplies the tower, so no
      low-resolution tower light bleeds into the smeared sky as a glow at its
      edge. (towerfill.py alone re-applies the fill to shipped atlases.)
-   - still.webp: 1920x1080, the linear mean of the whole loop (the tower
-     carries its average light and its glass the average of its reflections,
-     noise-free), with the stillness matte in alpha: the SAM 2.1 tower mask
-     (mask-tower.png, made on a frame of the plate with tools/depth/segment.py
-     prompt --box 70,130,800,1080 --point 480,840 --point 420,420
-     --point 160,950 --neg 100,100 --neg 1080,600), snapped to the mean
-     plate's own edges with a guided filter, then cut by the sky's own
-     motion: SAM takes the crown's open strut lattice as one solid, sky
-     pockets and all, so above the top floor every pixel whose linear-light
-     variance over the loop says it sees moving sky is taken out (see
-     "Stillness matte"). Eroded 1 px, feathered ~1 px. It is not grown into
-     the sky.
+   - still.webp: 1920x1080, the linear mean of the whole loop (the towers
+     carry their light, noise-free), with the stillness matte in alpha: the
+     SAM 2.1 tower masks (mask-tower.png, see above), snapped to the mean
+     plate's own edges with a guided filter, eroded 1 px, feathered ~1 px.
+     It is not grown into the sky. (CROWN, for a plate whose tower has an
+     open strut lattice SAM takes as solid, cuts the matte inside a polygon
+     by the sky's own motion; this plate has none.)
 """
 import argparse
 import json
@@ -73,7 +84,9 @@ from towerfill import fill_tower, tower_keep  # noqa: E402
 # px; the line runs through the slab, which is solid). Only here does the
 # variance test cut the matte: lower down the glass reflects the moving
 # cloud, and its variance is the sky's.
-CROWN = np.array([[150, 384], [610, 267], [610, 100], [150, 100]], np.int32)
+# (The Evolution Tower plate had one: [[150, 384], [610, 267], [610, 100],
+# [150, 100]]. The Hudson Yards towers are closed glass to their tops.)
+CROWN = None
 
 ap = argparse.ArgumentParser()
 ap.add_argument("src")
@@ -115,7 +128,7 @@ mask = cv2.resize(mask, (CW, CH), interpolation=cv2.INTER_AREA)
 # which sit above row 400 and are real sky.
 n_cc, lab_cc, st_cc, _ = cv2.connectedComponentsWithStats((mask < 0.5).astype(np.uint8), connectivity=4)
 for c in range(1, n_cc):
-    if st_cc[c, cv2.CC_STAT_AREA] < 2000 and st_cc[c, cv2.CC_STAT_TOP] > 400:
+    if st_cc[c, cv2.CC_STAT_AREA] < 2000 and (CROWN is None or st_cc[c, cv2.CC_STAT_TOP] > 400):
         mask[lab_cc == c] = 1.0
 
 
@@ -259,11 +272,12 @@ still_rgb = to8(still_lin)
 guide = still_rgb.astype(np.float32) / 255
 
 zone = np.zeros((CH, CW), np.uint8)
-cv2.fillPoly(zone, [CROWN], 1)
+if CROWN is not None:
+    cv2.fillPoly(zone, [CROWN], 1)
 zone = zone > 0
 open_sky = (cv2.dilate((mask > 0.02).astype(np.uint8), np.ones((5, 5), np.uint8)) == 0).astype(np.float32)
 sd_sky = pushpull(sd, open_sky)
-noise = float(np.median(sd[(inner > 0) & zone]))
+noise = float(np.median(sd[(inner > 0) & zone])) if zone.any() else 0.0
 cover = np.clip((sd - noise) / np.maximum(sd_sky - noise, 1e-3), 0, 1)  # f: the sky's share
 snap = np.clip(guided(guide, mask, 4, 1e-3), 0, 1)
 snap = np.clip((snap - 0.5) * 1.6 + 0.5, 0, 1)  # tighten the guided ramp back to ~2 px
@@ -282,10 +296,11 @@ for val, least in ((1, 6), (0, 16)):
     solid[small[lab_cc] & zone] = not val
 solid = solid.astype(np.uint8)
 core = cv2.erode(solid, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
-x0, y0 = CROWN[:, 0].min() - 4, CROWN[:, 1].min() - 4
-x1, y1 = CROWN[:, 0].max() + 4, CROWN[:, 1].max() + 4
 skel = np.zeros_like(solid)
-skel[y0:y1, x0:x1] = thin(solid[y0:y1, x0:x1])
+if CROWN is not None:
+    x0, y0 = CROWN[:, 0].min() - 4, CROWN[:, 1].min() - 4
+    x1, y1 = CROWN[:, 0].max() + 4, CROWN[:, 1].max() + 4
+    skel[y0:y1, x0:x1] = thin(solid[y0:y1, x0:x1])
 core |= skel & zone
 matte = np.maximum(core.astype(np.float32), cv2.GaussianBlur(core.astype(np.float32), (0, 0), 0.8))  # the feather falls outward
 # The struts' own light. A crown pixel the matte keeps is still part sky (a
@@ -400,8 +415,8 @@ a8 = np.clip(np.round(alpha * 255), 0, 255).astype(np.uint8)
 Image.fromarray(np.dstack([still_rgb, a8])).save(os.path.join(args.out, "still.webp"), "WEBP", quality=92, exact=True, method=6)
 prev = guide * (1 - 0.45 * alpha[..., None]) + np.array([1, 0.1, 0.1], np.float32) * 0.45 * alpha[..., None]
 cv2.imwrite(os.path.join(args.work, "debug-matte.jpg"), cv2.cvtColor((prev * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
-cz = (slice(CROWN[:, 1].min(), CROWN[:, 1].max() + 120), slice(CROWN[:, 0].min(), CROWN[:, 0].max() + 40))
-cv2.imwrite(os.path.join(args.work, "debug-crown.png"), cv2.resize(np.hstack([
+cz = (slice(CROWN[:, 1].min(), CROWN[:, 1].max() + 120), slice(CROWN[:, 0].min(), CROWN[:, 0].max() + 40)) if CROWN is not None else None
+cz and cv2.imwrite(os.path.join(args.work, "debug-crown.png"), cv2.resize(np.hstack([
     cv2.cvtColor(still_rgb[cz], cv2.COLOR_RGB2BGR),
     cv2.cvtColor((alpha[cz] * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR),
     cv2.cvtColor(((1 - cover[cz]) * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)]), None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST))
@@ -463,7 +478,7 @@ for a in range((NB + per - 1) // per):
     print(name, canvas.shape, os.path.getsize(os.path.join(args.out, name)), "bytes")
 
 meta = {
-    "source": "Pexels 5124202, 84LENS (@84lens)",
+    "source": "Unsplash trGhiLiRgsI, Harshit Joshi (@hpj1992); clouds drifted by drift.py",
     "start": S, "frames": N, "fade": K, "block": B, "blocks": NB, "fps": round(fps, 6),
     "crop": [0, 0, CW, CH],
     "video": [VW, VH],  # encode.sh keeps the master's size

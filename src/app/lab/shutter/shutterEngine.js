@@ -3,12 +3,18 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 import { createSound } from "@/lib/sound/engine";
 import { takes } from "./shutterTakes";
 
-// Shutter. A locked-off time-lapse from the foot of a tower, looking almost
-// straight up its glass into summer cumulus. Press and hold and the shutter
-// opens on bulb: the frame integrates the recorded light for as long as you
-// hold, so the clouds smear into silk along their real wind while the tower,
-// which never moved, stays sharp. Let go and the long exposure stays on the
-// print until the next press.
+// Shutter. A locked-off frame from the foot of five glass towers, looking
+// straight up past them into summer cumulus. Press and hold and the shutter
+// opens on bulb: the frame integrates the light for as long as you hold, so
+// the clouds smear into silk along their wind while the towers, which never
+// moved, stay sharp. Let go and the long exposure stays on the print until
+// the next press.
+//
+// The plate is one photograph made into a time-lapse of its own clouds
+// (tools/depth/bakes/shutter/drift.py): seen at the zenith a cloud deck is a
+// plane parallel to the sensor, so its drift is a pure translation, and the
+// photograph's cumulus is slid behind the towers along one wind, every cloud
+// breathing at its thin edges.
 //
 // The integral is real. Offline (tools/depth/bakes/shutter/bake.py) the
 // graded, looped plate is cut into blocks of 8 frames and each block's
@@ -105,10 +111,11 @@ const MEAN_FRAC = 1 / 8; // the local mean's scale, a fraction of the plate's wi
 const DETAIL_FRAC = 1 / 32; // the finer mean's (the crests' striations, keepSky)
 const DEEP = 1; // the gaps' fall to the clear sky's depth, at full keep
 const CREST = 1; // the crests' rise toward a cloud's white, at full keep
-// The cloud's light (cloudTone): toward the sun is up and a little left in
-// the frame (the glint on the tower's lit face), one tap is 1.2% of the
-// plate's width; sunlit hue and chroma, and the shade's skylight chroma.
-const SUN = [-0.5, -0.866];
+// The cloud's light (cloudTone): toward the sun is left and a little down in
+// the frame (the sky's glare is there, and the clouds' lit flanks face it),
+// one tap is 1.2% of the plate's width; sunlit hue and chroma, and the
+// shade's skylight chroma.
+const SUN = [-0.8, 0.6];
 const SUN_TAP = 0.012;
 const TONE = { k: 1, hue: (72 * Math.PI) / 180, warm: 0.012, shade: 0.09, edge: 0.06 };
 

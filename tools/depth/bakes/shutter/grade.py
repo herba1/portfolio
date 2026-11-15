@@ -1,19 +1,28 @@
-"""Shutter grade: the stock plate's electric cobalt into a Superia-ish summer scan.
+"""Shutter grade: the photograph's daylight blue into a Superia-ish summer scan.
 
-Works in linear light and OKLab. The source (Pexels 5124202) is already graded
-hot: a flat, clipped-red sky of sRGB ~ (0, 108, 203), OKLab L 0.53-0.56, C 0.165,
-h ~252, the same at the top of the frame as at the bottom (a telephoto sees a
-small patch of sky, and the stock grade flattened what gradient there was).
+Works in linear light and OKLab. The plate (Unsplash trGhiLiRgsI, see
+drift.py) is a phone's straight-up frame of a clean summer sky: OKLab L
+0.50-0.75, C ~0.12, h 249-254, palest in the glare round the sun (low left
+of the turned frame) and with no deepening toward the zenith at all (the
+phone's tone curve flattened it).
 
-The genre target is cyan-cobalt that deepens toward the zenith: #044984 at
-the top (L 0.40, C 0.116, h 252) to #0466a3 lower down (L 0.49, C 0.124, h 246).
-The camera points up the tower, so the top of the frame is the zenith side and
-the bottom is toward the horizon. Blues are pulled to that ramp: lightness
-scaled down by a vertical ramp, chroma eased, hue nudged a few degrees cyan as
-the ramp falls. Low-chroma pixels (cloud, the tower's white frame) are left
-alone, so a thin veil of cloud over blue takes the grade in proportion.
+The genre target is a cyan-cobalt that deepens toward the zenith: about
+#044984 there (L 0.40, C 0.12, h 252) to #0466a3 out toward the frame's
+edges (L 0.49, C 0.125, h 246). The camera points straight up, so the zenith
+is the vanishing point of the towers' plumb edges, near the middle of the
+frame, and the ramp is radial about it. The clear sky's own lightness and
+chroma over the frame (skyfield.npz, written by drift.py) set each pixel's
+scale, so the clear sky lands on the ramp with a share (KEEP) of the
+photograph's own gradient kept: the sun's side stays paler. Blues are pulled
+to it; low-chroma pixels (cloud, the towers' pale steel) are left alone, so
+a thin veil of cloud over blue takes the grade in proportion.
 """
+import os
+
+import cv2
 import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 M1 = np.array([[0.4122214708, 0.5363325363, 0.0514459929],
                [0.2119034982, 0.6806995451, 0.1073969566],
@@ -50,14 +59,37 @@ def hue_of_srgb(c):
     return np.degrees(np.arctan2(lab[2], lab[1])) % 360, np.hypot(lab[1], lab[2])
 
 
-# Ramp, top of frame -> bottom: lightness scale, chroma scale, hue (OKLab deg).
-TOP = (0.82, 0.74, 249.0)
-BOTTOM = (0.98, 0.80, 244.0)
+# The zenith (frame fractions) and the ramp, zenith -> r = 1 (the frame's
+# half-diagonal): lightness, chroma, hue (OKLab deg).
+ZENITH = (0.50, 0.46)
+AT_ZENITH = (0.41, 0.125, 252.0)
+AT_EDGE = (0.50, 0.132, 246.0)
+KEEP = 0.4  # the share of the photograph's own lightness gradient kept
+_field = {}
+
+
+def ramp(H, W):
+    key = (H, W)
+    if key not in _field:
+        z = np.load(os.path.join(HERE, "skyfield.npz"))
+        LS = cv2.resize(z["L"].astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
+        CS = cv2.resize(z["C"].astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
+        y, x = np.mgrid[0:H, 0:W].astype(np.float32)
+        r = np.hypot((x / W - ZENITH[0]) * W / H, y / H - ZENITH[1]) / np.hypot(0.5 * W / H, 0.5)
+        t = np.clip(r, 0, 1)
+        t = t * t * (3 - 2 * t)
+        TL = AT_ZENITH[0] + (AT_EDGE[0] - AT_ZENITH[0]) * t
+        TC = AT_ZENITH[1] + (AT_EDGE[1] - AT_ZENITH[1]) * t
+        Th = AT_ZENITH[2] + (AT_EDGE[2] - AT_ZENITH[2]) * t
+        TL = TL * (LS / float(np.median(LS))) ** KEEP
+        _field[key] = (TL / LS, np.clip(TC / CS, 0.9, 1.5), Th)
+    return _field[key]
 
 
 def grade(lin, lift=0.004):
     """lin: HxWx3 float32 linear sRGB -> graded linear sRGB."""
     H, W = lin.shape[:2]
+    kL, kC, hT = ramp(H, W)
     lab = lin2oklab(lin)
     L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
     C = np.hypot(a, b)
@@ -66,12 +98,6 @@ def grade(lin, lift=0.004):
     # where there is real chroma (a cloud's white is left alone).
     w = np.clip((h - 225) / 13, 0, 1) * np.clip((290 - h) / 15, 0, 1)
     w *= np.clip((C - 0.03) / 0.06, 0, 1)
-    # Vertical ramp, eased so the deepening gathers toward the top.
-    y = np.linspace(0, 1, H, dtype=np.float32)[:, None]
-    t = y * y * (3 - 2 * y)
-    kL = TOP[0] + (BOTTOM[0] - TOP[0]) * t
-    kC = TOP[1] + (BOTTOM[1] - TOP[1]) * t
-    hT = TOP[2] + (BOTTOM[2] - TOP[2]) * t
     L2 = L * (1 + (kL - 1) * w)
     C2 = C * (1 + (kC - 1) * w)
     h2 = np.radians(h + (hT - h) * w)
@@ -83,9 +109,10 @@ def grade(lin, lift=0.004):
 
 
 if __name__ == "__main__":
-    for c in ([0, 108, 203], [4, 73, 132], [4, 102, 163]):
+    for c in ([4, 73, 132], [4, 102, 163]):
         print(c, hue_of_srgb(c))
-    for c in ([0, 108, 203], [0, 120, 208], [250, 248, 246], [180, 200, 230]):
-        lin = np.tile(srgb2lin(np.array(c, np.float32)[None, None] / 255), (3, 1, 1))
-        g = lin2srgb(grade(lin)) * 255
-        print(c, "top", g[0, 0].round(), "mid", g[1, 0].round(), "bottom", g[2, 0].round())
+    import sys
+    from PIL import Image
+    if len(sys.argv) > 1:  # grade a frame: grade.py in.png out.png
+        im = srgb2lin(np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(np.float32) / 255)
+        Image.fromarray(np.round(lin2srgb(grade(im)) * 255).astype(np.uint8)).save(sys.argv[2])

@@ -1,5 +1,5 @@
 {
- "source": "Pexels 5124202, 84LENS (@84lens)",
+ "source": "Unsplash trGhiLiRgsI, Harshit Joshi (@hpj1992); clouds drifted by drift.py",
  "start": 24,
  "frames": 232,
  "fade": 24,
@@ -30,6 +30,6 @@
  ],
  "encoding": "oklab-l12",
  "ab": 0.15,
- "stabilised": true,
- "maxShift": 2.888
+ "stabilised": false,
+ "maxShift": 0.001
 }
