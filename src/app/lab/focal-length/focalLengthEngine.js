@@ -28,6 +28,13 @@ import { createFilm } from "../_kit/film";
 // soft and their shadows turned to grey blotches under magnification). At
 // 24 mm the frame is still mostly cumulus, the towers only at the corners.
 //
+// The capture is turned 32 degrees about the zenith (ROLL), so the curved
+// glass tower's crown and canopy, the one face the capture could not hold
+// together, sits on the frame's short axis and mostly past its top edge,
+// and the dark grid tower and the gold stone tower take the top corners.
+// An upright frame turns another quarter, so the same tower stays on its
+// short axis.
+//
 // Query: ?mm=10..24 holds a focal length.
 
 const ASSET = "/lab/focal-length/";
@@ -35,6 +42,7 @@ const TM = 95; // degrees from the zenith covered by the outer cap
 const RI = 0.5; // the inner inset covers rho <= 0.5 (47.5 degrees: the whole frame at 20 mm)
 const ENC = 2.0; // the caps store scene light / 2, sRGB-encoded
 const HALF_DIAG = 21.633; // mm, full frame
+const ROLL = (32 * Math.PI) / 180; // the capture's azimuth about the zenith
 
 const MM_LONG = 24;
 const MM_WIDE = 10;
@@ -57,7 +65,7 @@ uniform sampler2D uInner;
 uniform vec2 uRes;      // device px
 uniform float uF;       // px, the lens constant for this k
 uniform float uK;       // 1 rectilinear .. 2 stereographic
-uniform vec3 uRot;      // small tilts about world x and z, roll about the zenith
+uniform vec3 uRot;      // small tilts about screen x and y, then the roll about the zenith
 uniform float uGain;
 const float TM = ${((TM * Math.PI) / 180).toFixed(6)};
 const float RI = ${RI.toFixed(4)};
@@ -465,8 +473,9 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     const by = breathe * 0.35 * Math.sin((t * 2 * Math.PI) / 13.7 + 1.2);
 
     const mm = mmOf(clamp(zoom.x, -0.08, 1.08));
-    const rot = [(hover.y * 1.2 + by) * D2R, (-hover.x * 1.2 + bx) * D2R, 0];
-    const key = `${mm.toFixed(4)}|${rot[0].toFixed(5)}|${rot[1].toFixed(5)}`;
+    const roll = ROLL + (H > W ? Math.PI / 2 : 0);
+    const rot = [(hover.y * 1.2 + by) * D2R, (-hover.x * 1.2 + bx) * D2R, roll];
+    const key = `${mm.toFixed(4)}|${rot[0].toFixed(5)}|${rot[1].toFixed(5)}|${roll.toFixed(5)}`;
     if (key !== lastKey || dirty) {
       renderScene(mm, rot);
       lastKey = key;
