@@ -1,5 +1,5 @@
 import { createStage, clamp } from "../_kit/stage";
-import { createFilm, FILM_PRESETS } from "../_kit/film";
+import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 
 // Komorebi: lying under the stone pines of Piazza Martin Lutero in Rome,
 // looking up through the canopy towards a low sun.
@@ -70,10 +70,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // among them, and its flare had cost them their edges), so they keep their
 // real needle-sharp silhouettes; here they are pressed down into
 // silhouette, so they frame the glowing sky as the sharp dark under it.
-// That dark is a negative's, not a digital black: every tree's shade takes
-// a skylight fill reflected off its needles (carrying their relief), and on
-// the print its black is lifted and tinted towards the sky's cobalt, so the
-// crowns and trunks keep their green-teal needles all the way down.
+// That dark is a negative's, not a digital black: shot against the light,
+// the film holds them at full density, a deep blue-green-black with its
+// colour kept (no grey lift from the sky), climbing through each mass from
+// a dense heart to where it thins against the sky, its sunlit needles
+// green-gold, and where the needles thin against bright cloud a thin rim
+// of warm green light comes through them. The nearest cypress spire is the
+// one sharp anchor: printed from the sharp scene, without the film's
+// softness or mist. The overhead crowns' shade takes a skylight fill
+// reflected off their needles (carrying their relief), and their black is
+// lifted and tinted towards the sky's cobalt, so they keep their green-teal
+// needles.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..2 a breath of that strength sets off at t = 0.5 s (1 a
@@ -245,6 +252,8 @@ const FILM = {
   grain: 0.34,
   vignette: 0.22,
 };
+// Every film setting, for the anchor's sharp print.
+const FILM_PRINT = { ...FILM_DEFAULTS, ...FILM };
 // The grade, in linear scene light before the film.
 // Sky: a bright summer cyan-cobalt, saturated all the way up. The rebuilt
 // field gives the circumsolar glow low behind the cypresses (rolled off);
@@ -291,6 +300,41 @@ const CLOUD_GRADE = {
 // to a true black against the sky, their sunlit needles keeping a little
 // light, so they are the sharp dark that frames the glow.
 const SILHOUETTE = { strength: 1, knee: 0.1 };
+// Backlit film density on the lower and side silhouettes (the cypresses, the
+// far pines, the trunks). Shot against the light, a negative holds them as
+// a deep blue-green-black with full colour, not a grey lift: the skylight
+// fill keeps only fill of its share (and the cool of the needles, not the
+// sky's pale), and the shade is a tonal gradient through each mass (shade:
+// colour per unit luminance, lift: scene light where a mass thins towards
+// the sky at its tops and edges, deep: share of that left in its heart and
+// towards the ground; wide: the mip the mass is judged at). The capture's
+// own sunlit needles keep their light, turned green-gold (gold). Where the
+// needles thin against the bright cloud or sky behind them, light comes
+// through: a 1-3 px rim of warm green (trans: colour, gain on the light
+// behind, the luminance band it keys on, rim: the mip the rim is judged
+// against). mist: the share of the film's mist off the bright cloud taken
+// back inside them (their edges keep the film's softness), so they hold
+// their density beside it.
+const DENSITY = {
+  fill: 0.12,
+  shade: [0.12, 0.88, 0.8],
+  lift: 0.0035,
+  deep: 0.08,
+  wide: 4.5,
+  gold: [1.15, 1.05, 0.42],
+  trans: [0.66, 1, 0.14],
+  gain: 1.3,
+  key: [0.12, 1.4],
+  rim: 2,
+  mist: 0.6,
+};
+// The print's black under them: a deep blue-green-black (sRGB), where the
+// overhead crowns keep TREE_TOE.
+const DENSITY_TOE = [10 / 255, 22 / 255, 24 / 255];
+// The one sharp anchor: the nearest cypress spire, low in the middle of the
+// print, printed without the film's softness so it is the crisp dark edge
+// the soft frame is measured against (asset px: centre, half-size).
+const ANCHOR = { x: 858, y: 1950, rx: 100, ry: 210 };
 // Backlight. The sun stands behind the crowns, so what the eye sees of
 // them from below is their shaded underside, lit only by the sky: the
 // overhead crown's needles go down by near stops (the middle crowns, a
@@ -392,6 +436,12 @@ uniform float uRelief;       // share of the needles' relief the fill keeps
 uniform float uFillPale;     // how much paler the fill is than the sky overhead
 uniform vec4 uLeaf;          // the fill's green from other needles: rgb, share
 uniform vec2 uBackRoll;      // highlight roll-off: knee, pivot (scene light)
+uniform vec4 uDens;          // fill share kept, shade lift, share left deep, mip of the mass
+uniform vec3 uDensShade;     // the shade's colour, per unit luminance
+uniform vec3 uDensGold;      // the capture's sunlit needles, turned green-gold
+uniform vec4 uTrans;         // transmission rim: rgb per unit luminance, a gain
+uniform vec3 uTransK;        // luminance band behind it keys on, mip of the rim
+uniform vec4 uAnchor;        // the sharp spire: asset uv centre, half-size
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${ASPECT.toFixed(6)};
 
@@ -525,6 +575,36 @@ vec3 skyFill(vec2 u, vec3 c, vec3 skyF, float k) {
   vec3 alb = uFill.w * cb / yb;
   return skyF * alb * exp2(rel * uRelief) * k;
 }
+// A lower silhouette at backlit film density. c: its needles' own light
+// (already pressed down), f: the skylight fill it had, u: where it is read,
+// ch: its matte channel, behind: the sky and cloud behind it. The fill keeps
+// a share and its relief but loses the sky's pale, so it is the needles' own
+// cool green; the shade climbs from a deep heart (and the ground) to where
+// the mass thins against the sky; the capture's sunlit needles go
+// green-gold; and where the needles thin against bright cloud or sky the
+// light comes through them, a thin warm-green rim.
+vec3 dense(vec3 c, vec3 f, vec2 u, int ch, float a, vec3 behind) {
+  vec4 lw = textureLod(uLayersBlur, u, uDens.w);
+  vec4 lr = textureLod(uLayersBlur, u, uTransK.z);
+  float aw = ch == 0 ? lw.r : lw.g;
+  float ar = ch == 0 ? lr.r : lr.g;
+  float heart = smoothstep(0.45, 0.97, aw) * mix(0.6, 1.0, smoothstep(0.7, 1.0, u.y));
+  // The anchor spire is the deepest of them: the nearest, with the least air.
+  vec2 aq = (u - uAnchor.xy) / uAnchor.zw;
+  float anc = (ch == 0 ? 1.0 : 0.0) * (1.0 - smoothstep(0.6, 1.0, length(aq)));
+  vec3 shade = uDensShade * uDens.y * mix(1.0, uDens.z, heart) * (1.0 - 0.5 * anc);
+  float yf = dot(f, LUMA);
+  vec3 fill = withLuma(uDensShade, yf * uDens.x);
+  float y = dot(c, LUMA);
+  vec3 own = c * mix(vec3(1.0), uDensGold, smoothstep(0.003, 0.02, y)) * (1.0 - 0.6 * anc);
+  // only through needles: a trunk's smooth wood, with no needle-scale
+  // texture, lets none through
+  float tex = abs(lumAt(u, 0.0) - lumAt(u, 2.0));
+  float rim = smoothstep(0.25, 0.8, a) * (1.0 - smoothstep(0.55, 0.97, ar)) * smoothstep(0.012, 0.05, tex);
+  float yb = dot(behind, LUMA);
+  vec3 tr = uTrans.rgb * (uTrans.a * rim * yb * smoothstep(uTransK.x, uTransK.y, yb));
+  return own + shade + fill + tr;
+}
 void main() {
   vec2 p = vec2(vUv.x, 1.0 - vUv.y);
   vec2 uv = uCrop.xy + p * uCrop.zw;
@@ -644,19 +724,25 @@ void main() {
   // pressed down into silhouette: its shadows sink towards black, its lit
   // needles keep most of their light.
   float sil = uSil.x * smoothstep(0.5, 0.95, uv.y);
+  vec3 behind = col;
   vec3 c0 = canopy(u0);
   vec3 c1 = canopy(u1);
   vec3 f0 = skyFill(u0, c0, skyF, uFill.x);
   vec3 f1 = skyFill(u1, c1, skyF, uFill.y);
   c0 *= mix(vec3(1.0), c0 / (c0 + uSil.y), sil);
   c1 *= mix(vec3(1.0), c1 / (c1 + uSil.y), sil);
-  // Their shade is never black: the sky round them fills it.
-  c0 += f0;
+  // Above the band their shade is filled by the sky round them; in it they
+  // print at backlit film density.
+  // The far layer is all lower and side silhouettes: it takes the density
+  // from higher up the print.
+  c0 = mix(c0 + f0, dense(c0, f0, u0, 0, a0, behind), uSil.x * smoothstep(0.42, 0.75, uv.y));
   col = mix(col, c0, a0);
   // Backlit: the crowns between the lens and the sun show their shaded
   // undersides. The middle ones fade out of it into the silhouettes below.
-  c1 = mix(c1, underside(c1, uBack.y, skyTint), 1.0 - sil);
-  col = mix(col, c1 + f1, a1);
+  vec3 c1u = mix(c1, underside(c1, uBack.y, skyTint), 1.0 - sil) + f1;
+  // (behind the middle layer: the sky, the cloud and the far trees)
+  c1 = mix(c1u, dense(c1, f1, u1, 1, a1, col), sil);
+  col = mix(col, c1, a1);
   if (a2 > 0.0) {
     vec3 c2 = (canopy(ub) * ab + canopy(ut) * at) / (ab + at);
     col = mix(col, underside(c2, uBack.x, skyTint) + skyFill(ub, c2, skyF, uFill.z), a2);
@@ -756,12 +842,87 @@ uniform vec3 uPaper;
 uniform float uHueMax;       // hue ceiling for blues, in sixths of a turn
 uniform sampler2D uTrees;    // the scene: tree cover in a
 uniform vec3 uToe;           // the trees' lifted black, over the film's own
+uniform vec3 uToeLow;        // the lower silhouettes' black, over the film's own
+uniform vec4 uCrop;          // asset uv origin xy, size zw
+uniform vec4 uAnchor;        // the sharp spire: asset uv centre, half-size
+uniform vec3 uSoft;          // the film's softness, its spread (px), contrast
+// The film's own print, for the anchor printed from the sharp scene.
+uniform float uExpo;         // linear exposure, as the film's
+uniform vec4 uCurve;         // its curve: a, d, b, c
+uniform vec4 uLook;          // saturation, blue depth, vignette, grain
+uniform vec3 uShadowT;
+uniform vec3 uHighT;
+uniform vec3 uFilmToe;
+uniform float uSeed;
+uniform float uDensMist;     // share of the mist taken back inside the lower silhouettes
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 toLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toSrgb(vec3 c) {
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+// The film's tone path (exposure, vignette, blue depth, split tone,
+// saturation, curve, toe) with none of its optics: no softness, no colour
+// bleed, no mist.
+vec3 printSharp(vec3 x) {
+  vec2 res = vec2(textureSize(uTrees, 0));
+  vec2 r = (vUv - 0.5) * vec2(res.x / res.y, 1.0);
+  float t2 = dot(r, r) / (0.25 * (res.x * res.x / (res.y * res.y) + 1.0)) * uLook.z * uLook.z;
+  x = max(x, 0.0) * uExpo / ((1.0 + t2) * (1.0 + t2));
+  float sky = smoothstep(0.45, 0.9, (x.b - x.r) / (x.b + 1e-4)) * smoothstep(-0.02, 0.05, x.b - x.g) * smoothstep(0.004, 0.03, x.b);
+  x = mix(x, x * vec3(0.26, 0.64, 0.66), sky * uLook.y);
+  float yl = dot(x, LUMA);
+  x *= mix(uShadowT, uHighT, smoothstep(-3.0, 2.0, log2(max(yl, 1e-4) / 0.18)));
+  yl = dot(x, LUMA);
+  x = max(mix(vec3(yl), x, mix(uLook.x, 1.0, smoothstep(0.4, 1.4, yl))), 0.0);
+  x = pow(x, vec3(uCurve.x)) / (pow(x, vec3(uCurve.x * uCurve.y)) * uCurve.z + uCurve.w);
+  vec3 o = toSrgb(clamp(x, 0.0, 1.0));
+  o = uFilmToe + (1.0 - uFilmToe) * o;
+  // the same grain the film lays in its shadows
+  vec2 gp = gl_FragCoord.xy / max(0.75, res.y / 1100.0) + uSeed * vec2(17.13, 31.71);
+  float g = fract(sin(dot(floor(gp), vec2(127.1, 311.7))) * 43758.5453) - 0.5;
+  float ly = dot(o, LUMA);
+  return o + g * uLook.w * 0.2 * (0.2 + 0.8 * smoothstep(0.0, 0.3, ly)) * 0.6;
+}
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
-  // The trees' black is a scanned negative's, lifted and tinted towards the
-  // sky's cobalt, so their shade keeps its needles; the sky is left as is.
+  vec2 uv = uCrop.xy + vec2(vUv.x, 1.0 - vUv.y) * uCrop.zw;
+  // The anchor: the nearest cypress spire is printed without the film's
+  // optical softness. The film read its luma from a 1-2 px spread; here the
+  // print takes back the ratio of the sharp scene to that spread (through
+  // the curve's contrast), so its edge against the cloud is one pixel.
+  vec2 aq = (uv - uAnchor.xy) / uAnchor.zw;
+  float anc = 1.0 - smoothstep(0.75, 1.0, length(aq));
+  if (anc > 0.0) {
+    vec2 o = uSoft.y / vec2(textureSize(uTrees, 0));
+    float ys = dot(texture(uTrees, vUv).rgb, LUMA);
+    float yn = 0.25 * dot(texture(uTrees, vUv + vec2(-o.x, -o.y)).rgb + texture(uTrees, vUv + vec2(o.x, -o.y)).rgb
+      + texture(uTrees, vUv + vec2(-o.x, o.y)).rgb + texture(uTrees, vUv + vec2(o.x, o.y)).rgb, LUMA);
+    const float E = 0.004;
+    float r = clamp((ys + E) / (mix(ys, yn, uSoft.x) + E), 0.25, 3.0);
+    c = mix(c, clamp(toSrgb(toLin(clamp(c, 0.0, 1.0)) * pow(r, uSoft.z)), 0.0, 1.0), anc);
+    // ...and the spire itself (the trees in it, by their sharp matte) is
+    // printed straight from the sharp scene: no mist from the cloud beside
+    // it veils it, so it is the one dark that is truly dark.
+    vec4 sc = texture(uTrees, vUv);
+    c = mix(c, printSharp(sc.rgb), anc * smoothstep(0.5, 1.0, sc.a));
+  }
+  // The trees' black is a scanned negative's: the overhead crowns' lifted
+  // and tinted towards the sky's cobalt, so their shade keeps its needles;
+  // the lower silhouettes' a deep blue-green-black, backlit density. The sky
+  // is left as is.
   float tr = texture(uTrees, vUv).a;
-  c = mix(c, uToe + (1.0 - uToe) * c, tr);
+  float band = smoothstep(0.45, 0.85, uv.y);
+  // Inside the lower silhouettes (not at their edges, which keep the film's
+  // softness) much of the mist the bright cloud lays over them is taken
+  // back, so they hold their density beside it instead of greying.
+  if (band > 0.0 && tr > 0.85) {
+    vec3 sc = texture(uTrees, vUv).rgb;
+    c = mix(c, min(c, printSharp(sc)), uDensMist * band * smoothstep(0.85, 1.0, tr));
+  }
+  vec3 toe = mix(uToe, uToeLow, band);
+  c = mix(c, toe + (1.0 - toe) * c, tr);
   // Blues past the ceiling (the pale veil by the sun, a thin cloud edge
   // under the warm bloom) are turned back to it at the same value and
   // chroma, so no pale sky reads lavender; deep blacks and real violets are
@@ -777,6 +938,16 @@ void main() {
   }
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
+
+// The film's curve constants (Lottes, mid grey through, whitePoint to 1), as
+// the film computes them, for the anchor's sharp print.
+function filmCurve(a, d, hdrMax, mid = 0.18) {
+  const ad = a * d;
+  const den = (hdrMax ** ad - mid ** ad) * mid;
+  const b = (-(mid ** a) + hdrMax ** a * mid) / den;
+  const c = (hdrMax ** ad * mid ** a - hdrMax ** a * mid ** ad * mid) / den;
+  return [a, d, b, c];
+}
 
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
@@ -1266,6 +1437,12 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uDiff, DIFFUSE);
     gl.uniform4f(u.uBack, BACKLIGHT.near, BACKLIGHT.mid, BACKLIGHT.cool, BACKLIGHT.bark);
     gl.uniform2fv(u.uBackRoll, BACKLIGHT.roll);
+    gl.uniform4f(u.uDens, DENSITY.fill, DENSITY.lift, DENSITY.deep, DENSITY.wide);
+    gl.uniform3fv(u.uDensShade, DENSITY.shade.map((c, i, a) => c / (a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722)));
+    gl.uniform3fv(u.uDensGold, DENSITY.gold);
+    gl.uniform4f(u.uTrans, ...DENSITY.trans.map((c, i, a) => c / (a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722)), DENSITY.gain);
+    gl.uniform3f(u.uTransK, DENSITY.key[0], DENSITY.key[1], DENSITY.rim);
+    gl.uniform4f(u.uAnchor, ANCHOR.x / AW, ANCHOR.y / AH, ANCHOR.rx / AW, ANCHOR.ry / AH);
     gl.uniform4f(u.uFill, FILL.far, FILL.mid, FILL.near, FILL.albedo);
     gl.uniform1f(u.uRelief, FILL.relief);
     gl.uniform1f(u.uFillPale, FILL.pale);
@@ -1354,10 +1531,20 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1i(blit.u.uTrees, 1);
     // Over the film's own black, so the trees' black lands on TREE_TOE.
     const fb = FILM.toe;
-    gl.uniform3f(
-      blit.u.uToe,
-      ...TREE_TOE.map((t, i) => Math.max(0, (t - fb * FILM.toeColor[i]) / (1 - fb * FILM.toeColor[i]))),
-    );
+    const overFilm = (t, i) => Math.max(0, (t - fb * FILM.toeColor[i]) / (1 - fb * FILM.toeColor[i]));
+    gl.uniform3f(blit.u.uToe, ...TREE_TOE.map(overFilm));
+    gl.uniform3f(blit.u.uToeLow, ...DENSITY_TOE.map(overFilm));
+    gl.uniform4fv(blit.u.uCrop, L.crop);
+    gl.uniform4f(blit.u.uAnchor, ANCHOR.x / AW, ANCHOR.y / AH, ANCHOR.rx / AW, ANCHOR.ry / AH);
+    gl.uniform3f(blit.u.uSoft, FILM.softness, 0.5 + 0.9 * FILM.softness, FILM.contrast);
+    gl.uniform1f(blit.u.uExpo, 2 ** (BASE_EXPOSURE + expoStops + Math.log2(1 / GAIN) + (sceneT.ok ? 0 : 6)));
+    gl.uniform4fv(blit.u.uCurve, filmCurve(FILM.contrast, FILM.shoulder, FILM.whitePoint));
+    gl.uniform4f(blit.u.uLook, FILM.saturation, FILM.blueDepth, FILM.vignette, FILM.grain);
+    gl.uniform3fv(blit.u.uShadowT, FILM_PRINT.shadowTint);
+    gl.uniform3fv(blit.u.uHighT, FILM_PRINT.highlightTint);
+    gl.uniform3f(blit.u.uFilmToe, ...FILM.toeColor.map((t) => t * FILM.toe));
+    gl.uniform1f(blit.u.uSeed, grainSeed % 997);
+    gl.uniform1f(blit.u.uDensMist, DENSITY.mist);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
