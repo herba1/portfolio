@@ -48,7 +48,9 @@ Layers (2400x1600):
                  (I - B).(F - B) / |F - B|^2, with B the fill and F the local
                  structure colour (from dark core pixels only); the depth map
               decides only where to look; islands and sky-bright
-              "structure" dropped
+              "structure" dropped. --sky rewrites it cleaned
+              (clean_structure: floored at 0.15, choked, the knot's
+              slivers of sky dropped)
               key.png B, G: sky key, 0 far .. 1 near, 16 bit (B high byte,
                  G low): cloud density blurred to the scale of the masses, a
                  third distance by elevation, rank-equalised over the open
@@ -480,10 +482,12 @@ def write_sky_key(path, sky_key, key_r8):
 # reads as blurred blobs between the wires. --sky <photo> puts a photographed
 # cumulus sky behind the structure instead (SKY_SRC, CC0), graded to the same
 # radial cobalt, and leaves the structure, its matte and its depth key exactly
-# as they are: the structure is plate - (1 - alpha) * fill, premultiplied,
-# taken from the layers as first shipped (kept in WK as orig-*.webp), and the
-# new plate is that over the new sky. The sky key is measured again from the
-# new cloud.
+# as they are: the structure, premultiplied, is taken out of the photograph
+# against its own sky and cleaned (clean_structure: decontaminated, the matte
+# choked, the knot's slivers dropped), from the matte as first shipped (kept
+# in WK as orig-alpha.png with the other orig-* layers; OUT's alpha.png is
+# rewritten cleaned), and the new plate is that over the new sky. The sky key
+# is measured again from the new cloud.
 #
 # The cloud is graded as cumulus in sun is lit, as volumes (_cumulus_light):
 # each tower split by a large-radius optical depth towards the zenith and by
@@ -1176,17 +1180,192 @@ if "--reach" in sys.argv:
     sys.exit(0)
 
 
+# --- the structure layer, cleaned ----------------------------------------
+# plate - (1 - alpha) x fill takes the structure out against the LaMa fill,
+# which a few pixels into the matte is not the sky that was there: every
+# soft edge kept a share of the old pale cerulean (cyan outlines round each
+# cable, laid over the new cobalt), the faint tail of the matte drew ghost
+# wires across the open sky, and the sky cells between the crossarm members
+# that the matte half-covered came through as white and cyan slivers. So:
+#  1. each soft pixel is decontaminated against the photograph's own sky
+#     round it (B_orig: a normalised convolution of the clear pixels, fine
+#     to coarse, in log light), F = (I - (1 - a) B_orig) / a, and F is held
+#     inside the colour range of the opaque structure round it (per channel,
+#     and no bluer), so no sky is carried into the layer;
+#  2. the matte is choked: alpha under CLEAN_FLOOR goes to 0 and the rest is
+#     stretched back to 1, and the edges of members wider than a cable pair
+#     are pulled in by about a pixel;
+#  3. inside the knot, islands of matte under CLEAN_MIN_AREA px and soft
+#     cells whose decontaminated colour is bluer or lighter than the steel
+#     round them (sky seen between members) are dropped.
+CLEAN_FLOOR = 0.15
+CLEAN_MIN_AREA = 40
+CLEAN_MIN_SPECK = 12
+CLEAN_KNOT_SIGMA, CLEAN_KNOT_LEVEL = 40, 0.4
+
+
+def _orig_sky(I, alpha):
+    """The photograph's own sky round the structure (linear): normalised
+    convolution of its clear pixels, coarse to fine, in log light."""
+    clear = ~(cv2.dilate(_u8(alpha > 0.01), disk(2)) > 0)
+    kf = clear.astype(np.float32)
+    lg = np.log(np.maximum(I, 1e-4)).astype(np.float32)
+    B = None
+    for sg in (96, 48, 24, 12, 6, 3, 1.5):
+        num = cv2.GaussianBlur(lg * kf[..., None], (0, 0), sg)
+        den = cv2.GaussianBlur(kf, (0, 0), sg)
+        est = num / np.maximum(den, 1e-6)[..., None]
+        if B is None:
+            B = est
+            continue
+        k = np.clip(den / 0.25, 0, 1)[..., None]
+        B = B * (1 - k) + est * k
+    return np.where(clear[..., None], I, np.exp(B)).astype(np.float32)
+
+
+def _local_range(v, solid, radii=(3, 8), far=None):
+    """Per pixel, the min and max of v (HxW) over the solid pixels within the
+    first radius that finds any; past the last, 0 .. far (HxW)."""
+    lo = np.full(v.shape, np.nan, np.float32)
+    hi = np.full(v.shape, np.nan, np.float32)
+    big = np.float32(1e4)
+    for r in radii:
+        k = disk(r)
+        mx = cv2.dilate(np.where(solid, v, -big).astype(np.float32), k)
+        mn = -cv2.dilate(np.where(solid, -v, -big).astype(np.float32), k)
+        got = (mx > -big / 2) & np.isnan(hi)
+        hi[got], lo[got] = mx[got], mn[got]
+    rest = np.isnan(hi)
+    hi[rest] = far[rest]
+    lo[rest] = np.minimum(0.0, far[rest])
+    return lo, hi
+
+
+def clean_structure(I, alpha, luma, say=print):
+    """I: the photograph (linear, as the matte was pulled from); alpha: the
+    matte. Returns (pm, alpha): the premultiplied structure and its matte."""
+    h, w = alpha.shape
+    B = _orig_sky(I, alpha)
+    a3 = alpha[..., None]
+    Fu = (I - (1 - a3) * B) / np.maximum(a3, 1e-3)
+    Fu = np.where(a3 >= 0.98, I, Fu)
+    # the opaque structure's colour range round each pixel
+    solid = cv2.erode(_u8(alpha >= 0.95), disk(1)) > 0
+    solid |= alpha >= 0.995
+    blu = I[..., 2] - 0.5 * (I[..., 0] + I[..., 1])
+    Y = I @ luma
+    # (a wire with no opaque core of its own, far from any: no lighter than
+    # the structure's own colour pushed out to it, a shade over)
+    Floc = pushpull(I, solid.astype(np.float32)) * 1.25
+    F = np.empty_like(Fu)
+    for c in range(3):
+        lo, hi = _local_range(I[..., c], solid, far=Floc[..., c])
+        F[..., c] = np.clip(Fu[..., c], lo, hi)
+    _, bhi = _local_range(blu, solid, far=np.maximum(Floc[..., 2] - 0.5 * (Floc[..., 0] + Floc[..., 1]), 0.0))
+    _, yhi = _local_range(Y, solid, far=Floc @ luma)
+    # no bluer than the steel round it: pulled to a grey of its own light
+    fb = F[..., 2] - 0.5 * (F[..., 0] + F[..., 1])
+    g = (F @ luma)[..., None]
+    over = np.maximum(fb - np.maximum(bhi, 0.0), 0)
+    t = np.clip(over / np.maximum(fb, 1e-5), 0, 1)[..., None]
+    F = F * (1 - t) + g * t
+    # and no lighter
+    fy = F @ luma
+    F = F * np.minimum(1.0, yhi / np.maximum(fy, 1e-5))[..., None]
+    F = np.where(a3 >= 0.98, I, F)
+
+    # A wire too thin to have an opaque core of its own was matted as near
+    # opaque in its own blended colour (a two-pixel wire against white cloud
+    # reads as a light grey, opaque): over the cobalt that is a pale ghost
+    # line. Where a thin member is darker than the sky behind it, it is
+    # matted again as the dark steel round it over that sky (its alpha the
+    # share of the way from B_orig to that steel), so it keeps its weight
+    # and none of the sky's light.
+    wide = cv2.morphologyEx(_u8(alpha > 0.5), cv2.MORPH_OPEN, disk(2))
+    wide = cv2.dilate(wide, disk(3)) > 0
+    Fd = pushpull(I, (solid & (Y < 0.1)).astype(np.float32))
+    dFB = Fd - B
+    a_t = np.clip(((I - B) * dFB).sum(2) / np.maximum((dFB * dFB).sum(2), 1e-5), 0, 1)
+    thin = (alpha > 0) & ~wide & ((I - B) @ luma < 0.03)
+    alpha = np.where(thin, a_t, alpha).astype(np.float32)
+    F = np.where(thin[..., None], np.minimum(Fd, F), F)
+    a3 = alpha[..., None]
+
+    # what the solve says is sky, not steel: lighter or bluer than the
+    # opaque structure round it, by a margin
+    fuy = Fu @ luma
+    fub = Fu[..., 2] - 0.5 * (Fu[..., 0] + Fu[..., 1])
+    skyish = (alpha < 0.98) & ((fuy > np.maximum(yhi * 1.5, yhi + 0.06)) | (fub > np.maximum(bhi, 0) + 0.06))
+
+    # 2. the choke
+    a = np.clip((alpha - CLEAN_FLOOR) / (0.97 - CLEAN_FLOOR), 0, 1).astype(np.float32)
+    wide = cv2.morphologyEx(_u8(alpha > 0.5), cv2.MORPH_OPEN, disk(2))
+    wide = cv2.dilate(wide, disk(3)) > 0
+    ero = cv2.erode(a, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)))
+    a = np.where(wide & (a < 1), np.minimum(a, 0.5 * (a + ero)), a).astype(np.float32)
+    a = np.where(a < 0.02, 0.0, a).astype(np.float32)
+
+    # 3. the knot's slivers
+    dens = cv2.GaussianBlur(alpha, (0, 0), CLEAN_KNOT_SIGMA)
+    knot = cv2.dilate(_u8(dens > CLEAN_KNOT_LEVEL), disk(30)) > 0
+    soft = (a > 0) & (alpha < 0.9)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(_u8(soft & knot), connectivity=8)
+    frac = np.bincount(lab.ravel(), weights=skyish.ravel().astype(np.float64), minlength=n) / np.maximum(st[:, cv2.CC_STAT_AREA], 1)
+    drop_c = frac > 0.5
+    drop_c[0] = False
+    drop = drop_c[lab]
+    a = np.where(drop, 0.0, a).astype(np.float32)
+    # The matte's outer rim called opaque over the sky (F = I there): sky in
+    # colour, light and blue, within a few pixels of the open sky. (A shiny
+    # tag on the pole that mirrors the sky is as blue, but deep inside.)
+    fy, fb = F @ luma, F[..., 2] - 0.5 * (F[..., 0] + F[..., 1])
+    rim = cv2.distanceTransform(_u8(alpha > 0), cv2.DIST_L2, 3) <= 3
+    rim_sky = (a > 0) & rim & (fb > 0.08) & (fy > 0.12)
+    a = np.where(rim_sky, 0.0, a).astype(np.float32)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(_u8(a > 0), connectivity=8)
+    area = st[:, cv2.CC_STAT_AREA]
+    tiny = area < CLEAN_MIN_AREA
+    tiny[0] = False
+    # specks the size of a few pixels are noise anywhere; in the knot,
+    # anything under CLEAN_MIN_AREA is a sliver of sky between members
+    tiny_px = tiny[lab] & (knot | (area < CLEAN_MIN_SPECK)[lab])
+    # and an island of matte that is sky in colour (light and blue, on the
+    # whole) is a matte error over the sky, whatever its size
+    wsum = np.maximum(np.bincount(lab.ravel(), weights=a.ravel(), minlength=n), 1e-6)
+    my = np.bincount(lab.ravel(), weights=(a * fy).ravel(), minlength=n) / wsum
+    mb = np.bincount(lab.ravel(), weights=(a * fb).ravel(), minlength=n) / wsum
+    blue_isle = (area < 2000) & (mb > 0.06) & (my > 0.1)
+    blue_isle[0] = False
+    tiny_px |= blue_isle[lab]
+    a = np.where(tiny_px, 0.0, a).astype(np.float32)
+    say("clean: soft px", int(((alpha > 0) & (alpha < 0.98)).sum()), "floored", int(((alpha > 0) & (alpha < CLEAN_FLOOR)).sum()),
+        "skyish", int(skyish.sum()), "knot cells dropped", int(drop_c.sum()), "px", int(drop.sum()),
+        "rim sky px", int(rim_sky.sum()), "islands px", int(tiny_px.sum()))
+    pm = (F * a[..., None]).astype(np.float32)
+    return pm, a
+
+
 if "--sky" in sys.argv:
-    alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
     os.makedirs(WK, exist_ok=True)
-    for n in ("plate.webp", "fill.webp", "key.png"):
+    for n in ("plate.webp", "fill.webp", "key.png", "alpha.png"):
         if not os.path.exists(os.path.join(WK, "orig-" + n)):
             import shutil
             shutil.copyfile(os.path.join(OUT, n), os.path.join(WK, "orig-" + n))
-    plate0 = _read_lin(os.path.join(WK, "orig-plate.webp"))
-    fill0 = _read_lin(os.path.join(WK, "orig-fill.webp"))
+    # the matte as first shipped (OUT's alpha.png is the cleaned one)
+    alpha0 = cv2.imread(os.path.join(WK, "orig-alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+    # The structure, cleaned (clean_structure), from the photograph itself
+    # when it is at hand (the matte was pulled from it, at this crop and
+    # size), else from the plate as first shipped.
+    if os.path.exists(SRC):
+        _x0, _y0, _cw, _ch = CROP
+        _bgr = cv2.imread(SRC, cv2.IMREAD_COLOR)[_y0:_y0 + _ch, _x0:_x0 + _cw]
+        I0 = s2l(cv2.resize(_bgr, (W, H), interpolation=cv2.INTER_AREA)[:, :, ::-1].astype(np.float32) / 255)
+    else:
+        print("sky: no source photograph; cleaning the structure from orig-plate.webp")
+        I0 = _read_lin(os.path.join(WK, "orig-plate.webp"))
+    pm, alpha = clean_structure(I0, alpha0, LUMA)
+    save8(os.path.join(OUT, "alpha.png"), alpha)
     a3 = alpha[..., None]
-    pm = np.minimum(np.maximum(plate0 - (1 - a3) * fill0, 0), a3) * (a3 > 0.004)
     srcs = [s_.split(":")[0] for s_ in SKY_SRCS.split(",")] if SKY_SRCS else [SKY_SRC]
     if all(os.path.exists(p_) for p_ in srcs):
         raw, S_known = _sky_lookup(SKY_SRCS) if SKY_SRCS else (_sky_window(SKY_SRC), None)
@@ -1208,7 +1387,8 @@ if "--sky" in sys.argv:
     key0 = cv2.imread(os.path.join(WK, "orig-key.png"), cv2.IMREAD_COLOR)
     write_sky_key(os.path.join(OUT, "key.png"), sky_key_of(sky, alpha), key0[:, :, 2])
     save8(os.path.join(WK, "p-sky.png"), l2s(sky)[:, :, ::-1])
-    print("sky: wrote plate.webp, fill.webp, key.png")
+    save8(os.path.join(WK, "p-fg.png"), l2s(pm + (1 - a3) * np.array([0.6, 0.0, 0.6], np.float32))[:, :, ::-1])
+    print("sky: wrote plate.webp, fill.webp, key.png, alpha.png")
     sys.exit(0)
 
 
