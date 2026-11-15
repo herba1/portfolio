@@ -19,9 +19,12 @@ import { createStage, clamp } from "../_kit/stage";
 // ahead, behind the tower, in the middle; behind your shoulder at either
 // edge), up and down its elevation. The concrete faces and the tower's
 // lattice take a warm key from it, shaded by the MoGe normals and kept out of
-// the creases the depth map finds, and a fill from the open sky: on the walls
-// the sunlit face prints a warm stone and the one turned away a cool
-// grey-blue well below it, so dragging across swaps which wall glows.
+// the creases the depth map finds, and a fill in the open sky's own colour:
+// on the walls, a warm grey concrete in full colour, the sunlit face prints a
+// warm neutral stone and the one turned away a cool slate in the sky's light,
+// each falling off across the face with the sky it sees, its creases, and the
+// light the sunlit wall across the canyon bounces back. Dragging across swaps
+// which wall glows.
 //
 // The plate's own sky was flat haze, so inside the sky matte it is replaced by
 // a photographed summer cumulus dome (Poly Haven, Rural Asphalt Road, Alexander Scholten, CC0;
@@ -98,24 +101,28 @@ const float EXPO = 1.35;
 // gained and stored over WALL_RANGE.
 const float WALL_RANGE = 1.5;
 const float WALL_MID = 0.6;
-// The walls are one pale concrete under two lights of different colour
-// temperature, and the canyon is the split between them: the one gesture is
-// moving the sun, so which wall glows has to be the loudest thing it does.
-// They are set as the print should show them, not as lights to be guessed
-// at through the tone curve's shoulder. STONE is a facade of concrete at
-// WALL_MID standing KEY_NDL to the sun (a wall's own share at mid
-// elevation): a sunlit warm stone, hue 37. SHADE is the same face turned
-// away, in the sky's light alone: a cool grey-blue, well below the stone
-// and far below the sky's own blue. Laid in light, the stone's warmth is
-// almost all the key's (the shoulder takes the chroma out of a highlight, so
-// the key that prints that stone is near amber in light), and the sky's
-// share on a sunlit face is the shade's level held neutral, so its blue
-// cannot grey the stone. SUN_HIGH is the luma and SUN_HUE_HIGH the hue of
+// The walls are one pale concrete, a warm grey with a colour of its own,
+// under two lights of different colour temperature, and the canyon is the
+// split between them: the one gesture is moving the sun, so which wall
+// glows has to be the loudest thing it does. CONCRETE is that albedo's hue,
+// the plate's own warm grey (its grade had pushed it olive). The fill is
+// the sky's own colour a third of the way up the canyon, taken at FILL_SAT
+// of its saturation (a face sees the open blue, the bank's white and the
+// canyon's grey together), and it lands on every face, lit or not: a face
+// turned from the sun is that light times the concrete, a cool slate that
+// keeps about 0.4 of the lit face's chroma, never a grey. Its level is set as the print should show
+// it, SHADE_Y, the luma of a face turned away at the canyon's middle; the
+// key is then what a face standing KEY_NDL to the sun (a wall's own share
+// at mid elevation) needs over that fill to print STONE, a warm neutral
+// stone at hue 35, low in saturation: the tower's orange stays the only
+// warm accent in the frame. SUN_HIGH is the luma and SUN_HUE_HIGH the hue of
 // sunFor's colour with the sun high: a weaker sun takes the key down by the
 // square root of its share, and a setting one ambers it by its own hue's
 // shift from the high sun's.
-const vec3 STONE = vec3(216.0, 192.0, 154.0) / 255.0;
-const vec3 SHADE = vec3(143.0, 153.0, 166.0) / 255.0;
+const vec3 CONCRETE = vec3(198.0, 191.0, 184.0) / 255.0;
+const vec3 STONE = vec3(209.0, 195.0, 181.0) / 255.0;
+const float SHADE_Y = 0.6;
+const float FILL_SAT = 0.38;
 const float KEY_NDL = 0.6;
 const float SUN_HIGH = 2.52;
 const vec3 SUN_HUE_HIGH = vec3(1.0, 0.78, 0.6);
@@ -397,8 +404,8 @@ void main(){
   vec3 steelP = texture(uSteel, lb, bias).rgb;
   steelW *= 1.0 - solid * smoothstep(0.04, 0.12, length(steelP - albP));
   vec3 alb = toLin(mix(albP, steelP, steelW));
-  // The walls clip at a pale concrete, near white, and have no colour of
-  // their own: what warmth or cool is on them is the light's. Their texture
+  // The walls clip at a pale concrete, near white, in CONCRETE's warm grey:
+  // the light colours it, but it keeps its own hue under both. Their texture
   // is spread about its middle as it comes up, since sunlit, high on the
   // curve, the shoulder takes most of it back: the panel joints, the tie
   // holes and the louvre's slats stay drawn. They read the denoised bake,
@@ -408,7 +415,8 @@ void main(){
   // members and the half-lit steel behind them would all clip to the same
   // flat cream, and the lattice would go to a milky mush with no members in it.
   float wl = pow(texture(uWall, uv).r, 2.2) * WALL_RANGE;
-  vec3 wallAlb = vec3(min(WALL_MID * pow(wl / WALL_MID, 1.25), 0.9));
+  vec3 concrete = toLin(CONCRETE) / luma(toLin(CONCRETE));
+  vec3 wallAlb = min(WALL_MID * pow(wl / WALL_MID, 1.25), 0.9) * concrete;
   vec3 towerAlb = 0.86 * (1.0 - exp(-alb * 3.4 / 0.86));
   alb = mix(wallAlb, towerAlb, tower);
 
@@ -488,26 +496,68 @@ void main(){
   // The tower: its paint under the sun's own colour and the sky's cyan.
   vec3 towerL = alb * (uSunCol * key + vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis + bounce) + uSunCol * spec;
 
-  // The walls, under the two temperatures. The sky's light is SHADE's: its
-  // cool blue on a face turned from the sun (or a recess the sun does not
-  // get into), held neutral at the same level on one the sun reaches. The
-  // dome over the face, read very soft, only greys it a little where the
-  // bank stands there, its clouds' light being whiter than the open blue.
+  // The walls, as light over that albedo. Each term is a light, not a tint,
+  // and each falls off across a face.
+  //
+  // Occlusion, the depth map's creases read wide as well as sharp: a face
+  // set back behind its surroundings (under the balcony, the inside corner
+  // of a reveal, the wall behind the pole) sees less of both lights.
+  float bendW = (textureLod(uDepth, uv, 4.0).b - 0.5) * 2.0;
+  // (The sharp crease is already in vis and skyVis.)
+  float ao = 1.0 - 0.35 * smoothstep(0.02, 0.18, -bendW);
+  // How open the sky is round a pixel: the share of sky in a wide patch of
+  // the frame. Looking up a canyon, a wall's top stands against the sky and
+  // its foot, nearer the frame's edge, sees mostly the wall opposite, so the
+  // sky's light falls off down each face and the bounce takes over.
+  float open = smoothstep(0.0, 0.35, (textureLod(uMatte, uv, 5.5).b + textureLod(uMatte, uv, 6.5).b + textureLod(uMatte, uv, 7.5).b) / 3.0);
+  // Sky: the sky's own colour a third of the way up the canyon (from
+  // SKY_LOW toward SKY_HIGH), at FILL_SAT of its saturation, and
+  // whiter where the bank stands over the face (read very soft along the
+  // face's own upward view). Scaled so a face turned from the sun at the
+  // canyon's middle prints SHADE_Y.
   vec3 Dn = normalize(n + uUp) * uDome;
   float bank = smoothstep(0.2, 3.0, density(Dn, 7.5));
-  float sunFace = smoothstep(0.0, 0.08, ndl) * vis;
-  vec3 shadeL = untone(SHADE) / WALL_MID;
-  float shadeY = luma(shadeL);
-  vec3 ambW = mix(shadeL, vec3(shadeY), max(sunFace, 0.15 * bank));
-  ambW *= mix(0.6, 1.0, uDay) * skyVis / SKY_VERT;
+  vec3 skyHue = toLin(mix(SKY_LOW, SKY_HIGH, 0.35));
+  skyHue /= luma(skyHue);
+  skyHue = mix(vec3(1.0), skyHue, FILL_SAT * (1.0 - 0.45 * bank));
+  float fillY = untone(vec3(SHADE_Y)).r / (WALL_MID * luma(concrete * skyHue));
+  vec3 skyFill = skyHue * fillY * mix(0.6, 1.0, uDay) * skyVis / SKY_VERT * mix(0.55, 1.3, open) * ao;
+  // A recess the sun does not get into still sees the sky, a little less.
+  skyFill *= 1.0 - 0.3 * recess;
+  // MoGe's own normal, read soft, still holds how each face turns across the
+  // frame (the walls are not quite planes, and the lens bends them), where
+  // the facade bake is one smooth field to a face and alone lights it
+  // evenly. Its tilt toward the sky, against the bake's at the same
+  // softness, is laid over the fill as a gentle gradient.
+  vec3 nMs = normalize(textureLod(uNormal, uv, 5.0).rgb * 2.0 - 1.0);
+  vec3 nFs = normalize(nF4);
+  skyFill *= clamp(1.0 + 1.5 * (dot(nMs, uUp) - dot(nFs, uUp)), 0.75, 1.25);
   // The key, scaled by how square the face stands to the sun, no wrap: a
-  // plane takes none past edge-on. Unclamped past KEY_NDL, a low sun square
-  // to a face carries it up the shoulder, toward a pale gold, not to paper.
-  vec3 keyTint = uSunCol / max(uSunCol.r, 1e-3) / SUN_HUE_HIGH;
-  vec3 sunKey = (untone(STONE) / WALL_MID - vec3(shadeY)) / KEY_NDL;
+  // plane takes none past edge-on. It is what a face at KEY_NDL needs over
+  // the fill (at the canyon's middle) to print STONE: so the stone is the
+  // sum, and the sky's blue on a sunlit face is in it. Unclamped past
+  // KEY_NDL, a low sun square to a face carries it up the shoulder, toward a
+  // pale gold, not to paper.
+  vec3 fillMid = skyHue * fillY;
+  // A setting sun ambers it, but only by half its own shift: the walls
+  // stay stone, and the warmth in the frame stays the tower's.
+  vec3 keyTint = mix(vec3(1.0), uSunCol / max(uSunCol.r, 1e-3) / SUN_HUE_HIGH, 0.5);
+  vec3 sunKey = max(untone(STONE) / (WALL_MID * concrete) - fillMid, vec3(0.0)) / KEY_NDL;
   sunKey *= keyTint * luma(sunKey) / max(luma(sunKey * keyTint), 1e-4);
   sunKey *= sqrt(max(luma(uSunCol), 1e-3) / SUN_HIGH);
-  vec3 wallL = alb * (sunKey * max(ndl, 0.0) * vis + ambW + bounce) + sunKey * spec;
+  // The same over the key: MoGe's N.L against the bake's, as a ratio, so
+  // where the bake puts the sun edge-on the gradient goes with it and
+  // MoGe's wander never becomes the whole key.
+  float ndlS = dot(nFs, L);
+  float grad = clamp(1.0 + 1.6 * (dot(nMs, L) - ndlS) / max(abs(ndlS), 0.25), 0.7, 1.3);
+  float keyW = max(ndl, 0.0) * mix(grad, 1.0, tower) * vis * ao;
+  // Bounce: the wall across the canyon, where the sun is on it, lights this
+  // one with its own stone colour, most at the foot of the face, where it
+  // fills the view, and almost none at the top.
+  vec3 nH = normalize(n - uUp * dot(n, uUp) + vec3(1e-4, 0.0, 0.0));
+  float opposite = max(dot(-nH, L), 0.0);
+  vec3 bounceW = 0.08 * opposite * (1.0 - 0.85 * open) * WALL_MID * concrete * sunKey * KEY_NDL * ao;
+  vec3 wallL = alb * (sunKey * keyW + skyFill + bounceW) + sunKey * spec;
   vec3 litP = mix(tone(wallL), tone(towerL), tower);
 
   // The sky goes over the plate after the tone curve, as a print would be
