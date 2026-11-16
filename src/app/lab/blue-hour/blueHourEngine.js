@@ -112,6 +112,7 @@ uniform float uKnee;        // stops of lift kept linear
 uniform float uShoulder;    // and the most any pixel may reach
 uniform float uCloudKeep;   // how much of the source's skylight structure the cloud keeps (0..1)
 uniform float uCloudCeil;   // the brightest a cloud may print, scene units before uExpo
+uniform float uDomeK;       // extra sun on the sunlit domes while the sun is up (0 by blue hour)
 uniform vec3 uCloudWhite;   // lit tops, luminance 1: peach-white to a faint warm grey
 uniform vec3 uCloudPeach;   // afterglow on the undersides, luminance 1
 uniform float uAfter;       // afterglow left, 1 at sunset, 0 by mid-span
@@ -233,8 +234,26 @@ void main(){
   skyTint *= mix(vec3(0.93, 0.99, 1.14), vec3(0.98, 1.0, 1.03), uRampK);
   skyTint *= mix(vec3(1.0), vec3(0.93, 1.0, 1.02), 1.0 - sunny);
   skyTint = max(skyTint, 0.0) / dot(max(skyTint, 0.0), LUMA);
-  float kS = mix(1.0, skyS, uCloudKeep);
-  vec3 skyC = skyTint * kS;
+  // A puff thins into the sky, it does not end on a rim: towards the cover's
+  // edge its skylight floors at the local clear sky's own, colour, level and
+  // all (kS -> 1, tint -> col, the cloud's pass-on -> 1), so the source's
+  // dark cores only show where the cover is whole. The sun below adds on top,
+  // so no edge pixel prints under the gap beside it.
+  // The source's skylight share also dips through a puff's whole outer band
+  // (the key read the sunlit rim as the densest cloud), a band well inside
+  // the alpha's texel-or-two ramp, so once the sun left it printed as a
+  // dark ring round a paler middle. The level is therefore taken from the
+  // share's broad mean (mip 4.5, some twenty texels, the clear sky outside
+  // included, so it rises to the sky's own towards every edge) and the fine
+  // share only modulates it, at half its log contrast: billows kept, ring
+  // gone.
+  float skyB = exp2(textureLod(uCloud, uv, 4.5).g * (K_HI - K_LO) + K_LO);
+  float skyF = skyB * sqrt(skyS / skyB);
+  // and the floor lets go over that same broad scale (the cover's own mean),
+  // so a puff darkens into its core rather than at its outline
+  float ew = cw * cw * smoothstep(0.2, 0.8, textureLod(uAux, uv, 4.5).g);
+  float kS = mix(1.0, skyF, ew * uCloudKeep);
+  vec3 skyC = mix(col, skyTint, ew) * kS * mix(1.0, uCloudSkyK, ew);
   // while the afterglow lasts the sunlit domes scatter its peach through too
   skyC = mix(skyC, uCloudPeach * dot(skyC, LUMA), topK * 0.4 * glowK);
   // Sun. The reference core lifts uCoreLift (in units of the local sky) at
@@ -243,7 +262,9 @@ void main(){
   // brightest domes (a steeper power about the reference core, which keeps
   // the solved level), so the last of it is a line on the very tops.
   float sunT = pow(sn, 1.0 + 1.3 * uS);
-  float up = log2(1.0 + uCoreLift * sunT * uSunK);
+  // while the sun is up the domes that face it take extra (uDomeK), so they
+  // glow over the shaft instead of sitting level with it
+  float up = log2(1.0 + uCoreLift * sunT * uSunK * (1.0 + uDomeK * topK));
   float room = uShoulder - uKnee;
   up = up < uKnee ? up : uKnee + room * (1.0 - exp(-(up - uKnee) / room));
   // what of the sun reaches the middle ranks arrives scattered, so it
@@ -252,7 +273,7 @@ void main(){
   vec3 sunCol = mix(uCloudWhite, uCloudPeach, glowK * (0.95 - 0.3 * sunny) + 0.5 * uS);
   sunCol /= dot(sunCol, LUMA);
   vec3 sunC = mix(skyTint, sunCol, 0.25 + 0.75 * topK) * (exp2(up) - 1.0);
-  vec3 cl = (skyC * lum + sunC * lumSun) * uCloudSkyK;
+  vec3 cl = skyC * lum + sunC * lumSun * uCloudSkyK;
   // No cloud may print past the film's white: the brightest channel rolls
   // into uCloudCeil (scene units, before the camera's exposure), so the
   // tops stay modelled at sunset instead of a flat clipped plate.
@@ -260,6 +281,11 @@ void main(){
   float c0 = 0.62 * uCloudCeil;
   float pk2 = pk < c0 ? pk : c0 + (uCloudCeil - c0) * (1.0 - exp(-(pk - c0) / (uCloudCeil - c0)));
   cl *= pk2 / max(pk, 1e-6);
+  // and as it nears that white it goes warm-neutral, the way film shoulders
+  // a sunlit top, rather than holding a saturated peach plate
+  float roll = smoothstep(c0, uCloudCeil, pk);
+  vec3 wn = uCloudWhite / dot(uCloudWhite, LUMA);
+  cl = mix(cl, wn * dot(cl, LUMA), 0.3 * roll);
   // premultiplied over: the cloud's radiance times its alpha, plus the sky
   // it lets through
   vec3 sky = col * lum * (1.0 - cw) + cl * cw;
@@ -438,6 +464,11 @@ const CLOUD_STOPS = 4.8;
 const CORE_LIFT = 1.1; // stops: the reference lit core the curve is solved for
 const CLOUD_SKY1 = 0.8; // skylight a cloud passes on at +20 min, vs open sky
 const CLOUD_CEIL = 0.8; // of the film's white: the brightest a cloud top may print
+// While the sun is up its domes glow: about 1-1.5 stops over the zenith,
+// rolling into a warm white just under the film's.
+const DOME_GAIN = 1.6; // extra sun on a dome, relative to the reference core's
+const DOME_ROOM = 0.6; // stops of shoulder it opens
+const DOME_CEIL = 1.0; // and the ceiling it may print up to
 const FG_GAIN = 0.85; // building layer at sunset, about a quarter stop under the plate
 const GLASS_REFL = 0.25; // the shaft's light the curtain-wall glass gives back
 
@@ -526,9 +557,12 @@ export async function createBlueHour(host, { embedded = false } = {}) {
   // are single taps (light ids are read with texelFetch at level 0)
   gl.generateMipmap(gl.TEXTURE_2D);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  // the cloud's light: full resolution, no mips, so every billow is read at
-  // the texel it was baked at
+  // the cloud's light: full resolution, so every billow is read at the
+  // texel it was baked at (level 0); the mips only feed the skylight's
+  // broad floor
   const cloudTex = upload(gl, cloudImg, gl.LINEAR);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.deleteProgram(decode.p);
   const texW = auxImg.width;
   const texH = auxImg.height;
@@ -761,13 +795,18 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSunK, sunK);
     gl.uniform1f(u.uCloudSkyK, cloudSkyK);
     gl.uniform1f(u.uKnee, 1.0);
-    gl.uniform1f(u.uShoulder, 2.0);
+    // the sunlit domes' extra lift, gone by blue hour; their headroom (the
+    // shoulder) opens with it
+    const domeK = DOME_GAIN * (1 - smooth(0.3, 0.55, t));
+    gl.uniform1f(u.uDomeK, domeK);
+    gl.uniform1f(u.uShoulder, 2.0 + DOME_ROOM * (domeK / DOME_GAIN));
     // the skylight structure the cloud keeps: most of it while the sun still
     // fills the pockets, all of it once the sun has gone
     gl.uniform1f(u.uCloudKeep, 0.8 + 0.2 * s);
     // the film lands fp.whitePoint (after its own exposure) on paper white;
     // cloud tops roll off under CLOUD_CEIL of that, bloom included
-    gl.uniform1f(u.uCloudCeil, (CLOUD_CEIL * fp.whitePoint) / (2 ** fp.exposure * expo));
+    const ceil = CLOUD_CEIL + (DOME_CEIL - CLOUD_CEIL) * (1 - smooth(0.3, 0.55, t));
+    gl.uniform1f(u.uCloudCeil, (ceil * fp.whitePoint) / (2 ** fp.exposure * expo));
     gl.uniform3fv(u.uCloudWhite, mix3(CLOUD_WHITE0, CLOUD_WHITE1, smooth(0.0, 0.7, t)));
     gl.uniform3fv(u.uCloudPeach, CLOUD_PEACH);
     gl.uniform1f(u.uAfter, 1 - smooth(0, 0.65, t));
