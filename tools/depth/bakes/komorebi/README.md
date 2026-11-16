@@ -92,3 +92,26 @@ blends into the old assets over 110 rows. The engine presses the band to
 black (`SILHOUETTE`, `c / (c + 0.1)`).
 
     python3 -I lowband.py '{"hdr":"piazza_16k.hdr","out":".../public/lab/komorebi/"}'
+
+## overhead crown, rebaked from the HDRI
+
+The near layer (the stone-pine crown overhead) had come through five
+generations of lossy WebP on top of the 2560 master, and `clean.py` had
+feathered its matte: bark and needles broke into blotches. `crown_render.py`
+renders asset rows 0..1300 straight from the 16K HDRI at the asset's own
+geometry (2x supersampled, area-downsampled); `crown.py` then takes the near
+matte from the sky's transmittance through the needles (blue against a local
+foliage floor and a robust clear-sky fit, as `lowband.py`) wherever the crown
+stands on open sky (the old matte is kept where a mid or far crown is behind
+it), marks the sunlit bark solid (as `barkmask.py`), antialiases by 0.5 px
+only, and unpremultiplies the foliage light against that sky. The old
+canopy's grade (the bark 1.3 stops down and browned) rides on it as a
+low-frequency offset in log (sigma 8 px), so the colour holds and only the
+drawing changes. `canopy.webp` is written lossless (2.4 MB; lossy WebP's
+4:2:0 chroma floors at ~2.5 codes RMS on the needles even at q100), and
+`layers.webp` lossless. In the engine the crown is kept out of the scan's
+softness and the print's diffusion (see `SCAN`, `CRISP`), so it is the one
+sharp silhouette against the soft cypresses and far crowns.
+
+    python3 -I crown_render.py '{"hdr":"piazza_16k.hdr","out":"crown_hdr.npy"}'
+    python3 -I crown.py '{"out":".../public/lab/komorebi/","q":101}'

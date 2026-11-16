@@ -65,7 +65,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the sky's midtone chroma is eased back to a Superia cobalt; and the light
 // diffuses a few pixels through the emulsion (a thin warm halation ring
 // where a highlight meets the needles), so cloud and needle edges melt into
-// the sky instead of sitting on it as cutouts.
+// the sky instead of sitting on it as cutouts. The scan's softness is laid
+// on in the print too, and the overhead crown is kept out of both: rebaked
+// from the HDRI at full resolution (tools/depth/bakes/komorebi/crown.py),
+// it is the one sharp silhouette, its bark and needles crisp against the
+// soft cypresses and far crowns behind it.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..1 a breath of that strength sets off at t = 0.5 s.
@@ -160,7 +164,9 @@ const FILM = {
   // drawing and are not lifted by the veil.
   bloom: 0.15,
   bloomThreshold: 1.25 * GAIN,
-  softness: 0.42,
+  // The scan's softness is applied in the print instead (SCAN), where the
+  // overhead crown can be kept out of it.
+  softness: 0,
   saturation: 1.12,
   blueDepth: 0.7,
   // A scan's black, kept low so the lower canopy is a silhouette, not a
@@ -234,6 +240,14 @@ const PRINT = {
   cobalt: 0.87, // sky chroma kept
   cobaltRange: [0.12, 0.6], // value where it starts; min channel (paleness) where it ends
 };
+// The scan's softness, as the film's own at 0.42: luma mixed this far with a
+// ring of taps this many texels out, the colour ratio with one further out.
+// Applied in the print to everything but the overhead crown (and a few
+// texels round it), which also keeps only a share of the emulsion's bleed
+// and none of its edge softening: the nearest thing is the one sharp
+// silhouette, the cypresses and far crowns keep their diffusion behind it.
+const SCAN = { luma: 0.42, lumaR: 0.878, chroma: 0.336, chromaR: 3 };
+const CRISP = { bleed: 0.25 };
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -517,7 +531,9 @@ void main() {
   vec3 gc = mix(uGlint.rgb, uHalo.rgb * (uGlint.r / uHalo.r), smoothstep(0.3, 1.3, gq));
   col += gc * open * open * glintEdge * facing * exp(-gq * gq) * smoothstep(0.2, 0.7, cov);
 
-  outColor = vec4(col * uGain, 1.0);
+  // Alpha carries the overhead crown's cover to the print, which keeps it
+  // out of the scan's softness and the emulsion's diffusion.
+  outColor = vec4(col * uGain, a2);
 }`;
 
 const BLIT = `#version 300 es
@@ -533,6 +549,9 @@ uniform vec4 uDiffuse;       // bleed into the dark, soften, inner radius, outer
 uniform vec4 uHalate;        // warm ring rgb, threshold (linear)
 uniform vec4 uToe;           // lifted toe rgb (print units), falloff power
 uniform vec3 uCobalt;        // chroma kept, value where it starts, paleness where it ends
+uniform sampler2D uScene;    // the scene: a is the overhead crown's cover
+uniform vec4 uScan;          // scan softness: luma share, luma offset, colour share, colour offset (texels)
+uniform float uCrispBleed;   // share of the bleed the crown keeps
 
 vec3 toLin(vec3 c) {
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
@@ -557,8 +576,42 @@ vec3 holdHue(vec3 c) {
   return c;
 }
 
+// The overhead crown, and a few texels round it: the nearest thing, the one
+// sharp silhouette in the frame.
+float crisp() {
+  float k = texture(uScene, vUv).a;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.7853982;
+    vec2 o = vec2(cos(a), sin(a));
+    k = max(k, texture(uScene, vUv + o * uDiffuse.z * uTexel).a);
+    k = max(k, texture(uScene, vUv + o * uDiffuse.w * uTexel).a);
+  }
+  return smoothstep(0.04, 0.4, k);
+}
+
 void main() {
-  vec3 c = holdHue(texture(uTex, vUv).rgb);
+  float k = crisp();
+  vec3 c = texture(uTex, vUv).rgb;
+
+  // The scan's softness (the lens and the dye clouds): luma from a 1-2 texel
+  // spread, the colour ratio from a few texels, so colour creeps across
+  // edges while the drawing mostly holds. Everything but the crown.
+  if (k < 1.0) {
+    const float E = 0.004;
+    vec3 l0 = toLin(c);
+    vec2 o = uScan.y * uTexel;
+    vec2 q = uScan.w * uTexel;
+    vec3 sn = 0.25 * (toLin(texture(uTex, vUv + vec2(-o.x, -o.y)).rgb) + toLin(texture(uTex, vUv + vec2(o.x, -o.y)).rgb)
+      + toLin(texture(uTex, vUv + vec2(-o.x, o.y)).rgb) + toLin(texture(uTex, vUv + vec2(o.x, o.y)).rgb));
+    vec3 sc = 0.25 * (toLin(texture(uTex, vUv + vec2(-q.x, -q.y)).rgb) + toLin(texture(uTex, vUv + vec2(q.x, -q.y)).rgb)
+      + toLin(texture(uTex, vUv + vec2(-q.x, q.y)).rgb) + toLin(texture(uTex, vUv + vec2(q.x, q.y)).rgb));
+    const vec3 Lw = vec3(0.2126, 0.7152, 0.0722);
+    float y0 = dot(l0, Lw);
+    float ys = mix(y0, dot(sn, Lw), uScan.x);
+    vec3 hs = mix((l0 + E) / (y0 + E), (sc + E) / (dot(sc, Lw) + E), uScan.z);
+    c = toPrint(mix(max(hs * (ys + E) - E, 0.0), l0, k));
+  }
+  c = holdHue(c);
 
   // The print. The negative is printed on paper, and the paper's light
   // diffuses through the emulsion, so nothing sits on the sky as a cutout.
@@ -584,11 +637,11 @@ void main() {
   farL *= 0.125;
   hot *= 1.0 / 12.0;
   vec3 wide = mix(nearL, farL, 0.6);
-  lin = mix(lin, nearL, uDiffuse.y);
+  lin = mix(lin, nearL, uDiffuse.y * (1.0 - k));
   // Highlights spread furthest; the sky between needles only a little, so
   // the crown keeps its dark body and is not veiled.
   float wy = dot(wide, vec3(0.2126, 0.7152, 0.0722));
-  lin += uDiffuse.x * (0.3 + 0.7 * smoothstep(0.12, 0.6, wy)) * max(wide - lin, 0.0);
+  lin += uDiffuse.x * mix(1.0, uCrispBleed, k) * (0.3 + 0.7 * smoothstep(0.12, 0.6, wy)) * max(wide - lin, 0.0);
   // Halation: the bright light that went through the emulsion and came
   // back through the red layer, a thin warm ring where a highlight meets
   // something darker; none on the highlight itself.
@@ -1164,6 +1217,11 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform4f(blit.u.uHalate, ...PRINT.halation, PRINT.halationThreshold);
     gl.uniform4f(blit.u.uToe, ...PRINT.toe, PRINT.toePower);
     gl.uniform3f(blit.u.uCobalt, PRINT.cobalt, ...PRINT.cobaltRange);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.uniform1i(blit.u.uScene, 1);
+    gl.uniform4f(blit.u.uScan, SCAN.luma, SCAN.lumaR, SCAN.chroma, SCAN.chromaR);
+    gl.uniform1f(blit.u.uCrispBleed, CRISP.bleed);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
