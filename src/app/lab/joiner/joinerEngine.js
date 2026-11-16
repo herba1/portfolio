@@ -594,6 +594,7 @@ void main() {
   float Y0 = dot(c0, LUMA);
   float sGlow = 0.0;
   float sSky = 0.0;
+  vec2 toSky = vec2(0.0);
   float sw = 0.0;
   for (int j = 1; j <= 3; j++) {
     float r = uHal.z * (j == 1 ? 0.45 : (j == 2 ? 0.9 : 1.5));
@@ -604,6 +605,7 @@ void main() {
       float mq = texture(uRaw, q).a;
       sGlow += w * mq * dot(toLin(texture(uImg, q).rgb), LUMA);
       sSky += w * mq;
+      toSky += w * mq * vec2(cos(a), sin(a));
       sw += w;
     }
   }
@@ -612,12 +614,31 @@ void main() {
   float glow = smoothstep(0.08, 0.6, sGlow / max(sSky * sw, 1e-4));
   float edgeIn = (1.0 - m0) * smoothstep(0.02, 0.4, sSky) * glow;
   float edgeOut = m0 * smoothstep(0.04, 0.4, 1.0 - sSky) * smoothstep(0.25, 0.7, Y0);
-  // structure side: the ring. On a dark wall it is light added, red-orange;
-  // on a pale rim (the plate's own edge, which would read as a white matte
-  // fringe) the same ring is a filter that takes the white over to it.
-  float darkW = 1.0 - smoothstep(0.04, 0.35, Y0);
+  // structure side: the ring, light added, red-orange, and only where the
+  // structure is genuinely dark (a wall, a side in shade, the far mask). The
+  // base only throws back what it can show against: a pale pixel the matte
+  // calls structure (a cloud scrap over a wall top, the plate's own light
+  // rim) is left exactly as it is, or the ring traces every scrap with a
+  // thin orange tide-line.
+  float darkW = 1.0 - smoothstep(0.03, 0.14, Y0);
   lin += uHal.x * edgeIn * darkW * glow * 0.8 * HALO;
-  lin *= mix(vec3(1.0), vec3(1.0, 0.7, 0.5), clamp(uHal.x * edgeIn * (1.0 - darkW) * 1.6, 0.0, 1.0));
+  // Nor is that pale rim left as a white line along the edge: a structure-
+  // side pixel there that stands brighter than both the sky beside it and the
+  // structure just behind it (looked for straight away from the sky, past
+  // the rim) is a strip of old sky or cloud the matte kept, and its light is
+  // brought down to the brighter of the two, neutrally, hue kept, so the
+  // edge closes into the wall with no seam of either colour. Behind a thin
+  // pole there is sky again, and the pole is left alone.
+  vec2 back = -toSky / max(length(toSky), 1e-4);
+  vec2 qa = vUv + back * uHal.z * 1.2;
+  vec2 qb = vUv + back * uHal.z * 2.0;
+  float Yin = max(dot(toLin(texture(uImg, qa).rgb), LUMA), dot(toLin(texture(uImg, qb).rgb), LUMA));
+  float solid = 1.0 - smoothstep(0.05, 0.3, max(texture(uRaw, qa).a, texture(uRaw, qb).a));
+  float Ysky = sGlow / max(sSky * sw, 1e-4);
+  float Yside = max(max(Ysky, Yin), 1e-3);
+  float Yl = dot(lin, LUMA);
+  float seam = (1.0 - m0) * smoothstep(0.0, 0.15, sSky) * solid * smoothstep(1.05, 1.3, Yl / Yside);
+  lin *= mix(1.0, min(1.0, 1.04 * Yside / max(Yl, 1e-4)), seam);
   // sky side: the white along the same edge warms a little
   lin *= mix(vec3(1.0), vec3(1.0, 0.85, 0.72), clamp(uHal.y * edgeOut, 0.0, 1.0));
 
