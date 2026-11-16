@@ -25,19 +25,24 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //    radius of curvature (the strongly convex, wide-angle kind), the view ray
 //    reflected off it, corrected for parallax across the face with the
 //    panorama's distances, filtered by its own spread (ray differentials);
-//  - the frame (a deep band with a visor over its top), back shell, bracket
-//    and pole are signed distance fields,
+//  - the frame (a deep band with a visor over its top), back shell and its
+//    boss, bracket (a saddle on the pipe gripped by two galvanised band
+//    clamps, the arm up to the yoke) and pole are signed distance fields,
 //    lit as the crossing's own poles are: the measured sun at full strength
 //    with a hard terminator, and on the shade side only a dim, cyan skylight
 //    fill (the panorama's SH9 cut to the sky's share), an order of magnitude
 //    down, as the crossbuck pole's lit and shaded halves measure;
-//    their paint is the road mirror's vermilion enamel, chipped to dark steel,
+//    their paint is the road mirror's safety-orange enamel, chipped to dark steel,
 //    streaked by rain and dirtied where the AO says it is sheltered, its fine
 //    tooth taken from the photo's own plaster, with a roughness map that
 //    breaks up the sun's anisotropic streak down the pole; the head's paint
-//    is chalked matte (rough dielectric, its sheen the prefiltered panorama,
-//    no sun lobe), and all of it rolls off on the plate's shoulder, so a
-//    sunlit face stays orange and never bleaches;
+//    is chalked to a low sheen (a dielectric at roughness about 0.47, the
+//    prefiltered panorama and a broad sun lobe), its band shaded as a ring
+//    (lit along the sunward arc, rolling through a terminator into a core
+//    shadow on the averted one), the visor's sheltered underside a deep
+//    orange with the sky's blue in its glossier sheen, darkening into the
+//    joint with the glass; and all of it rolls off on the plate's shoulder,
+//    so a sunlit face stays orange and never bleaches;
 //  - the object takes the plate's grain at the photo's pixel pitch, so the
 //    film develops it and the photograph alike;
 //  - the street the glass shows is under the same sun: the 360's surfaces
@@ -397,8 +402,10 @@ vec2 sdSceneNF(vec3 p, out float nf) {
   // back shell: a shallow half ellipsoid closing the band
   float zb = ZF - FRAME_D + 0.01;
   float shell = max(sdEllipsoid(q - vec3(0.0, 0.0, zb), vec3(A + FRAME_W - 0.004, A + FRAME_W - 0.004, 0.045)), q.z - zb);
-  // the mounting plate bolted to the shell's back, under the knuckle
+  // the mounting plate bolted to the shell's back, under the knuckle, and
+  // the cast boss it carries proud of the pressing, which the yoke grips
   shell = min(shell, max(rho - 0.1, abs(q.z + HINGE - 0.0185) - 0.0045) - 0.002);
+  shell = min(shell, max(rho - 0.074, abs(q.z + HINGE + 0.026) - 0.013) - 0.003);
   // the bracket, in the arm's frame (s toward the head, w across, y up from
   // the hinge): knuckle (round its own axis, so it ignores the pitch), the
   // yoke that holds it, and the arm back and down to the pole's clamp band
@@ -406,13 +413,44 @@ vec2 sdSceneNF(vec3 p, out float nf) {
   vec3 m = vec3(dot(b, uHz), dot(b, uX), b.y);
   float knuckle = max(length(m.xz) - 0.021, abs(m.y) - 0.082);
   float yoke = sdBox(m - vec3(-0.04, 0.0, 0.0), vec3(0.019, 0.067, 0.021)) - 0.003;
-  float arm = min(knuckle, min(yoke, sdCapsule(m, vec3(-ARM, 0.0, -POLE_DROP - 0.05), vec3(-0.045, 0.0, 0.0), 0.02)));
-  // pole with its cap, clamp band round the top (world vertical)
+  // (the arm a pressed channel, deeper than it is wide, from the saddle on
+  // the pipe to the yoke)
+  const vec2 A0 = vec2(-ARM + POLE_R + 0.012, -POLE_DROP - 0.045), A1 = vec2(-0.057, 0.0);
+  vec2 ad = A1 - A0;
+  float aL = length(ad);
+  ad /= aL;
+  vec2 ax = m.xz - 0.5 * (A0 + A1);
+  vec3 ma = vec3(dot(ax, ad), m.y, ad.x * ax.y - ad.y * ax.x);
+  float armB = sdBox(ma, vec3(0.5 * aL + 0.008, 0.016, 0.024)) - 0.003;
+  float arm = min(knuckle, min(yoke, armB));
+  // pole with its cap (world vertical)
   vec3 pp = p - uPivot;
   float pr = length(pp.xz);
   float pole = max(pr - POLE_R, max(pp.y, uGround - p.y));
   pole = min(pole, max(pr - POLE_R - 0.003, abs(pp.y - 0.004) - 0.006) - 0.002);
-  float clampB = max(pr - POLE_R - 0.012, abs(pp.y + 0.055) - 0.045) - 0.003;
+  // The mount on the pipe, as the real fittings are: a saddle (a short
+  // channel shaped to the pipe) on the head's side of it, gripped by two
+  // band clamps 16 cm apart, each a pair of half-bands bolted through ears
+  // either side, the arm springing from the saddle's top. Both bands sit
+  // above where the frame's lower rim swings back to at the knuckle's
+  // lowest stop.
+  vec3 pc = vec3(dot(pp, uHz), dot(pp, uX), pp.y);
+  float yc = pp.y + 0.075, yc2 = pp.y + 0.235;
+  float bandsY = min(abs(yc), abs(yc2));
+  float clampB = max(pr - POLE_R - 0.008, bandsY - 0.022) - 0.002;
+  // the ears and the bolts through them (along the arm), each band's pair
+  vec3 pe = vec3(pc.x - 0.004, abs(pc.y) - (POLE_R + 0.018), 0.0);
+  float ears = 1e9, bolts = 1e9;
+  for (int k = 0; k < 2; k++) {
+    pe.z = k == 0 ? yc : yc2;
+    ears = min(ears, sdBox(pe, vec3(0.008, 0.015, 0.019)) - 0.002);
+    bolts = min(bolts, sdCapsule(pe - vec3(0.0, 0.003, 0.0), vec3(-0.021, 0.0, 0.0), vec3(0.021, 0.0, 0.0), 0.005));
+    bolts = min(bolts, sdBox(pe - vec3(0.016, 0.003, 0.0), vec3(0.0035, 0.0075, 0.0075)) - 0.001);
+  }
+  clampB = min(clampB, min(ears, bolts));
+  // the saddle: a channel standing on the pipe's head side, spanning both bands
+  float saddle = max(sdBox(vec3(pc.x - (POLE_R + 0.011), pc.y, pp.y + 0.13), vec3(0.011, 0.03, 0.135)) - 0.002, POLE_R + 0.001 - pr);
+  arm = min(arm, saddle);
   vec2 r = vec2(ring, 1.0);
   if (shell < r.x) r = vec2(shell, 2.0);
   if (arm < r.x) r = vec2(arm, 3.0);
@@ -573,6 +611,7 @@ float photoDirt(vec2 m) {
 // is scaled down on an exponential toward a ceiling well under white (half
 // way to what develops to 0.97). Its channels keep their ratio: the lit side
 // rolls off as a warm orange, never past about 240.
+const vec3 ENAMEL = vec3(0.896, 0.15, 0.0085);
 vec3 paintShoulder(vec3 c) {
   float m = max(max(c.r * uHiTint.r, c.g * uHiTint.g), c.b * uHiTint.b);
   float kn = uSunTone.x, top = mix(uSunTone.x, uSunTone.y, 0.5);
@@ -584,14 +623,15 @@ vec3 paintShoulder(vec3 c) {
 vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 q = toLocal(p);
   float occ = ao(p, n);
-  // カーブミラー vermilion: the road mirror's baked enamel, #E8541E as
-  // linear albedo (before the film's grade). It holds its chroma: only the
-  // faces turned to the sky carry a thin chalk bloom, and grime and chips
-  // below darken it rather than wash it toward tan.
-  vec3 alb = vec3(0.807, 0.089, 0.0123);
+  // カーブミラー orange: the road mirror's baked safety-orange enamel, about
+  // #F3741A as linear albedo (hue 25 before the film, whose cool toe and
+  // red layer take it to about 20 on the print: an orange, not a coral). It
+  // holds its chroma: only the faces turned to the sky carry a thin chalk
+  // bloom, and grime and chips below darken it rather than wash it toward tan.
+  vec3 alb = ENAMEL;
   float upF = clamp(n.y, 0.0, 1.0);
   float chalk = 0.015 + 0.06 * upF;
-  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.6, 1.0, 0.75), chalk);
+  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.6, 1.0, 0.45), chalk);
 
   // surface coordinates in metres: on the pole and band its unrolled
   // circumference and height, on the arm along it, on the frame ring its
@@ -643,7 +683,10 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   alb = mix(alb, alb * vec3(0.55, 0.42, 0.35), chipRim * 0.6);
   alb = mix(alb, vec3(0.07, 0.058, 0.05) * (0.8 + 0.4 * n1), chip);
   // the clamp band and bracket: castings, painted with the pole but worn darker
-  if (id == 5.0 || id == 3.0) alb = mix(alb, vec3(0.13, 0.12, 0.11), 0.3);
+  if (id == 3.0) alb = mix(alb, vec3(0.13, 0.12, 0.11), 0.3);
+  // the band clamps and their bolts are hot-dip galvanised, gone to a dull
+  // weathered zinc grey, so the fittings read as hardware gripping the pipe
+  if (id == 5.0) alb = mix(alb, vec3(0.15, 0.145, 0.135), 0.9);
   // the black rubber gasket where the frame meets the acrylic
   float gasket = id == 1.0 ? smoothstep(A + 0.009, A + 0.004, length(q.xy)) : 0.0;
   alb = mix(alb, vec3(0.035, 0.034, 0.033), gasket);
@@ -688,6 +731,9 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
     // one flat value all the way round, an outline stroke.
     vec3 nb = n;
     float lip = 0.0;
+    // the hood's underside: the paint facing back in over the dome, from
+    // where the visor leaves the band to its front edge
+    float inner = 0.0;
     if (id == 1.0) {
       float front = smoothstep(0.25, 0.85, dot(n, uN));
       float s = clamp((rq - (A + 0.006)) / (FRAME_W - 0.006), 0.0, 1.0);
@@ -700,41 +746,71 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
       // acrylic's wall shut out the sky, the last centimetre of the lip
       // darkening into the joint
       lip = front * (1.0 - smoothstep(A + 0.004, A + 0.019, rq));
+      inner = smoothstep(0.2, -0.7, dot(n, radW)) * smoothstep(ZF - 0.01, ZF + 0.015, q.z);
+      // The band is a ring, and it is lit as one: the pressed section is
+      // rounded where the front turns into the outer wall, so round the
+      // circumference the whole front leans a little toward whichever way
+      // its arc faces. The arc turned to the sun (the upper left) takes the
+      // light full on, and the paint rolls round through a terminator into
+      // a core shadow on the arc turned from it, as a torus does, instead of
+      // every point of the front reading the same flat value.
+      nb = normalize(nb + radW * 0.95 * front * (1.0 - inner));
     }
     float ndlB = max(dot(nb, uSun), 0.0);
     // the shadow follows the true surface, the shading the crowned one
     float shB = ndl > 0.0 ? sh : ndlB > 0.0 ? softShadow(p + n * 0.003, uSun, 0.004, 3.0, 64.0) : 0.0;
     shB *= smoothstep(-0.05, 0.12, dot(n, uSun) + 0.12);
     float cOcc = occ * (1.0 - 0.72 * lip);
+    // the core shadow: just past the terminator the paint faces neither the
+    // sun nor the open sky behind it, the darkest band on the ring; further
+    // round, the sky (and the sunlit road) fill it back up
+    float nds = dot(nb, uSun);
+    float core = smoothstep(0.08, -0.18, nds) * smoothstep(-0.85, -0.3, nds) * (1.0 - inner);
 
     // Shade: the sky's light, cooled, at about two stops under the sun side.
-    // The enamel's vermilion drinks the blue, so the chalk's bloom carries it:
-    // the averted faces read as the same orange gone dusky and cold, the way
-    // the pole's shade side does.
-    vec3 skyE = mix(Ei, Esky, 0.65) * vec3(0.55, 0.74, 1.06);
-    vec3 albS = mix(alb, vec3(dot(alb, LUMA)) * vec3(0.9, 1.0, 1.15), 0.16);
-    vec3 ambH = skyE * cOcc * 1.9;
-    // under the visor the paint faces the dome, and the dome throws the sky
-    // back up into it: the hood's underside is the frame's colour in shade,
-    // not a black slot
+    // The enamel's orange drinks the blue, so the chalk's bloom carries a
+    // little of it: the averted faces read as the same orange gone deep and
+    // cool, the way the pole's shade side does, never mauve.
+    vec3 skyE = mix(Ei, Esky, 0.65) * vec3(0.66, 0.78, 0.96);
+    vec3 albS = mix(alb, vec3(dot(alb, LUMA)) * vec3(0.95, 1.0, 1.08), 0.03);
+    vec3 ambH = skyE * cOcc * 2.1 * (1.0 - 0.5 * core);
+    // Under the visor the paint faces the dome and the road below it: in
+    // shade, but filled. The dome throws the cobalt back up into it, and the
+    // sunlit road and the band's own lit arc bounce warm light into it, so
+    // the hood's underside is a deep orange, cooled by the sky, darkening
+    // into the joint where it meets the glass (the dome's rim and the
+    // gasket shut the light out there), not a flat mauve-brown slot.
+    float hoodOcc = 1.0;
     if (id == 1.0) {
-      float inner = smoothstep(0.2, -0.7, dot(n, radW)) * smoothstep(ZF - 0.01, ZF + 0.015, q.z);
-      ambH += irradiance(uN) * vec3(0.55, 0.68, 0.9) * 0.55 * inner * cOcc;
+      float reachZ = q.z - ZF;
+      hoodOcc = mix(0.22, 1.0, smoothstep(-0.005, 0.085, reachZ));
+      vec3 bounce = irradiance(-uU) * vec3(1.0, 0.8, 0.58);
+      ambH = mix(ambH, (irradiance(uN) * vec3(0.55, 0.7, 0.92) * 0.8 + bounce * 1.5) * hoodOcc * occ, inner);
+      albS = mix(albS, alb, inner);
     }
     vec3 diffH = albS * ambH / PI + alb * sunC * sunE / PI * ndlB * shB * (1.0 - 0.5 * lip);
 
-    float rH = clamp(0.6 + 0.08 * (n1 - 0.5) + 0.1 * max(dirt, 0.0) + 0.12 * chip, 0.55, 0.72);
+    // A broad, low sheen: the enamel's gloss is chalked down, but not gone,
+    // roughness about 0.47; it lies along the sunward arc and rolls off
+    // with the form. Under the hood, out of the sun and the rain, the paint
+    // has kept more of its gloss (about 0.36), so the sky it faces lies in
+    // it as a blue sheen over the orange.
+    float rH = clamp(mix(0.47, 0.36, inner) + 0.06 * (n1 - 0.5) + 0.1 * max(dirt, 0.0) + 0.15 * chip, 0.32, 0.66);
     float ndvH = max(dot(nb, v), 1e-3);
     const vec4 C0 = vec4(-1.0, -0.0275, -0.572, 0.022);
     const vec4 C1 = vec4(1.0, 0.0425, 1.04, -0.04);
     vec4 rr = rH * C0 + C1;
     float a004 = min(rr.x * rr.x, exp2(-9.28 * ndvH)) * rr.x + rr.y;
     vec2 AB = vec2(-1.04, 1.04) * a004 + rr.zw;
-    // the panorama's sheen, prefiltered to the lobe (a mip of 8 to 9)
+    // the panorama's sheen, prefiltered to the lobe: on the hood's underside
+    // the reflected ray goes up and out past the visor's edge, so it carries
+    // the cobalt into the shade
     vec3 rH3 = reflect(-v, nb);
-    vec3 specH = env(rH3, 5.2 + 5.5 * rH) * (0.04 * AB.x + AB.y) * cOcc * (1.0 - gasket);
+    // (and the chalk's powder takes it at grazing, so no silhouette goes pale)
+    float grazeH = smoothstep(0.03, 0.3, ndvH);
+    vec3 specH = env(rH3, 4.6 + 5.5 * rH) * (0.04 * AB.x + AB.y) * cOcc * hoodOcc * (1.0 - gasket) * (0.65 + 1.25 * inner) * mix(grazeH, 1.0, inner);
     // and the sun's own lobe on it, GGX at the same roughness, at the plate's
-    // full strength: broad, a sheen that rides the crown toward the light
+    // full strength: broad, a sheen that rides the sunward arc
     float aH = rH * rH, aH2 = aH * aH;
     vec3 hH = normalize(uSun + v);
     float ndhH = max(dot(nb, hH), 0.0);
@@ -742,8 +818,9 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
     float FH = 0.04 + 0.96 * pow(1.0 - max(dot(v, hH), 0.0), 5.0);
     float kH = aH * 0.5;
     float GH = ndlB / (ndlB * (1.0 - kH) + kH) * ndvH / (ndvH * (1.0 - kH) + kH);
-    // (the chalk's powder masks a share of it, as it does the pole's streak)
-    specH += sunC * sunE * shB * DH * FH * GH / (4.0 * ndvH) * (1.0 - gasket) * (1.0 - chip) * (1.0 - lip) * 0.55;
+    // (the chalk's powder masks a share of it, as it does the pole's streak;
+    // what is left is warmed by the paint it sits in)
+    specH += sunC * vec3(1.0, 0.86, 0.7) * sunE * shB * DH * FH * GH / (4.0 * ndvH) * (1.0 - gasket) * (1.0 - chip) * (1.0 - lip) * grazeH * 0.85;
     return paintShoulder(diffH + specH);
   }
 
@@ -825,7 +902,7 @@ vec3 headSeen(vec3 nl) {
   vec3 n = normalize(uX * nl.x + uU * nl.y + uN * nl.z);
   // (in the same cold sky light, and as light, as paint() gives the hood
   // where the eye sees it directly, so the two read as one surface)
-  vec3 alb = vec3(0.807, 0.089, 0.0123) * 0.7;
+  vec3 alb = ENAMEL * 0.7;
   vec3 albS = mix(alb, vec3(dot(alb, LUMA)) * vec3(0.9, 1.0, 1.15), 0.16);
   vec3 E = (irradiance(n) * 0.6 + irradiance(uN) * 0.45) * vec3(0.55, 0.74, 1.06) * 1.4;
   return (albS * E + alb * vec3(1.0, 0.96, 0.88) * uSunE * 1.45 * max(dot(n, uSun), 0.0) * 0.5) / PI;
@@ -1331,7 +1408,7 @@ vec2 geoAt(ivec2 ip) {
 vec2 trace(vec3 d) {
   vec3 hc = uFace - uN * 0.09;
   vec2 hs = sphereHit(vec3(0.0), d, hc, A + 0.08);
-  vec2 hp = cylHit(vec3(0.0), d, uPivot, POLE_R + 0.03);
+  vec2 hp = cylHit(vec3(0.0), d, uPivot, POLE_R + 0.05);
   float t0 = min(max(hs.x, 0.0), max(hp.x, 0.0));
   float t1 = max(hs.y, hp.y);
   if (t1 <= t0) return vec2(0.0);
