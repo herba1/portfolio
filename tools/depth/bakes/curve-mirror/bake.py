@@ -19,7 +19,10 @@
 
 The mirror stands close to the lens, 1.9 m out and 1.3 m over it (2.75 m above
 the road), high on its pole at the upper left, so the lens looks up at it from
-below and its glass fills nearly half the frame's height. Everything it can reflect is gathered into one equirect panorama
+below. (That is where the panorama is centred, scene.json's mirror; the
+engine now stands the head nearer still, its pole 1.8 m out on the frame's
+left third (the engine's STAND), and marches this panorama's distances from
+wherever the face is.) Everything it can reflect is gathered into one equirect panorama
 centred on it, in a world frame whose y axis is the true vertical (from the
 photo's vertical vanishing point):
 

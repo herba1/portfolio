@@ -64,7 +64,9 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //    scatter the sun when it is in the glass; the sun there is HDR light (a
 //    warm core many times white, a warmer skirt round it) that the
 //    Pro-Mist and the film bloom warm;
-//  - the assembly's shadow falls on the photograph through its point map;
+//  - the assembly's shadow falls on the photograph through its point map,
+//    from wherever the head stands (with the sun high over the lens's left
+//    shoulder it falls down the road ahead, under the frame's bottom edge);
 //  - it is composited with real coverage: a geometry pass classifies every
 //    pixel centre, and wherever that changes from one pixel to the next (its
 //    silhouette, the glass meeting the frame, the hood seen in the glass)
@@ -115,16 +117,32 @@ const HOOD_ARC = 80;
 // panorama is the plate's own scene turned over it (reproject.py, which
 // holds the same number).
 const PLANE_AZ = -36;
-// rest aim (relative to facing the lens) and limits, degrees
-const REST = [20, -15];
+// Where the pole stands: the top of its pipe (the arm's clamp band), world
+// metres (y the true vertical, the lens at the origin). Close to the lens,
+// as ref 1's legs are: 1.8 m out and 0.75 m over it (2.2 m above the road),
+// the face some 1.5 m off, so the lens looks up at the head from under it
+// and, held on the far side, its glass is the anchor of the frame (about
+// half its height, a third of it across the turned face's narrow axis), its
+// centre on the frame's left third, clear of the crossbuck, and the pipe
+// below it stands on the photograph's own vertical (it converges to the
+// poles' vanishing point, as theirs do). The panorama is still centred
+// where the bake gathered it (scene.json's mirror, uM, 0.6 m further out
+// and 0.55 m higher): the glass marches its distances from wherever the
+// face is, so a near surface keeps its parallax from here.
+const STAND = [-0.3066, 0.7518, -1.6207];
+// rest aim (relative to facing the lens) and limits, degrees. At rest the
+// head is turned toward the far side, near the hero aim, so the frame opens
+// on the picture: the glass at the left third holding the turned crossing
+// under its cumulus. (Turned toward the lens and past it, the face sweeps
+// right across the frame, over the crossbuck, toward the street behind.)
+const REST = [-30, 2];
 // The hero aim (?aim=hero): turned toward the far side of the crossing and
-// tipped up a little, so the glass holds the turned crossbuck well inside its
-// rim with the far side's cumulus tower (reproject.py's far heap) rising
-// behind it over nearly half the dome, and the sun's glint off to the upper
-// rim, clear of the heap: a miniature of the scene, deep cobalt, one big
-// sunlit cloud, one sharp crossbuck. (Traced: the cloud takes ~44% of the
-// glass, the glint sits at 0.95 of the radius, the crossbuck at 0.64.)
-const HERO = [-50, 5];
+// tipped up a little, so the glass holds the turned crossbuck inside its
+// rim, low left of centre, with the far side's cumulus tower (reproject.py's
+// far heap) rising over and behind it, and the sun's glint high in the
+// dome, clear of the heap: a miniature of the scene, deep cobalt, one big
+// sunlit cloud, one sharp crossbuck, at the scale of the frame's own.
+const HERO = [-37, 10];
 // What the bracket can do. The arm's clamp band turns on the pole, but the
 // yoke's stops (and the street the mirror is bolted to watch) hold the face
 // within 65 degrees of the lens either way, so its back, the bare pressed
@@ -177,7 +195,7 @@ uniform vec2 uPhotoSize;
 uniform float uF;
 uniform vec2 uC;
 uniform mat3 uR;           // world = uR * camera
-uniform vec3 uM;           // panorama centre (the mirror at rest)
+uniform vec3 uM;           // panorama centre (where the bake stood the mirror)
 uniform vec3 uFace;        // face apex
 uniform vec3 uN;           // face axis (outward)
 uniform vec3 uU;           // face up
@@ -900,9 +918,10 @@ vec3 cobalt(vec3 c, vec3 T0, vec3 T1) {
 // with the ray's footprint (k: its share of the pixel's), and printed as
 // the plate is.
 vec3 seen(vec3 P, vec3 r, float smudge, float k) {
-  // parallax: the panorama is centred on the mirror at rest, the face is
-  // 0.8 m wide, and the far side's crossbuck stands 3 to 4 m off it, so a
-  // point of the face sees it some six degrees from where the centre does.
+  // parallax: the panorama is centred where the bake stood the mirror, some
+  // 0.8 m further out than the head now stands (STAND), the face is 0.8 m
+  // wide, and the far side's crossbuck stands 3 to 4 m off it, so a point of
+  // the face sees it degrees from where the panorama's centre does.
   // The reflected ray is marched through the distance panorama to its first
   // true crossing (envMarch), so a near surface is found once, whole and
   // opaque, rather than by a fixed-point guess that, across a silhouette,
@@ -2036,29 +2055,34 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const R = scene.R;
   const Rmat = new Float32Array([R[0][0], R[1][0], R[2][0], R[0][1], R[1][1], R[2][1], R[0][2], R[1][2], R[2][2]]);
 
-  // the bracket: azimuth from the mirror toward the lens; yaw and pitch are
-  // relative to facing it squarely, level
-  const az0 = Math.atan2(-M[0], -M[2]);
+  // the bracket: azimuth from the pole toward the lens; yaw and pitch are
+  // relative to facing it squarely, level (at yaw 0 the arm points at the
+  // lens, so the face does)
+  const pivot = [...STAND];
+  const az0 = Math.atan2(-pivot[0], -pivot[2]);
   const axis = (yaw, pitch) => {
     const a = az0 + yaw * DEG;
     const p = pitch * DEG;
     return [Math.cos(p) * Math.sin(a), Math.sin(p), Math.cos(p) * Math.cos(a)];
   };
-  const restN = axis(REST[0], REST[1]);
-  // at rest the face apex sits at M (the panorama's centre): the hinge HINGE
-  // behind it, the pole ARM further back along the arm, its top POLE_DROP below
-  const hingeRest = add(M, restN, -HINGE);
-  const hz = norm([restN[0], 0, restN[2]]);
-  const pivot = [hingeRest[0] - hz[0] * ARM, hingeRest[1] - POLE_DROP, hingeRest[2] - hz[2] * ARM];
+  // the face apex for an aim: the arm turns about the pole (yaw), the head
+  // about its hinge (pitch)
+  const faceAt = (yaw, pitch) => {
+    const n = axis(yaw, pitch);
+    const hzY = norm([n[0], 0, n[2]]);
+    const hinge = [pivot[0] + hzY[0] * ARM, pivot[1] + POLE_DROP, pivot[2] + hzY[2] * ARM];
+    return { n, hzY, hinge, face: add(hinge, n, HINGE) };
+  };
 
   // the aim that puts the sun in the middle of the glass: the face's normal
-  // halves the angle between the sun and the lens
-  const toCam = norm([-M[0], -M[1], -M[2]]);
-  const sunN = norm(add(SUN, toCam));
-  const sunAim = [
-    (Math.atan2(sunN[0], sunN[2]) - az0) / DEG,
-    Math.asin(sunN[1]) / DEG,
-  ];
+  // halves the angle between the sun and the lens (as seen from the face,
+  // which moves with the aim, so found by a few steps)
+  let sunAim = [...REST];
+  for (let i = 0; i < 6; i++) {
+    const f = faceAt(sunAim[0], sunAim[1]).face;
+    const sunN = norm(add(SUN, norm([-f[0], -f[1], -f[2]])));
+    sunAim = [(Math.atan2(sunN[0], sunN[2]) - az0) / DEG, Math.asin(sunN[1]) / DEG];
+  }
 
   let held = false;
   let aimInit = [...REST];
@@ -2127,7 +2151,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       Object.assign(V, { x: 0, y: (PH - h) * 0.4, w: PW, h });
     } else {
       const w = PH * aspect;
-      Object.assign(V, { x: clamp(640 - w * 0.45, 0, PW - w), y: 0, w, h: PH });
+      Object.assign(V, { x: clamp(820 - w * 0.45, 0, PW - w), y: 0, w, h: PH });
     }
     L.x = Math.round(L.x * dpr) / dpr;
     L.y = Math.round(L.y * dpr) / dpr;
@@ -2300,13 +2324,9 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     gl.disable(gl.SCISSOR_TEST);
     const yaw = aim[0] + sway[0];
     const pitch = aim[1] + sway[1];
-    const n = axis(yaw, pitch);
+    const { n, hzY, hinge, face } = faceAt(yaw, pitch);
     const xr = norm(cross([0, 1, 0], n));
     const up = cross(n, xr);
-    // the arm turns about the pole (yaw), the head about its hinge (pitch)
-    const hzY = norm([n[0], 0, n[2]]);
-    const hinge = [pivot[0] + hzY[0] * ARM, pivot[1] + POLE_DROP, pivot[2] + hzY[2] * ARM];
-    const face = add(hinge, n, HINGE);
     // three passes: what each pixel centre meets; the scene, supersampled
     // where that changes; the plate's optics on the edge band
     for (const [P, T] of [
