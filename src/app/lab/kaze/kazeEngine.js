@@ -16,8 +16,10 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 // opaque with 4x MSAA: one tall culm with a seed head at your shoulder
 // stands sharp and near-black against the cloud, and the rest sits a touch
 // diffused behind it, backlit: dark cores, a warm yellow-green rim toward the
-// sun, paler and bluer with distance; where a blade crosses the sun, a thin
-// halation ring.
+// sun, paler and bluer with distance. After the scene, a film-highlight
+// stage (HL_* below): orange-red halation as a thin ring wherever a blade
+// crosses bright cloud, and a faint Pro-Mist bleed of the cumulus into the
+// blue.
 //
 // The sky behind (sky.webp) is rendered through that same lens
 // (tools/depth/bakes/kaze/sky_cumulus.py): deepest cobalt round the zenith
@@ -183,8 +185,25 @@ void main() {
   // light climbs steadily into the core with no plateau edge, pale
   // cyan-white, added over the sky with nothing for a ring to form on. The shoulder below rolls the
   // core off smoothly toward the film's white instead of clipping it.
-  vec3 sunC = vec3(0.94, 0.98, 1.0);
-  sky += sunC * (0.3 * exp(-0.5 * (r * r) / (0.014 * 0.014)) + 0.3 * exp(-r / 0.03) + 0.06 * exp(-r / 0.12));
+  // The bake lays its bloom pale cyan-white; on film the sun is not that
+  // colour. Its light is warm-neutral and the cyan is the sky it sits in, so
+  // round the sun the baked bloom is first turned toward warm white by how
+  // much it outshines the sky (its luminance kept), strongest at the core
+  // and gone a few radii out, where the sky's own cyan takes over.
+  float Ys = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+  float warmK = exp(-r / 0.075) * smoothstep(0.15, 0.55, Ys);
+  const vec3 PALE = vec3(1.0, 0.93, 0.82);
+  sky = mix(sky, Ys * PALE / dot(PALE, vec3(0.2126, 0.7152, 0.0722)), 0.85 * warmK);
+  // Then the exposure itself, over it: a disc whose top is flat (overexposed
+  // film, a soft plateau, not a gaussian's point) rolling off over a soft
+  // shoulder, r^4 rather than r^2, so it holds bright and then lets go; a
+  // pale warm-white inner glow round it; and a wide faint skirt that fades
+  // into the cyan. Each step out is cooler than the last, from the warm
+  // core (about #FFF4E0 once printed) through pale warm white to the sky.
+  float disc = 1.0 / (1.0 + pow(r / 0.024, 4.0));
+  float glow = exp(-r / 0.04);
+  float skirt = exp(-r / 0.13);
+  sky += vec3(1.0, 0.74, 0.5) * 0.9 * disc + vec3(1.0, 0.88, 0.74) * 0.32 * glow + vec3(1.0, 0.97, 0.93) * 0.05 * skirt;
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:
@@ -194,19 +213,8 @@ void main() {
   vec3 col = sky * (1.0 - gr.a) + gr.rgb;
   col = col * (1.0 - gn.a) + gn.rgb;
   float a = 1.0 - (1.0 - gr.a) * (1.0 - gn.a);
-  // Halation, the only orange in the grass: where a dark blade crosses the sun,
-  // the sun's light bounced back off the film base spills a few pixels in
-  // over the dark edge of the blade as a thin red-orange ring (the coverage
-  // here less the coverage a few pixels round: only the blade's rim), and
-  // nowhere else. The shoulder below takes it in with the rest, keeping
-  // its hue, so it reads as a thin orange rim against the cream round the
-  // sun; the ring shows on the dark side, as it does on film.
-  float ab = 1.0 - (1.0 - textureLod(uRest, vUv, 1.0).a) * (1.0 - textureLod(uNear, vUv, 2.0).a);
-  // (a sliver thinner than the ring is left alone: all rim, it would only
-  // turn brown)
-  float ring = clamp(a - ab, 0.0, 1.0) * smoothstep(0.55, 0.95, a);
-  float sunK = exp(-r / 0.04);
-  col += vec3(1.0, 0.36, 0.12) * 3.5 * ring * sunK;
+  // (Halation is the film-highlight stage's, after this pass: HIGHLIGHT
+  // below, which reads the grass's coverage from this pass's alpha.)
   // The highlight shoulder's diffusion (kept low, and lower still now the
   // bake keeps the lit billows' texture: a wide warm veil over them washed
   // that texture back out into a cream glow): only the light above the threshold
@@ -233,7 +241,130 @@ void main() {
   const float TOP = 1.38;
   float sm = m < KNEE ? m : KNEE + (TOP - KNEE) * (1.0 - exp(-(m - KNEE) / (TOP - KNEE)));
   col *= sm / max(m, 1e-5);
-  outColor = vec4(col * uExpo, 1.0);
+  outColor = vec4(col * uExpo, a);
+}`;
+
+// ---- the film-highlight stage ----
+// Between the scene and the stock: the light past a threshold (scene
+// luminance about 0.8: the sun, the lit cumulus tops) is gathered at half
+// resolution and blurred at three radii (1/2, 1/4, 1/8 of the frame), then
+// laid back two ways. Halation: the red layer's second exposure from light
+// bounced off the film base, tinted orange-red and added only where it
+// spills past a bright-to-dark edge (a local max of the highlight mask less
+// the pixel's own), so a thin warm ring forms wherever a blade, an oat head
+// or the stalk crosses bright cloud or the sun, and nothing lands on the
+// highlight itself. Pro-Mist: a few percent of the same light spread out,
+// so the cumulus bleeds a little into the blue round it.
+const HL_THR = 0.8;
+const HL_COMMON = `
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// soft knee round the threshold: the mask grows smoothly out of it
+float hiMask(vec3 c) { float y = dot(c, LUMA); return smoothstep(${(HL_THR - 0.12).toFixed(3)}, ${(HL_THR + 0.14).toFixed(3)}, y); }
+`;
+
+// Full res -> half: the highlight light in rgb, its mask in a. Four bilinear
+// taps over a 4x4 block, so a thin bright edge does not shimmer.
+const HL_PREP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uIn;
+uniform vec2 uTexel;
+${HL_COMMON}
+void main() {
+  vec4 acc = vec4(0.0);
+  for (int i = 0; i < 4; i++) {
+    vec2 o = vec2(i == 0 || i == 2 ? -1.0 : 1.0, i < 2 ? -1.0 : 1.0) * uTexel;
+    vec3 c = max(texture(uIn, vUv + o).rgb, 0.0);
+    float m = hiMask(c);
+    acc += vec4(c * m, m);
+  }
+  outColor = acc * 0.25;
+}`;
+
+// 13-tap downsample (Jimenez 2014), one level down.
+const HL_DOWN = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+void main() {
+  vec2 t = uTexel;
+  vec4 a = texture(uSrc, vUv + t * vec2(-2, -2));
+  vec4 b = texture(uSrc, vUv + t * vec2(0, -2));
+  vec4 c = texture(uSrc, vUv + t * vec2(2, -2));
+  vec4 d = texture(uSrc, vUv + t * vec2(-1, -1));
+  vec4 e = texture(uSrc, vUv + t * vec2(1, -1));
+  vec4 f = texture(uSrc, vUv + t * vec2(-2, 0));
+  vec4 g = texture(uSrc, vUv);
+  vec4 h = texture(uSrc, vUv + t * vec2(2, 0));
+  vec4 i = texture(uSrc, vUv + t * vec2(-1, 1));
+  vec4 j = texture(uSrc, vUv + t * vec2(1, 1));
+  vec4 k = texture(uSrc, vUv + t * vec2(-2, 2));
+  vec4 l = texture(uSrc, vUv + t * vec2(0, 2));
+  vec4 m = texture(uSrc, vUv + t * vec2(2, 2));
+  outColor = (d + e + i + j) * 0.125 + (a + c + k + m) * 0.03125 + (b + f + h + l) * 0.0625 + g * 0.125;
+}`;
+
+// Separable 9-tap gaussian (five bilinear fetches), one direction.
+const HL_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uDir;         // texel times the direction
+void main() {
+  outColor = texture(uSrc, vUv) * 0.227027
+    + (texture(uSrc, vUv + uDir * 1.384615) + texture(uSrc, vUv - uDir * 1.384615)) * 0.316216
+    + (texture(uSrc, vUv + uDir * 3.230769) + texture(uSrc, vUv - uDir * 3.230769)) * 0.070270;
+}`;
+
+const HL_COMP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uIn;     // the scene, linear; a: the grass's coverage
+uniform sampler2D uM0;     // half res, unblurred: the highlight mask
+uniform sampler2D uL0;     // the highlight, blurred at 1/2, 1/4, 1/8
+uniform sampler2D uL1;
+uniform sampler2D uL2;
+uniform vec2 uM0Texel;
+uniform float uHal;
+uniform vec3 uHalTint;
+uniform float uHalSky;
+uniform float uMist;
+${HL_COMMON}
+void main() {
+  vec4 s = texture(uIn, vUv);
+  vec3 c = max(s.rgb, 0.0);
+  float cov = clamp(s.a, 0.0, 1.0);
+  float self = hiMask(c);
+  // The edge: the highlight mask's local maximum over a small disc (two
+  // rings of eight, 1.25 and 2.5 half-res texels out) less the pixel's own. It
+  // is 1 on the dark side of a bright edge, 0 on the bright side and 0 out
+  // in the open, so the halo lands only where the light spills over.
+  float mx = texture(uM0, vUv).a;
+  for (int i = 0; i < 8; i++) {
+    float an = float(i) * 0.785398;
+    vec2 d = vec2(cos(an), sin(an)) * uM0Texel;
+    mx = max(mx, texture(uM0, vUv + d * 1.25).a);
+    mx = max(mx, texture(uM0, vUv + d * 2.5).a);
+  }
+  float edge = clamp(mx - self, 0.0, 1.0);
+  vec4 b0 = texture(uL0, vUv);
+  vec4 b1 = texture(uL1, vUv);
+  vec4 b2 = texture(uL2, vUv);
+  // the halo is mostly the tight radii: a thin ring, not a wash
+  float h = 0.5 * b0.a + 0.35 * b1.a + 0.15 * b2.a;
+  // Full strength on a dark blade; on the open blue round a cloud, where
+  // the step from bright to dark is smaller, a faint warm fringe only.
+  c += uHalTint * (uHal * h * edge * mix(uHalSky, 1.0, cov));
+  // Pro-Mist: a share of the highlight leaves its pixel and lands spread
+  // over the three radii, weighted wide.
+  vec3 mist = 0.2 * b0.rgb + 0.35 * b1.rgb + 0.45 * b2.rgb;
+  c = c - uMist * c * self + uMist * mist;
+  outColor = vec4(c, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -341,6 +472,11 @@ function msaaTarget(gl, w, h, float) {
   return { rb, fbo, res, w, h, ok: ok && res.ok, tex: null };
 }
 
+// The highlight stage's strengths: the halation's gain and its orange-red
+// tint (the red layer's colour), its share on the open blue round a cloud
+// (a blade's edge takes all of it), and the Pro-Mist share.
+const HAL = { strength: 0.42, tint: [1.0, 0.35, 0.15], sky: 0.22, mist: 0.08 };
+
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
@@ -399,6 +535,12 @@ export async function createKaze(host) {
 
   const scene = program(gl, VERT, SCENE);
   const blit = program(gl, VERT, BLIT);
+  const hl = {
+    prep: program(gl, VERT, HL_PREP),
+    down: program(gl, VERT, HL_DOWN),
+    blur: program(gl, VERT, HL_BLUR),
+    comp: program(gl, VERT, HL_COMP),
+  };
 
   // The grass: two layers of world-space ribbons (grass.js).
   const grassP = program(gl, GRASS_VERT, GRASS_FRAG);
@@ -441,6 +583,14 @@ export async function createKaze(host) {
   let filmT = null;
   let nearT = null;
   let restT = null;
+  // the highlight stage: the unblurred half-res mask, three blurred levels
+  // with a scratch target each, and the frame it hands to the stock
+  let hlT = null;
+  const hlFree = () => {
+    if (!hlT) return;
+    [hlT.m0, ...hlT.lv, ...hlT.tmp, hlT.out].forEach((t) => freeTarget(gl, t));
+    hlT = null;
+  };
   let cam = camera(16, 10);
   let scale = 1;
   let lastBox = null;
@@ -455,6 +605,7 @@ export async function createKaze(host) {
     freeTarget(gl, filmT);
     freeTarget(gl, nearT);
     freeTarget(gl, restT);
+    hlFree();
     cam = camera(W, H);
     // the anchor at full resolution, the rest at half (its diffusion)
     nearT = msaaTarget(gl, L.rw, L.rh, floatOk);
@@ -476,6 +627,18 @@ export async function createKaze(host) {
     }
     filmT = target(gl, L.rw, L.rh, false);
     film.resize(L.rw, L.rh);
+    // The highlight stage needs float (the sun runs past 1); without it the
+    // scene goes to the stock as before.
+    if (floatOk && sceneT.ok) {
+      const lvl = (d) => [Math.max(1, Math.round(L.rw / d)), Math.max(1, Math.round(L.rh / d))];
+      hlT = {
+        m0: target(gl, ...lvl(2), true),
+        lv: [2, 4, 8].map((d) => target(gl, ...lvl(d), true)),
+        tmp: [2, 4, 8].map((d) => target(gl, ...lvl(d), true)),
+        out: target(gl, L.rw, L.rh, true),
+      };
+      if (![hlT.m0, ...hlT.lv, ...hlT.tmp, hlT.out].every((t) => t.ok)) hlFree();
+    }
   };
   // The part of the photograph on screen, in image uv: the crop window
   // cover-fitted to the box, held to its top edge (the zenith side) and
@@ -604,6 +767,59 @@ export async function createKaze(host) {
     gl.generateMipmap(gl.TEXTURE_2D);
   };
 
+  const pass = (P, T) => {
+    gl.useProgram(P.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
+    gl.viewport(0, 0, T.w, T.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  const bindTex = (P, name, unit, tex) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(P.u[name], unit);
+  };
+  // The film-highlight stage (HL_* above): scene -> mask -> three blurred
+  // levels -> halation and Pro-Mist laid back over the scene.
+  const highlights = () => {
+    gl.bindVertexArray(vao);
+    gl.disable(gl.BLEND);
+    const { m0, lv, tmp, out } = hlT;
+    gl.useProgram(hl.prep.p);
+    bindTex(hl.prep, "uIn", 0, sceneT.tex);
+    gl.uniform2f(hl.prep.u.uTexel, 1 / sceneT.w, 1 / sceneT.h);
+    pass(hl.prep, m0);
+    for (let i = 0; i < 3; i++) {
+      const src = i === 0 ? m0 : lv[i - 1];
+      if (i > 0) {
+        gl.useProgram(hl.down.p);
+        bindTex(hl.down, "uSrc", 0, src.tex);
+        gl.uniform2f(hl.down.u.uTexel, 1 / src.w, 1 / src.h);
+        pass(hl.down, lv[i]);
+      }
+      const from = i === 0 ? m0 : lv[i];
+      gl.useProgram(hl.blur.p);
+      bindTex(hl.blur, "uSrc", 0, from.tex);
+      gl.uniform2f(hl.blur.u.uDir, 1 / from.w, 0);
+      pass(hl.blur, tmp[i]);
+      bindTex(hl.blur, "uSrc", 0, tmp[i].tex);
+      gl.uniform2f(hl.blur.u.uDir, 0, 1 / from.h);
+      pass(hl.blur, lv[i]);
+    }
+    const P = hl.comp;
+    gl.useProgram(P.p);
+    bindTex(P, "uIn", 0, sceneT.tex);
+    bindTex(P, "uM0", 1, m0.tex);
+    lv.forEach((t, i) => bindTex(P, "uL" + i, 2 + i, t.tex));
+    gl.uniform2f(P.u.uM0Texel, 1 / m0.w, 1 / m0.h);
+    gl.uniform1f(P.u.uHal, HAL.strength);
+    gl.uniform3fv(P.u.uHalTint, HAL.tint);
+    gl.uniform1f(P.u.uHalSky, HAL.sky);
+    gl.uniform1f(P.u.uMist, HAL.mist);
+    pass(P, out);
+    gl.activeTexture(gl.TEXTURE0);
+    return out.tex;
+  };
+
   const draw = (expoStops, fade) => {
     gl.disable(gl.SCISSOR_TEST);
     drawGrass(layers.rest, restT);
@@ -635,25 +851,21 @@ export async function createKaze(host) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const filmIn = hlT ? highlights() : sceneT.tex;
 
     film.render(
-      sceneT.tex,
+      filmIn,
       {
         ...FILM_PRESETS.summer,
-        // No global veil: the diffusion is the scene's own thresholded
-        // highlight shoulder (the lit cloud tops), so the blacks stay down and the grass
+        // No global veil and no halation of the stock's own: both are the
+        // highlight stage's (highlights() above), thresholded and kept to
+        // the bright-to-dark edges, so the blacks stay down and the grass
         // keeps its colour. A little optical softness and dye-cloud bleed.
-        // The stock's own halation only answers the sun itself (the lit
-        // cloud tops stay under its threshold, so no warm creeps onto the
-        // blades crossing them); the thin ring where a blade crosses the sun
-        // is drawn in the scene. The sky's depth is in the bake, so the stock's blue deepening is
+        // The sky's depth is in the bake, so the stock's blue deepening is
         // kept light.
         bloom: 0,
         softness: 0.45,
-        halation: 0.3,
-        halationThreshold: 1.6,
-        halationColor: [1, 0.32, 0.12],
-        halationLocal: 0.4,
+        halation: 0,
         contrast: 1.14,
         toe: 0.022,
         blueDepth: 0.25,
@@ -749,6 +961,8 @@ export async function createKaze(host) {
       freeTarget(gl, filmT);
       freeTarget(gl, nearT);
       freeTarget(gl, restT);
+      hlFree();
+      Object.values(hl).forEach((P) => gl.deleteProgram(P.p));
       [skyTex, windTex].forEach((t) => gl.deleteTexture(t));
       for (const l of Object.values(layers)) {
         gl.deleteVertexArray(l.vao);
