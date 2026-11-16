@@ -202,6 +202,9 @@ const float AURE_W = 0.008;
 const float AURE_CORE = 0.0007;
 const vec3 AURE_WHITE = vec3(0.92, 0.9, 0.84);
 const float AURE_CORE_MIX = 0.3;
+// the veiled sky low in the frame: its hue (degrees) and saturation lift
+const float VEIL_HUE = 208.0;
+const float VEIL_SAT = 0.3;
 
 // The camera pitched up by uCam.x. Every layer goes through one and the same
 // map, so all of them converge on one zenith and nothing tears between them:
@@ -316,6 +319,19 @@ vec3 plateCR(vec2 uv) {
          + (textureLod(uPlate, vec2(a.x, b.y), 0.0).rgb * w0.x + textureLod(uPlate, vec2(b.x, b.y), 0.0).rgb * w12.x + textureLod(uPlate, vec2(c.x, b.y), 0.0).rgb * w3.x) * w12.y
          + (textureLod(uPlate, vec2(a.x, c.y), 0.0).rgb * w0.x + textureLod(uPlate, vec2(b.x, c.y), 0.0).rgb * w12.x + textureLod(uPlate, vec2(c.x, c.y), 0.0).rgb * w3.x) * w3.y;
   return max(r, 0.0);
+}
+
+// hue (degrees) and HSV saturation of a colour, and back
+vec2 hueSat(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b));
+  float d = mx - min(c.r, min(c.g, c.b));
+  if (d < 1e-5) return vec2(0.0);
+  float h = mx == c.r ? mod((c.g - c.b) / d, 6.0) : mx == c.g ? (c.b - c.r) / d + 2.0 : (c.r - c.g) / d + 4.0;
+  return vec2(h * 60.0, d / max(mx, 1e-5));
+}
+vec3 fromHsv(float h, float s, float v) {
+  vec3 k = clamp(abs(mod(h / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return v * mix(vec3(1.0), k, s);
 }
 
 float capsule(vec2 p, vec2 a, vec2 b) {
@@ -529,6 +545,27 @@ void main() {
   float gc = seen * exp(-ds * ds / AURE_CORE);
   vec3 e = mix(sqrt(max(col, 0.0)), sqrt(AURE_WHITE), gc * AURE_CORE_MIX);
   col = e * e;
+
+  // Low in the frame the sky is seen through the cloud's thin veil, and the
+  // sunlit haze laid over the blue there leans its hue past 220 into a dusty
+  // mauve. Turn that veiled sky back to the cobalt-cyan of the clear blue
+  // above it (hue ~208, judged in a gamma-like space as it will be seen) and
+  // give it back a little saturation, at the same luminance. Only blues that
+  // lean past 212: the cloud's lavender-grey shadows sit beyond the window
+  // (and the cloud's body takes the pull a little less than the veil), and
+  // the clear sky, warm lobes and pink tones are left as they are.
+  {
+    vec3 gc = sqrt(max(col, 0.0));
+    vec2 hs = hueSat(gc);
+    float wv = (1.0 - smoothstep(0.42, 0.72, vUv.y)) * (1.0 - 0.3 * occ)
+             * smoothstep(209.0, 215.0, hs.x) * (1.0 - smoothstep(262.0, 290.0, hs.x));
+    if (wv > 0.0) {
+      float v = max(gc.r, max(gc.g, gc.b));
+      vec3 gv = fromHsv(mix(hs.x, VEIL_HUE, wv), min(hs.y * (1.0 + VEIL_SAT * wv), 1.0), v);
+      vec3 cv = gv * gv;
+      col = cv * (dot(col, LUMA) / max(dot(cv, LUMA), 1e-5));
+    }
+  }
 
   // --- wires, masts, gantry: per-pixel disparity, springs ---
   vec2 pWp = layerAt(P, false);
