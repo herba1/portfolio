@@ -211,6 +211,17 @@ const float LOBE = 0.6;
 const float FEATHER = 4.0;
 // deep cobalt straight up (linear light, before the film)
 const vec3 ZENITH = vec3(0.0006, 0.053, 0.29);
+// Past the photograph's top the sky goes on from the colour at its top edge
+// and deepens along a measured ramp to this at the zenith (90 deg): on screen
+// about #0B4084 at the zenith from about #1255A2 at the seam, hue held near
+// 210 the whole way (green kept up with blue as it darkens, so it never
+// leans past 215 into violet). ZEN_K shapes the ramp, ZEN_SUN lifts it toward
+// the sun's azimuth (cyan-leaning, so the hue there drops, never rises), and
+// ZEN_DITHER is the blue-noise dither in display code values.
+const vec3 ZENITH_DEEP = vec3(0.0001, 0.03, 0.085);
+const float ZEN_K = 2.4;
+const vec3 ZEN_SUN = vec3(0.3, 1.0, 0.8) * 0.22;
+const float ZEN_DITHER = 1.6;
 // Aureole round the hidden sun: per-channel lift of the sky's own colour at
 // its peak, the lobe's width (ds^2, plate widths), and the tight warm core.
 const vec3 AURE_GAIN = vec3(0.55, 2.2, 1.15);
@@ -230,7 +241,7 @@ const float VEIL_SAT = 0.3;
 // ray past the photograph's top lands far above it. elev: the ray's elevation
 // over the photograph's horizon (rad).
 const float PHOTO_F = ${PHOTO_F}.0;
-vec2 project(vec2 s, out float elev) {
+vec2 project(vec2 s, out float elev, out vec3 ray) {
   float r = length(s);
   float d = uCam.z;
   float k = r / (uCam.y * (d + 1.0));
@@ -241,6 +252,7 @@ vec2 project(vec2 s, out float elev) {
   float cy = cos(uCam.w), sy = sin(uCam.w);
   w = vec3(w.x * cy + w.z * sy, w.y, -w.x * sy + w.z * cy);
   elev = asin(clamp(w.y, -1.0, 1.0));
+  ray = w;
   vec2 u = PHOTO_F * w.xy / max(w.z, 1e-3);
   if (w.z < 1e-3) u = vec2(w.x, w.y) * 1e6;
   return 0.5 * PLATE + vec2(u.x, -u.y);
@@ -279,6 +291,42 @@ vec3 sky(vec2 uv) {
     dot(vec3(${SKY[0].slice(0, 3).join(", ")}), t1) + dot(vec3(${SKY[0].slice(3).join(", ")}), t2),
     dot(vec3(${SKY[1].slice(0, 3).join(", ")}), t1) + dot(vec3(${SKY[1].slice(3).join(", ")}), t2),
     dot(vec3(${SKY[2].slice(0, 3).join(", ")}), t1) + dot(vec3(${SKY[2].slice(3).join(", ")}), t2)), 0.0);
+}
+
+// The sky past the photograph's top, for a ray w of elevation elev, from the
+// photograph's own sky at its top edge (seam, already deepened by elevation
+// as the sky inside it is). The seam's elevation along this azimuth is where
+// the ray's vertical plane meets the plate's top row: atan(PH/2 / PHOTO_F *
+// cos az). From there to the zenith the ramp is front-loaded, so the frame's
+// top, a third of the way up, already shows most of the deepening.
+vec3 zenithSky(vec3 w, float elev, vec3 seam) {
+  float h = length(w.xz);
+  float cAz = h > 1e-5 ? w.z / h : 1.0;
+  float eS = atan(0.5 * PLATE.y / PHOTO_F * cAz);
+  float t = clamp((elev - eS) / max(1.5708 - eS, 1e-3), 0.0, 1.0);
+  float r = 1.0 - pow(1.0 - t, ZEN_K);
+  vec3 c = mix(seam, ZENITH_DEEP, r);
+  // a little brighter toward the sun's azimuth, wherever the sun is (uL has
+  // z toward the viewer, the ray z into the scene), broad as a clear sky's
+  // brightening is, and only once the ramp has begun
+  vec2 sAz = vec2(uL.x, -uL.z);
+  float ls = length(sAz);
+  float toward = (ls > 1e-4 && h > 1e-5) ? dot(w.xz / h, sAz / ls) : 0.0;
+  float lift = (0.5 + 0.5 * toward) * (0.5 + 0.5 * toward) * smoothstep(0.0, 0.25, t);
+  return c * (1.0 + ZEN_SUN * lift);
+}
+// Blue-noise dither: white noise put through a Laplacian high-pass, so its
+// energy sits at the finest frequencies and the eye reads it as smooth.
+// Zero mean, roughly -1..1.
+float white(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+float blueNoise(vec2 p) {
+  float c = white(p);
+  float n = white(p + vec2(1.0, 0.0)) + white(p - vec2(1.0, 0.0)) + white(p + vec2(0.0, 1.0)) + white(p - vec2(0.0, 1.0));
+  return (c - 0.25 * n) * 1.6;
 }
 
 vec3 hash3(vec3 p) {
@@ -358,11 +406,15 @@ void main() {
 
   // --- sky (at infinity) ---
   float elev;
-  vec2 pS = project(s, elev);
+  vec3 ray;
+  vec2 pS = project(s, elev, ray);
   vec3 sky0 = sky(pS / PLATE);
-  // the photograph's blue deepens toward the zenith with the elevation
-  float zen = smoothstep(0.05, 1.3, elev + 0.3 * uCam.x);
+  // the photograph's blue deepens toward the zenith with the elevation alone
+  // (the sky does not change with where the camera points); past its top
+  // edge, where sky0 is that edge's colour, it goes on deepening to cobalt
+  float zen = smoothstep(0.05, 1.3, elev);
   vec3 skyN = mix(sky0, ZENITH, zen * zen * (3.0 - 2.0 * zen) * 0.92);
+  if (pS.y < 0.0) skyN = zenithSky(ray, elev, skyN);
   vec3 col = skyN;
 
   // How many of the photograph's texels each pixel spans. High up, the lens
@@ -576,6 +628,14 @@ void main() {
       vec3 cv = gv * gv;
       col = cv * (dot(col, LUMA) / max(dot(cv, LUMA), 1e-5));
     }
+  }
+
+  // dither the open sky (gamma-like space, so a code value is the same
+  // step from seam to zenith) before the silhouettes go over it
+  {
+    float dn = blueNoise(gl_FragCoord.xy) * ZEN_DITHER / 255.0 * (1.0 - occ);
+    vec3 gd = sqrt(max(col, 0.0)) + dn;
+    col = gd * max(gd, 0.0);
   }
 
   // --- wires, masts, gantry: springs ---
