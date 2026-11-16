@@ -193,6 +193,7 @@ uniform sampler2D uEnvD;   // log distance code
 uniform sampler2D uAux;    // r: log z code, g: sunlit, b: sky
 uniform sampler2D uGrade;  // the plate's enamels: r yellow, g orange-red, b green (grade.py)
 uniform sampler2D uShade;  // where the sky fills the plate's shade side (shade.py)
+uniform sampler2D uSignal; // the crossing signal, rebuilt and relit (signal.py), over SIGNAL_BOX
 uniform sampler2D uEnvC;   // the panorama's cumulus matte (match.py)
 uniform sampler2D uEnvB;   // its far layer: the foreground taken out (reproject.py)
 uniform vec4 uView;        // photo px: x0, y0 (top), w, h
@@ -586,6 +587,28 @@ vec3 skyFill(vec3 c, vec2 uv) {
   float w = m * sh * smoothstep(0.12, 0.03, l);
   float alb = clamp(l / 0.012, 0.0, 2.2);
   return c + w * SKY_FILL * (0.35 + 0.65 * alb);
+}
+
+// The crossing signal. Seen from under them, the crossbuck and the two
+// flasher heads were the largest flat area in the right half: the boards
+// evenly lit khaki and black with no edge, the lamps two black discs with a
+// smear of yellow, read as cutouts against the photographic houses. The bake
+// (signal.py) redraws them as objects under the plate's own sun and sky,
+// in these same scene units: boards with a rolled edge in skylight shade, a
+// bevel catching the sun and a print-weathered face over the plate's own
+// stripes; JR flasher heads with a deep hood open at its lower lip, an
+// oxblood fresnel lens with a glint, a black backplate with a lit rim, the
+// hood's inside occluded and filled from the open side with the sky's blue;
+// then the plate's optics (its MTF and sharpening, a highlight shoulder and
+// bloom, the red layer's halation, a little grain). It is laid over the
+// photograph after the enamel grade and the sky fill, which it no longer
+// needs, and before the sky's re-grade, which it holds off: straight alpha,
+// in the plate's own px box.
+const vec4 SIGNAL_BOX = vec4(1240.0, 240.0, 2100.0, 1540.0);
+vec4 signalAt(vec2 ppx) {
+  vec2 t = (ppx - SIGNAL_BOX.xy) / (SIGNAL_BOX.zw - SIGNAL_BOX.xy);
+  if (t.x <= 0.0 || t.y <= 0.0 || t.x >= 1.0 || t.y >= 1.0) return vec4(0.0);
+  return texture(uSignal, t);
 }
 
 // The photograph's own dirt. The sunlit plaster under the house's eave
@@ -1486,13 +1509,15 @@ void main() {
 
   // the photograph
   vec3 col = skyFill(enamel(texture(uPhoto, p / uPhotoSize).rgb, p / uPhotoSize), p / uPhotoSize);
+  vec4 sig = signalAt(p);
+  col = mix(col, sig.rgb, sig.a);
   vec4 aux = texture(uAux, p / uPhotoSize);
   // its sky taken from the bake's grade to the cobalt, by elevation, through
   // the matte (a wire across it, darker than half the sky, is left alone)
   {
     float el = degrees(asin(clamp(d.y, -1.0, 1.0)));
     vec3 T0 = skyT(el);
-    float w = aux.b * smoothstep(0.35, 0.7, dot(col, LUMA) / max(dot(T0, LUMA), 1e-4));
+    float w = aux.b * smoothstep(0.35, 0.7, dot(col, LUMA) / max(dot(T0, LUMA), 1e-4)) * (1.0 - sig.a);
     col = mix(col, cobalt(col, T0, skyN(el)), w);
   }
   // The cumulus' sunlit tops. clouds.py lights them in the bake (tops a
@@ -1506,7 +1531,7 @@ void main() {
   // uCloudW, which develops to a warm neutral of about 246, R over G over B.
   // (a warm-neutral top passes; a board's yellow edge, blue under half its
   // red, does not)
-  float cTop = aux.b * smoothstep(0.42, 0.86, dot(col, LUMA)) * smoothstep(-0.45, -0.25, (col.b - col.r) / max(col.r, 1e-3));
+  float cTop = aux.b * (1.0 - sig.a) * smoothstep(0.42, 0.86, dot(col, LUMA)) * smoothstep(-0.45, -0.25, (col.b - col.r) / max(col.r, 1e-3));
   col = mix(col, col * uCloudW / CLOUD_TOP, cTop);
   // the assembly's shadow on it, through the point map
   if (aux.r < 0.995) {
@@ -1987,7 +2012,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg, envbImg, shadeImg] = await Promise.all([
+  const [scene, photoImg, envImg, envdImg, auxImg, gradeImg, envcImg, envbImg, shadeImg, signalImg] = await Promise.all([
     fetch(BASE + "scene.json").then((r) => r.json()),
     loadImage(BASE + "photo.webp"),
     loadImage(BASE + "env.webp"),
@@ -1997,6 +2022,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     loadImage(BASE + "envc.png"),
     loadImage(BASE + "envb.webp"),
     loadImage(BASE + "shade.png"),
+    loadImage(BASE + "signal.webp"),
   ]);
   const photo = imageTexture(gl, photoImg, { srgb: true, mips: true });
   const envT = imageTexture(gl, envImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
@@ -2006,6 +2032,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const aux = imageTexture(gl, auxImg);
   const gradeT = imageTexture(gl, gradeImg);
   const shadeT = imageTexture(gl, shadeImg);
+  const signalT = imageTexture(gl, signalImg, { srgb: true, mips: true });
   const envC = imageTexture(gl, envcImg, { wrapS: gl.REPEAT });
   const envB = imageTexture(gl, envbImg, { srgb: true, mips: true, wrapS: gl.REPEAT });
 
@@ -2452,6 +2479,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       if (P === sceneP) bindTex(6, envC, u.uEnvC);
       if (P === sceneP) bindTex(7, envB, u.uEnvB);
       if (P === sceneP) bindTex(8, shadeT, u.uShade);
+      if (P === sceneP) bindTex(9, signalT, u.uSignal);
       gl.uniform2f(u.uRes, L.rw, L.rh);
       gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
       gl.viewport(0, 0, L.rw, L.rh);
@@ -2684,7 +2712,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       film.destroy();
       filmP.destroy();
       for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT, diffT, diffPT, redT, ringT, ...mq, ...ms]) freeTarget(gl, t);
-      for (const t of [photo, envT, envD, aux, gradeT, envC, shadeT]) gl.deleteTexture(t);
+      for (const t of [photo, envT, envD, aux, gradeT, envC, shadeT, signalT]) gl.deleteTexture(t);
       for (const pr of [sceneP, geoP, opticsP, blit, mistKeyP, mistDownP, mistBlurP, mistRedP, mistP, mistRingP]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
