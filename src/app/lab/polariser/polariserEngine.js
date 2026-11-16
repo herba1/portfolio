@@ -198,12 +198,22 @@ const BURN_DEG = 13;
 const VEIL = { a: 0.195, deg: 5.0, colour: [1.23, 0.932, 0.994] };
 const AUREOLE = { a: 3.04, deg: 14.3, colour: [0.848, 1.04, 1.051] };
 const AUREOLE_TAKE = 0.6;
+// The clear sky round the sun, modelled rather than read (see the sky in the
+// shader). Within AUR_ZONE[0] degrees of the sun the clear-sky field is the
+// plate's glare more than its sky, so the field is read at AUR_ZONE[0] on the
+// same great circle and carried in along γ, and the model's lobe fades out by
+// AUR_ZONE[1]. The cyan-grey glare wedge between the block and the pointed
+// tower is then re-dyed and turned by the filter like the rest. MIE is the
+// aureole the glare removal leaves in the sky (1 - AUREOLE_TAKE of it), in
+// the warm white of forward-scattered sunlight.
+const AUR_ZONE = [24, 36];
 
 const rad = (d) => (d * Math.PI) / 180;
 const lumNorm = (c) => {
   const y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   return c.map((v) => v / y);
 };
+const MIE = { a: AUREOLE.a * (1 - AUREOLE_TAKE), deg: AUREOLE.deg, colour: lumNorm([1.0, 0.98, 0.93]) };
 // SHADE as a chroma offset from unit luminance, its lowest channel at -1.
 const shadeC = (() => {
   const c = lumNorm(SHADE).map((v) => v - 1);
@@ -297,6 +307,8 @@ uniform float uLodBias;
 uniform vec2 uBurn;      // stops at the sun, falloff in radians
 uniform vec4 uVeil;      // lens glare at the sun (rgb, plate units), falloff in radians
 uniform vec4 uAureole;   // the share of the aureole taken off the sky, likewise
+uniform vec4 uMie;       // the aureole left in the sky (rgb, plate units), falloff in radians
+uniform vec2 uAurZone;   // the aureole model's reach: whole inside x, gone by y (radians)
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // Negative to print. Print density is a sigmoid in log exposure, so the
@@ -402,24 +414,46 @@ void main() {
   // values of difference decode to a tenfold change, so the aureole's
   // near-clipped sky round the sun is glare and cloud, not clear sky.
   float clipped = smoothstep(0.88, 0.96, max(enc.r, max(enc.g, enc.b)));
-  vec3 S = deflare(decode(texture(uClear, puv).rgb), veilSky);
+  // So round the sun the clear sky is modelled, not read: the field where it
+  // is still sound, at uAurZone.x from the sun on the same great circle, its
+  // Rayleigh part carried in by (1 + cos²γ), plus the forward-scattered Mie
+  // lobe the glare removal leaves in the sky, warm white and unpolarised.
+  // It is smooth in γ, so the glare streaks in the plate cannot get into the
+  // sky behind them, and the filter's own P -> 0 at the sun, not a gate,
+  // keeps the light nearest it unpolarised.
+  float gR = max(gam, uAurZone.x);
+  vec3 tS = d - cg * uSun;
+  tS = dot(tS, tS) > 1e-8 ? normalize(tS) : uVR;
+  float cR = cos(gR);
+  vec3 veilR = uVeil.rgb * exp(-gR / uVeil.w) + uAureole.rgb * exp(-gR / uAureole.w);
+  vec3 Sray = deflare(decode(texture(uClear, plateUv(cR * uSun + sin(gR) * tS)).rgb), veilR) * ((1.0 + cg * cg) / (1.0 + cR * cR));
+  vec3 mie = uMie.rgb * exp(-gam / uMie.w);
+  float zone = aux.r * (1.0 - smoothstep(uAurZone.x, uAurZone.y, gam));
+  vec3 S = Sray + mie * zone;
   float Ls = dot(S, LUMA);
   float L = dot(C, LUMA);
   float alpha = clamp((L - Ls) / max((uCloudWhite - 1.0) * Ls, 1e-3), 0.0, 1.0);
   // The clear sky's Rayleigh part, by its chroma (the field is smooth, so the
   // unmix is too), re-dyed toward the cobalt a Fuji negative gives a clear
   // sky and turned by the filter; its neutral, unpolarised haze stays.
-  float As = clamp((0.85 * S.b - S.r) / 0.56, 0.0, S.b);
+  float As = clamp((0.85 * Sray.b - Sray.r) / 0.56, 0.0, Sray.b);
   float f = 1.0 + P * cos(2.0 * (uPhi - psi));
   f = sqrt(f * f + uSkyFloor.x * uSkyFloor.x);
   vec3 dyed = As * uSkyDye * f;
   dyed = mix(dyed, vec3(dot(dyed, LUMA)), uSkyGrey);
   vec3 polSky = S - As * vec3(0.29, 0.58, 1.0) + dyed;
-  vec3 cloudPart = C * (max(L - (1.0 - alpha) * Ls, 0.0) / max(L, 1e-4));
+  // A cloud's own light is the sun's, scattered forward. Near the sun and
+  // near paper white the plate's colour is the glare's (a cyan-grey cast),
+  // so there the cloud takes the Mie lobe's warm white at its own luminance;
+  // its shadowed bodies, darker, keep their own colour.
+  float glare = zone * smoothstep(0.7, 0.88, max(enc.r, max(enc.g, enc.b)));
+  vec3 cloudCol = mix(C / max(L, 1e-4), uMie.rgb / max(dot(uMie.rgb, LUMA), 1e-4), glare);
+  vec3 cloudPart = cloudCol * max(L - (1.0 - alpha) * Ls, 0.0);
   vec3 skyOut = cloudPart + (1.0 - alpha) * pow(min(L / max(Ls, 1e-4), 1.0), uSkyFloor.y) * polSky;
-  // Open sky only: the towers, the mast and the glare round the sun keep
-  // their own light.
-  float gate = aux.r * (1.0 - clipped);
+  // Open sky only: the towers, the mast and, away from the sun, the clipped
+  // cloud tops keep their own light. Round the sun the aureole model holds
+  // the gate open.
+  float gate = aux.r * (1.0 - clipped * (1.0 - zone));
   vec3 Cout = mix(C, skyOut, gate);
   // The share of the pixel that is open sky seen through the cloud.
   float t = (1.0 - alpha) * gate;
@@ -514,7 +548,9 @@ void main() {
   // give a skylight blue of one strength in their own hue. It replaces the
   // shadow's chroma rather than multiplying it, so the warm cast the burn and
   // the glare removal leave round the sun cannot cancel it to grey.
-  vec3 skyC = polSky / max(dot(polSky, LUMA), 1e-4) - 1.0;
+  // The Rayleigh sky's, not the aureole's: the cloud's shadow sees the dome.
+  vec3 polRay = polSky - mie * zone;
+  vec3 skyC = polRay / max(dot(polRay, LUMA), 1e-4) - 1.0;
   float skyD = -min(skyC.r, min(skyC.g, skyC.b));
   vec3 shadeC = mix(uShade, skyC / max(skyD, 1e-3), smoothstep(0.15, 0.4, skyD));
   vec3 shadow = Y * uShadeTone.y * max(1.0 + uShadeTone.x * shadeC, 0.0);
@@ -853,6 +889,8 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform2f(u.uBurn, BURN, rad(BURN_DEG));
     gl.uniform4f(u.uVeil, ...VEIL.colour.map((v) => v * VEIL.a), rad(VEIL.deg));
     gl.uniform4f(u.uAureole, ...AUREOLE.colour.map((v) => v * AUREOLE.a * AUREOLE_TAKE), rad(AUREOLE.deg));
+    gl.uniform4f(u.uMie, ...MIE.colour.map((v) => v * MIE.a), rad(MIE.deg));
+    gl.uniform2f(u.uAurZone, rad(AUR_ZONE[0]), rad(AUR_ZONE[1]));
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform1f(u.uSkyGrey, SKY_GREY);
     gl.uniform2f(u.uSkyFloor, SKY_FLOOR, MOTTLE);
