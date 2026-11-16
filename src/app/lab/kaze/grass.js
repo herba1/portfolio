@@ -134,8 +134,9 @@ const PROFILE = {
 
 // Vertex layout: P(3) S(3) tip(3) col(3) lever, trans, phase, then the
 // shading frame: along (0 root .. 1 tip), across (-1 .. 1), the plant's seed,
-// and its depth (0 at your shoulder .. 1 the field a few paces off).
-export const STRIDE = 19;
+// and its depth (0 at your shoulder .. 1 the field a few paces off), and how
+// much of the lens's defocus it takes (1 for all but the blades at your cheek).
+export const STRIDE = 20;
 
 // A seed in 0..1 from a plant's phase, so every ribbon of one plant (stem,
 // leaves, panicle) shares its hue and value without drawing on the layout's
@@ -149,7 +150,7 @@ function builder(cam) {
   const v = [];
   const idx = [];
   let nv = 0;
-  const st = { depth: 0 };
+  const st = { depth: 0, focus: 1 };
   // ribbon: points + tangents, half width per point, the wind's reference
   // point (the culm or blade tip) and the lever per point (metres of tip
   // travel per unit of bend), colours base -> tip; the plant's seed and where
@@ -166,7 +167,7 @@ function builder(cam) {
       const lv = lever(s);
       const al = along(s);
       for (const sg of [-1, 1]) {
-        v.push(P[0], P[1], P[2], side[0] * w * sg, side[1] * w * sg, side[2] * w * sg, tip[0], tip[1], tip[2], col[0], col[1], col[2], lv, trans, phase, al, sg, seed, st.depth);
+        v.push(P[0], P[1], P[2], side[0] * w * sg, side[1] * w * sg, side[2] * w * sg, tip[0], tip[1], tip[2], col[0], col[1], col[2], lv, trans, phase, al, sg, seed, st.depth, st.focus);
       }
       if (i < n - 1) {
         const a = nv + i * 2;
@@ -386,6 +387,11 @@ export function buildGrass() {
     // depth: 0 at your shoulder .. 1 the field behind (more sky in front)
     const dep = it.kind === "sun" ? 0.05 : Math.min(1, Math.max(0, (it.D - 0.15) / 0.75));
     rest.st.depth = dep;
+    // the nearest of the low fringe take only part of the lens's defocus,
+    // so along the bottom edge they hold as soft-edged blades rather than
+    // spreading into dark swaths
+    const nf = Math.min(1, Math.max(0, (it.D - 0.06) / 0.16));
+    rest.st.focus = 0.4 + 0.6 * nf * nf * (3 - 2 * nf);
     const vary = 0.8 + 0.4 * R();
     const dry = R() < 0.1 ? 0.5 : 0;
     // a pace off the blades are no paler than at your shoulder: against
@@ -410,11 +416,15 @@ export function buildGrass() {
     });
   }
 
-  // ---- the nearest few: at your cheek, wide and dark, out of focus ----
-  // Drawn over the anchor at full resolution (the lens defocuses them, in the
-  // shader, by their distance), and kept off its azimuth so none hides it.
-  // Under the same skyline, and low under it: a dark frame along the
-  // bottom edge, not a wall across the cumulus.
+  rest.st.focus = 1;
+
+  // ---- the nearest few: at your cheek, thin and dark, nearly in focus ----
+  // Drawn over the anchor at full resolution and kept off its azimuth so
+  // none hides it. Under the same skyline, and low under it: a dark frame
+  // along the bottom edge, not a wall across the cumulus. Fine leaves, and
+  // given only a little of the lens's defocus: wide and fully defocused, at
+  // a few centimetres they spread into broad near-black swaths that muddied
+  // the bottom-left corner; thin, they print as crisp dark silhouettes.
   for (let i = 0, k = 0; i < 80 && k < 10; i++) {
     const side = k % 2 ? 1 : -1;
     const phi = side * (22 + 50 * R()) + (side > 0 ? 8 : 0);
@@ -422,12 +432,13 @@ export function buildGrass() {
     const D = 0.05 + 0.07 * R();
     const sp = span(phi);
     if (!sp) continue;
-    const el = (sp[0] + (sp[1] - sp[0]) * (0.25 + 0.5 * R())) * DEG;
+    const el = (sp[0] + (sp[1] - sp[0]) * (0.12 + 0.36 * R())) * DEG;
     const L = Math.min(0.9, D * Math.tan(el) + CAM.h);
     const root = at(D, phi);
     if (!inFrame(root, L)) continue;
     k++;
     near.st.depth = 0;
+    near.st.focus = 0.12;
     const v = 0.85 + 0.3 * R();
     blade(near, R, {
       root,
@@ -436,13 +447,14 @@ export function buildGrass() {
       droop: 0.06 + 0.12 * R(),
       droopTurn: (R() - 0.5) * 0.6,
       L,
-      w0: 0.005 + 0.005 * R(),
+      w0: 0.0009 + 0.0006 * R(),
       c0: lin(0x10150b).map((c) => c * v),
       c1: lin(0x1d2612).map((c) => c * v),
       trans: 0.3,
       segs: 36,
     });
   }
+  near.st.focus = 1;
   return { near: near.out(), rest: merged(rest, shoulder) };
 }
 
@@ -454,6 +466,7 @@ in vec3 aCol;    // linear colour
 in vec3 aK;      // lever (m of travel per unit bend), translucency, phase
 in vec3 aB;      // along (0 root .. 1 tip), across (-1 .. 1), the plant's seed
 in float aD;     // depth: 0 at your shoulder .. 1 the field a few paces off
+in float aF;     // its share of the lens's defocus
 uniform vec3 uCam;
 uniform vec3 uR;
 uniform vec3 uU;
@@ -527,7 +540,7 @@ void main() {
   // fragment shader spreads the blade's coverage across it (a box blur of a
   // box, exact), so a thin blade out of focus also goes thinner in value.
   float hwp = max(hw, MINW);
-  float bl = uRes.y * 0.0042 * clamp(0.5 / length(P - uCam) - 1.0, 0.0, 6.0);
+  float bl = aF * uRes.y * 0.0042 * clamp(0.5 / length(P - uCam) - 1.0, 0.0, 6.0);
   sp *= (hwp + bl) / hwp;
   vHalf = hwp;
   vBlur = bl;

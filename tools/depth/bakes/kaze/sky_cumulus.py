@@ -93,6 +93,7 @@ import os
 import sys
 import time
 
+import cv2
 import numba as nb
 import numpy as np
 from PIL import Image
@@ -143,6 +144,7 @@ WHITE = float(os.environ.get("WHITE", 3.0))
 DESAT = float(os.environ.get("DESAT", 0.5))  # how far the shoulder whitens
 PCT = float(os.environ.get("PCT", 90.0))  # the cloud's 90th percentile is exposed to WHITE (linear)
 GAIN = float(os.environ.get("GAIN", 1.353))  # unless the exposure is pinned (0: by PCT)
+FEATHER = float(os.environ.get("FEATHER", 1.0))  # the far mass's feathered rim (0: off)
 
 # The masses: azimuth (deg, 0 straight ahead = the frame's bottom centre,
 # east positive, -90 west, the sun's side); horizontal distance of the axis
@@ -156,11 +158,75 @@ TOWERS = [
     dict(az=57, dist=1.55, zb=1.3, zt=4.65, rb=0.5, rt=0.32, lean=0.3, seed=1, foot=0.8),
     # low in the middle, small and far: a subordinate cloud side-lit from
     # the left, its domes just clearing the field, well under the hero
-    dict(az=2, dist=2.25, zb=1.6, zt=3.75, rb=0.36, rt=0.24, lean=0.2, seed=2),
+    # (feathered: at its distance the silver fringe toward the sun shrinks
+    # to a pixel or two and printed as a bright white rim with a few torn
+    # specks standing off it, a cut-out halo, so its rim is eased into the
+    # sky round it and the specks are taken off; see feather)
+    dict(az=2, dist=2.25, zb=1.6, zt=3.75, rb=0.36, rt=0.24, lean=0.2, seed=2,
+         feather=dict(width=3.0, hue=0.55, speck=0.04, reach=5.0)),
 ]
 # (No mass toward the sun: the frame's top left quarter is the sun's open
 # corner, its bloom running clean into the cobalt. A backlit tower there
 # printed as a big grey-lavender mass with only a thin silver rim.)
+
+
+def feather(o, tt, skyl, f):
+    """A far mass's edge, eased into the sky round it. o: its light
+    (premultiplied), tt: what of the sky shows through it, skyl: the open
+    sky; f: width (px at full size, the rim's softening), hue (how far its
+    outermost pixels take the sky's own colour), speck (a torn piece is kept
+    only above this share of the main body's area) and reach (px: how far
+    out of the kept body the fringe may stand).
+
+    At a few kilometres the fringe that silvers a near tower's edge is a
+    pixel or two wide and lit almost straight into the sun: it prints as a
+    hard white line round the sunward side, with single torn wisps of it
+    standing off as bright specks. Here the specks (every piece of the mass
+    under speck of its body, and any veil standing more than reach off it)
+    are taken off, and the last few pixels in from the edge are softened
+    and leaned toward the sky behind them, so the rim thins into the blue
+    instead of standing on it as a cut-out."""
+    k = W / 3600.0
+    cov = 1.0 - tt
+    # the specks: keep the body and any lobe of a real size, and the fringe
+    # within reach of them
+    body = (cov > 0.5).astype(np.uint8)
+    n, labs, stats, _ = cv2.connectedComponentsWithStats(body, connectivity=8)
+    if n > 1:
+        area = stats[1:, cv2.CC_STAT_AREA]
+        keep = np.zeros(n, bool)
+        keep[1:] = area >= f["speck"] * area.max()
+        kb = keep[labs].astype(np.uint8)
+        r = max(1, int(round(f["reach"] * k)))
+        kb = cv2.dilate(kb, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+        km = cv2.GaussianBlur(kb.astype(np.float32), (0, 0), max(0.5, 0.5 * r))
+        km = np.clip(km * 2.0, 0.0, 1.0)
+        o = o * km[..., None]
+        cov = cov * km
+    # the rim: within a few pixels of the edge, the coverage is softened
+    # (the edge spreads over a few pixels rather than one) and the colour
+    # leans toward the sky behind it, most at the very edge
+    sg = max(0.5, f["width"] * k)
+    cb = cv2.GaussianBlur(cov, (0, 0), sg)
+    band = 1.0 - smooth_(0.55, 0.98, cb)          # 1 out at the edge, 0 inside
+    band *= smooth_(0.0, 0.05, cb)                 # and nothing out in the open blue
+    col = o / np.maximum(cov, 1e-4)[..., None]
+    ob = cv2.GaussianBlur(o, (0, 0), sg)
+    covs = cov + (cb - cov) * band
+    cols = ob / np.maximum(cb, 1e-4)[..., None]
+    cols = col + (cols - col) * band[..., None]
+    # the lean toward the sky: the outermost veil is mostly the sky seen
+    # through it, so its colour goes toward the sky's own, value and hue
+    # (held at the cloud's luminance it printed a pale cyan outline)
+    w = (f["hue"] * band * (1.0 - smooth_(0.2, 0.95, covs)))[..., None]
+    cols = cols + (skyl - cols) * w
+    o = cols * covs[..., None]
+    return o.astype(np.float32), (1.0 - covs).astype(np.float32)
+
+
+def smooth_(e0, e1, x):
+    t = np.clip((x - e0) / (e1 - e0), 0, 1)
+    return t * t * (3 - 2 * t)
 
 
 def unit(v):
@@ -723,19 +789,18 @@ def main():
 
     # the masses, far to near (by the axis' distance)
     order = sorted(range(len(TOWERS)), key=lambda i: -TOWERS[i]["dist"])
-    rad = np.zeros((H, W, 3), np.float32)   # the cloud's light, premultiplied
-    tr = np.ones((H, W), np.float32)        # what of the sky shows through
-    lab = np.full((H, W), -1, np.int8)
-    isb = np.zeros((H, W), bool)
-    # VOLCACHE=path.npz keeps the rendered volume, so the exposure and the
-    # print below can be tuned without marching it again
+    # VOLCACHE=path.npz keeps each mass's rendered volume, so the exposure,
+    # the far mass's feathering and the print below can be tuned without
+    # marching it again
     cache = os.environ.get("VOLCACHE")
+    layers = {}
     if cache and os.path.exists(cache):
         z = np.load(cache)
-        rad, tr, lab, isb = z["rad"], z["tr"], z["lab"], z["isb"]
+        layers = {ti: (z[f"o{ti}"], z[f"t{ti}"], z[f"z{ti}"]) for ti in order}
         print(f"volume from {cache}", flush=True)
-        order = []
     for ti in order:
+        if ti in layers:
+            continue
         T = TOWERS[ti]
         t0 = time.time()
         S, lo, hi = tower(T)
@@ -748,19 +813,30 @@ def main():
         zh = np.full((H, W), 1e9, np.float32)
         render(DX, DY, DZ, sdf, ts, tu, lo, hi2, VOX, LVOX, L, T["zb"], T["zt"], RAMP, SIGMA,
                SEED + T["seed"] * 31, SUN_C, SKY_C, GND_C, BASE_C, PRM, o, tt, zh)
+        layers[ti] = (o, tt, zh)
+        print(f"tower {ti}: {len(S)} spheres, grid {nx}x{ny}x{nz}, {time.time() - t0:.1f}s", flush=True)
+    if cache and not os.path.exists(cache):
+        np.savez(cache, **{f"{k}{ti}": v for ti, ly in layers.items() for k, v in zip("otz", ly)})
+
+    rad = np.zeros((H, W, 3), np.float32)   # the cloud's light, premultiplied
+    tr = np.ones((H, W), np.float32)        # what of the sky shows through
+    lab = np.full((H, W), -1, np.int8)
+    isb = np.zeros((H, W), bool)
+    for ti in order:
+        T = TOWERS[ti]
+        o, tt, zh = layers[ti]
         # a little air: the mass leans toward the sky behind it with distance
         dist = np.hypot(T["dist"], (T["zb"] + T["zt"]) / 2)
         haze = 1 - np.exp(-dist / 30.0)
         o = o * (1 - haze) + skyl * (1 - tt)[..., None] * haze * 0.8
+        if T.get("feather") and FEATHER > 0:
+            o, tt = feather(o, tt, skyl, T["feather"])
         rad = o + tt[..., None] * rad
         # for the measurements: which mass each solid pixel shows, and
         # whether it is that mass's base
         lab[tt < 0.05] = ti
         isb[tt < 0.05] = zh[tt < 0.05] < T["zb"] + 0.06
         tr = tt * tr
-        print(f"tower {ti}: {len(S)} spheres, grid {nx}x{ny}x{nz}, {time.time() - t0:.1f}s", flush=True)
-    if cache and order:
-        np.savez(cache, rad=rad, tr=tr, lab=lab, isb=isb)
 
     # the exposure: the brightest domes (the top few thousandths of the
     # cloud) land at WHITE, linear

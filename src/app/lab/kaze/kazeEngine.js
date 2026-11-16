@@ -411,6 +411,7 @@ export async function createKaze(host) {
     ["aK", 3, 12],
     ["aB", 3, 15],
     ["aD", 1, 18],
+    ["aF", 1, 19],
   ];
   const layerVao = (geo) => {
     const vao = gl.createVertexArray();
