@@ -65,6 +65,10 @@ import { takes } from "./shutterTakes";
 // to sky.webp's own OKLab lightness and chroma (skyPrints in FINISH_FS), with
 // the sky under thin cloud shifted with it, so the shutter closed, the
 // viewfinder and a short hold print the same cobalt as the long exposure.
+// At every hold the clear sky is then clamped in OKLab to that same baked
+// gradient (never darker, its chroma never under the clear sky's mean, its
+// hue in the cobalt's band), and the scan's black and the tower's develop
+// are the opening frame's: only the clouds' time changes with the hold.
 
 const BASE = "/lab/shutter/";
 const TAU = 1; // frames: the opening frame's share of a still (?open); each frame already carries its own interval
@@ -166,6 +170,30 @@ const develop = (T, N) => {
     blueDepth: LOOK.blueDepth + 0.5 * k,
   };
 };
+
+// The clear sky's mean OKLab chroma as the scan prints it (sky.webp on the
+// scan's lifted black): the floor the long exposure's gaps never fall under.
+const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+function skyChroma(img, toe) {
+  const cv = document.createElement("canvas");
+  cv.width = img.width;
+  cv.height = img.height;
+  const cx = cv.getContext("2d", { willReadFrequently: true });
+  if (!cx) return 0.12;
+  cx.drawImage(img, 0, 0);
+  const px = cx.getImageData(0, 0, cv.width, cv.height).data;
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const [r, g, b] = [0, 1, 2].map((j) => srgbToLinear(toe[j] + (1 - toe[j]) * (px[i + j] / 255)));
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const q = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    sum += Math.hypot(1.9779984951 * l - 2.428592205 * m + 0.4505937099 * q, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * q);
+    n++;
+  }
+  return n ? sum / n : 0.12;
+}
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -500,7 +528,7 @@ uniform sampler2D uStill;  // sRGB still plate, stillness matte in a
 uniform vec2 uSize;
 uniform vec4 uCover;
 uniform float uLodS;       // still lod at display
-uniform vec2 uLift;        // highlight gain (linear); the streaks' share of its stops
+uniform vec3 uLift;        // highlight gain (linear); the streaks' share of its stops; the tower's gain (the opening frame's)
 uniform vec2 uKnee;        // lightness where the shoulder starts, paper white
 uniform float uDetail;     // the glint's mullions put back
 uniform vec3 uCream;       // cream: hue (rad), chroma, strength
@@ -516,6 +544,9 @@ uniform float uPin;        // how far the clear sky is pinned to its own colour
 uniform vec4 uScan;        // the develop's vignette, and its lifted black (sRGB)
 uniform vec3 uFilmE;       // the develop at this hold, per point: exposure (linear, white balance in it)
 uniform vec2 uFilmS;       // saturation, blue depth
+uniform vec3 uFilmE0;      // the same for the opening frame (a hold of 0): the tower's develop at every hold
+uniform vec2 uFilmS0;
+uniform float uSkyC;       // the clear sky's mean OKLab chroma (sky.webp, on the scan's black)
 uniform vec4 uCurve;       // its curve's constants
 uniform vec3 uTintS;       // split tone: shadows, highlights
 uniform vec3 uTintH;
@@ -612,25 +643,29 @@ vec3 printSky(vec3 c, float Yb){
 // print of the clear sky at this hold (filmPoint: the film's per-point
 // steps, without its spread) is shifted onto the pinned colour, and the
 // cloud's excess rides on it. No seam where the pin gives way.
-vec3 filmPoint(vec3 col){
-  col *= uFilmE;
+vec3 filmAt(vec3 col, vec3 E, vec2 S){
+  col *= E;
   float sky = smoothstep(0.45, 0.9, (col.b - col.r) / (col.b + 1e-4)) * smoothstep(-0.02, 0.05, col.b - col.g) * smoothstep(0.004, 0.03, col.b);
-  col = mix(col, col * vec3(0.26, 0.64, 0.66), sky * uFilmS.y);
+  col = mix(col, col * vec3(0.26, 0.64, 0.66), sky * S.y);
   float yl = dot(col, LUMA);
   col *= mix(uTintS, uTintH, smoothstep(-3.0, 2.0, log2(max(yl, 1e-4) / 0.18)));
   yl = dot(col, LUMA);
-  col = max(mix(vec3(yl), col, mix(uFilmS.x, 1.0, smoothstep(0.4, 1.4, yl))), 0.0);
+  col = max(mix(vec3(yl), col, mix(S.x, 1.0, smoothstep(0.4, 1.4, yl))), 0.0);
   col = pow(col, vec3(uCurve.x)) / (pow(col, vec3(uCurve.x * uCurve.y)) * uCurve.z + uCurve.w);
   return lin(uScan.yzw + (1.0 - uScan.yzw) * enc(col));
+}
+vec3 filmPoint(vec3 col){ return filmAt(col, uFilmE, uFilmS); }
+// The develop's optical vignette, as a gain at this point of the print.
+float vignetteAt(vec2 duv){
+  vec2 r = (duv - 0.5) * vec2(uTexel.y / uTexel.x, 1.0);
+  float a2 = uTexel.y * uTexel.y / (uTexel.x * uTexel.x);
+  float t2 = dot(r, r) / (0.25 * (a2 + 1.0)) * uScan.x * uScan.x;
+  return 1.0 / ((1.0 + t2) * (1.0 + t2));
 }
 // The clear sky (OKLab) as the print pins it, and as this hold's develop
 // alone would print it; both under the develop's vignette.
 void skyPrints(vec2 duv, vec2 iuv, out vec3 pinned, out vec3 held){
-  vec3 k = lin(texture(uSky, iuv).rgb);
-  vec2 r = (duv - 0.5) * vec2(uTexel.y / uTexel.x, 1.0);
-  float a2 = uTexel.y * uTexel.y / (uTexel.x * uTexel.x);
-  float t2 = dot(r, r) / (0.25 * (a2 + 1.0)) * uScan.x * uScan.x;
-  k /= (1.0 + t2) * (1.0 + t2);
+  vec3 k = lin(texture(uSky, iuv).rgb) * vignetteAt(duv);
   held = toLab(filmPoint(k));
   pinned = toLab(lin(uScan.yzw + (1.0 - uScan.yzw) * enc(k)));
 }
@@ -644,6 +679,14 @@ vec3 grainOf(vec2 duv, vec3 p){
 }
 const vec2 PIN_CLEAR = vec2(0.03, 0.14); // cloudiness: pinned whole, and by which it is cloud
 const vec2 PIN_THIN = vec2(0.1, 0.6);    // cloudiness: shifted whole, and by which the shift is gone
+// The clear sky's hue band, OKLab (rad): 244-253.5 deg, which on this sky's
+// lightness and chroma is 205-213 deg of display hue, the cyan-cobalt the
+// bake grades to (sky.webp spans 245-253). Inside it the hue is held within
+// SKY_HUE_HOLD of the baked gradient's own at that point, so the gaps match
+// the opening frame's sky, not only its band.
+const vec2 SKY_HUE = vec2(-2.0246, -1.8588);
+const float SKY_HUE_HOLD = 0.0175; // rad, 1 deg
+const float SKIRT_RISE = 0.5;
 void main(){
   vec2 fc = gl_FragCoord.xy;
   vec3 c = max(lin(texture(uDev, fc / uSize).rgb), 0.0);
@@ -652,6 +695,18 @@ void main(){
   vec2 iuv = vec2(uv.x, 1.0 - uv.y);
   vec4 s = stillAt(iuv);
   float m = s.a;
+  // The tower never moved, so it prints as the opening frame printed it at
+  // every hold: the meter that falls for the long exposure's sky is taken
+  // back off the steel and the glass. The develop's per-point print of the
+  // latent tower at this hold is shifted onto its print at a hold of 0
+  // (exposure, saturation, blue depth), in OKLab, so the develop's grain and
+  // diffusion ride along unchanged.
+  if (m > 0.0) {
+    vec3 x = lin(texture(uComp, fc / uSize).rgb) * vignetteAt(fc / uSize);
+    p += (toLab(filmAt(x, uFilmE0, uFilmS0)) - toLab(filmAt(x, uFilmE, uFilmS))) * m;
+    c = max(fromLab(p), 0.0);
+    p = toLab(c);
+  }
   float Yb = skyLuma(gapPoint(fc / uSize));
   float C = length(p.yz);
   float neutral = 1.0 - smoothstep(0.03, 0.07, C);
@@ -665,7 +720,7 @@ void main(){
   float Y = p.x * p.x * p.x;
   float Ys = lumaOf(s.rgb);
   float wl = mix(smoothstep(uKnee.x - 0.04, uKnee.x + 0.04, p.x) * neutral, smoothstep(0.45, 0.88, Ys), m);
-  float g = pow(uLift.x, mix(uLift.y, 1.0, m));
+  float g = pow(mix(uLift.x, uLift.z, m), mix(uLift.y, 1.0, m));
   float Yl = Y * mix(1.0, g, wl);
   float Yp = uKnee.y * uKnee.y * uKnee.y;
   Yl = Yl / pow(1.0 + pow(Yl / Yp, 8.0), 0.125);
@@ -737,6 +792,37 @@ void main(){
     vec3 q = toLab(col);
     vec3 thin = fromLab(q + (pinned - held) * wt);
     col = mix(max(thin, 0.0), max(fromLab(pinned + grainOf(fc / uSize, p)), 0.0), wp);
+  }
+  // The clear sky at every hold. Between the streaks the sky was the same
+  // cobalt whenever the cloud was elsewhere, but the long exposure's gaps
+  // are burnt to the clear sky's depth before a print metered further down
+  // and deepened bluer (keepSky's fall, then printSky's ND), so they land
+  // past the baked zenith gradient in grey-navy pools, drifting violet. So
+  // after both, the clear sky is clamped in OKLab: its lightness never falls
+  // below the baked gradient as the opening frame prints it, its chroma
+  // never below the clear sky's mean, its hue held in the cobalt's band.
+  // Only the smooth light is clamped; the grain rides on top. No cloud in
+  // front of the sky is darker than the sky behind it, so the floor holds
+  // across the whole sky, and rises with the latent image's cloudiness by
+  // SKIRT_RISE of the way to a cloud's white: the silk's skirt climbs out of
+  // the gap instead of sitting on the floor as a dull rim between gap and
+  // streak. The veil keeps its own pale chroma, so the colour is clamped
+  // only on the clear sky.
+  float wkL = (1.0 - smoothstep(0.02, 0.5, m)) * uPin;
+  float wkC = (1.0 - smoothstep(PIN_CLEAR.x, 0.3, 1.0 - open)) * wkL;
+  if (wkL > 0.0) {
+    vec3 pinned;
+    vec3 held;
+    skyPrints(fc / uSize, iuv, pinned, held);
+    vec3 gr = grainOf(fc / uSize, p);
+    vec3 q = toLab(col) - gr;
+    float Ck = max(length(q.yz), uSkyC);
+    float hp = atan(pinned.z, pinned.y);
+    float hk = clamp(atan(q.z, q.y), max(SKY_HUE.x, hp - SKY_HUE_HOLD), min(SKY_HUE.y, hp + SKY_HUE_HOLD));
+    float floorL = pinned.x + SKIRT_RISE * (1.0 - open) * max(0.94 - pinned.x, 0.0);
+    q.x = mix(q.x, max(q.x, floorL), wkL);
+    q.yz = mix(q.yz, vec2(cos(hk), sin(hk)) * Ck, wkC);
+    col = max(fromLab(q + gr), 0.0);
   }
   o = vec4(enc(col), 1.0);
 }`;
@@ -918,6 +1004,10 @@ export async function createShutter(host, { embedded = false } = {}) {
   canvas.setAttribute("aria-label", "Shutter, press and hold to expose");
   canvas.setAttribute("aria-pressed", "false");
   canvas.style.outline = "none";
+  // A held still (?open, ?still) is a print, not an arrival: it appears whole
+  // instead of fading up over the paper, so no capture of it lands on a
+  // half-faded, milky frame.
+  if (still) canvas.style.transition = "none";
   const half = !!gl.getExtension("EXT_color_buffer_float");
 
   const quad = gl.createBuffer();
@@ -938,6 +1028,11 @@ export async function createShutter(host, { embedded = false } = {}) {
   const stillTex = texture(gl, stillImg, { mips: true });
   const atlasTex = atlasImgs.map((img) => texture(gl, img));
   const skyTex = texture(gl, skyImg);
+  // The opening frame's develop: the scan's black and the tower's print at
+  // every hold.
+  const base = develop(0, N);
+  const scan = base.toeColor.map((t) => t * base.toe);
+  const skyC = skyChroma(skyImg, scan);
   stillImg.close?.();
   skyImg.close?.();
   atlasImgs.forEach((i) => i.close?.());
@@ -1173,7 +1268,7 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1f(fu.uPrintND, anchor == null ? 1 : holdND(anchor));
     gl.uniform4fv(fu.uCover, cover);
     gl.uniform1f(fu.uLodS, lodD);
-    gl.uniform2f(fu.uLift, 2 ** (LIFT - look.exposure), STREAK_LIFT);
+    gl.uniform3f(fu.uLift, 2 ** (LIFT - look.exposure), STREAK_LIFT, 2 ** (LIFT - base.exposure));
     gl.uniform1f(fu.uDetail, GLINT_DETAIL);
     gl.uniform2f(fu.uKnee, KNEE, PAPER);
     gl.uniform3f(fu.uCream, CREAM_HUE, CREAM_C, 1);
@@ -1187,11 +1282,16 @@ export async function createShutter(host, { embedded = false } = {}) {
     // The pin comes in with the opening reveal, as the sky deepens out of
     // the overexposed field.
     gl.uniform1f(fu.uPin, reveal ? Math.max(0, 1 - exposureEV / reveal.from) : 1);
-    gl.uniform4f(fu.uScan, look.vignette, ...look.toeColor.map((t) => t * look.toe));
+    // The scan's lifted black is the opening frame's at every hold.
+    gl.uniform4f(fu.uScan, base.vignette, ...scan);
     const ev = 2 ** (exposureEV + look.exposure);
     const wb = Math.max(-1, Math.min(1, look.warmth)) * 0.08;
     gl.uniform3f(fu.uFilmE, ev * (1 + wb), ev, ev * (1 - wb));
     gl.uniform2f(fu.uFilmS, look.saturation, Math.min(1, Math.max(0, look.blueDepth)));
+    const ev0 = 2 ** (exposureEV + base.exposure);
+    gl.uniform3f(fu.uFilmE0, ev0 * (1 + wb), ev0, ev0 * (1 - wb));
+    gl.uniform2f(fu.uFilmS0, base.saturation, Math.min(1, Math.max(0, base.blueDepth)));
+    gl.uniform1f(fu.uSkyC, skyC);
     gl.uniform4fv(fu.uCurve, curveConstants(look.contrast, look.shoulder, look.whitePoint, 0.18, 0.18));
     gl.uniform3fv(fu.uTintS, look.shadowTint);
     gl.uniform3fv(fu.uTintH, look.highlightTint);
