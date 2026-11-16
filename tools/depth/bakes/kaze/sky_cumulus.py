@@ -15,8 +15,14 @@ A cumulus here is a cauliflower, in km, the camera at the origin (x east,
 y ahead, z up):
 
 - A column of lobes up a slightly leaning axis, a skirt of lobes at the
-  bottom, all of it cut flat by the condensation level (a horizontal
-  plane): from below that cut is the flat base. The column is a stack of
+  bottom, all of it cut by the condensation level: from below that cut is
+  the base, flat in the large but never a ruled plane. It sags a little
+  under broad lumps (BSAG, BSF), so the underside is a set of shallow
+  downturned domes, and it is joined to the body by a smooth maximum
+  (BSK), so the flank's lobes roll round a broad shoulder onto it; the
+  erosion below is laid after the cut and runs on over that shoulder. (A
+  hard cut, seen from below, printed one dead-straight terminator across
+  the foot and a flat blue-grey slab under it.) The column is a stack of
   distinct lobes about a radius apart, alternately fuller and leaner and
   each pushed off the axis the other way from the one below, and every
   lobe of it and of the skirt carries a ring of side lobes pushed out
@@ -53,9 +59,11 @@ corner, as in kazeEngine.js) and toward the zenith:
   about two thirds of the sunlit tops' value, so each mass reads as a
   volume turned from the light and not a white cut-out;
 - the base: the flat underside, under the whole tower and facing down,
-  takes no sun, a dimmer and mottled light, and a flat blue-grey rather
-  than the flanks' cyan (about half the tops' value), low near the frame's
-  edge under every mass;
+  takes no sun, a dimmer and mottled light, and a blue-grey rather than
+  the flanks' cyan (about half the tops' value), modelled by its own lumps
+  (each downturned dome's side, tilted toward the horizon, takes more of
+  the low sky than its bottom, LOBK) with skylight-cyan clefts between
+  them, low near the frame's edge under every mass;
 - a little warm bounce from the summer ground on the undersides;
 - forward scattering (Henyey-Greenstein, g 0.72) where a thin edge stands
   between you and the sun: the silver lining; and the powder (the skin
@@ -73,14 +81,14 @@ nothing toward the sun, so the top left quarter is an open corner where the
 sun's bloom runs clean into the cobalt (TOWERS).
 
 The open sky and the sun's bloom are sky_tower.py's (open_sky). The cloud
-is exposed by its sunlit tops (GAIN, pinned to what WHITE at PCT 90
-measured over the old four-mass field), so the shade below them
-keeps its own value instead of being lifted toward the median, and its
-brightest domes roll off under the clip through a long shoulder (KNEE to
-TOP, rational, so the sunlit faces keep their lobe-by-lobe steps rather
-than flattening into one cream) that whitens as it rolls (DESAT), as film
-does near its white; the engine's grade and the
-film's shoulder carry them the rest of the way. Last, the cloud's whites
+is exposed by a pinned GAIN, set low enough that the sunlit faces sit on
+the steep part of a long shoulder (KNEE to TOP, rational) and not on its
+flat top: they print about 215 to 235, each lit knuckle a step above its
+lee, and only the crowns square to the sun climb to about 240, leaned to
+a warm cream (WARM, CREAM: about #F6EEDD once the engine's grade and the
+film's highlight tint have taken their share). Exposed as it was before
+(about 1.7 times this), the whole lit face pressed into the shoulder and
+printed one plateau of 238 to 245 neutral white. Last, the cloud's whites
 bleed a little into the cobalt round them (sky_tower.py's bleed), as light
 diffuses in the emulsion, so no lit edge meets the blue at a digital cut.
 The bake prints, per mass, the luminance of its body and of its base.
@@ -109,7 +117,9 @@ LVOX = float(os.environ.get("LVOX", 0.03))  # km: the light grid
 LUM = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
 # Light, linear, before the exposure.
-SUN_C = np.array([1.0, 0.91, 0.74], np.float32)       # warm-neutral
+# The sun: warm, so the domes square to it print cream and not the neutral
+# white a cooler sun made of them once the skylight was added on top
+SUN_C = np.array([float(c) for c in os.environ.get("SUNC", "1.0,0.84,0.56").split(",")], np.float32)
 # The skylight, and the multiply scattered light inside the cloud, take the
 # zenith's colour, not grey: a pale cyan (hue about 200), so the flanks
 # turned from the sun print a luminous skylight cyan and never lean lavender.
@@ -121,13 +131,13 @@ GND_C = np.array([0.55, 0.50, 0.40], np.float32)      # bounce off the summer gr
 BASE_C = np.array([0.66, 0.81, 1.0], np.float32)
 BASE_C /= float(BASE_C @ np.array([0.2126, 0.7152, 0.0722], np.float32))
 KS = float(os.environ.get("KS", 4.0))    # sun
-KA = float(os.environ.get("KA", 2.4))   # skylight
-KM = float(os.environ.get("KM", 0.4))   # the deep multiple scattering (diffusion)
+KA = float(os.environ.get("KA", 2.0))   # skylight
+KM = float(os.environ.get("KM", 0.25))   # the deep multiple scattering (diffusion)
 KG = float(os.environ.get("KG", 0.05))   # ground bounce
 MSK = float(os.environ.get("MSK", 0.16))  # how fast the deep diffusion falls off with the sun's depth
-MSO = float(os.environ.get("MSO", 0.38))  # each scattering octave's contribution after the last
+MSO = float(os.environ.get("MSO", 0.3))  # each scattering octave's contribution after the last
 SKYF = float(os.environ.get("SKYF", 0.4))  # the skylight's floor under the cloud over a sample
-BASEK = float(os.environ.get("BASEK", 0.35))  # how far the flat base darkens
+BASEK = float(os.environ.get("BASEK", 0.5))  # how far the flat base darkens
 BASEH = float(os.environ.get("BASEH", 0.12))  # km: how deep up the tower the base's shade reaches
 G0 = float(os.environ.get("G0", 0.72))   # forward lobe of the first octave
 OCT = int(os.environ.get("OCT", 4))      # scattering octaves
@@ -140,10 +150,21 @@ FRW = float(os.environ.get("FRW", 0.022))     # km: the translucent fringe outsi
 FRD = float(os.environ.get("FRD", 0.05))      # its density, against the body's
 FRG = float(os.environ.get("FRG", 0.85))      # its forward lobe
 FRK = float(os.environ.get("FRK", 1.2))       # and how much of it
+LOBK = float(os.environ.get("LOBK", 0.8))     # how far the base's lumps model it
+AOK = float(os.environ.get("AOK", 0.6))       # how far the clefts between billows shade the skylight
 WHITE = float(os.environ.get("WHITE", 3.0))
-DESAT = float(os.environ.get("DESAT", 0.5))  # how far the shoulder whitens
+DESAT = float(os.environ.get("DESAT", 0.0))  # how far the shoulder whitens
 PCT = float(os.environ.get("PCT", 90.0))  # the cloud's 90th percentile is exposed to WHITE (linear)
-GAIN = float(os.environ.get("GAIN", 1.353))  # unless the exposure is pinned (0: by PCT)
+GAIN = float(os.environ.get("GAIN", 0.8))  # unless the exposure is pinned (0: by PCT)
+BSAG = float(os.environ.get("BSAG", 0.2))  # km: how far the base sags under its lumps
+BSK = float(os.environ.get("BSK", 0.13))    # km: the shoulder where the flank rolls onto the base
+BSF = float(os.environ.get("BSF", 4.5))     # /km: the sagging lumps' frequency
+WARM = float(os.environ.get("WARM", 0.9))    # how far the sunlit crowns lean to cream
+# the crowns' cream, as baked: warmer than the #F6EEDD they print at, since
+# the film's shoulder and its highlight tint take some of it back
+CREAM = np.array([int(os.environ.get("CREAMC", "F8E6C6")[i:i + 2], 16) / 255 for i in (0, 2, 4)], np.float32)
+CREAM = np.where(CREAM <= 0.04045, CREAM / 12.92, ((CREAM + 0.055) / 1.055) ** 2.4).astype(np.float32)
+CREAM /= float(CREAM @ LUM)
 FEATHER = float(os.environ.get("FEATHER", 1.0))  # the far mass's feathered rim (0: off)
 
 # The masses: azimuth (deg, 0 straight ahead = the frame's bottom centre,
@@ -157,7 +178,7 @@ TOWERS = [
     # enough off (2.6 km) that it is seen from the side, not from under its
     # base, at the wide lens. The one subject of the frame: one glowing tower
     # behind the dark hero culm, and from the sun a clean cobalt diagonal
-    dict(az=48, dist=2.6, zb=1.3, zt=5.2, rb=0.68, rt=0.44, lean=0.3, seed=1, foot=0.8),
+    dict(az=48, dist=2.6, zb=1.3, zt=5.2, rb=0.68, rt=0.44, lean=0.3, seed=1, foot=0.72),
     # low on the left, small and far: a subordinate cloud side-lit from
     # the left, its domes just clearing the field, well under the hero
     # (feathered: at its distance the silver fringe toward the sun shrinks
@@ -360,7 +381,7 @@ def tower(T):
     S = np.array(S, np.float64)
     lo = np.min(S[:, :3] - S[:, 3:4], 0) - 0.08
     hi = np.max(S[:, :3] + S[:, 3:4], 0) + 0.08
-    lo[2] = zb - 0.02
+    lo[2] = zb - BSAG - 0.04
     return S, lo, hi
 
 
@@ -431,7 +452,7 @@ def fine(x, y, z, seed):
 # ---- the grids ----
 
 @nb.njit(cache=True, parallel=True)
-def build_sdf(S, lo, nx, ny, nz, vox, zb, seed, mid):
+def build_sdf(S, lo, nx, ny, nz, vox, zb, seed, mid, bsag, bk, bsf):
     # a lower bound on the distance everywhere (FAR where no sphere is
     # within FAR of it), so the march may sphere-trace through the air
     FAR = 0.15
@@ -464,16 +485,33 @@ def build_sdf(S, lo, nx, ny, nz, vox, zb, seed, mid):
             for ii in range(nx):
                 x = lo[0] + (ii + 0.5) * vox
                 v = sdf[k, j, ii]
+                # the base: the condensation level, but not a ruled plane.
+                # Under each skirt lobe the cloud sags a little lower (broad
+                # lumps of a few hundred metres, up to bsag), so the
+                # underside is a set of shallow downturned domes, each
+                # turned its own way to the low sky
+                sag = bsag * min(max(billow(x, y, 0.0, bsf, 3, seed + 7) - BMEAN + 0.45, 0.0), 1.0)
+                cut = zb - sag - z + 0.012 * vnoise(x * 6.0, y * 6.0, 0.0, seed + 5)
                 if v < 0.15:
+                    # and the cut is joined to the body by a smooth maximum,
+                    # not a hard one: the flank's lobes roll round a broad
+                    # shoulder onto the base instead of meeting it at a
+                    # sharp rim, which seen from below printed as one dead
+                    # straight terminator across the foot
+                    h = min(max(0.5 + 0.5 * (v - cut) / bk, 0.0), 1.0)
+                    v = cut + (v - cut) * h + bk * h * (1.0 - h)
                     # the large erosion: lumps of a few hundred metres down to
                     # tens, and a middle one of about a hundred, both laid
                     # cauliflower-way out (as fine() is): round lumps stand
-                    # proud, sharp clefts cut in between them
-                    v += 0.055 * (billow(x, y, z, 3.2, 4, seed) - BMEAN + 0.05)
-                    v += mid * (billow(x, y, z, 9.0, 3, seed + 1) - BMEAN)
-                # the base: cut flat at the condensation level, faintly
-                # rippled so its edge is not a ruled line
-                v = max(v, zb - z + 0.012 * vnoise(x * 6.0, y * 6.0, 0.0, seed + 5))
+                    # proud, sharp clefts cut in between them. Laid after the
+                    # cut, so the billows and their clefts run on over the
+                    # shoulder and onto the base (a little shallower on the
+                    # underside itself, which stays flat in the large)
+                    wb = 0.55 + 0.45 * min(max((z - zb + sag) / 0.16, 0.0), 1.0)
+                    v += wb * 0.055 * (billow(x, y, z, 3.2, 4, seed) - BMEAN + 0.05)
+                    v += wb * mid * (billow(x, y, z, 9.0, 3, seed + 1) - BMEAN)
+                else:
+                    v = max(v, cut)
                 sdf[k, j, ii] = v
     return sdf
 
@@ -579,6 +617,9 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
     ks, ka, km, kg, g0, noct, powk, fd = P[0], P[1], P[2], P[3], P[4], int(P[5]), P[6], P[7]
     msk, skyf, bk, bh, mso = P[8], P[9], P[10], P[11], P[12]
     frw, frd, frg, frk = P[13], P[14], P[15], P[16]
+    aok, lobk = P[17], P[18]
+    # the skylight's colour at unit luminance
+    skyn = skyc / (0.2126 * skyc[0] + 0.7152 * skyc[1] + 0.0722 * skyc[2])
     # how far out of the grid's surface a sample may still be cloud: the
     # skin, the fine billows standing proud of it, and the fringe beyond
     reach = max(ramp * 1.6, ramp * 0.5 + 0.7 * fd + frw)
@@ -733,7 +774,7 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                 # the floors are high: inside a cumulus the skylight is
                 # itself scattered round many times, so no face goes dark
                 sky = ((skyf + (1.0 - skyf) * math.exp(-0.05 * tau_u)) * (0.7 + 0.3 * hn)
-                       * (0.72 + 0.28 * gz) * (0.6 + 0.4 * ao))
+                       * (0.72 + 0.28 * gz) * (1.0 - aok + aok * ao))
                 gnd = (1 - hn) ** 2
                 # the base: the flat underside, under the whole tower and
                 # facing down, sees neither the sun nor the zenith, only the
@@ -758,9 +799,22 @@ def render(DX, DY, DZ, sdf, ts, tu, lo, hi, vox, lvox, L, zb, zt, ramp, sigma, s
                     # is, not a smooth grey disc
                     mot = 0.8 + 0.6 * vnoise(x * 7.0, y * 7.0, 0.5, seed + 9) + 0.2 * vnoise(x * 19.0, y * 19.0, 0.5, seed + 11)
                     k_ = 1.0 - bk * hb * (0.55 + 0.45 * (1.0 - math.exp(-0.015 * tau_u))) * mot
-                    er = (er * (1.0 - 0.75 * hb) + yl * basec[0] * 0.75 * hb) * k_
-                    eg = (eg * (1.0 - 0.75 * hb) + yl * basec[1] * 0.75 * hb) * k_
-                    eb_ = (eb_ * (1.0 - 0.75 * hb) + yl * basec[2] * 0.75 * hb) * k_
+                    # the underside's own lobes: each downturned dome's
+                    # flank, tilted toward the horizon, takes more of the
+                    # low sky than its bottom, and the clefts between the
+                    # domes less, so the base reads as lobes and not one
+                    # flat plane; the clefts lean to the skylight's cyan
+                    # rather than the base's grey
+                    hz_ = math.sqrt(gx * gx + gy * gy)
+                    lob = (1.0 - lobk) + lobk * (0.55 + 1.1 * hz_) * (0.35 + 0.65 * ao)
+                    k_ *= 1.0 - hb + hb * lob
+                    cy = min(0.75 * hb * (1.0 - ao) * 2.0, 0.75)
+                    cr_ = basec[0] * (1.0 - cy) + skyn[0] * cy
+                    cg_ = basec[1] * (1.0 - cy) + skyn[1] * cy
+                    cb_ = basec[2] * (1.0 - cy) + skyn[2] * cy
+                    er = (er * (1.0 - 0.75 * hb) + yl * cr_ * 0.75 * hb) * k_
+                    eg = (eg * (1.0 - 0.75 * hb) + yl * cg_ * 0.75 * hb) * k_
+                    eb_ = (eb_ * (1.0 - 0.75 * hb) + yl * cb_ * 0.75 * hb) * k_
                 a = 1 - math.exp(-sg * st)
                 cr += T * a * er
                 cg += T * a * eg
@@ -786,7 +840,7 @@ def main():
     DX, DY, DZ = [np.ascontiguousarray(D[..., i]) for i in range(3)]
     del D
     L = unit(ray_at(*SUN)).astype(np.float64)
-    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE, MSK, SKYF, BASEK, BASEH, MSO, FRW, FRD, FRG, FRK], np.float64)
+    PRM = np.array([KS, KA, KM, KG, G0, OCT, POW, FINE, MSK, SKYF, BASEK, BASEH, MSO, FRW, FRD, FRG, FRK, AOK, LOBK], np.float64)
     skyl = open_sky(U, V).astype(np.float32)
 
     # the masses, far to near (by the axis' distance)
@@ -807,7 +861,7 @@ def main():
         t0 = time.time()
         S, lo, hi = tower(T)
         nx, ny, nz = [int(np.ceil((hi[i] - lo[i]) / VOX)) for i in range(3)]
-        sdf = build_sdf(S, lo, nx, ny, nz, VOX, T["zb"], SEED + T["seed"] * 31, MID)
+        sdf = build_sdf(S, lo, nx, ny, nz, VOX, T["zb"], SEED + T["seed"] * 31, MID, BSAG, BSK, BSF)
         hi2 = lo + np.array([nx, ny, nz]) * VOX
         ts, tu = build_light(sdf, lo, hi2, VOX, LVOX, L, RAMP, SIGMA)
         o = np.zeros((H, W, 3), np.float32)
@@ -849,11 +903,8 @@ def main():
     print("cloud percentiles 50/90/99/99.7/max", [round(float(np.percentile(mx, q)), 3) for q in (50, 90, 99, 99.7, 100)])
     pk = np.percentile(mx, PCT) if solid.any() else 1.0
     gain = WHITE / pk
-    # GAIN pins it: measured by percentile over the field it was, and with
-    # the shaded masses gone (the backlit one toward the sun, the one behind
-    # your head) the hero's own sunlit faces alone set it and printed it
-    # half a stop down. Pinned to the gain the field measured, the hero
-    # keeps its print
+    # GAIN pins it (0: by percentile). Pinned low, so the sunlit faces sit
+    # on the steep part of the shoulder below and keep their modelling
     if GAIN > 0:
         gain = GAIN
     print(f"exposure gain {gain:.3f}")
@@ -865,7 +916,7 @@ def main():
     # between each lit knuckle and its lee all the way up, and only the
     # very crowns come near TOP
     m = rad.max(-1)
-    K, TOP = float(os.environ.get("KNEE", 0.4)), float(os.environ.get("TOP", 0.95))
+    K, TOP = float(os.environ.get("KNEE", 0.35)), float(os.environ.get("TOP", 1.05))
     x = np.maximum(m - K, 0) / (TOP - K)
     roll = x / (1 + x)   # how far up the shoulder, 0 at the knee, 1 at TOP
     sm = np.where(m < K, m, K + (TOP - K) * roll)
@@ -875,6 +926,13 @@ def main():
     # (their light is the sun's), and only the shade keeps the sky's cyan
     w = DESAT * roll[..., None]
     rad = rad * (1 - w) + (rad @ LUM)[..., None] * w
+    # and the domes square to the sun keep a warm cream core (about #F6EEDD
+    # printed): the skylight that the rest of the cloud carries cools a lit
+    # face toward a neutral white, so the highest of the shoulder alone is
+    # leaned to the sun's cream (luminance kept), most at the crowns
+    w = WARM * (roll * roll)[..., None]
+    Yr = (rad @ LUM)[..., None]
+    rad = rad * (1 - w) + Yr * CREAM * w
     acc = rad + tr[..., None] * skyl
     # and the cloud's whites bleed a little into the cobalt round them
     acc = bleed(acc, rad, tr, W)
