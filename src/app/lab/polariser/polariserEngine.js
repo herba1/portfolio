@@ -75,7 +75,11 @@ const VIEW = { k: 0.5, half: 1.8, shift: [-0.2, -0.1], turn: -10 };
 // mip down, which is coarser than the print, so the towers would come out
 // upscaled and soft. Biasing a level finer keeps every blended level at or
 // above the print's own resolution; the mips are box-prefiltered, so the
-// window grids do not alias.
+// window grids do not alias. Measured through the print's derivatives, the
+// architecture minifies the plate 2-3x (2.1-3.0 plate px per print px at the
+// drum, 2.5 at the block's corner), so the bias lands those lookups between
+// mips 0 and 1, both at or above the print's resolution; a deeper bias
+// (-1.5) changed nothing visible there.
 const LOD_BIAS = -0.7;
 const SUN = { lon: 38.12255859375, lat: 28.762207031249996 };
 const GLASS_A = [-0.85284216, 0, 0.5221688];
@@ -919,7 +923,11 @@ export async function createPolariser(host, { embedded = false } = {}) {
         // Pro-Mist and halation only take the highlights past a threshold, and
         // the halation judges saturation from its surround: spread from every
         // pixel, they veiled the bright cumulus near the sun into a flat grey
-        // haze and fringed the tower edges orange.
+        // haze and fringed the tower edges orange. Softness is held low: at
+        // 0.4 its 1-2 px luma spread and quarter-res colour bleed acted on
+        // every pixel, so the mullions, the block's corner and the mast came
+        // out mushy, as if upscaled. The architecture stays a crisp anchor and
+        // only the light past the threshold blooms into the sky.
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         headroom: 0,
         exposure: 0,
@@ -932,9 +940,9 @@ export async function createPolariser(host, { embedded = false } = {}) {
         halation: 0.1,
         halationThreshold: 0.9,
         halationLocal: 1,
-        bloom: 0.06,
+        bloom: 0.08,
         bloomThreshold: 0.75,
-        softness: 0.4,
+        softness: 0.12,
         toe: 0.04,
         grain: 0.32,
         vignette: 0,
