@@ -48,7 +48,11 @@ import { takes } from "./shutterTakes";
 // for the live part of an exposure the live mean's light with the still's own
 // fine detail added back at the matching blur (so the glass still shows its
 // passing reflections in the viewfinder), for the blocks' part the still
-// itself. Outside it the print is sky alone; the blocks carry no tower, so no
+// itself. The glass is a mirror, though, and the still keeps the
+// photograph's one instant in it: once the shutter opens, each facade's
+// reflection is rebuilt from the same latent sky, through its mirror
+// (glassSky; tools/depth/bakes/shutter/glass.py), so it smears with the sky.
+// Outside the matte the print is sky alone; the blocks carry no tower, so no
 // low-resolution tower light can bleed into the smeared sky as a glow. No
 // sharpening anywhere: the edge is the matte's, a pixel or two wide.
 //
@@ -126,6 +130,16 @@ const CREST = 1; // the crests' rise toward a cloud's white, at full keep
 const SUN = [-0.8, 0.6];
 const SUN_TAP = 0.012;
 const TONE = { k: 1, hue: (85 * Math.PI) / 180, warm: 0.017, shade: 0.09, edge: 0.06 };
+// The glass's sky (glassSky) is read a little soft: reflected in a curtain
+// wall, the sky's edges carry the panes' small misalignments.
+const GLASS_LOD = 1;
+// The glass takes the sky's reflection once the shutter opens: a print with
+// the shutter closed (and the viewfinder) is the photograph's own instant,
+// its reflection and all; over the first REFL_IN plate frames of a hold
+// (~3/4 s) the glass hands over to the sky it is being exposed to, which
+// then smears with it.
+const REFL_IN = 12;
+const NFAC = 12; // facades the shader takes (glass.json lists them)
 
 const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0 };
 // The top end (FINISH_FS): the highlights above the knee are printed back up
@@ -296,6 +310,19 @@ uniform vec2 uSun;         // one tap toward the sun, in plate uv (y down)
 uniform vec2 uLodT;        // the tone's lightness lods: live mean, blocks
 uniform vec4 uTone;        // strength, sunlit hue (rad), sunlit chroma, shade chroma
 uniform float uEdge;       // the lightness step across the taps that reads as a whole edge
+#define NFAC ${NFAC}
+const float GLASS_BOOST = 3.0; // the most a long exposure's reflection is stretched
+const float GLASS_SILK = 0.6;  // and, as the sky's crests are printed up past the knee, its silk's further stretch
+uniform sampler2D uGlass;  // the glass (glass.py): the photograph's reflection, R its OKLab L, G its tint; B the facade id + 1
+uniform vec4 uFacA[NFAC];  // each facade's mirror into the open sky (plate uv, y down): 2x2
+uniform vec4 uFacB[NFAC];  // its offset (uv), gain, the spread a single frame's sky shows it
+uniform vec2 uFacR[NFAC];  // how much of the facade is mirror glass; its tint per unit of reflected lightness
+uniform vec4 uFacBox[NFAC]; // its bounds (image uv)
+uniform sampler2D uGlassMean; // each facade's reflected cloud at this hold (the mean pass): its plane (R 0.5 + x / 2, GB 0.5 + x / 4), A its spread about it (x 2)
+uniform float uMeanPass;   // 1: write the facades' means instead of the latent image
+uniform vec3 uGlassK;      // the reflection's range in glass.webp; sky lods: live mean, blocks
+uniform vec3 uGlassT;      // the tint's range in glass.webp; its axis (OKLab a, b: cyan to steel)
+uniform float uGlassW;     // how far the glass has handed over from the photograph's reflection to the exposure's
 out vec4 o;
 ${COMMON}
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -461,18 +488,14 @@ vec2 skyPoint(vec2 iuv){
   }
   return iuv + n * (SKY_GAP - d) * px;
 }
-void main(){
-  vec2 uv = gl_FragCoord.xy / uSize * uCover.xy + uCover.zw;
-  vec2 iuv = vec2(uv.x, 1.0 - uv.y);
-  vec3 f = texture(uFrame, iuv).rgb;
-  if (uFrameLin < 0.5) f = lin(f);
-  // The sky's samples, from outside the grown matte.
-  vec2 siuv = skyPoint(iuv);
+// The latent sky at a point (image uv): the live part and the blocks' part
+// of the exposure, and past the live second the long exposure's own print
+// of them (keepSky). The lods soften both reads (< 0: the texture's own).
+vec3 latentSky(vec2 siuv, float lf, float le){
   vec2 suv = vec2(siuv.x, 1.0 - siuv.y);
-  vec3 fs = texture(uFrame, siuv).rgb;
+  vec3 fs = lf < 0.0 ? texture(uFrame, siuv).rgb : textureLod(uFrame, siuv, lf).rgb;
   if (uFrameLin < 0.5) fs = lin(fs);
-  vec3 e = texture(uExp, suv).rgb;
-  vec3 sl = mix(fs, e, uWB);
+  vec3 sl = mix(fs, le < 0.0 ? texture(uExp, suv).rgb : textureLod(uExp, suv, le).rgb, uWB);
   if (uKeep > 0.0) {
     vec3 ml = mix(textureLod(uFrame, siuv, uLodM.x).rgb, textureLod(uExp, suv, uLodM.y).rgb, uWB);
     // The finer mean: four taps half a cell apart, so the mip's cells
@@ -488,11 +511,109 @@ void main(){
     }
     sl = keepSky(sl, ml, md, siuv);
   }
+  return sl;
+}
+// The glass mirrors the sky it faces, and that sky moves: held open, the
+// reflected cumulus smears into silk with the real sky's. The still plate
+// carries one instant's reflection (the photograph's), so it is taken back
+// off: glass.py baked it per facade, the panes' low pass over the facade's
+// own broad light, and here it is replaced by the same latent sky the open
+// sky is printed from (the live mean and the blocks, mixed by the blocks'
+// share), read through the facade's mirror. Each facade is a vertical plane
+// and a plane mirror: the sky is reflected across its floor lines, so the
+// reflected clouds drift (and smear) along the wind's mirror image. The
+// mirror's footprint was placed on the frame's open sky (the true one is
+// behind the camera), and the reflection is that sky's cloud lightness over
+// its clear gradient, scaled to the photograph's own reflection on that
+// facade, about its mean over the facade at this hold (so the glass's light
+// holds while its pattern moves); held long, it is printed as the open sky's
+// silk is (keepSky), so the glass shows the same streaks, their gaps deep
+// and their crests lifted. Only the low pass changes, additively in OKLab L:
+// every mullion, slab and bay keeps its step to the pane beside it, sharp.
+int glassId(vec2 iuv){
+  vec2 gs = vec2(textureSize(uGlass, 0));
+  return int(texelFetch(uGlass, ivec2(clamp(iuv * gs, vec2(0.0), gs - 1.0)), 0).b * 255.0 + 0.5) - 1;
+}
+// The cloud a facade's glass sees at a point: the latent sky's lightness
+// over the clear sky's, through the facade's mirror. Where the mirror's
+// footprint grazes a tower it sees no sky.
+float glassCloud(int id, vec2 iuv){
+  vec4 A = uFacA[id];
+  vec2 m = vec2(dot(A.xy, iuv), dot(A.zw, iuv)) + uFacB[id].xy;
+  float cloud = toLab(latentSky(m, uGlassK.y, uGlassK.z)).x - toLab(lin(texture(uSky, m).rgb)).x;
+  return cloud * (1.0 - smoothstep(0.02, 0.3, textureLod(uStill, m, 4.0).a));
+}
+// The mean pass: one texel per facade, what its glass sees over a 12 x 12
+// grid on its bounds (the points that fall on it), as a plane across the
+// facade (least squares in the bounds' own coordinates, centred) and the
+// spread about it. The photograph's reflection was taken off the facade's
+// own plane of light (glass.py), so the new one is put back about its own.
+vec4 glassMean(int id){
+  vec4 bx = uFacBox[id];
+  mat3 M = mat3(0.0);
+  vec3 r = vec3(0.0);
+  float sq = 0.0;
+  for (int j = 0; j < 12; j++) {
+    for (int i = 0; i < 12; i++) {
+      vec2 t = (vec2(float(i), float(j)) + 0.5) / 12.0;
+      vec2 p = mix(bx.xy, bx.zw, t);
+      if (glassId(p) != id) continue;
+      float c = glassCloud(id, p);
+      vec3 x = vec3(1.0, t - 0.5);
+      M += outerProduct(x, x);
+      r += x * c;
+      sq += c * c;
+    }
+  }
+  if (M[0][0] < 4.0) return vec4(0.5, 0.5, 0.5, 0.0);
+  vec3 k = abs(determinant(M)) > 1e-6 ? inverse(M) * r : vec3(r.x / M[0][0], 0.0, 0.0);
+  float sd = sqrt(max((sq - dot(k, r)) / M[0][0], 0.0));
+  return vec4(0.5 + 0.5 * k.x, 0.5 + 0.25 * k.yz, 2.0 * sd);
+}
+vec3 glassSky(vec3 tl, vec2 iuv){
+  int id = glassId(iuv);
+  if (id < 0) return tl;
+  vec2 g = (texture(uGlass, iuv).rg * 255.0 - 128.0) / 127.0 * vec2(uGlassK.x, uGlassT.x);
+  // The reflection about the facade's own plane at this hold: what the
+  // glass shows moves and smears with the sky, and the facade's light
+  // holds. Its
+  // spread is held at a single frame's, as the sky's print (printSky) holds
+  // its silk's: the streaks of a long exposure are printed as boldly in the
+  // glass as in the sky, never as a faint grey wash, and the long
+  // exposure's silk a little more (printSky lifts the sky's past a frame's).
+  vec4 ms = texelFetch(uGlassMean, ivec2(id, 0), 0);
+  vec4 bx = uFacBox[id];
+  vec2 t = (iuv - bx.xy) / (bx.zw - bx.xy) - 0.5;
+  float plane = (ms.r - 0.5) * 2.0 + dot((ms.gb - 0.5) * 4.0, t);
+  float boost = clamp(uFacB[id].w / max(ms.a * 0.5, 1e-3), 1.0, GLASS_BOOST) * (1.0 + GLASS_SILK * uKeep);
+  float refl = uFacB[id].z * (glassCloud(id, iuv) - plane) * boost;
+  // A pane that mirrors cloud is a warm steel, one that mirrors clear sky a
+  // muted cyan (the grade's two glass colours): the tint follows.
+  vec2 k = uFacR[id];
+  vec3 p = toLab(tl);
+  float w = k.x * uGlassW;
+  p.x = max(p.x + w * (refl - g.x), 0.0);
+  p.yz += uGlassT.yz * w * (k.y * refl - g.y);
+  return max(fromLab(p), 0.0);
+}
+void main(){
+  if (uMeanPass > 0.5) {
+    o = glassMean(int(gl_FragCoord.x));
+    return;
+  }
+  vec2 uv = gl_FragCoord.xy / uSize * uCover.xy + uCover.zw;
+  vec2 iuv = vec2(uv.x, 1.0 - uv.y);
+  vec3 f = texture(uFrame, iuv).rgb;
+  if (uFrameLin < 0.5) f = lin(f);
+  // The sky's samples, from outside the grown matte.
+  vec2 siuv = skyPoint(iuv);
+  vec3 sl = latentSky(siuv, -1.0, -1.0);
   if (uTone.x > 0.0) sl = cloudTone(sl, siuv);
   vec3 sky = enc(sl);
   vec4 s = textureLod(uStill, iuv, uLod.x);
   vec3 dF = s.rgb - textureLod(uStill, iuv, uLod.y).rgb;
   vec3 tower = mix(clamp(enc(f) + dF, 0.0, 1.0), s.rgb, uWB);
+  if (s.a > 0.0 && uGlassW > 0.0) tower = enc(glassSky(lin(tower), iuv));
   // How clear the sky is here, for the print's pin (FINISH_FS): 1 where the
   // latent image is the clear sky's own light, falling as cloud (more
   // lightness, or less of the sky's chroma: a veil) comes into the pixel,
@@ -991,7 +1112,30 @@ export async function createShutter(host, { embedded = false } = {}) {
   const atStart = params.has("at") ? (((parseFloat(params.get("at")) || 0) * FPS) % N + N) % N : AT;
 
   const video = makeVideo();
-  const [stillImg, skyImg, ...atlasImgs] = await Promise.all([bitmap(`${BASE}still.webp`), bitmap(`${BASE}sky.webp`), ...meta.atlases.map((a) => bitmap(BASE + a))]);
+  const [stillImg, skyImg, glassImg, glass, ...atlasImgs] = await Promise.all([
+    bitmap(`${BASE}still.webp`),
+    bitmap(`${BASE}sky.webp`),
+    bitmap(`${BASE}glass.webp`),
+    fetch(`${BASE}glass.json`).then((r) => r.json()),
+    ...meta.atlases.map((a) => bitmap(BASE + a)),
+  ]);
+  // Each facade's mirror (glass.json, plate px: p -> q + s R (p - c), R the
+  // reflection across its floor lines) as an affine map of plate uv.
+  const facA = new Float32Array(NFAC * 4);
+  const facB = new Float32Array(NFAC * 4);
+  const facR = new Float32Array(NFAC * 2);
+  const facBox = new Float32Array(NFAC * 4);
+  glass.facades.slice(0, NFAC).forEach((g, i) => {
+    const th = (g.floor * Math.PI) / 90;
+    const [c2, s2] = [Math.cos(th) * g.s, Math.sin(th) * g.s];
+    const [a, b, c, d] = [c2, (s2 * SH) / SW, (s2 * SW) / SH, -c2];
+    facA.set([a, b, c, d], i * 4);
+    const cu = g.c[0] / SW;
+    const cv = g.c[1] / SH;
+    facB.set([g.q[0] / SW - (a * cu + b * cv), g.q[1] / SH - (c * cu + d * cv), g.gain, g.spread], i * 4);
+    facBox.set([g.box[0] / SW, g.box[1] / SH, g.box[2] / SW, g.box[3] / SH], i * 4);
+    facR.set([g.reflect, g.tint], i * 2);
+  });
   if (video.readyState < 2) await Promise.race([once(video, "loadeddata"), once(video, "error")]);
 
   host.style.background = "#f2f0eb";
@@ -1028,6 +1172,7 @@ export async function createShutter(host, { embedded = false } = {}) {
   const stillTex = texture(gl, stillImg, { mips: true });
   const atlasTex = atlasImgs.map((img) => texture(gl, img));
   const skyTex = texture(gl, skyImg);
+  const glassTex = texture(gl, glassImg);
   // The opening frame's develop: the scan's black and the tower's print at
   // every hold.
   const base = develop(0, N);
@@ -1035,11 +1180,13 @@ export async function createShutter(host, { embedded = false } = {}) {
   const skyC = skyChroma(skyImg, scan);
   stillImg.close?.();
   skyImg.close?.();
+  glassImg.close?.();
   atlasImgs.forEach((i) => i.close?.());
   const liveTex = texture(gl, null);
   const pressTex = texture(gl, null);
   let liveReady = false;
   const exp = target(gl, BW, BH, half) || target(gl, BW, BH, false);
+  const glassMean = target(gl, NFAC, 1, false);
   const VH = meta.video[1];
   let acc = [0, 1].map(() => target(gl, VW, VH, half) || target(gl, VW, VH, false));
   // The live mean and the block integral carry mips: their coarse levels
@@ -1217,12 +1364,36 @@ export async function createShutter(host, { embedded = false } = {}) {
     // The integral's edges are softer the longer it runs; the crests and
     // gaps are printed apart (keepSky), so its edges are read finer.
     gl.uniform1f(u.uEdge, TONE.edge * (1 - 0.7 * keep));
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, glassTex);
+    gl.uniform1i(u.uGlass, 4);
+    gl.uniform4fv(u.uFacA, facA);
+    gl.uniform4fv(u.uFacB, facB);
+    gl.uniform2fv(u.uFacR, facR);
+    gl.uniform4fv(u.uFacBox, facBox);
+    gl.uniform1i(u.uGlassMean, 5);
+    gl.uniform3f(u.uGlassT, glass.tintRange, ...glass.axis);
+    gl.uniform3f(u.uGlassK, glass.range, GLASS_LOD, GLASS_LOD + Math.log2(BW / VW));
     gl.uniform2f(u.uSize, comp.w, comp.h);
     gl.uniform4fv(u.uCover, cover);
     gl.uniform1f(u.uWB, wB);
     gl.uniform1f(u.uFrameLin, shot.any ? 1 : 0);
     const lodD = Math.max(0, Math.log2((SW * cover[0]) / comp.w));
     gl.uniform2f(u.uLod, lodD, Math.max(lodD, Math.log2(SW / VW)));
+    // Each facade's reflected cloud at this hold, first (its sampler is
+    // pointed off the target while it is drawn).
+    const glassW = shot.any ? Math.min(1, T / REFL_IN) ** 2 * (3 - 2 * Math.min(1, T / REFL_IN)) : 0;
+    gl.uniform1f(u.uGlassW, glassW);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, glassTex);
+    if (glassW > 0) {
+      gl.uniform1f(u.uMeanPass, 1);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, glassMean.fbo);
+      gl.viewport(0, 0, glassMean.w, 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindTexture(gl.TEXTURE_2D, glassMean.tex);
+    }
+    gl.uniform1f(u.uMeanPass, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, comp.fbo);
     gl.viewport(0, 0, comp.w, comp.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1665,8 +1836,9 @@ export async function createShutter(host, { embedded = false } = {}) {
       if (fence) gl.deleteSync(fence);
       gl.deleteBuffer(pbo);
       freeTarget(gl, exp);
+      freeTarget(gl, glassMean);
       acc.forEach((t) => freeTarget(gl, t));
-      [stillTex, skyTex, liveTex, pressTex, ...atlasTex].forEach((t) => gl.deleteTexture(t));
+      [stillTex, skyTex, glassTex, liveTex, pressTex, ...atlasTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
