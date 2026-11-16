@@ -5,7 +5,7 @@ flat photograph, and it stayed that: a flat cut-out laid behind the grass,
 with no perspective of its own. This bake builds the cumulus in the world
 and looks at it through the same lens as the grass (CAM in grass.js:
 stereographic about the zenith, the frame shifted down so the zenith sits
-just past its top centre), so the clouds take part in the worm's-eye
+in frame just above its centre), so the clouds take part in the worm's-eye
 convergence: each mass's flat base, about 1.4 km up, lies low in the frame
 near its edge, and its stacked domes climb toward the zenith along the same
 radial lines the stalks draw, the nearer and wider at the foot, the farther
@@ -152,17 +152,19 @@ FEATHER = float(os.environ.get("FEATHER", 1.0))  # the far mass's feathered rim 
 # the crown toward the camera (km); seed.
 TOWERS = [
     # the hero, right: front-lit (the sun is behind it, over your left
-    # shoulder), its flat base low on the right edge, its domes climbing
-    # toward the zenith. The one subject of the frame: one glowing tower
+    # shoulder), its flat base low in the lower right corner, under the
+    # ring of grass, its domes climbing toward the zenith in frame; far
+    # enough off (2.6 km) that it is seen from the side, not from under its
+    # base, at the wide lens. The one subject of the frame: one glowing tower
     # behind the dark hero culm, and from the sun a clean cobalt diagonal
-    dict(az=57, dist=1.55, zb=1.3, zt=4.65, rb=0.5, rt=0.32, lean=0.3, seed=1, foot=0.8),
-    # low in the middle, small and far: a subordinate cloud side-lit from
+    dict(az=48, dist=2.6, zb=1.3, zt=5.2, rb=0.68, rt=0.44, lean=0.3, seed=1, foot=0.8),
+    # low on the left, small and far: a subordinate cloud side-lit from
     # the left, its domes just clearing the field, well under the hero
     # (feathered: at its distance the silver fringe toward the sun shrinks
     # to a pixel or two and printed as a bright white rim with a few torn
     # specks standing off it, a cut-out halo, so its rim is eased into the
     # sky round it and the specks are taken off; see feather)
-    dict(az=2, dist=2.25, zb=1.6, zt=3.75, rb=0.36, rt=0.24, lean=0.2, seed=2,
+    dict(az=-30, dist=3.4, zb=1.6, zt=3.75, rb=0.4, rt=0.27, lean=0.2, seed=2,
          feather=dict(width=3.0, hue=0.55, speck=0.04, reach=5.0)),
 ]
 # (No mass toward the sun: the frame's top left quarter is the sun's open
@@ -235,7 +237,7 @@ def unit(v):
 
 
 def lens_scale():
-    return 2 * np.tan(np.radians(FOV) / 4) / np.hypot(ASPECT, 1 + VP[1])
+    return 2 * np.tan(np.radians(FOV) / 4) / np.hypot(ASPECT * (1 + abs(VP[0])), 1 + VP[1])
 
 
 def ray_at(u, v):

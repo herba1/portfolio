@@ -1,15 +1,15 @@
 // The grass, as geometry: the stalks seen from where you lie, worm's-eye.
 //
-// The camera sits 4 cm off the ground and looks straight up through a wide
-// stereographic lens centred on the zenith, its frame shifted down so the
-// zenith, where every upright stalk points, lands just above the top centre
-// of the frame and the frame's centre looks up about 67 deg. Every blade is
-// rooted on the ground well below the bottom edge and runs up toward that
-// vanishing point: an upright stalk draws as a dead straight line into it,
-// at its own azimuth, so the culms at your shoulder splay out from the bottom
-// edge and converge overhead, as the towers in a street do looking up. Only
-// the stalks within a pace or so are tall enough to reach into frame; the
-// field behind stays under the bottom edge. Built once, here, as world-space
+// The camera sits 4 cm off the ground and looks straight up through a 155 deg
+// stereographic lens centred on the zenith, its frame shifted a little so the
+// zenith, where every upright stalk points, is in frame just above and right
+// of its centre, a point of open cobalt. The ground is all round the image
+// circle's rim, outside the frame, and every blade rooted on it runs in over
+// the frame's edge at its own azimuth toward that vanishing point: an
+// upright stalk draws as a dead straight line into it, so the grass comes in
+// from all four edges at once and converges overhead, as the towers in a
+// street do looking straight up. Only the stalks within a pace or so are
+// tall enough to reach into frame. Built once, here, as world-space
 // ribbons (a blade, a culm, a pedicel, a spikelet), each a centreline with its
 // half-width turned to face the lens; the vertex shader projects them, bends
 // them about their roots under the wind and keeps any sliver at least a
@@ -26,18 +26,18 @@
 
 const DEG = Math.PI / 180;
 
-// The lens: aimed straight up, at the zenith, with the frame shifted down
-// off its axis (a rising front, as an architect shoots a tower), so the
-// zenith, where every upright stalk points, sits just past the top centre of
-// the frame and the frame itself looks up about 67 deg (its centre) through
-// the stalks. Stereographic about the zenith: every vertical line through the
+// The lens: aimed straight up, at the zenith, with the frame shifted a
+// little off its axis, so the zenith, where every upright stalk points, sits
+// in frame a little above and right of its centre and the ring of grass
+// round it is deepest at the bottom corners (about 12 deg above the ground
+// there, 70 deg at the top edge). Stereographic about the zenith: every vertical line through the
 // lens is a great circle through the projection's centre, so every upright
 // culm draws as a dead straight line converging on that point, at its own
 // azimuth, and a stalk at the edge is never stretched (the projection is
-// conformal). FOV is the image circle that just takes in the frame's far
-// (bottom) corners; VP is where the zenith lands in NDC (x, y); ROLL turns
+// conformal: a blade at the corners is magnified, never stretched). FOV is
+// the image circle that just takes in the frame's far (bottom) corners; VP is where the zenith lands in NDC (x, y); ROLL turns
 // the field about it.
-export const CAM = { h: 0.04, fov: 110, vp: [0.0, 1.05], roll: 0 };
+export const CAM = { h: 0.04, fov: 155, vp: [0.05, 0.52], roll: 0 };
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -243,7 +243,7 @@ function culmWithHead(b, R, o) {
   }
 }
 
-// A plain leaf blade, rooted below the bottom edge: nearly straight, leaning
+// A plain leaf blade, rooted outside the frame: nearly straight, leaning
 // out away from you along its own azimuth so it draws as a straight line into
 // the zenith; its tip droops a little, mostly outward along that same line
 // (where it stays straight on screen) and now and then across it, so a few
@@ -278,26 +278,110 @@ export function buildGrass() {
   // drawn over it at full resolution)
   const near = builder(cam);
   const rest = builder(cam);
-  // the three brome culms beside the hero, drawn with the rest but over it
+  // the three brome culms round the frame, drawn with the rest but over it
   // (they are the nearest of it)
   const shoulder = builder(cam);
   const at = (D, phi) => [D * Math.sin(phi * DEG), D * Math.cos(phi * DEG), 0];
-  const HERO = 21;
 
-  // ---- the anchor, and three seed heads beside it ----
-  // The only panicles left in the field: the hero, near-black, sharp, full
-  // resolution, and three brome culms round it, lit against the light like
-  // the field. Each stands straight out along its own line of sight, so it
-  // runs dead straight into the zenith; only the heads nod across that line,
-  // downwind (+x), at staggered heights so they never meet.
+  // ---- the ring, on screen ----
+  // The zenith is in frame, a little above and right of centre, and the
+  // ground is all round the image circle's rim: whatever stands near enough
+  // and tall enough comes in over the edge of the frame at its own azimuth
+  // and runs straight in toward the zenith, from the bottom edge (ahead of
+  // you), the top (behind your head) and both sides alike. Distances on
+  // screen are taken from the zenith in frame heights (x times the aspect),
+  // so a circle round it is a circle; a world azimuth phi (0 ahead, 90 to
+  // your right) leaves the zenith along (sin phi, -cos phi).
+  const wide = camera(16, 10);
+  const WA = 16 / 10;
+  const VP = CAM.vp;
+  const rOf = (p) => Math.hypot((p[0] - VP[0]) * WA, p[1] - VP[1]);
+  // how far the frame's edge is from the zenith along azimuth phi
+  const edgeOf = (phi) => {
+    const dx = Math.sin(phi * DEG) / WA;
+    const dy = -Math.cos(phi * DEG);
+    let t = 1e9;
+    if (dx > 1e-6) t = Math.min(t, (1 - VP[0]) / dx);
+    if (dx < -1e-6) t = Math.min(t, (-1 - VP[0]) / dx);
+    if (dy > 1e-6) t = Math.min(t, (1 - VP[1]) / dy);
+    if (dy < -1e-6) t = Math.min(t, (-1 - VP[1]) / dy);
+    return t;
+  };
+  const dAz = (a, b) => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
+  // The open sky the ring leaves: no tip comes nearer the zenith than OPEN,
+  // and how far in from the edge a tip may reach, as a share of the way to
+  // the zenith, is held back toward the sun (its corner stays open, the
+  // bloom runs clean into the cobalt) and across the tower's lit flank
+  // (it is framed by the ring, not buried in it).
+  const SUN_AZ = -100;
+  const TOWER_AZ = 48;
+  const OPEN = 0.2;
+  const reachOf = (phi) => {
+    const sun = Math.exp(-((dAz(phi, SUN_AZ) / 26) ** 2));
+    const tower = Math.exp(-((dAz(phi, TOWER_AZ) / 20) ** 2));
+    return 0.7 * (1 - 0.8 * sun) * (1 - 0.45 * tower);
+  };
+  const innerOf = (phi) => Math.max(OPEN, edgeOf(phi) * (1 - reachOf(phi)));
+  const tipAt = (phi, D, z) => project(wide, add(at(D, phi), [0, 0, z]));
+  // the heights at which the top of a stalk at (D, phi) comes in over the
+  // edge of the frame and at which it meets its inner limit; null if it
+  // never shows inside it
+  const span = (phi, D) => {
+    const e = edgeOf(phi);
+    const rin = innerOf(phi);
+    let lo = null;
+    let hi = null;
+    for (let i = 1; i <= 160; i++) {
+      const z = CAM.h + (1.2 * i) / 160;
+      const r = rOf(tipAt(phi, D, z));
+      if (lo == null && r < e) lo = z;
+      if (r >= rin) hi = z;
+    }
+    return lo == null || hi == null || hi <= lo ? null : [lo, hi];
+  };
+  // a point on the frame's edge, its length taken evenly (the top edge, the
+  // behind-your-head side, a little sparser), as an azimuth from the zenith
+  const PER = [
+    [3.2, 1.0, (u) => [-1 + 2 * u, -1]],
+    [2.0, 1.0, (u) => [1, -1 + 2 * u]],
+    [3.2, 0.8, (u) => [1 - 2 * u, 1]],
+    [2.0, 1.0, (u) => [-1, 1 - 2 * u]],
+  ];
+  const perTotal = PER.reduce((a, p) => a + p[0] * p[1], 0);
+  const edgeAz = () => {
+    let x = R() * perTotal;
+    for (const [len, w, f] of PER) {
+      if (x < len * w) {
+        const p = f(x / (len * w));
+        return Math.atan2((p[0] - VP[0]) * WA, -(p[1] - VP[1])) / DEG;
+      }
+      x -= len * w;
+    }
+    return 0;
+  };
+
+  // ---- the anchor, and three seed heads round the ring ----
+  // The only panicles in the field: the hero, near-black, sharp, full
+  // resolution, in from the bottom edge across the tower, and three brome
+  // culms in from the other edges, lit against the light like the field.
+  // Each stands straight out along its own line of sight, so it runs dead
+  // straight into the zenith; only the heads nod across that line, at
+  // staggered distances from it so they never meet. Each is cut to the
+  // height that brings its top k of the way in from the frame's edge to
+  // the open sky round the zenith.
   const ink = lin(0x1c2414);
   const inkTip = lin(0x232d18);
+  const HERO = 30;
   const anchors = [
-    { D: 0.25, phi: 4, L: 0.64, lean: 0.02, nod: 0.6, nodAz: 80 },
-    { D: 0.27, phi: 37, L: 0.86, lean: 0.03, nod: 0.85, nodAz: 115 },
-    { D: 0.3, phi: 52, L: 0.66, lean: 0.02, nod: 0.7, nodAz: 125 },
-    { D: 0.2, phi: HERO, L: 1.0, lean: 0.0, nod: 0.75, nodAz: 105, hero: 1 },
+    { D: 0.27, phi: 116, k: 0.72, lean: 0.03, nod: 0.3, nodAz: 30 },
+    { D: 0.3, phi: -46, k: 0.66, lean: 0.02, nod: 0.3, nodAz: 40 },
+    { D: 0.25, phi: 152, k: 0.6, lean: 0.02, nod: 0.3, nodAz: 62 },
+    { D: 0.2, phi: HERO, k: 0.8, lean: 0.0, nod: 0.35, nodAz: 114, hero: 1 },
   ];
+  const heightTo = (phi, D, r) => {
+    for (let z = 0.05; z < 3; z += 0.005) if (rOf(tipAt(phi, D, z)) <= r) return z;
+    return 3;
+  };
   for (const a of anchors) {
     const lit = !a.hero;
     culmWithHead(lit ? shoulder : near, R, {
@@ -306,7 +390,7 @@ export function buildGrass() {
       lean: a.lean,
       nod: a.nod,
       nodAz: a.nodAz * DEG,
-      L: a.L,
+      L: heightTo(a.phi, a.D, edgeOf(a.phi) - (edgeOf(a.phi) - OPEN) * a.k) - CAM.h,
       w0: lit ? 0.0015 : 0.0017,
       cStem: lit ? lin(0x2c3a1a) : ink,
       cTip: lit ? lin(0x4a5a26) : inkTip,
@@ -321,77 +405,45 @@ export function buildGrass() {
 
   // ---- the field: plain blades, far to near (painter's order) ----
   // Each is laid out by where its tip lands on screen rather than its
-  // length: under a skyline that holds the field to the lower part of the
-  // frame (tips mostly stopping a little past half way up) and lets it climb
-  // only at the side edges, so the middle of the frame stays open sky, the
-  // cumulus bases clear behind the anchor. The mass is heaviest along the
-  // bottom edge and thins upward, every blade converging on the zenith. Only
-  // grass within a pace reaches into frame from 4 cm down.
+  // length: in over the frame's edge at its own azimuth, all the way round,
+  // and stopping somewhere between the edge and its inner limit, so the
+  // ring is densest at the frame's edge and thins inward, every blade
+  // converging on the zenith, and the middle stays open cobalt round it.
   const items = [];
-  const wide = camera(16, 10);
-  // the skyline, NDC y over NDC x: about 58% of the frame height through
-  // the middle, rising toward the side edges, less on the right, where the
-  // tower's flat base sits low behind the anchor's shoulder culms
-  const sky = (x) => {
-    const e = Math.min(1, Math.max(0, (Math.abs(x) - 0.55) / 0.45));
-    return 0.16 + (x < 0 ? 0.42 : 0.3) * e * e * (3 - 2 * e);
-  };
-  const tipAt = (phi, el) => {
-    const c = Math.cos(el);
-    return project(wide, [Math.sin(phi * DEG) * c, Math.cos(phi * DEG) * c, CAM.h + Math.sin(el)]);
-  };
-  // the elevations (from the lens) at which a tip at azimuth phi enters the
-  // frame and at which it meets the skyline; null if it never shows under it
-  const span = (phi) => {
-    let lo = null;
-    let hi = null;
-    for (let e = 25; e <= 86; e += 0.5) {
-      const p = tipAt(phi, e * DEG);
-      const inside = Math.abs(p[0]) < 1 && p[1] > -1 && p[1] < 1;
-      if (lo == null && inside) lo = e;
-      if (lo != null && p[1] <= sky(p[0])) hi = e;
-    }
-    return lo == null || hi == null || hi <= lo ? null : [lo, hi];
-  };
   // n blades at D0..D1, their tips from f0 to f1 of the way from where they
-  // enter the frame up to the skyline (fp biases them low)
+  // come in over the edge to the inner limit (fp biases them toward the edge)
   const put = (n, kind, D0, D1, Dp, f0, f1, fp) => {
     for (let i = 0; i < n; i++) {
       const D = D0 + (D1 - D0) * Math.pow(R(), Dp);
-      // gathered a little toward the middle, where the bottom edge is
-      const u = R() * 2 - 1;
-      const phi = Math.sign(u) * Math.pow(Math.abs(u), 1.25) * 88;
+      const phi = edgeAz();
       const f = f0 + (f1 - f0) * Math.pow(R(), fp);
-      const sp = span(phi);
-      // below the frame either way: no blade
+      const sp = span(phi, D);
+      // never in frame inside the limit: no blade
       if (!sp) continue;
-      const el = (sp[0] - 1 + (sp[1] + 4 - sp[0]) * f) * DEG;
-      items.push({ kind, D, phi, L: Math.min(1.15, (D * Math.tan(el) + CAM.h) / 0.985) });
+      const z = sp[0] + (sp[1] - sp[0]) * f;
+      // a little over the height: the lean and the droop bring it down
+      items.push({ kind, D, phi, L: Math.min(1.4, (z - CAM.h) * 1.03 + 0.01) });
     }
   };
   // the field behind: a sparse few, standing a pace or two off
-  put(110, "far", 0.42, 0.95, 1.0, 0.3, 1.0, 0.8);
+  put(260, "far", 0.42, 0.95, 1.0, 0.3, 1.0, 0.8);
   // the body of it, round your head
-  put(150, "mid", 0.15, 0.45, 0.9, 0.1, 1.0, 1.4);
-  // a low fringe along the bottom edge, the mass the rest rises out of
-  put(420, "mat", 0.06, 0.3, 1.1, 0.0, 0.6, 1.2);
-  // one that once crossed the sun, in from the left edge (its azimuth is the
-  // sun's, seen from the zenith). It read as a stray line through the open
-  // sun corner, so it is built into a builder that is never drawn: it still
-  // draws its numbers from R, and the rest of the field stays where it was
-  items.push({ kind: "sun", D: 0.34, phi: -79, L: 0.9 });
+  put(340, "mid", 0.15, 0.45, 0.9, 0.1, 1.0, 1.4);
+  // a low fringe all round the edge, the mass the rest rises out of
+  put(720, "mat", 0.09, 0.3, 1.1, 0.0, 0.5, 1.3);
   items.sort((p, q) => q.D - p.D);
   for (const it of items) {
     const root = at(it.D, it.phi);
     if (!inFrame(root, it.L)) continue;
     // depth: 0 at your shoulder .. 1 the field behind (more sky in front)
-    const dep = it.kind === "sun" ? 0.05 : Math.min(1, Math.max(0, (it.D - 0.15) / 0.75));
+    const dep = Math.min(1, Math.max(0, (it.D - 0.15) / 0.75));
     rest.st.depth = dep;
     // the nearest of the low fringe take only part of the lens's defocus,
-    // so along the bottom edge they hold as soft-edged blades rather than
-    // spreading into dark swaths
-    const nf = Math.min(1, Math.max(0, (it.D - 0.06) / 0.16));
-    rest.st.focus = 0.4 + 0.6 * nf * nf * (3 - 2 * nf);
+    // so along the edge they hold as soft-edged blades rather than
+    // spreading into dark swaths (in the corners, where the lens is widest,
+    // fully defocused they smeared into streaks, like motion blur)
+    const nf = Math.min(1, Math.max(0, (it.D - 0.09) / 0.2));
+    rest.st.focus = 0.25 + 0.55 * nf * nf * (3 - 2 * nf);
     const vary = 0.8 + 0.4 * R();
     const dry = R() < 0.1 ? 0.5 : 0;
     // a pace off the blades are no paler than at your shoulder: against
@@ -399,16 +451,16 @@ export function buildGrass() {
     const base = mix3(mix3(lin(0x1c2614), lin(0x34421f), dep * 0.3), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
     const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep * 0.3), lin(0x7a7434), dry).map((c) => c * vary);
     // mostly a droop outward, along its own line; a third of them across it
-    const across = R() < 0.35;
-    blade(it.kind === "sun" ? builder(cam) : rest, R, {
+    const across = R() < 0.25;
+    blade(rest, R, {
       root,
       az: (it.phi + (R() - 0.5) * 3) * DEG,
       lean: 0.01 + 0.07 * R(),
-      droop: across ? 0.12 + 0.22 * R() : 0.08 + 0.2 * R(),
+      droop: across ? 0.08 + 0.14 * R() : 0.04 + 0.12 * R(),
       droopTurn: across ? (R() < 0.5 ? -1 : 1) * (0.9 + 0.5 * R()) : (R() - 0.5) * 0.5,
       L: it.L,
-      // a leaf 3-7 mm wide; the sun-crossing one a culm-thin blade
-      w0: it.kind === "sun" ? 0.0018 : (0.0022 + 0.0024 * R()) * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.8 : 1),
+      // a leaf 3-7 mm wide
+      w0: (0.0022 + 0.0024 * R()) * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.4 : 1),
       c0: base,
       c1: tipC,
       trans: 1,
@@ -419,21 +471,20 @@ export function buildGrass() {
   rest.st.focus = 1;
 
   // ---- the nearest few: at your cheek, thin and dark, nearly in focus ----
-  // Drawn over the anchor at full resolution and kept off its azimuth so
-  // none hides it. Under the same skyline, and low under it: a dark frame
-  // along the bottom edge, not a wall across the cumulus. Fine leaves, and
+  // Drawn over the anchor at full resolution and kept off its azimuth (and
+  // off the sun's) so none hides it. Round the ring, and low in it: a dark
+  // frame along the edges, not a wall across the cumulus. Fine leaves, and
   // given only a little of the lens's defocus: wide and fully defocused, at
-  // a few centimetres they spread into broad near-black swaths that muddied
-  // the bottom-left corner; thin, they print as crisp dark silhouettes.
-  for (let i = 0, k = 0; i < 80 && k < 10; i++) {
-    const side = k % 2 ? 1 : -1;
-    const phi = side * (22 + 50 * R()) + (side > 0 ? 8 : 0);
-    if (Math.abs(phi - HERO) < 9 || Math.abs(phi) > 74) continue;
+  // a few centimetres they spread into broad near-black swaths; thin, they
+  // print as crisp dark silhouettes.
+  for (let i = 0, k = 0; i < 200 && k < 14; i++) {
+    const phi = edgeAz();
+    if (dAz(phi, HERO) < 9 || dAz(phi, SUN_AZ) < 30) continue;
     const D = 0.05 + 0.07 * R();
-    const sp = span(phi);
+    const sp = span(phi, D);
     if (!sp) continue;
-    const el = (sp[0] + (sp[1] - sp[0]) * (0.12 + 0.36 * R())) * DEG;
-    const L = Math.min(0.9, D * Math.tan(el) + CAM.h);
+    const z = sp[0] + (sp[1] - sp[0]) * (0.12 + 0.36 * R());
+    const L = Math.min(0.9, z - CAM.h + 0.01);
     const root = at(D, phi);
     if (!inFrame(root, L)) continue;
     k++;
@@ -620,7 +671,7 @@ void main() {
   const vec3 TRANS = vec3(0.337, 0.431, 0.069);
   // Down in the sward the light has come through every blade above it: the
   // lower a stretch of leaf stands, the darker it is and the less it glows,
-  // so the field sits on a dark mass along the bottom edge.
+  // so the field sits on a dark mass along the frame's edges.
   float sward = smoothstep(0.06, 0.5, vH);
   c *= mix(0.4, 1.0, sward);
   float tw = lit * behind * mix(0.35, 1.0, s) * mix(0.25, 1.0, sward);

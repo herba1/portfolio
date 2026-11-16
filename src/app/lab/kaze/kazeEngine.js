@@ -1,15 +1,15 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createWind, GX, GY } from "./wind";
-import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
+import { buildGrass, camera, CAM, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 
 // Kaze: lying in the long grass in July, looking up, and the wind is yours.
 //
 // You lie in the grass and look straight up: a wide stereographic lens 4 cm
 // off the ground, aimed at the zenith with its frame shifted down so the
-// zenith sits just past the top centre, so every stalk grows up from below
-// the bottom edge and runs straight in toward it, splaying out from the
-// bottom and converging overhead (grass.js). Brush across it and the stroke
+// zenith is in frame just above its centre, so every stalk comes in over
+// the frame's edge, from all four sides, and runs straight in toward it,
+// converging overhead (grass.js). Brush across it and the stroke
 // becomes a gust: a small stable-fluids velocity field (wind.js) carries it
 // on through the stalks, each one a damped spring that lies over under it
 // and swings back with a little overshoot. The grass is geometry, drawn
@@ -23,7 +23,7 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 //
 // The sky behind (sky.webp) is rendered through that same lens
 // (tools/depth/bakes/kaze/sky_cumulus.py): deepest cobalt round the zenith
-// at the top centre, paler cyan toward the frame's bottom corners, and a
+// above the frame's centre, paler cyan toward its edges, and a
 // field of towering cumulus built in the world and rendered as a volume, so
 // it takes part in the worm's-eye convergence: each mass's flat blue-grey
 // base lies low near the frame's edge and its cauliflower domes climb toward
@@ -48,10 +48,10 @@ const ASPECT = 1.5;
 const OVER = 0.02;
 const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.9, ax: 0.6 };
 // The sun (image uv): where sky_tower.py lays the sun's bloom, in the frame's
-// top left corner (keep the two SUNs equal); and the zenith, just past the
-// top centre of the frame (CAM.vp in grass.js, in image uv).
+// top left corner (keep the two SUNs equal); and the zenith, in frame a
+// little above and right of its centre (CAM.vp in grass.js, in image uv).
 const SUN = [0.09, 0.12];
-const ZEN = [0.5, OVER - (0.05 * CROP.h) / 2];
+const ZEN = [CROP.x0 + CROP.w * (0.5 + CAM.vp[0] / 2), CROP.y0 + CROP.h * (0.5 - CAM.vp[1] / 2)];
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -84,7 +84,7 @@ void main() {
   vec2 uv = uView.xy + vec2(vUv.x, 1.0 - vUv.y) * uView.zw;
 
   // ---- the sky ----
-  // Toward the zenith (just past the top centre) cloud is nearer overhead
+  // Toward the zenith (in frame, above its centre) cloud is nearer overhead
   // and crosses faster; low in the frame's corners it barely moves.
   float zd = length((uv - ZEN) * vec2(${ASPECT.toFixed(2)}, 1.0));
   float k = 0.35 + 0.65 * pow(clamp(1.0 - zd, 0.0, 1.0), 1.2);

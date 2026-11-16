@@ -11,7 +11,7 @@ just above the horizon: a wide bank of cloud lying across the lower half of
 the frame, and over it the sky deepening toward the top. That is the view
 of someone sitting up. Lying in the grass with the lens aimed at the zenith
 (grass.js: stereographic about the zenith, the frame shifted down so the
-zenith sits just past its top centre), the sky is laid out round that
+zenith sits in frame just above its centre), the sky is laid out round that
 point instead: deepest there, paler toward the frame's bottom corners, the
 lowest sky in view; and a cumulus standing off to one side rises toward the
 zenith like the stalks do, its axis on a line out of the frame's lower right
@@ -57,8 +57,8 @@ W, H = 3600, 2400
 # the frame on screen for a 16:10 box (CROP in kazeEngine.js): image uv
 FRAME = (0.02, 0.02, 0.96, 0.9)
 # the lens (CAM in grass.js), for a 16:10 frame
-FOV = float(os.environ.get("FOV", 110))
-VP = (0.0, 1.05)
+FOV = float(os.environ.get("FOV", 155))
+VP = tuple(float(c) for c in os.environ.get("VP", "0.05,0.52").split(","))
 ASPECT = 1.6
 SUN = (0.09, 0.12)  # image uv (SUN in kazeEngine.js)
 PIECES = json.loads(os.environ.get("PIECES", "null")) or [
@@ -75,7 +75,7 @@ PIECES = json.loads(os.environ.get("PIECES", "null")) or [
 HUE_LO, HUE_HI = 200.0, float(os.environ.get("HUE_HI", 216))
 SAT_LO, SAT_HI = 0.40, 0.74
 VAL_LO, VAL_HI = 0.88, 0.47
-THETA_LO = float(os.environ.get("THETA_LO", 58))  # deg from the zenith where the gradient is palest
+THETA_LO = float(os.environ.get("THETA_LO", 76))  # deg from the zenith where the gradient is palest
 BLOOM = float(os.environ.get("BLOOM", 210))  # px: the sun's diffusion, its halo's e-folding distance
 # the bloom's light (linear): the core a pale cyan-white, the halo and the
 # wide skirt the paler, cyan side of the sky round the sun
@@ -109,7 +109,7 @@ def theta_of(u, v):
     """Angle from the zenith (deg) of image uv, through the lens."""
     x = (u - FRAME[0]) / FRAME[2] * 2 - 1
     y = 1 - (v - FRAME[1]) / FRAME[3] * 2
-    s = 2 * np.tan(np.radians(FOV) / 4) / np.hypot(ASPECT, 1 + VP[1])
+    s = 2 * np.tan(np.radians(FOV) / 4) / np.hypot(ASPECT * (1 + abs(VP[0])), 1 + VP[1])
     r = np.hypot((x - VP[0]) * ASPECT * s, (y - VP[1]) * s)
     return np.degrees(2 * np.arctan(r / 2))
 
