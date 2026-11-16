@@ -246,11 +246,17 @@ void main() {
     // stand clear of the receiver, or a wall would shadow itself; thin
     // occluders (signals, the sign, wires) are taken as solid a little in
     // front of their surface too, since their depth is only good to about
-    // their own width.
+    // their own width. Past the wires (baked at exactly 0.25 m) that leniency
+    // is only for things standing well out in front of what they shade (the
+    // street furniture over the road): the run-length thickness also reads
+    // thin along every building's roofline, and a ray grazing in front of a
+    // wall a metre or two behind its receiver is not blocked by it (it left
+    // a detached oval on the left tower's facade).
     float bias = 0.1 + 0.006 * rz;
     if (d > -0.6 && length(s - s0) > 10.0) {
       float th = exp2(textureLod(uNrm, st, 0.0).b * 6.0 - 2.0);
-      float lo = th < 2.0 && abs(sz - P.z) > 1.5 ? -0.4 * th : 0.3 + 0.008 * rz;
+      bool thin = th < 2.0 && abs(sz - P.z) > 1.5 && (th < 0.28 || sz < 0.7 * P.z - 1.5);
+      float lo = thin ? -0.4 * th : 0.3 + 0.008 * rz;
       if (d > lo && d < th + bias) { occ = 1.0; break; }
     }
   }
