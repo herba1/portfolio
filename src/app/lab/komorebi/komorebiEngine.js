@@ -14,27 +14,22 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // or sky, never a hole.
 //
 // The cumulus come from a second capture, Poly Haven's
-// kloofendal_48d_partly_cloudy_puresky, rendered into the same upward view
-// with its horizon kept level (turned only about the vertical), so they are
-// a deck seen from under it: big and open by the zenith, just left of the
-// drawn sun, shrinking, flattening and stacking into rows towards the
-// bottom corners, where the trees converge from the horizon. Offline the
-// clouds were separated from their own pale sky as a soft matte (cover and
-// premultiplied light, consistent, so no edge carries a dark unmixing band)
-// and veils far from any cloud body taken out; here they lie over the deep
-// Roman sky and behind every needle, and are shaded as volumes: the sky
-// behind them is a clean smooth field (offline, the piazza's own ghost
-// clouds and lens rings taken out of it).
+// kloofendal_48d_partly_cloudy_puresky, reprojected to the same upward view
+// and turned so its sun lands on the drawn sun: every cloud keeps its true
+// lighting, sunlit tops towards the sun and skylight-blue undersides, and the
+// edge of the big cumulus beside the sun glows. Offline the clouds were
+// separated from their own pale sky as a soft matte (cover and premultiplied
+// light, consistent, so no edge carries a dark unmixing band), relit to this
+// sun and skylight, and rolled off below the film's clip; here they lie over
+// the deep Roman sky and behind every needle. The sky behind them is a clean
+// smooth field (offline, the piazza's own ghost clouds and lens rings taken
+// out of it).
 //
 // The grade, here in the shader: the rebuilt sky takes a Superia cobalt,
-// pale cyan-blue at the horizon deepening overhead. Each cumulus is shaded
-// as a volume at its own scale (the perspective of the deck sets how wide
-// its body is measured): a light march towards the sun over its cover
-// lights the edges that face the sun warm-neutral a good way in, the thick
-// core and the base sink to the skylight's blue-grey, the thin fringes let
-// the cobalt through, brightened, never a grey ring; the capture's own
-// light rides on top as the drawing of the lobes, rolled off below the
-// clip, and the cloud beside the sun takes a forward-scatter gain.
+// pale cyan-blue at the horizon deepening overhead. The cumulus keep the
+// capture's own light as their drawing, rolled off below the clip: sunlit
+// tops warm-neutral, shade and undersides in the colour of the sky round
+// them, and a forward-scatter gain on the cloud beside the sun.
 //
 // Wind: every layer is split into a few branches, each a damped spring with
 // its own natural frequency (big near crowns slow and wide, far trees quick
@@ -61,20 +56,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // The lower canopy, the cypresses and far pines against the low sky, was
 // rebaked from the HDRI at full resolution (the capture's own sun stood
 // among them, and its flare had cost them their edges), so they keep their
-// real needle-sharp silhouettes; here they are pressed down hard and the
-// scan's black kept low and neutral, so they frame the glowing sky as the
-// dark under it rather than a grey-teal veil.
-//
-// Last, the print: the negative printed on paper. Its toe is a lifted
-// cyan-blue, so the silhouettes land on a deep slate, never a dead black;
-// the sky's midtone chroma is eased back to a Superia cobalt; and the light
-// diffuses a few pixels through the emulsion (a thin warm halation ring
-// where a highlight meets the needles), so cloud and needle edges melt into
-// the sky instead of sitting on it as cutouts. The scan's softness is laid
-// on in the print too, and the overhead crown is kept out of both: rebaked
-// from the HDRI at full resolution (tools/depth/bakes/komorebi/crown.py),
-// it is the one sharp silhouette, its bark and needles crisp against the
-// soft cypresses and far crowns behind it.
+// real needle-sharp silhouettes; here they are pressed to a true black and
+// the scan's black kept low and neutral, so they frame the glowing sky as
+// the sharp dark under it rather than a grey-teal veil.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..1 a breath of that strength sets off at t = 0.5 s.
@@ -169,9 +153,7 @@ const FILM = {
   // drawing and are not lifted by the veil.
   bloom: 0.15,
   bloomThreshold: 1.25 * GAIN,
-  // The scan's softness is applied in the print instead (SCAN), where the
-  // overhead crown can be kept out of it.
-  softness: 0,
+  softness: 0.42,
   saturation: 1.12,
   blueDepth: 0.7,
   // A scan's black, kept low so the lower canopy is a silhouette, not a
@@ -204,71 +186,30 @@ const SKY_GRADE = {
 // pale sky by the sun under the film's warm bloom) is held to this hue,
 // degrees, so nothing drifts to lavender.
 const SKY_HUE_MAX = 215;
-// Cloud: a volume, seen from under the deck. The matte is soft, from the
-// puresky's own cloud-vs-sky separation (tools/depth/bakes/komorebi/
-// deck.py, softmatte.py), so the lobes, the wisps and the fringe where a
-// cloud thins into the sky are the photograph's. Here each cloud is lit by
-// its shape at its own scale (elevationAt): its thickness from its cover
-// blurred at one, three and eight times that scale; its sun side from a
-// light march towards the sun over the cover. Sun side warm-neutral at
-// lit, the rim away from the sun at rim, the thick core and base at core
-// in the skylight's blue-grey; the capture's light at a share (capture)
-// and its fine drawing in full (detail); a gain by the sun for the light
-// scattered forward, a soft roll-off under the clip; thin fringes
-// translucent, the sky through them brightened (fringe).
+// Cloud: the capture's own light is the drawing. The matte is soft, from
+// the puresky's own cloud-vs-sky separation (tools/depth/bakes/komorebi/
+// softmatte.py), so the lobes, the wisps and the pale fringe where a cloud
+// thins into the sky are the photograph's. Here it gets a touch of local
+// contrast and skylight fill, a gain by the sun for the light scattered
+// forward, a soft roll-off under the clip, and colour: sunlit tops warm,
+// shade and undersides in the sky's own blue.
 const CLOUD_GRADE = {
-  key: [1, 0.8, 0.52], // the sun side, per unit red
-  sky: 0.1, // share of the sky round it (eased to white) in the core's blue-grey
+  key: [1, 0.89, 0.67], // sunlit tops, per unit red
+  sky: 0.1, // the shade's colour: the sky round it, this far towards white
   fill: 0.05, // skylight under every part of a cloud, scene light
-  gain: 1.3, // the capture's own light, where it is kept (capture)
+  gain: 1.3, // the capture's own light
   top: 2.2, // the ceiling: rolls off to it from knee, under the clip
   knee: 1.1,
   detail: 1.2, // local contrast against the cloud's own blur
-  own: 0.3, // share of the capture's own colour kept in a cloud's shade
+  own: 0.6, // share of the capture's own colour kept in a cloud's body
   forward: 0.35, // gain on cloud by the sun, from the light it scatters forward
-  lod: 4.5, // the body's blur overhead (mip level); it follows the cloud's scale
-  lit: 1.8, // the sun side's light, scene
-  core: 0.12, // the thick core and base
-  rim: 0.42, // the thin rim away from the sun
-  march: 0.8, // the light march's step towards the sun, in body blur widths
-  capture: 0.2, // share of the capture's own low-frequency shading kept
-  coreTint: [0.26, 0.42, 0.64], // skylight blue-grey, linear (~rgb 150, 175, 200 printed)
-  fringe: [0.3, 1.5], // thin fringe: the sky this far to white, this much brighter
 };
-// The view the capture was reprojected to: stereographic, 140 degrees over
-// a 2560 master, pitched 64 up; the asset is the crop at x0, y0.
-const VIEW = { x0: 521, y0: 94, n: 2560, pitch: (64 * Math.PI) / 180, f: 1280 / (2 * Math.tan((35 * Math.PI) / 180)) };
 // The lower canopy's shadows sink by c / (c + knee): strength 0 off, 1 full.
 // The cypresses and far pines are rebaked from the HDRI with needle-sharp
 // mattes (tools/depth/bakes/komorebi/lowband.py); pressed this hard they go
 // to a true black against the sky, their sunlit needles keeping a little
 // light, so they are the sharp dark that frames the glow.
 const SILHOUETTE = { strength: 1, knee: 0.1 };
-// The print, last: a negative printed on paper, in display units. A lifted
-// cyan-blue toe, so the densest silhouettes land near rgb(22, 34, 44), not
-// black; the sky's midtone chroma pulled ~15% towards Superia cobalt; and a
-// mild diffusion through the emulsion: every edge softened a touch, the
-// light past it bleeding 2-4 px into the dark needles, and the brightest
-// light coming back through the red layer as a thin warm ring.
-const PRINT = {
-  toe: [0.05, 0.075, 0.11],
-  toePower: 3,
-  bleed: 0.4, // share of a bright surround that spills into a darker pixel
-  soften: 0.18, // every edge mixed this far into its near ring
-  radius: [2, 4], // texels, near and far ring
-  halation: [0.9, 0.4, 0.12], // the warm ring, per unit highlight
-  halationThreshold: 0.45, // linear print light
-  cobalt: 0.87, // sky chroma kept
-  cobaltRange: [0.12, 0.6], // value where it starts; min channel (paleness) where it ends
-};
-// The scan's softness, as the film's own at 0.42: luma mixed this far with a
-// ring of taps this many texels out, the colour ratio with one further out.
-// Applied in the print to everything but the overhead crown (and a few
-// texels round it), which also keeps only a share of the emulsion's bleed
-// and none of its edge softening: the nearest thing is the one sharp
-// silhouette, the cypresses and far crowns keep their diffusion behind it.
-const SCAN = { luma: 0.42, lumaR: 0.878, chroma: 0.336, chromaR: 3 };
-const CRISP = { bleed: 0.25 };
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -314,11 +255,8 @@ uniform vec3 uSkyPale;       // the pale sky round the sun
 uniform float uVig;          // the film's vignette, taken back out of the sky
 uniform vec3 uCKey;          // sunlit tops
 uniform vec4 uCGrade;        // sky share in the shade, fill, gain, detail
-uniform vec4 uCRoll;         // knee, top, the rim away from the sun, march step (blur widths)
+uniform vec4 uCRoll;         // knee, top, unused, unused
 uniform vec2 uCGlow;         // own colour share, forward scatter
-uniform vec4 uCVol;          // blur lod overhead, lit level, core share, capture's own shading share
-uniform vec3 uCCore;         // thick core and base
-uniform vec2 uCCoreW;        // thin fringe: towards white, light over the sky
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${ASPECT.toFixed(6)};
 
@@ -390,20 +328,6 @@ vec3 withLuma(vec3 tint, float y) {
   return tint * (y / dot(tint, LUMA));
 }
 
-// Elevation of a point of the print above the horizon, and the
-// stereographic magnification there (1 at the centre of the view): the
-// geometry the capture was reprojected with (yaw 36, pitch 64 up, 140
-// degrees over a 2560 master, the asset a crop of it).
-float elevationAt(vec2 uv, out float stretch) {
-  vec2 m = vec2(${VIEW.x0.toFixed(1)}, ${VIEW.y0.toFixed(1)}) + uv * vec2(${AW}.0, ${AH}.0) - 0.5 - ${((VIEW.n - 1) / 2).toFixed(1)};
-  float rr = length(m);
-  float th = 2.0 * atan(rr / ${(2 * VIEW.f).toFixed(4)});
-  vec3 d = vec3(m * (rr > 0.0 ? sin(th) / rr : 0.0), cos(th));
-  float c = cos(0.5 * th);
-  stretch = 1.0 / (c * c);
-  return asin(clamp(${Math.sin(VIEW.pitch).toFixed(6)} * d.z - ${Math.cos(VIEW.pitch).toFixed(6)} * d.y, -1.0, 1.0));
-}
-
 void main() {
   vec2 p = vec2(vUv.x, 1.0 - vUv.y);
   vec2 uv = uCrop.xy + p * uCrop.zw;
@@ -443,69 +367,40 @@ void main() {
   float mu = sqrt(max(1.0 - d * d, 0.0));
   col += uSunL * (uSunR * uSunR) / (r * r) * cover * (0.4 + 0.6 * mu) / 0.8;
 
-  // Cumulus, in front of the sky and behind every needle: a level deck seen
-  // from under it, so their scale follows the elevation (big and open
-  // overhead, small and stacked towards the horizon at the bottom corners),
-  // and every measure of a cloud's body below is taken at its own scale.
+  // Cumulus, in front of the sky and behind every needle.
   vec4 cl = texture(uClouds, uv);
   vec3 cP = exp2(uCLog.x + cl.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
   if (cl.a > 0.0) {
-    float stretch;
-    float el = elevationAt(uv, stretch);
-    float lod = uCVol.x + log2(clamp(sin(el) * stretch, 0.15, 1.4));
     // The capture's own light, unpremultiplied, with its local contrast
     // lifted a little against the blurred surround so the lobes survive the
-    // shoulder.
-    vec4 cb = textureLod(uCloudsBlur, uv, lod);
-    vec4 cw = textureLod(uCloudsBlur, uv, lod + 1.5);
+    // shoulder. Thin edges carry little cover: their surround is mostly
+    // sky, so they keep their own drawing.
+    vec4 cb = textureLod(uCloudsBlur, uv, 4.5);
     vec3 bP = exp2(uCLog.x + cb.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
     float Yc = max(dot(cP, LUMA) / max(cl.a, 1e-3), 1e-4);
     float Yb = max(dot(bP, LUMA) / max(cb.a, 1e-3), 1e-4);
     float body = smoothstep(0.35, 0.85, cl.a) * smoothstep(0.25, 0.65, cb.a);
     float near = exp(-sd / 0.22);
+    // Close to the sun the light scattered forward fills the cloud, so its
+    // dark cores are not deepened there.
     float detail = mix(1.0, mix(uCGrade.w, 1.0, near * near), body);
-    // Thickness: how deep in a cloud's body a point lies, from its cover
-    // blurred at the cloud's own scale, twice and eight times that.
-    vec4 cx = textureLod(uCloudsBlur, uv, lod + 3.0);
-    float thick = smoothstep(0.45, 0.98, (cb.a + cw.a + cx.a) / 3.0) * smoothstep(0.4, 0.9, cl.a);
-    // The side that faces the sun: how little cloud lies between a point and
-    // the open sky on the way to the sun, marched over the cover at the
-    // cloud's own scale (a light march in the picture plane), so the edges
-    // that face the sun are lit a good way in and the far side is not.
-    vec2 toSun = normalize((uSun - uv) * vec2(${AW}.0, ${AH}.0) + 1e-4);
-    vec2 stepUv = toSun * exp2(lod) * uCRoll.w / vec2(${AW}.0, ${AH}.0);
-    float od = 0.0;
-    for (int i = 1; i <= 6; i++) od += textureLod(uCloudsBlur, uv + stepUv * float(i), lod - 1.0).a;
-    float sunSide = exp(-0.45 * od) * smoothstep(0.1, 0.5, cl.a);
-    // Light: the sun side up at the ceiling, the thick core and the base in
-    // shade well under it, the rim away from the sun between; the capture's
-    // own light rides on it, its shading (the darker bases of the far rows)
-    // at a share, its fine drawing (the lobes) in full.
-    float Ym = mix(mix(uCVol.z, uCRoll.z, 1.0 - thick), uCVol.y, sunSide);
-    float Y = uCGrade.y + pow(Ym, 1.0 - uCVol.w) * pow(uCGrade.z * Yb, uCVol.w) * pow(Yc / Yb, detail);
-    // Cloud by the sun glows with the light it scatters forward.
+    float Y = uCGrade.y + uCGrade.z * Yb * pow(Yc / Yb, detail);
+    // Cloud by the sun glows with the light it scatters forward: a gain on
+    // its own light, so its lobes keep their drawing.
     float fwd = exp(-sd / 0.15) * (1.0 - 0.35 * smoothstep(0.4, 1.0, cl.a));
     Y *= 1.0 + uCGlow.y * fwd;
-    // The sunlit edges roll off softly to a ceiling under the clip.
+    // The sunlit tops roll off softly to a ceiling under the clip.
     if (Y > uCRoll.x) Y = uCRoll.x + (uCRoll.y - uCRoll.x) * (1.0 - exp(-(Y - uCRoll.x) / (uCRoll.y - uCRoll.x)));
-    // Colour: the sun side warm-neutral, the thick core and the base the
-    // skylight's blue-grey (the sky round it, well towards white), the
-    // capture's own colour at a share.
-    float shade = clamp(mix(thick, 0.45, 1.0 - thick) * (1.0 - sunSide), 0.0, 1.0);
-    shade *= 1.0 - smoothstep(0.0, 0.9, 0.25 * uCGlow.y * fwd);
-    vec3 core = mix(normalize(uCCore), mix(skyTint, vec3(1.0), 0.5), uCGrade.x);
-    vec3 tint = mix(uCKey, core / dot(core, LUMA), shade);
+    // Colour follows the light: the shade takes the sky round it, the sun
+    // side the warm key, through a clean white between them; the bodies
+    // keep much of the capture's own (offline relit) colour, the thin
+    // edges fade into the sky through its pale skylight blue.
+    float lit = max(smoothstep(0.5, 1.9, Y), smoothstep(0.0, 0.9, 0.5 * uCGlow.y * fwd));
+    vec3 shade = mix(skyTint, vec3(1.0), uCGrade.x);
+    vec3 tint = mix(shade, uCKey, lit);
     vec3 own = cP / max(dot(cP, LUMA), 1e-5);
-    tint = mix(tint, own, uCGlow.x * smoothstep(0.3, 0.9, cl.a) * (1.0 - sunSide));
-    vec3 C = withLuma(tint, Y);
-    // Thin fringes are translucent: the sky shows through them, brightened
-    // by the light they scatter, so a cloud thins into the cobalt through
-    // a pale blue, never a grey ring.
-    float skyY = dot(col, LUMA);
-    vec3 thin = withLuma(mix(skyTint, vec3(1.0), uCCoreW.x), max(skyY * uCCoreW.y, 1e-4));
-    float fr = 1.0 - smoothstep(0.15, 0.8, cl.a) * smoothstep(0.1, 0.6, cb.a);
-    C = mix(C, max(C, thin), fr);
-    cP = C * cl.a;
+    tint = mix(tint, own, uCGlow.x * smoothstep(0.3, 0.9, cl.a));
+    cP = withLuma(tint, Y) * cl.a;
   }
   col = col * (1.0 - cl.a) + cP * smoothstep(0.0, 2.0 / 255.0, cl.a);
 
@@ -598,9 +493,7 @@ void main() {
   vec3 gc = mix(uGlint.rgb, uHalo.rgb * (uGlint.r / uHalo.r), smoothstep(0.3, 1.3, gq));
   col += gc * open * open * glintEdge * facing * exp(-gq * gq) * smoothstep(0.2, 0.7, cov);
 
-  // Alpha carries the overhead crown's cover to the print, which keeps it
-  // out of the scan's softness and the emulsion's diffusion.
-  outColor = vec4(col * uGain, a2);
+  outColor = vec4(col * uGain, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -608,29 +501,15 @@ precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uTex;
-uniform vec2 uTexel;         // one film texel
 uniform float uFade;
 uniform vec3 uPaper;
 uniform float uHueMax;       // hue ceiling for blues, in sixths of a turn
-uniform vec4 uDiffuse;       // bleed into the dark, soften, inner radius, outer radius (texels)
-uniform vec4 uHalate;        // warm ring rgb, threshold (linear)
-uniform vec4 uToe;           // lifted toe rgb (print units), falloff power
-uniform vec3 uCobalt;        // chroma kept, value where it starts, paleness where it ends
-uniform sampler2D uScene;    // the scene: a is the overhead crown's cover
-uniform vec4 uScan;          // scan softness: luma share, luma offset, colour share, colour offset (texels)
-uniform float uCrispBleed;   // share of the bleed the crown keeps
-
-vec3 toLin(vec3 c) {
-  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
-}
-vec3 toPrint(vec3 c) {
-  c = max(c, 0.0);
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-// Blues past the ceiling (the pale veil by the sun, a thin cloud edge under
-// the warm bloom) are turned back to it at the same value and chroma, so no
-// pale sky reads lavender; deep blacks and real violets are left alone.
-vec3 holdHue(vec3 c) {
+void main() {
+  vec3 c = texture(uTex, vUv).rgb;
+  // Blues past the ceiling (the pale veil by the sun, a thin cloud edge
+  // under the warm bloom) are turned back to it at the same value and
+  // chroma, so no pale sky reads lavender; deep blacks and real violets are
+  // left alone.
   float mx = max(c.r, max(c.g, c.b));
   float mn = min(c.r, min(c.g, c.b));
   float d = mx - mn;
@@ -640,98 +519,6 @@ vec3 holdHue(vec3 c) {
     float hn = mix(h, uHueMax, w);
     c = hn < 4.0 ? vec3(mn, mn + (4.0 - hn) * d, mx) : vec3(mn + (hn - 4.0) * d, mn, mx);
   }
-  return c;
-}
-
-// The overhead crown, and a few texels round it: the nearest thing, the one
-// sharp silhouette in the frame.
-float crisp() {
-  float k = texture(uScene, vUv).a;
-  for (int i = 0; i < 8; i++) {
-    float a = float(i) * 0.7853982;
-    vec2 o = vec2(cos(a), sin(a));
-    k = max(k, texture(uScene, vUv + o * uDiffuse.z * uTexel).a);
-    k = max(k, texture(uScene, vUv + o * uDiffuse.w * uTexel).a);
-  }
-  return smoothstep(0.04, 0.4, k);
-}
-
-void main() {
-  float k = crisp();
-  vec3 c = texture(uTex, vUv).rgb;
-
-  // The scan's softness (the lens and the dye clouds): luma from a 1-2 texel
-  // spread, the colour ratio from a few texels, so colour creeps across
-  // edges while the drawing mostly holds. Everything but the crown.
-  if (k < 1.0) {
-    const float E = 0.004;
-    vec3 l0 = toLin(c);
-    vec2 o = uScan.y * uTexel;
-    vec2 q = uScan.w * uTexel;
-    vec3 sn = 0.25 * (toLin(texture(uTex, vUv + vec2(-o.x, -o.y)).rgb) + toLin(texture(uTex, vUv + vec2(o.x, -o.y)).rgb)
-      + toLin(texture(uTex, vUv + vec2(-o.x, o.y)).rgb) + toLin(texture(uTex, vUv + vec2(o.x, o.y)).rgb));
-    vec3 sc = 0.25 * (toLin(texture(uTex, vUv + vec2(-q.x, -q.y)).rgb) + toLin(texture(uTex, vUv + vec2(q.x, -q.y)).rgb)
-      + toLin(texture(uTex, vUv + vec2(-q.x, q.y)).rgb) + toLin(texture(uTex, vUv + vec2(q.x, q.y)).rgb));
-    const vec3 Lw = vec3(0.2126, 0.7152, 0.0722);
-    float y0 = dot(l0, Lw);
-    float ys = mix(y0, dot(sn, Lw), uScan.x);
-    vec3 hs = mix((l0 + E) / (y0 + E), (sc + E) / (dot(sc, Lw) + E), uScan.z);
-    c = toPrint(mix(max(hs * (ys + E) - E, 0.0), l0, k));
-  }
-  c = holdHue(c);
-
-  // The print. The negative is printed on paper, and the paper's light
-  // diffuses through the emulsion, so nothing sits on the sky as a cutout.
-  // Two rings of taps, a few texels out, in light: the near ring softens
-  // every edge a little, and what is brighter than the pixel bleeds into
-  // it, so cloud and sky spill a few pixels over the dark needles.
-  vec3 lin = toLin(c);
-  vec3 nearL = vec3(0.0);
-  vec3 farL = vec3(0.0);
-  vec3 hot = vec3(0.0);
-  for (int i = 0; i < 8; i++) {
-    float a = float(i) * 0.7853982;
-    vec2 o = vec2(cos(a), sin(a));
-    vec2 o2 = vec2(cos(a + 0.3926991), sin(a + 0.3926991));
-    vec3 n = toLin(texture(uTex, vUv + o * uDiffuse.z * uTexel).rgb);
-    vec3 f = toLin(texture(uTex, vUv + o2 * uDiffuse.w * uTexel).rgb);
-    nearL += n;
-    farL += f;
-    // Only the light past the threshold halates.
-    hot += max(f - uHalate.a, 0.0) + max(n - uHalate.a, 0.0) * 0.5;
-  }
-  nearL *= 0.125;
-  farL *= 0.125;
-  hot *= 1.0 / 12.0;
-  vec3 wide = mix(nearL, farL, 0.6);
-  lin = mix(lin, nearL, uDiffuse.y * (1.0 - k));
-  // Highlights spread furthest; the sky between needles only a little, so
-  // the crown keeps its dark body and is not veiled.
-  float wy = dot(wide, vec3(0.2126, 0.7152, 0.0722));
-  lin += uDiffuse.x * mix(1.0, uCrispBleed, k) * (0.3 + 0.7 * smoothstep(0.12, 0.6, wy)) * max(wide - lin, 0.0);
-  // Halation: the bright light that went through the emulsion and came
-  // back through the red layer, a thin warm ring where a highlight meets
-  // something darker; none on the highlight itself.
-  float hy = dot(hot, vec3(0.2126, 0.7152, 0.0722));
-  float dark = 1.0 - smoothstep(0.08, 0.6, dot(lin, vec3(0.2126, 0.7152, 0.0722)));
-  lin += uHalate.rgb * hy * dark;
-  c = toPrint(lin);
-
-  // Superia cobalt: the sky's midtones keep less chroma than the scan, so
-  // the blue is deep, not electric; whites and the shadows are left alone.
-  float mx = max(c.r, max(c.g, c.b));
-  float mn = min(c.r, min(c.g, c.b));
-  float blue = smoothstep(0.0, 0.08, c.b - max(c.r, c.g * 0.92));
-  float mid = smoothstep(uCobalt.y, uCobalt.y + 0.2, mx) * (1.0 - smoothstep(uCobalt.z - 0.15, uCobalt.z + 0.15, mn));
-  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  vec3 grey = vec3(mix(y, mx, 0.35));
-  c = mix(c, mix(grey, c, uCobalt.x), blue * mid);
-
-  // The toe: the print's black is not black but a lifted cyan-blue, the
-  // paper's base showing through the densest silhouettes, falling off
-  // quickly so the midtones keep their contrast.
-  c += uToe.rgb * pow(clamp(1.0 - c, 0.0, 1.0), vec3(uToe.a));
-
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -1219,11 +1006,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(u.uVig, FILM.vignette);
     gl.uniform3fv(u.uCKey, CLOUD_GRADE.key);
     gl.uniform4f(u.uCGrade, CLOUD_GRADE.sky, CLOUD_GRADE.fill, CLOUD_GRADE.gain, CLOUD_GRADE.detail);
-    gl.uniform4f(u.uCRoll, CLOUD_GRADE.knee, CLOUD_GRADE.top, CLOUD_GRADE.rim, CLOUD_GRADE.march);
+    gl.uniform4f(u.uCRoll, CLOUD_GRADE.knee, CLOUD_GRADE.top, 0, 0);
     gl.uniform2f(u.uCGlow, CLOUD_GRADE.own, CLOUD_GRADE.forward);
-    gl.uniform4f(u.uCVol, CLOUD_GRADE.lod, CLOUD_GRADE.lit, CLOUD_GRADE.core, CLOUD_GRADE.capture);
-    gl.uniform3fv(u.uCCore, CLOUD_GRADE.coreTint);
-    gl.uniform2f(u.uCCoreW, CLOUD_GRADE.fringe[0], CLOUD_GRADE.fringe[1]);
     gl.uniform2f(u.uCLog, CLOUD_LOG[0], CLOUD_LOG[1]);
     gl.uniform4fv(u.uCrop, L.crop);
     gl.uniform2f(u.uRes, L.pw, L.ph);
@@ -1281,17 +1065,6 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.uniform1f(blit.u.uHueMax, SKY_HUE_MAX / 60);
-    gl.uniform2f(blit.u.uTexel, 1 / L.pw, 1 / L.ph);
-    // Radii are device pixels: a lower internal resolution takes fewer texels.
-    gl.uniform4f(blit.u.uDiffuse, PRINT.bleed, PRINT.soften, PRINT.radius[0] * quality, PRINT.radius[1] * quality);
-    gl.uniform4f(blit.u.uHalate, ...PRINT.halation, PRINT.halationThreshold);
-    gl.uniform4f(blit.u.uToe, ...PRINT.toe, PRINT.toePower);
-    gl.uniform3f(blit.u.uCobalt, PRINT.cobalt, ...PRINT.cobaltRange);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
-    gl.uniform1i(blit.u.uScene, 1);
-    gl.uniform4f(blit.u.uScan, SCAN.luma, SCAN.lumaR, SCAN.chroma, SCAN.chromaR);
-    gl.uniform1f(blit.u.uCrispBleed, CRISP.bleed);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };

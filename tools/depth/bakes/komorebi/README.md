@@ -1,31 +1,5 @@
 # komorebi cumulus
 
-## the deck, level (current)
-
-`deck.py` renders the puresky into the komorebi crop with its horizon kept
-level, turned only about the vertical (yaw 150), instead of `rep.py`'s tilt.
-That tilt (24 degrees, to put the puresky's sun at altitude 48 on the drawn
-sun at altitude 83) ran the puresky's horizon through the middle of the
-frame, so every cumulus came out at one scale: matted blobs with no
-worm's-eye read. Level, the deck foreshortens as it does from under it: big
-open cumulus by the zenith (asset ~0.45, 0.36), shrinking, flattening and
-stacking into rows towards the bottom corners (altitude 0-11 there). The
-puresky's sun lands at the top edge (asset 0.7226, 0.0495), behind the
-overhead limb; `softmatte.py` takes it out (`sun`, `sunClear`), and `veil`
-drops thin cover more than ~24 px from any cloud body (the puresky's sun
-rays), so open sky is clear.
-
-    python3 -I deck.py '{"hdr":"kloofendal_48d_partly_cloudy_puresky_8k.hdr","out":"rep_deck.npy"}'
-    python3 -I softmatte.py deck '{"src":"rep_deck.npy","sun":[0.7226,0.0495],"ref":"clouds.orig.webp","sky":".../public/lab/komorebi/sky.bin","ceilSun":0,"sunClear":130,"veil":24,"out":".../public/lab/komorebi/clouds.webp"}'
-
-The capture's lighting is kept only as the drawing of the lobes: the engine
-shades each cloud as a volume at its own scale (its elevation and the
-stereographic magnification set the blur that measures its body), a light
-march towards the drawn sun over the cover lighting the sun-facing edges,
-cores and bases going to the skylight's blue-grey, fringes translucent.
-
-## the first bake (tilted, superseded)
-
 The cloud layer (`public/lab/komorebi/clouds.webp`) comes from Poly Haven's
 CC0 `kloofendal_48d_partly_cloudy_puresky` (8K), reprojected into the
 komorebi crop: the same stereographic view (yaw 36, pitch 64 up, 140 degrees,
@@ -118,26 +92,3 @@ blends into the old assets over 110 rows. The engine presses the band to
 black (`SILHOUETTE`, `c / (c + 0.1)`).
 
     python3 -I lowband.py '{"hdr":"piazza_16k.hdr","out":".../public/lab/komorebi/"}'
-
-## overhead crown, rebaked from the HDRI
-
-The near layer (the stone-pine crown overhead) had come through five
-generations of lossy WebP on top of the 2560 master, and `clean.py` had
-feathered its matte: bark and needles broke into blotches. `crown_render.py`
-renders asset rows 0..1300 straight from the 16K HDRI at the asset's own
-geometry (2x supersampled, area-downsampled); `crown.py` then takes the near
-matte from the sky's transmittance through the needles (blue against a local
-foliage floor and a robust clear-sky fit, as `lowband.py`) wherever the crown
-stands on open sky (the old matte is kept where a mid or far crown is behind
-it), marks the sunlit bark solid (as `barkmask.py`), antialiases by 0.5 px
-only, and unpremultiplies the foliage light against that sky. The old
-canopy's grade (the bark 1.3 stops down and browned) rides on it as a
-low-frequency offset in log (sigma 8 px), so the colour holds and only the
-drawing changes. `canopy.webp` is written lossless (2.4 MB; lossy WebP's
-4:2:0 chroma floors at ~2.5 codes RMS on the needles even at q100), and
-`layers.webp` lossless. In the engine the crown is kept out of the scan's
-softness and the print's diffusion (see `SCAN`, `CRISP`), so it is the one
-sharp silhouette against the soft cypresses and far crowns.
-
-    python3 -I crown_render.py '{"hdr":"piazza_16k.hdr","out":"crown_hdr.npy"}'
-    python3 -I crown.py '{"out":".../public/lab/komorebi/","q":101}'
