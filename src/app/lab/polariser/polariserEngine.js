@@ -103,6 +103,26 @@ const SKY_DYE = [0.03 * 2, 0.37 * 2, 2];
 // base fog greys it. A share of the dyed blue's luminance comes back as grey,
 // lifting the band toward a soft grey-cobalt instead of a poster blue.
 const SKY_GREY = 0.15;
+// The deep band's floor. Taken straight, the filter's 1 - P at the band and
+// the plate's own mottle under it (a gap darker than the clear-sky field
+// keeps that darkness as a ratio) multiplied down through the print's steep
+// toe to a crushed navy, #0e3057 at the darkest 2%, darker than a real
+// polarised zenith on Fuji. Its transmission f = 1 + P cos 2(phi - psi) is
+// eased onto a soft floor, sqrt(f^2 + F^2), which leaves the washed side
+// within a few percent and lifts only the deepest band; the mottle ratio is
+// taken to MOTTLE's power, so the band lands as one luminous cyan-cobalt sweep
+// (#0b4a86 at the darkest 2%, #2f6db0 through its middle) instead of a
+// navy blotch.
+const SKY_FLOOR = 0.5;
+const MOTTLE = 0.65;
+// The clear sky's saturation on the print. With the filter turned in, the
+// unpolarised haze left the lower sky milky (median saturation 0.56) beside
+// the deepened band; a polariser cuts that glare and the blue under it comes
+// up richer. It scales the open sky's saturation by up to SKY_CHROMA, as far
+// as the filter darkens it (none at the washed angle) and more on the bright
+// lower sky than in the band, which the floor above already carries. Only the
+// sky a cloud lets through is touched, so the cumulus keeps its roll-off.
+const SKY_CHROMA = 1.18;
 // Cloud white against the clear sky behind it: an open-sky pixel this many
 // times as bright as the local clear sky is opaque cloud. Measured on the
 // plate (clearsky.py's field), the cumulus bodies sit at a median 3.3x it,
@@ -242,6 +262,8 @@ uniform float uExpo;
 uniform float uLinearOut;
 uniform vec3 uSkyDye;
 uniform float uSkyGrey;
+uniform vec2 uSkyFloor;  // filter transmission soft floor, mottle exponent
+uniform float uSkyChroma;
 uniform sampler2D uClear; // the clear sky behind the clouds (clearsky.py)
 uniform float uCloudWhite; // cloud white, in units of the local clear sky
 uniform float uHaloPx;   // halation ring radius, print px
@@ -370,11 +392,13 @@ void main() {
   // unmix is too), re-dyed toward the cobalt a Fuji negative gives a clear
   // sky and turned by the filter; its neutral, unpolarised haze stays.
   float As = clamp((0.85 * S.b - S.r) / 0.56, 0.0, S.b);
-  vec3 dyed = As * uSkyDye * (1.0 + P * cos(2.0 * (uPhi - psi)));
+  float f = 1.0 + P * cos(2.0 * (uPhi - psi));
+  f = sqrt(f * f + uSkyFloor.x * uSkyFloor.x);
+  vec3 dyed = As * uSkyDye * f;
   dyed = mix(dyed, vec3(dot(dyed, LUMA)), uSkyGrey);
   vec3 polSky = S - As * vec3(0.29, 0.58, 1.0) + dyed;
   vec3 cloudPart = C * (max(L - (1.0 - alpha) * Ls, 0.0) / max(L, 1e-4));
-  vec3 skyOut = cloudPart + (1.0 - alpha) * min(L / max(Ls, 1e-4), 1.0) * polSky;
+  vec3 skyOut = cloudPart + (1.0 - alpha) * pow(min(L / max(Ls, 1e-4), 1.0), uSkyFloor.y) * polSky;
   // Open sky only: the towers, the mast and the glare round the sun keep
   // their own light.
   float gate = aux.r * (1.0 - clipped);
@@ -446,6 +470,15 @@ void main() {
   // the dyed sky swung to a cyan fringe.
   float rayleigh = t * As / max(S.b, 1e-4);
   print = mix(print, held, 0.5 * rayleigh);
+  // The clear sky's chroma, lifted on the print as the scan encodes it:
+  // every channel pushed away from the brightest, so the saturation scales
+  // by SKY_CHROMA while the hue and the brightest channel hold. Pushed off
+  // grey in the scene instead, the red fell faster than the green through
+  // the curves and the sky swung toward electric cyan.
+  vec3 e = pow(max(print, 0.0), vec3(1.0 / 2.2));
+  float em = max(e.r, max(e.g, e.b));
+  e = max(vec3(em) - (em - e) * mix(1.0, uSkyChroma, t * (1.0 - smoothstep(0.8, 1.4, f)) * mix(0.5, 1.0, smoothstep(0.1, 0.35, dot(print, LUMA)))), 0.0);
+  print = pow(e, vec3(2.2));
 
   // Split tone the cumulus. A cloud's sunlit top is lit by the low sun; its
   // shadowed underside only by the open sky around it, so it goes blue-grey
@@ -791,6 +824,8 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform4f(u.uAureole, ...AUREOLE.colour.map((v) => v * AUREOLE.a * AUREOLE_TAKE), rad(AUREOLE.deg));
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform1f(u.uSkyGrey, SKY_GREY);
+    gl.uniform2f(u.uSkyFloor, SKY_FLOOR, MOTTLE);
+    gl.uniform1f(u.uSkyChroma, SKY_CHROMA);
     gl.uniform1f(u.uCloudWhite, CLOUD_WHITE);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, clear);
