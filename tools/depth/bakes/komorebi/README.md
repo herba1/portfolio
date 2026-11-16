@@ -1,5 +1,31 @@
 # komorebi cumulus
 
+## the deck, level (current)
+
+`deck.py` renders the puresky into the komorebi crop with its horizon kept
+level, turned only about the vertical (yaw 150), instead of `rep.py`'s tilt.
+That tilt (24 degrees, to put the puresky's sun at altitude 48 on the drawn
+sun at altitude 83) ran the puresky's horizon through the middle of the
+frame, so every cumulus came out at one scale: matted blobs with no
+worm's-eye read. Level, the deck foreshortens as it does from under it: big
+open cumulus by the zenith (asset ~0.45, 0.36), shrinking, flattening and
+stacking into rows towards the bottom corners (altitude 0-11 there). The
+puresky's sun lands at the top edge (asset 0.7226, 0.0495), behind the
+overhead limb; `softmatte.py` takes it out (`sun`, `sunClear`), and `veil`
+drops thin cover more than ~24 px from any cloud body (the puresky's sun
+rays), so open sky is clear.
+
+    python3 -I deck.py '{"hdr":"kloofendal_48d_partly_cloudy_puresky_8k.hdr","out":"rep_deck.npy"}'
+    python3 -I softmatte.py deck '{"src":"rep_deck.npy","sun":[0.7226,0.0495],"ref":"clouds.orig.webp","sky":".../public/lab/komorebi/sky.bin","ceilSun":0,"sunClear":130,"veil":24,"out":".../public/lab/komorebi/clouds.webp"}'
+
+The capture's lighting is kept only as the drawing of the lobes: the engine
+shades each cloud as a volume at its own scale (its elevation and the
+stereographic magnification set the blur that measures its body), a light
+march towards the drawn sun over the cover lighting the sun-facing edges,
+cores and bases going to the skylight's blue-grey, fringes translucent.
+
+## the first bake (tilted, superseded)
+
 The cloud layer (`public/lab/komorebi/clouds.webp`) comes from Poly Haven's
 CC0 `kloofendal_48d_partly_cloudy_puresky` (8K), reprojected into the
 komorebi crop: the same stereographic view (yaw 36, pitch 64 up, 140 degrees,

@@ -29,20 +29,22 @@
 #    in the engine holds.
 #
 #     python3 -I rep.py 15
+#     (deck.py, the level deck: python3 -I softmatte.py deck '{"src":"rep_deck.npy","sun":[0.7226,0.0495],...}')
 #     python3 -I softmatte.py 15 '{"out":".../public/lab/komorebi/clouds.webp","ref":"clouds.orig.webp","sky":".../sky.bin"}'
 import sys, numpy as np, cv2, json
 
-roll = int(sys.argv[1])
+roll = sys.argv[1]
 P = dict(gamma=2.2, sigma=2.6, edge=0.35, sunClear=28, knee=0.9, ceil=1.5, ceilSun=2.5, sunR=100,
-         sunT=1.0, skyT=0.35, k=None, expo=0.0, LO=-9.0, HI=6.0, q=95, out="", ref="", sky="", dbg="")
+         sunT=1.0, skyT=0.35, k=None, expo=0.0, LO=-9.0, HI=6.0, q=95, out="", ref="", sky="", dbg="",
+         src="", sun=[0.3994, 0.89429])
 if len(sys.argv) > 2: P.update(json.loads(sys.argv[2]))
 LUM = np.array([.2126, .7152, .0722], np.float32)
 def ell(n): return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (n, n))
 
-x = np.load("rep_%d.npy" % roll).astype(np.float32)
+x = np.load(P["src"] or "rep_%s.npy" % roll).astype(np.float32)
 H, W = x.shape[:2]
 yy, xx = np.mgrid[:H, :W].astype(np.float32)
-sx, sy = 0.3994 * W, 0.89429 * H
+sx, sy = P["sun"][0] * W, P["sun"][1] * H  # the source's own sun, asset uv
 r = np.hypot(xx - sx, yy - sy)
 
 # the source sun disc goes (the engine draws its own)
@@ -130,6 +132,15 @@ Ce = ch_b * Yu[..., None]
 Cu = Ce * (1 - t) + Cu * t
 Pm = Cu * a2[..., None]
 Pm[a2 <= 0] = 0
+
+# veils: thin cover far from any cloud body (sun rays, haze over open sky)
+# goes, so open sky is clear; a wisp attached to a cloud keeps its fringe
+if P.get("veil", 0) > 0:
+    vr = int(P["veil"])
+    prox = cv2.dilate((a2 > 0.7).astype(np.uint8), ell(2 * vr + 1)).astype(np.float32)
+    prox = np.clip(cv2.GaussianBlur(prox, (0, 0), vr / 3), 0, 1)
+    a2 = a2 * prox; Pm = Pm * prox[..., None]
+    a2[a2 < 1 / 255] = 0; Pm[a2 <= 0] = 0
 
 # target sky (the engine's rebuilt field) for the skylight tint
 St = None
