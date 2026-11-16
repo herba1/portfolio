@@ -22,7 +22,8 @@
 #               engine lays the drifted cloud over it, so the sun and the blue's
 #               gradient stay where they are while the cumulus move.
 #   overcast.webp  NO px: the Docklands plate's own overcast, structures filled
-#               (see below), used only to clean the structures' rims.
+#               (see below), used only to clean the structures' rims. flip.py
+#               then fills it again from the matte it gives the low haze back to.
 # usage: python3 -I skyplate.py kloofendal_8k.hdr scene.webp mask.webp outdir [sunAz] [NC] [NS] [NO]
 import sys, os, numpy as np, cv2
 from PIL import Image

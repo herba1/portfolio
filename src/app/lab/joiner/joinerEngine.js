@@ -261,6 +261,11 @@ void main() {
 //     of the gradient and the pile reads as one dome. It carries the print's own
 //     exposure, vignette and grain as a ratio so every print still meters
 //     for itself.
+//   - horizon haze: over the last 25 degrees above the horizon the clear sky
+//     is lerped, in light, towards a pale greyed blue (#B9D2E6), steeper the
+//     lower it gets, as the air path is; low cloud gets a little of the same
+//     veil. Whatever is left of the Docklands overcast round the roofs then
+//     meets a pale horizon, not a saturated cobalt cut.
 const srgbHex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const SKY_GRADE = {
   cloudGain: 0.5, // stops into the shoulder at a mid cloud of the deck (x = 1 is the knee)
@@ -285,6 +290,14 @@ const SKY_GRADE = {
   skyDeep: 0.7, // stops the clear sky is taken down at the zenith, falling off towards the rim
   skySat: 0.3, // extra chroma at the zenith (share of the sky's own), falling off the same way
   skyFall: 1.6, // zenith angle (radians) where the sky has opened fully to the rim colour
+  // horizon haze: the long air path low over the roofs scatters white into
+  // the blue, so the clear sky pales and greys over the last 25 degrees
+  // before the horizon, and whatever overcast the matte still leaves there
+  // meets a pale sky instead of a hard cobalt cut
+  haze: 0.7, // share of the haze colour in the clear sky at the horizon
+  hazeFrom: 65, // zenith angle (degrees) where the haze starts
+  hazeTo: 90, // zenith angle (degrees) where it is full: the horizon
+  hazeVeil: 0.35, // share of that haze laid over cloud too (aerial perspective)
 };
 // The plate is 4096 px across 2 x THMAX of zenith angle.
 const PLATE_RAD = (2 * THMAX) / 4096;
@@ -292,6 +305,7 @@ const CLOUD_HI = srgbHex("#F4F1EA");
 const CLOUD_SHADE = srgbHex("#8FB4D8"); // skylight: shade under an open blue sky
 const SKY_ZENITH = srgbHex("#0C55AC");
 const SKY_RIM = srgbHex("#4499D6");
+const SKY_HAZE = srgbHex("#B9D2E6"); // pale, greyed blue of the sky right down on the horizon
 const SKY_VREF = 0.34; // clear-sky peak channel (linear) the film lays down at the zenith
 const vec3 = (v) => `vec3(${v.map((x) => x.toFixed(4)).join(", ")})`;
 
@@ -312,6 +326,7 @@ uniform vec4 uModel;     // detail, knee, exposure kept, shade depth
 uniform vec2 uEv;        // the print's exposure against the zenith print (stops), film slope there
 uniform vec2 uSky;       // keep, strength
 uniform vec3 uDome;      // zenith deepening (stops), zenith extra chroma, fall-off angle
+uniform vec4 uHaze;      // horizon haze: share, start and end zenith angle (radians), veil on cloud
 uniform vec3 uSun;       // towards the sun, disk frame
 uniform vec3 uLight;     // stops of sun on the lit side, of shade on the far side, relief gain
 uniform float uFeather;  // cloud matte feather radius (print uv)
@@ -321,6 +336,7 @@ const vec3 HI = ${vec3(CLOUD_HI)};
 const vec3 SHADE = ${vec3(CLOUD_SHADE)};
 const vec3 ZEN = ${vec3(SKY_ZENITH)};
 const vec3 RIM = ${vec3(SKY_RIM)};
+const vec3 HAZE = ${vec3(SKY_HAZE)};
 const float VREF = ${SKY_VREF.toFixed(4)};
 
 vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
@@ -504,9 +520,21 @@ void main() {
   sk = tv - (tv - sk) * min(1.0 + uDome.y * zw, tv / max(tv - tn, 1e-4));
   vec3 tgt = toLin(sk) * exp2(-uDome.x * zw);
   float V = max(lin.r, max(lin.g, lin.b));
-  vec3 sky = tgt * pow(clamp(V / VREF, 0.55, 1.25), uSky.x);
+  // Horizon haze: over the last stretch before the horizon the sky is seen
+  // through more and more air, which scatters white into it, so it pales
+  // and loses chroma, faster the lower it gets (a ramp that steepens down
+  // to the horizon, as the air path does). A lerp in light towards a pale
+  // greyed blue, before the print's exposure goes on.
+  float hz = pow(clamp((th - uHaze.y) / (uHaze.z - uHaze.y), 0.0, 1.0), 1.6) * uHaze.x;
+  vec3 hazeL = toLin(HAZE);
+  tgt = mix(tgt, hazeL, hz);
+  float expo = pow(clamp(V / VREF, 0.55, 1.25), uSky.x);
+  vec3 sky = tgt * expo;
 
   vec3 g = mix(cloud, sky, clear);
+  // the same air veils the low cloud a little: its shade side lifts towards
+  // the haze, its sunlit tops (already as pale) barely change
+  g = mix(g, max(g, hazeL * expo), hz * uHaze.w * (1.0 - clear));
   // Low over the roofs the deck goes to haze and its cumulus are
   // foreshortened to streaks; ease the grade off a little towards the
   // horizon, where a real sky pales anyway (the deck has no fill round the
@@ -1186,6 +1214,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform2f(g.uEv, ev - ev0, grade0.cloudSlope);
     gl.uniform2f(g.uSky, grade0.skyKeep, grade0.grade);
     gl.uniform3f(g.uDome, grade0.skyDeep, grade0.skySat, grade0.skyFall);
+    gl.uniform4f(g.uHaze, grade0.haze, (grade0.hazeFrom * Math.PI) / 180, (grade0.hazeTo * Math.PI) / 180, grade0.hazeVeil);
     gl.uniform3fv(g.uSun, sunDir);
     gl.uniform3f(g.uLight, grade0.sunGain, grade0.sunShade, grade0.relief);
     // feather radius, plate pixels to print uv (the print spans 2 uHalf / F radians)
