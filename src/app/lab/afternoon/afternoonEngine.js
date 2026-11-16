@@ -533,6 +533,33 @@ void main() {
   float fine = textureLod(uCloud, cuv, 1.6).r - textureLod(uCloud, cuv, 4.5).r;
   float draw = 0.5 + 0.4 * (1.0 - sunK);
   vec3 cloud = min(mix(shadeC, litC, sunK) * (1.0 + 0.6 * fine * draw), vec3(1.07));
+  // The shade's own lobes. Low in the towers the shade is one even plane:
+  // the coverage there is solid and the photograph's tone faint. So the tone
+  // is read at the scale of a lobe (about 60 card px) against the tower round
+  // it (about 200, four taps apiece so the coarse mips never show their
+  // blocks), with its fall across each lobe from crown to foot taken at that
+  // band only (the tower's own fall from its sunlit top would lay one dark
+  // band under the terminator). Soft-limited, it gives every lobe in the
+  // shade a paler crown and a deeper foot: a plain scale of the shade, so its
+  // hue (about 208) holds, only where the sun is not and well inside the
+  // outline.
+  vec2 lo = vec2(0.6, 0.6) * 32.0 * ct;
+  vec2 lh = vec2(-0.6, 0.6) * 32.0 * ct;
+  vec2 wo = vec2(0.7, 0.7) * 80.0 * ct;
+  vec2 wh = vec2(-0.7, 0.7) * 80.0 * ct;
+  vec2 lu = vec2(0.0, 44.0) * ct;   // down the tower, on the card
+  float lA = 0.25 * (textureLod(uCloud, cuv + lo, 5.3).r + textureLod(uCloud, cuv - lo, 5.3).r
+                   + textureLod(uCloud, cuv + lh, 5.3).r + textureLod(uCloud, cuv - lh, 5.3).r);
+  float lB = 0.25 * (textureLod(uCloud, cuv + wo, 6.6).r + textureLod(uCloud, cuv - wo, 6.6).r
+                   + textureLod(uCloud, cuv + wh, 6.6).r + textureLod(uCloud, cuv - wh, 6.6).r);
+  float lF = (textureLod(uCloud, cuv + lu, 5.3).r - textureLod(uCloud, cuv - lu, 5.3).r)
+           - (textureLod(uCloud, cuv + 2.0 * lu, 6.6).r - textureLod(uCloud, cuv - 2.0 * lu, 6.6).r) * 0.5;
+  float lobe = 14.0 * (lA - lB) + 4.5 * lF;
+  lobe = lobe / (1.0 + abs(lobe));
+  float lobeW = (1.0 - smoothstep(0.2, 0.75, sunK)) * smoothstep(0.15, 0.7, deep) * smoothstep(0.6, 1.0, textureLod(uCloud, cuv, 4.0).a);
+  // (the crowns lift a little more than the feet sink, so the shade keeps
+  // its weight; a foot goes a touch deeper blue, as the dome sees it)
+  cloud *= 1.0 + lobeW * (lobe > 0.0 ? vec3(0.5 * lobe) : 0.4 * lobe * vec3(1.1, 1.0, 0.86));
   // Where the cloud thins to its edge the sun comes through it, so a sunlit
   // billow's top ends in a bright fringe. That is only true where the sun
   // stands: the edge has to face it (squared, so it fades fast as the edge
