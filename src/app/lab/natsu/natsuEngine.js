@@ -36,16 +36,18 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    re-seeded with a variance-preserving cross-fade, masked to the active
 //    upper tower so the outline never doubles.
 //  - The wires hang on three lightly damped springs driven by a little wind.
-//  - Looking up is looking into the sun: past SUN_FROM of the pitch it swings
-//    from low front-left (as photographed) round behind the tower. The lit
-//    faces turn with it and the faces it leaves go to skylight blue without
-//    losing any brightness, and a thin warm rim lights on the silhouette's
-//    edges facing the sun; the film's halation and diffusion pick that up.
+//  - One grade for every pose. The sun stays low front-left, as
+//    photographed, and exposure, white balance and the film's development are
+//    the rest pose's, fixed: nothing in the colour reads the pitch, the pan
+//    or what the frame happens to hold, so the cumulus keeps its warm light
+//    from level to worm's-eye. The cloud is composited premultiplied over the
+//    sky as it stands at each pixel, and the only tone curve is the film's,
+//    once, after everything is laid down.
 //  - The crossing lamps alternate now and then, as a train comes.
 //
 // Query: ?t=0..1 growth (0 = the photograph, 1 = five minutes on),
-// ?light=0..1 sun (0 = as shot, 1 = behind the tower; else it follows the
-// pitch), ?tilt=x[,y] in -1..1 (y: -1 looks highest, 0 is the resting look),
+// ?light=0..1 relights by hand (0 = as shot, the default at every pose; 1 =
+// the sun behind the tower), ?tilt=x[,y] in -1..1 (y: -1 looks highest, 0 is the resting look),
 // ?pitch=0..42 degrees (overrides tilt's y; more is held at 42), ?lamp=0|1|2, ?still=1 skips the
 // reveal.
 
@@ -63,8 +65,6 @@ const PITCH_MAX = (PITCH_MAX_DEG * Math.PI) / 180;
 const PITCH_LO = 0;
 const PITCH_HI = 0.78;
 const PITCH_REST = 0.07;
-// The light comes round behind the tower as the look climbs past this.
-const SUN_FROM = 0.8;
 // The photograph as a pinhole: its focal length in plate px (about 102 deg
 // vertical), centred on the plate.
 const PHOTO_F = 700;
@@ -188,7 +188,6 @@ uniform float uBoil;        // 0 with reduced motion
 uniform vec4 uBul[${NB}];   // cx, cy (px), R (px), current amount
 uniform vec4 uSway;         // three spring states (px) + gust
 uniform vec3 uL;            // sun direction (x right, y up, z to viewer)
-uniform vec2 uRimDir;
 uniform float uBehind;
 uniform vec2 uSunPx;
 uniform float uAure;
@@ -201,8 +200,6 @@ const vec3 SUN = vec3(1.0, 0.84, 0.66);
 const vec3 AMB = vec3(0.42, 0.52, 0.72);
 // skylight at unit luminance
 const vec3 SKYLIT = vec3(0.86, 1.0, 1.24);
-// the sun through a thin edge
-const vec3 RIM = vec3(1.0, 0.76, 0.5);
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // Where the lens magnifies the photograph: how much the lobe band (4 px over
 // 20 px smoothing) is deepened, and over how many of its texels the cloud's
@@ -523,51 +520,37 @@ void main() {
   // light and stands off the darkened body as a second, ghostly rim.
   float exc = dot(cl - skyQ, LUMA);
   float aC = smoothstep(0.0, 0.1, exc);
-  // relight the cloud's light, not the sky seen through its fringe
   vec3 R = mix(vec3(1.0), ratio, max(m, aC));
   float solid = smoothstep(0.62, 0.95, textureLod(uCloud, qb, 4.0).b) * smoothstep(0.45, 0.9, mRaw);
-  // (only the cloud's light: where the plate dips a shade under the fitted
-  // sky there is no cloud to relight, and scaling it would lift a pale rim)
-  vec3 dC = cl - skyQ;
-  vec3 lit = mix(skyQ + max(dC, 0.0) * R + min(dC, 0.0), cl * R, solid);
-  // With the sun behind, the faces we see are lit by the sky alone. Scaling
-  // the photograph's warm, sun-lit colour by a cool skylight only greys it to
-  // lavender; instead keep the relit luminance and give it the sky's own hue:
-  // the blue of the sky round it, a little thinned on the brightest lobes and
-  // full in the shade, so the shadows read as skylight, not as haze.
-  float yS = dot(skyQ, LUMA);
-  vec3 skyHue = skyQ / max(yS, 1e-4);
-  float yC = dot(cl * R, LUMA);
-  float shade = 1.0 - smoothstep(0.18, 0.95, yC);
-  vec3 tint = mix(vec3(1.0), skyHue, mix(0.1, 0.62, shade));
-  tint /= dot(tint, LUMA);
-  vec3 litSky = mix(skyQ + dot(max(dC, 0.0) * R, LUMA) * tint + min(dC, 0.0), yC * tint, solid);
-  lit = mix(lit, litSky, uBehind);
-
-  // Silver lining: thin edges facing the sun transmit it when it is behind.
-  float thick = textureLod(uCloud, qb, 4.0).b;
-  vec2 e = vec2(18.0) / PLATE;
-  float gx = textureLod(uCloud, qb + vec2(e.x, 0.0), 4.5).b - textureLod(uCloud, qb - vec2(e.x, 0.0), 4.5).b;
-  float gy = textureLod(uCloud, qb + vec2(0.0, e.y), 4.5).b - textureLod(uCloud, qb - vec2(0.0, e.y), 4.5).b;
-  vec2 g = vec2(gx, -gy);
-  vec2 out2 = -g / max(length(g), 1e-3);
-  float edge = smoothstep(0.0, 0.6, 1.0 - thick) * smoothstep(0.0, 0.02, length(g));
-  float tex = clamp(dot(cl, LUMA) / max(dot(base, LUMA), 1e-3), 0.55, 1.5);
-  float bright = smoothstep(0.2, 0.55, dot(base, LUMA));
-  // a thin band on the silhouette itself, seated on the cloud's own alpha:
-  // eased in from its very edge, gone a little way inside
-  float seat = smoothstep(0.03, 0.09, exc) * (1.0 - smoothstep(0.12, 0.32, exc));
-  float toward = smoothstep(-0.2, 0.8, dot(out2, uRimDir));
-  lit += RIM * (uBehind * 1.7 * edge * toward * seat * bright * tex);
-
+  // The cloud's matte: how much of the sky behind it the cloud covers.
   occ = m * max(clamp(exc / 0.12, 0.0, 1.0), solid);
+  // Composited premultiplied. The plate is the cloud over the photographed
+  // sky (skyQ), so the cloud's own light is the plate less the share of that
+  // sky its matte lets through. Floored at zero: where the plate dips a shade
+  // under the fitted sky round the silhouette there is no cloud light at all,
+  // and carrying that dip over as a negative laid a dark grey-blue fringe
+  // between cloud and sky. What the matte lets through is then the sky as it
+  // stands at this very pixel (skyN, deepened by elevation), so a thin edge
+  // takes the colour of the sky directly behind it and can never be brighter
+  // than the cloud's own light over that sky.
+  vec3 P = max(cl - (1.0 - occ) * skyQ, 0.0) * R;
+  // Only with the sun moved behind (?light): the faces we see are lit by the
+  // sky alone. Scaling the photograph's warm, sun-lit colour by a cool
+  // skylight only greys it to lavender; instead keep the relit luminance and
+  // give it the sky's own hue, thinned on the brightest lobes, full in shade.
+  if (uBehind > 0.0) {
+    vec3 skyHue = skyQ / max(dot(skyQ, LUMA), 1e-4);
+    float shade = 1.0 - smoothstep(0.18, 0.95, dot(cl * R, LUMA));
+    vec3 tint = mix(vec3(1.0), skyHue, mix(0.1, 0.62, shade));
+    tint /= dot(tint, LUMA);
+    P = mix(P, dot(P, LUMA) * tint, uBehind);
+  }
   // The thin fringe round the silhouette (the cloud as it is seen now, not
   // the baked mask) scatters the sun's light forward rather than hiding it.
   // Blocking the aureole there left the fringe darker than the glowing sky
   // beside it: a teal ghost of a second outline off the cloud.
   thin = smoothstep(0.0, 0.04, exc) * (1.0 - smoothstep(0.08, 0.4, exc));
-  // the cloud's own light stays as photographed; only the sky through it deepens
-  col = max(skyN + lit - skyQ - (skyN - sky0) * occ, 0.0);
+  col = P + (1.0 - occ) * skyN;
   // Toward the photograph's foot (only ever reached high up, where the lens
   // magnifies it two- to threefold and its texels smear into brush strokes,
   // over a base that was inpainted behind the signal) the cloud gives way to
@@ -927,8 +910,9 @@ export async function createNatsu(host, { embedded = false } = {}) {
   // look: the camera's pitch as a share of PITCH_MAX; hold: 0..1 on a spring
   const lookOf = (cy) => (cy < 0 ? PITCH_REST - (PITCH_HI - PITCH_REST) * cy : PITCH_REST - (PITCH_REST - PITCH_LO) * cy);
   let look = pitchQ != null ? clamp(pitchQ / PITCH_MAX_DEG, 0, 1) : lookOf(cam.y);
-  const lightOf = (lk) => smooth(SUN_FROM, 1, lk);
-  let light = lightQ != null ? clamp(lightQ, 0, 1) : lightOf(look);
+  // The sun stays where it was when the photograph was taken unless ?light
+  // moves it: the grade is the rest pose's and never follows the look.
+  const light = lightQ != null ? clamp(lightQ, 0, 1) : 0;
   let hold = 0;
   let holdV = 0;
   // wire springs: x, v per mode
@@ -1023,8 +1007,6 @@ export async function createNatsu(host, { embedded = false } = {}) {
     gl.uniform4f(u.uSway, springs[0].x, springs[1].x, springs[2].x, 0);
     const Ld = sunDir(light);
     gl.uniform3f(u.uL, Ld[0], Ld[1], Ld[2]);
-    const rl = Math.hypot(Ld[0], Ld[1]) || 1;
-    gl.uniform2f(u.uRimDir, Ld[0] / rl, Ld[1] / rl);
     gl.uniform1f(u.uBehind, smooth(0.0, 0.7, -Ld[2]));
     // the hidden sun's place in the frame when it is behind (plate px)
     const sx = 0.62 + (Ld[0] / Math.max(0.35, -Ld[2] + 0.35)) * 0.32;
@@ -1042,9 +1024,11 @@ export async function createNatsu(host, { embedded = false } = {}) {
       {
         ...FILM_PRESETS.summer,
         input: floatOk && sceneT.ok ? "linear" : "srgb",
-        halation: 0.3 + 0.3 * light,
+        // one development for every pose: the grade is fixed at the rest
+        // pose's, so nothing here reads the look, the sun or the frame
+        halation: 0.3,
         halationThreshold: 0.8,
-        bloom: 0.2 + 0.08 * light,
+        bloom: 0.2,
         softness: 0.55,
         contrast: 1.14,
         whitePoint: 1.25,
@@ -1139,7 +1123,7 @@ export async function createNatsu(host, { embedded = false } = {}) {
       cam.y += (ty - cam.y) * k;
 
       // the hold: a critically-ish damped spring toward held / let go; it
-      // tips the look all the way up, and the sun comes round with the look
+      // tips the look all the way up
       const goal = holding || keyHold ? 1 : 0;
       const w = 2.6;
       const z = 0.92;
@@ -1148,7 +1132,6 @@ export async function createNatsu(host, { embedded = false } = {}) {
       hold += holdV * dt;
       hold = clamp(hold, -0.02, 1.02);
       look = lookOf(cam.y) + (1 - lookOf(cam.y)) * hold;
-      light = clamp(lightOf(look), 0, 1);
 
       // wind on the wires: two incommensurate gust sines, and a nudge when the
       // pointer sweeps fast across the print
