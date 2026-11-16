@@ -56,9 +56,16 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // The lower canopy, the cypresses and far pines against the low sky, was
 // rebaked from the HDRI at full resolution (the capture's own sun stood
 // among them, and its flare had cost them their edges), so they keep their
-// real needle-sharp silhouettes; here they are pressed to a true black and
-// the scan's black kept low and neutral, so they frame the glowing sky as
-// the sharp dark under it rather than a grey-teal veil.
+// real needle-sharp silhouettes; here they are pressed down hard and the
+// scan's black kept low and neutral, so they frame the glowing sky as the
+// dark under it rather than a grey-teal veil.
+//
+// Last, the print: the negative printed on paper. Its toe is a lifted
+// cyan-blue, so the silhouettes land on a deep slate, never a dead black;
+// the sky's midtone chroma is eased back to a Superia cobalt; and the light
+// diffuses a few pixels through the emulsion (a thin warm halation ring
+// where a highlight meets the needles), so cloud and needle edges melt into
+// the sky instead of sitting on it as cutouts.
 //
 // Query: ?t=seconds holds the simulation at that moment (deterministic);
 // with ?wind=0..1 a breath of that strength sets off at t = 0.5 s.
@@ -210,6 +217,23 @@ const CLOUD_GRADE = {
 // to a true black against the sky, their sunlit needles keeping a little
 // light, so they are the sharp dark that frames the glow.
 const SILHOUETTE = { strength: 1, knee: 0.1 };
+// The print, last: a negative printed on paper, in display units. A lifted
+// cyan-blue toe, so the densest silhouettes land near rgb(22, 34, 44), not
+// black; the sky's midtone chroma pulled ~15% towards Superia cobalt; and a
+// mild diffusion through the emulsion: every edge softened a touch, the
+// light past it bleeding 2-4 px into the dark needles, and the brightest
+// light coming back through the red layer as a thin warm ring.
+const PRINT = {
+  toe: [0.05, 0.075, 0.11],
+  toePower: 3,
+  bleed: 0.4, // share of a bright surround that spills into a darker pixel
+  soften: 0.18, // every edge mixed this far into its near ring
+  radius: [2, 4], // texels, near and far ring
+  halation: [0.9, 0.4, 0.12], // the warm ring, per unit highlight
+  halationThreshold: 0.45, // linear print light
+  cobalt: 0.87, // sky chroma kept
+  cobaltRange: [0.12, 0.6], // value where it starts; min channel (paleness) where it ends
+};
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
 const VERT = `#version 300 es
@@ -501,15 +525,26 @@ precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uTex;
+uniform vec2 uTexel;         // one film texel
 uniform float uFade;
 uniform vec3 uPaper;
 uniform float uHueMax;       // hue ceiling for blues, in sixths of a turn
-void main() {
-  vec3 c = texture(uTex, vUv).rgb;
-  // Blues past the ceiling (the pale veil by the sun, a thin cloud edge
-  // under the warm bloom) are turned back to it at the same value and
-  // chroma, so no pale sky reads lavender; deep blacks and real violets are
-  // left alone.
+uniform vec4 uDiffuse;       // bleed into the dark, soften, inner radius, outer radius (texels)
+uniform vec4 uHalate;        // warm ring rgb, threshold (linear)
+uniform vec4 uToe;           // lifted toe rgb (print units), falloff power
+uniform vec3 uCobalt;        // chroma kept, value where it starts, paleness where it ends
+
+vec3 toLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toPrint(vec3 c) {
+  c = max(c, 0.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+// Blues past the ceiling (the pale veil by the sun, a thin cloud edge under
+// the warm bloom) are turned back to it at the same value and chroma, so no
+// pale sky reads lavender; deep blacks and real violets are left alone.
+vec3 holdHue(vec3 c) {
   float mx = max(c.r, max(c.g, c.b));
   float mn = min(c.r, min(c.g, c.b));
   float d = mx - mn;
@@ -519,6 +554,64 @@ void main() {
     float hn = mix(h, uHueMax, w);
     c = hn < 4.0 ? vec3(mn, mn + (4.0 - hn) * d, mx) : vec3(mn + (hn - 4.0) * d, mn, mx);
   }
+  return c;
+}
+
+void main() {
+  vec3 c = holdHue(texture(uTex, vUv).rgb);
+
+  // The print. The negative is printed on paper, and the paper's light
+  // diffuses through the emulsion, so nothing sits on the sky as a cutout.
+  // Two rings of taps, a few texels out, in light: the near ring softens
+  // every edge a little, and what is brighter than the pixel bleeds into
+  // it, so cloud and sky spill a few pixels over the dark needles.
+  vec3 lin = toLin(c);
+  vec3 nearL = vec3(0.0);
+  vec3 farL = vec3(0.0);
+  vec3 hot = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.7853982;
+    vec2 o = vec2(cos(a), sin(a));
+    vec2 o2 = vec2(cos(a + 0.3926991), sin(a + 0.3926991));
+    vec3 n = toLin(texture(uTex, vUv + o * uDiffuse.z * uTexel).rgb);
+    vec3 f = toLin(texture(uTex, vUv + o2 * uDiffuse.w * uTexel).rgb);
+    nearL += n;
+    farL += f;
+    // Only the light past the threshold halates.
+    hot += max(f - uHalate.a, 0.0) + max(n - uHalate.a, 0.0) * 0.5;
+  }
+  nearL *= 0.125;
+  farL *= 0.125;
+  hot *= 1.0 / 12.0;
+  vec3 wide = mix(nearL, farL, 0.6);
+  lin = mix(lin, nearL, uDiffuse.y);
+  // Highlights spread furthest; the sky between needles only a little, so
+  // the crown keeps its dark body and is not veiled.
+  float wy = dot(wide, vec3(0.2126, 0.7152, 0.0722));
+  lin += uDiffuse.x * (0.3 + 0.7 * smoothstep(0.12, 0.6, wy)) * max(wide - lin, 0.0);
+  // Halation: the bright light that went through the emulsion and came
+  // back through the red layer, a thin warm ring where a highlight meets
+  // something darker; none on the highlight itself.
+  float hy = dot(hot, vec3(0.2126, 0.7152, 0.0722));
+  float dark = 1.0 - smoothstep(0.08, 0.6, dot(lin, vec3(0.2126, 0.7152, 0.0722)));
+  lin += uHalate.rgb * hy * dark;
+  c = toPrint(lin);
+
+  // Superia cobalt: the sky's midtones keep less chroma than the scan, so
+  // the blue is deep, not electric; whites and the shadows are left alone.
+  float mx = max(c.r, max(c.g, c.b));
+  float mn = min(c.r, min(c.g, c.b));
+  float blue = smoothstep(0.0, 0.08, c.b - max(c.r, c.g * 0.92));
+  float mid = smoothstep(uCobalt.y, uCobalt.y + 0.2, mx) * (1.0 - smoothstep(uCobalt.z - 0.15, uCobalt.z + 0.15, mn));
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  vec3 grey = vec3(mix(y, mx, 0.35));
+  c = mix(c, mix(grey, c, uCobalt.x), blue * mid);
+
+  // The toe: the print's black is not black but a lifted cyan-blue, the
+  // paper's base showing through the densest silhouettes, falling off
+  // quickly so the midtones keep their contrast.
+  c += uToe.rgb * pow(clamp(1.0 - c, 0.0, 1.0), vec3(uToe.a));
+
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -1065,6 +1158,12 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.uniform1f(blit.u.uHueMax, SKY_HUE_MAX / 60);
+    gl.uniform2f(blit.u.uTexel, 1 / L.pw, 1 / L.ph);
+    // Radii are device pixels: a lower internal resolution takes fewer texels.
+    gl.uniform4f(blit.u.uDiffuse, PRINT.bleed, PRINT.soften, PRINT.radius[0] * quality, PRINT.radius[1] * quality);
+    gl.uniform4f(blit.u.uHalate, ...PRINT.halation, PRINT.halationThreshold);
+    gl.uniform4f(blit.u.uToe, ...PRINT.toe, PRINT.toePower);
+    gl.uniform3f(blit.u.uCobalt, PRINT.cobalt, ...PRINT.cobaltRange);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   };
