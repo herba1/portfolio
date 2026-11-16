@@ -148,10 +148,21 @@ const WB = [1.1, 0.97, 0.97];
 const PRINT_STOPS = 0.9;
 const PRINT_WHITE = 8;
 const PRINT_CURVE = [2.0, 1.1];
-// Cloud split tone, multipliers on the print (unit luminance): skylight blue
-// in the shadowed underside (hue ~205), warm-neutral on the sunlit top.
-const SHADE = [0.8, 1.0, 1.2];
-const SHADE_DEPTH = 0.9;
+// Cloud split tone. A cumulus underside is lit only by the open sky round
+// it, so it takes that sky's own colour: the shadow keeps its luminance
+// (times SHADE_DEPTH) and its chroma is replaced by the local polarised clear
+// sky's, eased to SHADE_CHROMA (the linear print's lowest channel sits that
+// far under unit luminance, 0.3-0.35 saturation on the scan in the deepest
+// shadows, #6e8bad beside the left tower tip). A fixed
+// multiplier only tinted what was there, and round the sun the deflared,
+// burned shadows came in warm, so the tint cancelled to a grey smudge
+// (#808c93) beside the blue shadows on the far side of the frame. Where the
+// clear sky is too pale to carry a hue (the aureole, the clipped glare) the
+// shadow falls back to SHADE, a hue-205 skylight blue in linear light.
+// Sunlit tops stay a warm-neutral multiplier.
+const SHADE = [0.168, 0.29, 0.402];
+const SHADE_DEPTH = 0.86;
+const SHADE_CHROMA = 0.34;
 const SUNLIT = [1.0, 0.965, 0.9];
 const VIGNETTE = 0.28;
 // Burning in round the sun. The sun sits behind the cumulus between the
@@ -193,6 +204,12 @@ const lumNorm = (c) => {
   const y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   return c.map((v) => v / y);
 };
+// SHADE as a chroma offset from unit luminance, its lowest channel at -1.
+const shadeC = (() => {
+  const c = lumNorm(SHADE).map((v) => v - 1);
+  const d = -Math.min(...c);
+  return c.map((v) => v / d);
+})();
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -273,7 +290,8 @@ uniform vec3 uWB;
 uniform vec2 uPrint;     // print curve: contrast n, half-density exposure s
 uniform float uVignette; // lens cos^4 falloff, before the emulsion
 uniform float uPrintAsp; // print w / h
-uniform vec3 uShade;     // cloud split tone: skylight-lit shadow, sunlit top
+uniform vec3 uShade;     // fallback shadow chroma (unit luminance, minus 1, lowest channel -1)
+uniform vec2 uShadeTone; // shadow chroma, depth
 uniform vec3 uSunlit;
 uniform float uLodBias;
 uniform vec2 uBurn;      // stops at the sun, falloff in radians
@@ -488,8 +506,20 @@ void main() {
   // shade into every part-sky pixel too, so a translucent veil came out a
   // straight-edged slate smear between sky and cloud.
   float cloud = aux.r * smoothstep(0.45, 0.9, alpha);
-  float lit = smoothstep(0.4, 0.85, dot(print, LUMA));
-  print *= mix(vec3(1.0), mix(uShade, uSunlit, lit), cloud);
+  float Y = dot(print, LUMA);
+  float lit = smoothstep(0.4, 0.85, Y);
+  // The shadow side takes the local skylight: the polarised clear sky's
+  // chroma at unit luminance, scaled so its lowest channel sits uShadeTone.x
+  // under the rest, so the deep band and the pale sky by the horizon both
+  // give a skylight blue of one strength in their own hue. It replaces the
+  // shadow's chroma rather than multiplying it, so the warm cast the burn and
+  // the glare removal leave round the sun cannot cancel it to grey.
+  vec3 skyC = polSky / max(dot(polSky, LUMA), 1e-4) - 1.0;
+  float skyD = -min(skyC.r, min(skyC.g, skyC.b));
+  vec3 shadeC = mix(uShade, skyC / max(skyD, 1e-3), smoothstep(0.15, 0.4, skyD));
+  vec3 shadow = Y * uShadeTone.y * max(1.0 + uShadeTone.x * shadeC, 0.0);
+  print = mix(print, shadow, (1.0 - lit) * cloud);
+  print *= mix(vec3(1.0), uSunlit, lit * cloud);
   // Paper white: the print's base never scans as a full 255.
   print = clamp(print, 0.0, 1.0) * 0.985;
 
@@ -816,7 +846,8 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform2fv(u.uPrint, PRINT_CURVE);
     gl.uniform1f(u.uVignette, VIGNETTE);
     gl.uniform1f(u.uPrintAsp, L.pw / L.ph);
-    gl.uniform3fv(u.uShade, lumNorm(SHADE).map((v) => v * SHADE_DEPTH));
+    gl.uniform3fv(u.uShade, shadeC);
+    gl.uniform2f(u.uShadeTone, SHADE_CHROMA, SHADE_DEPTH);
     gl.uniform3fv(u.uSunlit, SUNLIT);
     gl.uniform1f(u.uLodBias, LOD_BIAS);
     gl.uniform2f(u.uBurn, BURN, rad(BURN_DEG));
