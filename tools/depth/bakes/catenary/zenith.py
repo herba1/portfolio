@@ -34,10 +34,20 @@ import numpy as np
 
 PUB = sys.argv[1]
 IW, IH = 6000, 4000
-ZEN_BOX = (-2048, -4096, 10240, 4096)  # x0, y0, x1, y1, image px
+ZEN_BOX = (-8192, -6144, 14336, 4096)  # x0, y0, x1, y1, image px
 ZEN_TEXEL = 16
 EASE = 0.07  # L, in plate widths / heights
 EDGE_FADE = 480.0  # image px
+# Toward the zenith the sky is one deep cobalt, whatever the side: the fit
+# carried on holds each column's own colour (pale on the sun's side, the
+# left), so above the photograph it is drawn, by elevation, to ZENITH, the
+# fit's own mean along the old box's top (rows far above the photograph,
+# x across its away-from-sun 30 percent, its deepest). Elevation from the 24 mm on the full frame and the
+# photograph's own tilt (its verticals meet some 6950 px above its centre:
+# 30 degrees up); smoothstep over ZEN_ELEV, degrees.
+F_PX = 24 / 35.9 * IW
+TILT = 30.0
+ZEN_ELEV = (60.0, 84.0)
 B_FADE = 360.0  # image px
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
@@ -136,6 +146,12 @@ bfill = fill(np.repeat(Kb[..., None], 3, -1), edge.astype(np.float32))[..., 0]
 resid = np.where(inside[..., None], rs * rw[..., None], rfill * np.exp(-dist / EDGE_FADE)[..., None])
 b = np.where(inside, Kb, bfill * np.exp(-dist / B_FADE))
 sky = np.maximum(base + resid, 0)
+top_u = np.linspace(0.7, 1, 64, dtype=np.float32)
+zen_rgb = np.maximum(basis(ease(top_u), ease(np.full_like(top_u, -4096 / IH))).astype(np.float32) @ coef, 1e-5).mean(0)
+elev = TILT + np.degrees(np.arctan2(IH / 2 - iy, F_PX))
+t = np.clip((elev - ZEN_ELEV[0]) / (ZEN_ELEV[1] - ZEN_ELEV[0]), 0, 1)
+wz = (t * t * (3 - 2 * t) * (iy < 0))[..., None]
+sky = sky * (1 - wz) + zen_rgb * wz
 
 rgb = lin_to_srgb(sky)
 out = np.clip(np.concatenate([rgb, b[..., None]], -1) * 255 + 0.5, 0, 255).astype(np.uint8)
@@ -151,4 +167,5 @@ for name, inner, outer in (
 ):
     seam.append((name, np.round(inner * 255, 1).tolist(), np.round(outer * 255, 1).tolist()))
 print("zenith.py:", ZW, "x", ZH, "texels; grain", round(float(hp[ok].std()), 5), "seam", seam)
+print("  zenith", np.round(lin_to_srgb(zen_rgb) * 255).tolist())
 print("  far corners", np.round(rgb[0, 0] * 255).tolist(), np.round(rgb[0, -1] * 255).tolist(), "above centre", np.round(rgb[0, ZW // 2] * 255).tolist())

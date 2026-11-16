@@ -55,8 +55,8 @@ const WIDTH_TRIM = 0.6; // image px
 // verticals meet some 7000 px above its centre); the virtual camera turns
 // PITCH further up about its own centre (pitchView in strings.js: a pure
 // rotation, so the homography H = K R K^-1, K from the bake's 24 mm on the
-// full frame, is exact without depth): some 72 degrees above the horizon in
-// all. Everything drawn goes through the same H: the plate (per pixel, in
+// full frame, is exact without depth): some 86 degrees above the horizon in
+// all, an extreme worm's-eye. Everything drawn goes through the same H: the plate (per pixel, in
 // PLATE), the wires (each sample of the fitted catenary plus its
 // displacement, the profile across the projected tangent), the insulators
 // (their corners, perspective-correct). The strings themselves stay in the
@@ -64,31 +64,44 @@ const WIDTH_TRIM = 0.6; // image px
 // Turned that far, the frame looks past the top of the photograph: its top
 // edge sits at the photograph's row VIEW.top, above row 0, and the strip of
 // sky above the photograph is the plate's own fitted cobalt carried on
-// (ZEN, zenith.py). So the mast and the far pole converge on a zenith some
-// half a frame height above the top edge (it was a whole frame height at
-// the photograph's own crop), the gantry leans in hard across
-// the frame, and the cumulus and the steel stand in the lower two thirds
-// under open, deepening cobalt. The frame may run past the photograph's
-// sides only where its edge is clear sky (VIEW.clear: on the right the
-// photograph's own far wires leave it below row 900, on the left the cage
-// below row 2880), never past its bottom, so no corner shows past the plate;
-// VIEW.zoom past cover on a 16:10 box, the mast top at poleAt of the width
-// or as far left as the edges allow, zooming further only if a corner would
-// still leave the plate. A box narrower than 16:10 keeps the crop's width
-// down to its height; a portrait box covers at its height.
-const PITCH = 42; // degrees
+// (ZEN, zenith.py). The crop is wider than the photograph (VIEW.zoom under
+// cover, the 24 mm turned into something nearer a 14 mm's field), so the
+// mast, the far pole and the gantry's verticals converge on one vanishing
+// point an eighth of a frame height above the top edge, straight over the
+// cloud (it was half a frame up at 42 degrees, a whole frame at the
+// photograph's own crop): the steel splays out toward the bottom corners
+// and leans in hard, and the cumulus stands whole in the middle under
+// open, deepening cobalt. The frame may run past the photograph's sides
+// only where its edge is clear sky (VIEW.clear: on the left the cage below
+// row 2880; on the right the photograph's four far wires are carried on
+// past its edge, RUN, and its bottom-right wires start near row 3600), never
+// past its bottom, so no corner shows past the plate; VIEW.zoom of cover on
+// a 16:10 box, the mast top at poleAt of the width or as far left as the
+// edges allow, zooming in only if a corner would still leave the plate. A
+// box narrower than 16:10 keeps the crop's width down to its height; a
+// portrait box covers at its height.
+const PITCH = 56; // degrees
 const VIEW = {
-  zoom: 1, // on a 16:10 box, 1 is cover (the right edge binds the mast in)
-  top: -900, // the crop's top edge, a row of the photograph (above it: ZEN)
+  zoom: 0.59, // of cover on a 16:10 box (wider than the photograph's own field)
+  top: -2660, // the crop's top edge, a row of the photograph (above it: ZEN)
   mast: [1915, 360], // the mast top, image px
-  poleAt: 0.11, // the furthest left it may sit, as a share of the width
+  poleAt: 0.352, // the furthest left it may sit, as a share of the width
   inset: 4, // image px kept clear of the plate's edge
-  clear: [2880, 900], // rows down to which the left and right edges are clear sky
+  clear: [2880, 3600], // rows down to which the left and right edges are clear sky
 };
 // The sky past the photograph (zenith.py): its extent in image px, and the
 // plate's grain (gamma luma, high-passed) that the shader lays on it.
-const ZEN_BOX = [-2048, -4096, 10240, 4096];
+const ZEN_BOX = [-8192, -6144, 14336, 4096];
 const ZEN_GRAIN = 0.0115;
+// The photograph's four far wires (not live: they stay in the plate) leave
+// its right edge between rows RUN[0] and RUN[1], nearly parallel, the top
+// one at slope RUN[2] (dy/dx, image px) at row 945, the slope easing by
+// RUN[3] per row further down (measured at x 5400, 5700 and 5990: 945,
+// 1130, 1357, 1577 at the edge; they share a vanishing point far to the
+// left). Past the edge each is carried on as a straight line, its own
+// profile at the edge (darker than the sky there, so the grain is not
+// smeared along it) laid on the carried-on sky.
+const RUN = [850, 1720, -0.597, 1.092e-4];
 
 
 const FILM = {
@@ -374,6 +387,7 @@ vec3 graphite(vec3 c) {
 const ZEN = `uniform sampler2D uZen; // rgb sky, a the key's B
 uniform vec4 uZenBox;   // its extent, image px: x0, y0, x1, y1
 uniform float uZenGrain;
+uniform vec4 uRun;      // the far wires carried on: edge rows from, to; slope; its change per row
 float onPlate(vec2 uv) {
   vec2 q = step(vec2(0.0), uv) * step(uv, vec2(1.0));
   return q.x * q.y;
@@ -405,9 +419,30 @@ vec3 zenSky(vec2 uv, float lod) {
   float n = zenNoise(uv * vec2(textureSize(uPlate, 0)) - 0.5) * 1.3 * uZenGrain * exp2(-lod);
   return pow(max(pow(c, vec3(1.0 / 2.2)) + n, 0.0), vec3(2.2));
 }
-vec3 plateAt(vec2 uv) { return mix(zenSky(uv, 0.0), texture(uPlate, uv).rgb, onPlate(uv)); }
-vec3 plateBiasAt(vec2 uv, float b) { return mix(zenSky(uv, b), texture(uPlate, uv, b).rgb, onPlate(uv)); }
-vec3 plateLodAt(vec2 uv, float l) { return mix(zenSky(uv, l), textureLod(uPlate, uv, l).rgb, onPlate(uv)); }
+// Past the right edge, the photograph's four far wires carried on (RUN):
+// the row each line through this pixel left the edge at, then the plate's
+// own wire there, as its departure from the sky beside it, in gamma. Only
+// where the edge is darker than its sky by more than the grain (read a mip
+// up), so the grain is not drawn out into streaks along the run.
+vec3 zenOut(vec2 uv, float lod) {
+  vec3 sky = zenSky(uv, lod);
+  vec2 p = uv * uImg;
+  float d = p.x - uImg.x;
+  if (d <= 0.0) return sky;
+  float ye = (p.y - (uRun.z - 945.0 * uRun.w) * d) / (1.0 + uRun.w * d);
+  float band = smoothstep(uRun.x - 60.0, uRun.x, ye) * (1.0 - smoothstep(uRun.y, uRun.y + 60.0, ye));
+  if (band <= 0.0) return sky;
+  vec2 e = vec2(uImg.x - 3.0, ye) / uImg;
+  vec3 wg = pow(textureLod(uPlate, e, lod).rgb, vec3(1.0 / 2.2));
+  vec3 sg = pow(zenAt(e).rgb, vec3(1.0 / 2.2));
+  const vec3 Y = vec3(0.2126, 0.7152, 0.0722);
+  float dark = dot(sg, Y) - dot(pow(textureLod(uPlate, e, lod + 1.0).rgb, vec3(1.0 / 2.2)), Y);
+  float g = smoothstep(0.02, 0.06, dark) * band;
+  return pow(max(pow(sky, vec3(1.0 / 2.2)) + (wg - sg) * g, 0.0), vec3(2.2));
+}
+vec3 plateAt(vec2 uv) { return mix(zenOut(uv, 0.0), texture(uPlate, uv).rgb, onPlate(uv)); }
+vec3 plateBiasAt(vec2 uv, float b) { return mix(zenOut(uv, b), texture(uPlate, uv, b).rgb, onPlate(uv)); }
+vec3 plateLodAt(vec2 uv, float l) { return mix(zenOut(uv, l), textureLod(uPlate, uv, l).rgb, onPlate(uv)); }
 vec3 keyAt(vec2 uv) { return mix(vec3(0.0, 0.0, zenAt(uv).a), texture(uKey, uv).rgb, onPlate(uv)); }`;
 
 const MIST = `uniform vec3 uMist;   // ring radius scale, steel share, steel cap
@@ -1415,7 +1450,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     bitmap(`${ASSET}zenith.png`),
   ]);
   const [IW, IH] = meta.image;
-  const view = pitchView(IW, IH, clamp(num("pitch", PITCH), -10, 50));
+  const view = pitchView(IW, IH, clamp(num("pitch", PITCH), -10, 60));
   const metal = metalTint(plateBm, meta);
   const plateMtf = PLATE_MTF;
   const plateTex = upload(gl, plateBm);
@@ -1568,7 +1603,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     haloed = target(w, h, "rgba");
     filmed = target(w, h, "disp");
     film.resize(w, h);
-    // Cover the box with the photograph, then crop in to the view. Rows stay
+    // Scale to VIEW.zoom of cover (wider than the photograph), then place the view. Rows stay
     // rows under a pitch, so the plate's outline in view px is a trapezoid
     // with level top and bottom, narrow at the top, and so is ZEN_BOX's. The
     // crop stays inside ZEN_BOX, above the plate's bottom, and inside the
@@ -1593,11 +1628,11 @@ export async function createCatenary(host, { embedded = false } = {}) {
     const yL = view.view(e, VIEW.clear[0])[1];
     const yR = view.view(IW - e, VIEW.clear[1])[1];
     const vTop = num("viewTop", VIEW.top);
-    const zoom = clamp(num("viewZoom", VIEW.zoom), 0.5, 3);
+    const zoom = clamp(num("viewZoom", VIEW.zoom), 0.3, 3);
     const poleAt = num("poleAt", VIEW.poleAt);
     const top = view.view(VIEW.mast[0], vTop)[1];
     const mastX = view.view(VIEW.mast[0], VIEW.mast[1])[0];
-    let k = Math.max(cover, Math.min(cover * zoom, (w * zoom) / IW));
+    let k = cover * zoom;
     let x0 = 0;
     let y0 = 0;
     for (let it = 0; it < 400; it++, k *= 1.01) {
@@ -1744,6 +1779,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform1i(pr.u.uZen, 3);
     gl.uniform4fv(pr.u.uZenBox, ZEN_BOX);
     gl.uniform1f(pr.u.uZenGrain, ZEN_GRAIN);
+    gl.uniform4fv(pr.u.uRun, RUN);
     gl.activeTexture(gl.TEXTURE0);
   };
   const drawScene = () => {
