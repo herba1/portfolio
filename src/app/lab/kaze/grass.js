@@ -17,9 +17,10 @@
 // into 4x MSAA targets, premultiplied, so every edge is the blade's own
 // coverage of the pixel: no matte, no alpha test, no fringe of another colour.
 //
-// Two layers: the anchor (one tall culm with a seed head at your shoulder,
-// near-black olive, full resolution, sharp) and the rest (half resolution, so
-// slightly diffused behind it), lit against the light: a dark core and a
+// Two layers: the near one at full resolution (the field's blades nearer
+// than about 30 cm, nearly in focus, the brome culms, and the anchor, one
+// tall culm with a seed head at your shoulder, near-black olive, sharp) and
+// the field behind (half resolution, so slightly diffused behind it), lit against the light: a dark core and a
 // warm yellow-green rim on the side toward the sun, opaque at every
 // distance, so the field is a low dark silhouette under the sky, never a
 // pale ghost over the cloud, and the anchor stands clear above it.
@@ -179,16 +180,21 @@ function builder(cam) {
   return { ribbon, st, raw: () => ({ v, idx, nv }), out: () => ({ verts: new Float32Array(v), index: new Uint32Array(idx), count: idx.length }) };
 }
 
-// One layer from two builders, the second drawn over the first.
-function merged(a, b) {
-  const A = a.raw();
-  const B = b.raw();
-  const index = new Uint32Array(A.idx.length + B.idx.length);
-  index.set(A.idx);
-  for (let i = 0; i < B.idx.length; i++) index[A.idx.length + i] = B.idx[i] + A.nv;
-  const verts = new Float32Array(A.v.length + B.v.length);
-  verts.set(A.v);
-  verts.set(B.v, A.v.length);
+// One layer from several builders, each drawn over the one before.
+function merged(...bs) {
+  const raws = bs.map((b) => b.raw());
+  const index = new Uint32Array(raws.reduce((n, r) => n + r.idx.length, 0));
+  const verts = new Float32Array(raws.reduce((n, r) => n + r.v.length, 0));
+  let ni = 0;
+  let nf = 0;
+  let base = 0;
+  for (const r of raws) {
+    for (let i = 0; i < r.idx.length; i++) index[ni + i] = r.idx[i] + base;
+    verts.set(r.v, nf);
+    ni += r.idx.length;
+    nf += r.v.length;
+    base += r.nv;
+  }
   return { verts, index, count: index.length };
 }
 
@@ -281,6 +287,13 @@ export function buildGrass() {
   // the three brome culms round the frame, drawn with the rest but over it
   // (they are the nearest of it)
   const shoulder = builder(cam);
+  // the field's blades nearer than the anchor: drawn at full resolution
+  // with the anchor, under the brome culms and it, and given only a little
+  // of the lens's defocus. At half resolution and fully defocused they
+  // printed as one soft dark olive smear along the bottom of the frame; at
+  // full resolution and nearly in focus each is its own crisp silhouette.
+  const fore = builder(cam);
+  const FORE = 0.3;
   const at = (D, phi) => [D * Math.sin(phi * DEG), D * Math.cos(phi * DEG), 0];
 
   // ---- the ring, on screen ----
@@ -384,6 +397,9 @@ export function buildGrass() {
   };
   for (const a of anchors) {
     const lit = !a.hero;
+    // the anchor's foot, nearer than the focus, takes only a little of the
+    // lens's defocus, so the stalk runs in as one sharp line, not a smear
+    near.st.focus = 0.2;
     culmWithHead(lit ? shoulder : near, R, {
       root: at(a.D, a.phi),
       az: a.phi * DEG,
@@ -437,13 +453,17 @@ export function buildGrass() {
     if (!inFrame(root, it.L)) continue;
     // depth: 0 at your shoulder .. 1 the field behind (more sky in front)
     const dep = Math.min(1, Math.max(0, (it.D - 0.15) / 0.75));
-    rest.st.depth = dep;
+    const into = it.D < FORE ? fore : rest;
+    into.st.depth = dep;
     // the nearest of the low fringe take only part of the lens's defocus,
     // so along the edge they hold as soft-edged blades rather than
     // spreading into dark swaths (in the corners, where the lens is widest,
     // fully defocused they smeared into streaks, like motion blur)
     const nf = Math.min(1, Math.max(0, (it.D - 0.09) / 0.2));
-    rest.st.focus = 0.25 + 0.55 * nf * nf * (3 - 2 * nf);
+    // (the near field: from a twentieth of it at your cheek to a quarter by
+    // the time it meets the field behind, and thinner the nearer it is)
+    const fk = Math.min(1, Math.max(0, (it.D - 0.09) / (FORE - 0.09)));
+    into.st.focus = it.D < FORE ? 0.05 + 0.2 * fk * fk : 0.25 + 0.55 * nf * nf * (3 - 2 * nf);
     const vary = 0.8 + 0.4 * R();
     const dry = R() < 0.1 ? 0.5 : 0;
     // a pace off the blades are no paler than at your shoulder: against
@@ -452,7 +472,7 @@ export function buildGrass() {
     const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep * 0.3), lin(0x7a7434), dry).map((c) => c * vary);
     // mostly a droop outward, along its own line; a third of them across it
     const across = R() < 0.25;
-    blade(rest, R, {
+    blade(into, R, {
       root,
       az: (it.phi + (R() - 0.5) * 3) * DEG,
       lean: 0.01 + 0.07 * R(),
@@ -460,7 +480,7 @@ export function buildGrass() {
       droopTurn: across ? (R() < 0.5 ? -1 : 1) * (0.9 + 0.5 * R()) : (R() - 0.5) * 0.5,
       L: it.L,
       // a leaf 3-7 mm wide
-      w0: (0.0022 + 0.0024 * R()) * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.4 : 1),
+      w0: (0.0022 + 0.0024 * R()) * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.4 : 1) * (it.D < FORE ? 0.6 + 0.4 * fk : 1),
       c0: base,
       c1: tipC,
       trans: 1,
@@ -469,6 +489,7 @@ export function buildGrass() {
   }
 
   rest.st.focus = 1;
+  fore.st.focus = 1;
 
   // ---- the nearest few: at your cheek, thin and dark, nearly in focus ----
   // Drawn over the anchor at full resolution and kept off its azimuth (and
@@ -489,7 +510,7 @@ export function buildGrass() {
     if (!inFrame(root, L)) continue;
     k++;
     near.st.depth = 0;
-    near.st.focus = 0.12;
+    near.st.focus = 0.05;
     const v = 0.85 + 0.3 * R();
     blade(near, R, {
       root,
@@ -506,7 +527,9 @@ export function buildGrass() {
     });
   }
   near.st.focus = 1;
-  return { near: near.out(), rest: merged(rest, shoulder) };
+  // full resolution: the near field, the brome culms over it as before,
+  // then the anchor and the blades at your cheek
+  return { near: merged(fore, shoulder, near), rest: rest.out() };
 }
 
 export const GRASS_VERT = `#version 300 es

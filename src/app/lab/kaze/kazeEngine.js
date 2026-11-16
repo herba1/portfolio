@@ -194,16 +194,19 @@ void main() {
   float warmK = exp(-r / 0.075) * smoothstep(0.15, 0.55, Ys);
   const vec3 PALE = vec3(1.0, 0.93, 0.82);
   sky = mix(sky, Ys * PALE / dot(PALE, vec3(0.2126, 0.7152, 0.0722)), 0.85 * warmK);
-  // Then the exposure itself, over it: a disc whose top is flat (overexposed
-  // film, a soft plateau, not a gaussian's point) rolling off over a soft
-  // shoulder, r^4 rather than r^2, so it holds bright and then lets go; a
-  // pale warm-white inner glow round it; and a wide faint skirt that fades
-  // into the cyan. Each step out is cooler than the last, from the warm
-  // core (about #FFF4E0 once printed) through pale warm white to the sky.
-  float disc = 1.0 / (1.0 + pow(r / 0.024, 4.0));
-  float glow = exp(-r / 0.04);
+  // Then the exposure itself, over it: no disc (a flat-topped r^4 disc ran
+  // into the shoulder and printed a flat cream plate), but a small gaussian
+  // rounding the peak over a tight exponential body, so only the very core
+  // reaches the film's white and the light falls away from it at once and
+  // steadily; a warm inner glow round it, carrying the warmth well out; and
+  // a wide faint skirt that fades into the cyan. Each step out is cooler
+  // than the last, from the warm core (about #FFF6E7 once printed) through
+  // warm pale white to the sky.
+  float core = exp(-r * r / (2.0 * 0.006 * 0.006));
+  float body = exp(-r / 0.016);
+  float glow = exp(-r / 0.045);
   float skirt = exp(-r / 0.13);
-  sky += vec3(1.0, 0.74, 0.5) * 0.9 * disc + vec3(1.0, 0.88, 0.74) * 0.32 * glow + vec3(1.0, 0.97, 0.93) * 0.05 * skirt;
+  sky += vec3(1.0, 0.74, 0.5) * (0.3 * core + 0.4 * body) + vec3(1.0, 0.8, 0.6) * 0.3 * glow + vec3(1.0, 0.97, 0.93) * 0.05 * skirt;
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:
