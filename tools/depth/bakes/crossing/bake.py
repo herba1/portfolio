@@ -68,6 +68,9 @@ postflank.py (after billows.py) carries the cumulus on behind the signal
 post as round lobes under the crossbuck's arm and out past the upper lamp
 (widening the clouds card on the right), so a swing never slides the post
 on to the cloud's flank and leaves a bite of clear sky keyed along it.
+Last, cloudtone.py (after postflank.py) takes the milky cyan veil off the
+cumulus's interior: its colour only (alpha and matte untouched) is regraded
+so the sunlit billows come up warm-white and the folds go skylight-blue.
 """
 import sys
 import os
