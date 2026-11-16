@@ -15,6 +15,8 @@
 #      fragment that window brings in: the distant slatted tower top left)
 #   -> clean.py --street plate.jpg aux.png plate.jpg aux.png (the street
 #      furniture across the block's corner, street.png)
+#   -> seam.py plate.jpg plate.jpg (the thin veil's cut-out edge right of
+#      the block's corner, given a soft, frayed density falloff)
 # aux_old.png for reproj.py: git show 39c5ed8:public/lab/polariser/aux.png > aux_old.png
 # HDRI: Poly Haven docklands_01 at 16k, its native maximum (the 8k gave the
 # plate only about 11 px/deg at the frame centre, so facades and window grids
