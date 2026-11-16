@@ -66,7 +66,7 @@ precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uSky;    // the sky
-uniform sampler2D uRest;   // the grass behind, half res, premultiplied linear
+uniform sampler2D uRest;   // the grass behind, full res (mipmapped), premultiplied linear
 uniform sampler2D uNear;   // the anchor, full res, premultiplied linear
 uniform float uCloudT;     // cloud flow clock
 uniform vec2 uCloudV;      // cloud drift at the top of the frame, uv / s
@@ -211,7 +211,10 @@ void main() {
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:
   // a blade's edge is only ever the blade and the sky behind, never a matte.
-  vec4 gr = texture(uRest, vUv);
+  // the field behind a touch diffused: a third of the way into its first
+  // mip, a box of the full-resolution MSAA resolve, so its edges soften
+  // evenly instead of stepping
+  vec4 gr = textureLod(uRest, vUv, 0.35);
   vec4 gn = texture(uNear, vUv);
   vec3 col = sky * (1.0 - gr.a) + gr.rgb;
   col = col * (1.0 - gn.a) + gn.rgb;
@@ -610,18 +613,19 @@ export async function createKaze(host) {
     freeTarget(gl, restT);
     hlFree();
     cam = camera(W, H);
-    // the anchor at full resolution, the rest at half (its diffusion)
+    // Both layers at full resolution, 4x MSAA. The field behind was drawn
+    // at half and scaled up for its diffusion, but its few coverage levels
+    // stretched over two pixels printed every edge as a serrated stair; its
+    // diffusion is now a light read into its own mips (SCENE below).
     nearT = msaaTarget(gl, L.rw, L.rh, floatOk);
     if (!nearT.ok) {
       freeTarget(gl, nearT);
       nearT = msaaTarget(gl, L.rw, L.rh, false);
     }
-    const hw = Math.max(2, Math.round(L.rw / 2));
-    const hh = Math.max(2, Math.round(L.rh / 2));
-    restT = msaaTarget(gl, hw, hh, floatOk);
+    restT = msaaTarget(gl, L.rw, L.rh, floatOk);
     if (!restT.ok) {
       freeTarget(gl, restT);
-      restT = msaaTarget(gl, hw, hh, false);
+      restT = msaaTarget(gl, L.rw, L.rh, false);
     }
     sceneT = target(gl, L.rw, L.rh, floatOk);
     if (!sceneT.ok) {

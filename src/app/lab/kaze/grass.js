@@ -20,10 +20,12 @@
 // Two layers: the near one at full resolution (the field's blades nearer
 // than about 30 cm, nearly in focus, the brome culms, and the anchor, one
 // tall culm with a seed head at your shoulder, near-black olive, sharp) and
-// the field behind (half resolution, so slightly diffused behind it), lit against the light: a dark core and a
-// warm yellow-green rim on the side toward the sun, opaque at every
-// distance, so the field is a low dark silhouette under the sky, never a
-// pale ghost over the cloud, and the anchor stands clear above it.
+// the field behind (full resolution and 4x MSAA too, read a touch into its
+// own mips so it sits slightly diffused behind it), lit against the light:
+// a near-black deep green body and a thin yellow-green transmission rim on
+// the edge toward the sun, opaque at every distance, so the field is a ring
+// of varied dark shapes framing the sky, never a pale ghost over the cloud
+// or an olive comb, and the anchor stands clear above it.
 
 const DEG = Math.PI / 180;
 
@@ -257,11 +259,14 @@ function culmWithHead(b, R, o) {
 // places.
 function blade(b, R, o) {
   const { root, az, L, w0, c0, c1, trans, segs } = o;
-  const lc = curve(root, az, o.lean, o.droop, 2.2, L, segs, null, az + o.droopTurn);
-  const tip = lc.pts[lc.pts.length - 1];
   const tw = R() * 6.283;
   const twr = (R() - 0.5) * 2.4;
   const ph = R() * 6.283;
+  // thinned out: it still takes its draws from the layout's random stream,
+  // so every blade kept stands exactly where it stood
+  if (o.skip) return;
+  const lc = curve(root, az, o.lean, o.droop, 2.2, L, segs, null, az + o.droopTurn);
+  const tip = lc.pts[lc.pts.length - 1];
   b.ribbon(lc, (s) => w0 * PROFILE.blade(s) * (0.55 + 0.45 * Math.abs(Math.cos(tw + twr * s))), tip, (s) => AMP * L * s * s, c0, c1, trans, ph);
 }
 
@@ -280,6 +285,9 @@ function inFrame(root, H) {
 export function buildGrass() {
   const cam = [0, 0, CAM.h];
   const R = rng(11);
+  // a second stream for each blade's own width, length and hue and for the
+  // thinning, so the layout's stream (and so the frame) is unchanged
+  const R2 = rng(29);
   // the anchor, and the few blades nearer than it (dark, wide, out of focus,
   // drawn over it at full resolution)
   const near = builder(cam);
@@ -408,9 +416,9 @@ export function buildGrass() {
       nodAz: a.nodAz * DEG,
       L: heightTo(a.phi, a.D, edgeOf(a.phi) - (edgeOf(a.phi) - OPEN) * a.k) - CAM.h,
       w0: lit ? 0.0015 : 0.0017,
-      cStem: lit ? lin(0x2c3a1a) : ink,
-      cTip: lit ? lin(0x4a5a26) : inkTip,
-      cHead: lit ? lin(0x3c4820) : ink,
+      cStem: lit ? lin(0x18240f) : ink,
+      cTip: lit ? lin(0x243216) : inkTip,
+      cHead: lit ? lin(0x1e2a12) : ink,
       trans: lit ? 1 : 0,
       segs: 72,
       leaves: 0,
@@ -465,11 +473,34 @@ export function buildGrass() {
     const fk = Math.min(1, Math.max(0, (it.D - 0.09) / (FORE - 0.09)));
     into.st.focus = it.D < FORE ? 0.05 + 0.2 * fk * fk : 0.25 + 0.55 * nf * nf * (3 - 2 * nf);
     const vary = 0.8 + 0.4 * R();
-    const dry = R() < 0.1 ? 0.5 : 0;
-    // a pace off the blades are no paler than at your shoulder: against
-    // the light they stay dark silhouettes, carried by their rims
-    const base = mix3(mix3(lin(0x1c2614), lin(0x34421f), dep * 0.3), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
-    const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep * 0.3), lin(0x7a7434), dry).map((c) => c * vary);
+    const dry = R() < 0.1 ? 1 : 0;
+    // Against the light a leaf's body is near-black deep green, #0F1A0C to
+    // #1C2A14; only its sunward margin glows (the rim, in GRASS_FRAG). Each
+    // blade its own: most a deep sap green, some cooler and bluer, the odd
+    // one dry and toward a dark umber, and its value its own, so the ring
+    // reads as separate dark shapes, never one olive comb.
+    const fam = R2();
+    const tv = R2();
+    const core = dry
+      ? mix3(lin(0x1a1a0c), lin(0x262412), tv)
+      : fam < 0.28
+        ? mix3(lin(0x0d1810), lin(0x162418), tv)
+        : fam < 0.82
+          ? mix3(lin(0x0f1a0c), lin(0x1c2a14), tv)
+          : mix3(lin(0x161c0b), lin(0x222a10), tv);
+    // a pace off a touch less dark, the air between (GRASS_FRAG adds it)
+    const base = core.map((c) => c * vary * (1 + 0.15 * dep));
+    const tipC = mix3(core, lin(0x2c3816), 0.35).map((c) => c * vary * (1 + 0.15 * dep));
+    // In the band below the zenith (ahead of you, the bottom edge's middle)
+    // the field is thinned by about two in five, so the bottom of the frame
+    // is a varied run of dark shapes with sky between, not a comb, and the
+    // hero culm stands clear in it.
+    const band = 1 - Math.min(1, Math.max(0, (dAz(it.phi, 0) - 34) / 16));
+    const skip = R2() < 0.38 * band;
+    // its own width and length: a few broad, most medium, some fine; and
+    // some cut short, so the tips do not all stop on one line
+    const wk = 0.5 + 1.15 * Math.pow(R2(), 1.4);
+    const lk = 0.62 + 0.46 * R2();
     // mostly a droop outward, along its own line; a third of them across it
     const across = R() < 0.25;
     blade(into, R, {
@@ -478,13 +509,14 @@ export function buildGrass() {
       lean: 0.01 + 0.07 * R(),
       droop: across ? 0.08 + 0.14 * R() : 0.04 + 0.12 * R(),
       droopTurn: across ? (R() < 0.5 ? -1 : 1) * (0.9 + 0.5 * R()) : (R() - 0.5) * 0.5,
-      L: it.L,
-      // a leaf 3-7 mm wide
-      w0: (0.0022 + 0.0024 * R()) * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.4 : 1) * (it.D < FORE ? 0.6 + 0.4 * fk : 1),
+      L: Math.min(it.L, it.L * lk),
+      // a leaf 3-7 mm wide, and then its own
+      w0: (0.0022 + 0.0024 * R()) * wk * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.4 : 1) * (it.D < FORE ? 0.6 + 0.4 * fk : 1),
       c0: base,
       c1: tipC,
       trans: 1,
       segs: Math.round(16 + 20 * (1 - dep)),
+      skip,
     });
   }
 
@@ -564,6 +596,7 @@ out float vDepth;
 out float vHalf;
 out float vBlur;
 out float vH;
+out vec3 vRim;
 
 vec2 proj(vec3 P) {
   vec3 d = normalize(P - uCam);
@@ -626,6 +659,10 @@ void main() {
   float h1 = fract(aB.z * 13.731);
   float h2 = fract(aB.z * 71.377 + 0.31);
   vCol = max(hueTurn(aCol, (h1 - 0.5) * 2.0 * 0.105), vec3(0.0)) * (0.9 + 0.2 * h2);
+  // and its rim, the light through its margin, its own too: from a cool
+  // sap green to a warm straw, brighter on some than others
+  float h3 = fract(aB.z * 37.913 + 0.67);
+  vRim = max(hueTurn(vec3(0.6, 0.58, 0.1), (h3 - 0.45) * 0.42), vec3(0.0)) * (0.75 + 0.5 * h2);
   if (uDebug > 0.5) vCol = mix(vCol, vec3(1.0, 0.2, 0.1), clamp(length(b) * lv * 6.0, 0.0, 1.0));
   vTrans = aK.y;
   vAlong = aB.x;
@@ -654,6 +691,7 @@ in float vDepth;
 in float vHalf;           // the blade's half-width here, px
 in float vBlur;           // its disc of confusion, px
 in float vH;              // height above the ground, m
+in vec3 vRim;             // the light through its margin, this plant's own
 uniform vec2 uSun;        // the sun on screen, NDC
 uniform float uAspect;
 uniform vec4 uView;       // image uv on screen
@@ -664,11 +702,14 @@ out vec4 outColor;
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
 void main() {
-  // A grass leaf against the light, not a flat ribbon.
-  // Root to tip: the base sits in the shade of the sward and is thick; the
-  // tip is thin and up in the light.
+  // A grass leaf against the light: a silhouette. Its body is near-black
+  // deep green (the vertex colour, #0F1A0C to #1C2A14 printed), the light
+  // only reaching you through its thin sunward margin, so the field is a
+  // ring of dark shapes framing the sky and the rims draw it.
+  // Root to tip: the base sits in the shade of the sward; the tip is thin
+  // and up in the light, a little less dark.
   float s = clamp(vAlong, 0.0, 1.0);
-  float lift = mix(0.55, 1.05, smoothstep(0.0, 1.0, pow(s, 0.8)));
+  float lift = mix(0.8, 1.1, smoothstep(0.0, 1.0, pow(s, 0.8)));
   vec3 c = vCol * lift;
   // where across the blade itself this is, px, and how much of the pixel
   // the defocused blade covers: the overlap of the blade with the disc
@@ -687,48 +728,40 @@ void main() {
   vec2 d = (vNdc - uSun) * vec2(uAspect, 1.0);
   float sn = exp(-dot(d, d) / 0.35);
   float behind = max(cloud, 0.45 * sn);
-  // Transmission: a thin blade with bright sky behind glows a translucent
-  // yellow-green (#9DB04A), stronger toward the thin tip, less down the
-  // thicker midrib. Held back in the body (a leaf against the light is dark
-  // through its middle) and given to the rim below instead.
-  const vec3 TRANS = vec3(0.337, 0.431, 0.069);
   // Down in the sward the light has come through every blade above it: the
-  // lower a stretch of leaf stands, the darker it is and the less it glows,
-  // so the field sits on a dark mass along the frame's edges.
+  // lower a stretch of leaf stands, the darker it is.
   float sward = smoothstep(0.06, 0.5, vH);
-  c *= mix(0.4, 1.0, sward);
-  float tw = lit * behind * mix(0.35, 1.0, s) * mix(0.25, 1.0, sward);
-  c = mix(c, TRANS * mix(0.55, 1.0, s), 0.2 * tw);
-  // Across, over both: a shallow trough read as a cylinder, the edges about
-  // a quarter darker, and a soft paler midrib down the centre.
-  float cyl = mix(0.75, 1.0, sqrt(max(0.0, 1.0 - x * x)));
-  float rib = 1.0 + 0.12 * exp(-x * x / 0.02);
-  c *= cyl * rib;
-  // Backlit: the core darkens, toward the sun-facing half and away from it
-  // alike, so the light through the margin is what carries the blade.
-  c *= mix(1.0, 0.62, lit * exp(-x * x / 0.18));
+  c *= mix(0.55, 1.0, sward);
+  // Transmission through the body: only a whisper of yellow-green, toward
+  // the thin tip with bright cloud behind; the body stays dark.
+  const vec3 TRANS = vec3(0.337, 0.431, 0.069);
+  float tw = lit * behind * s * s * sward;
+  c += TRANS * 0.03 * tw;
+  // Across: a shallow trough, the edges a little darker than the middle.
+  c *= mix(0.8, 1.0, sqrt(max(0.0, 1.0 - x * x)));
   // The air between you and a blade: a pace or two of it, no more, so it
   // only cools the farthest blades a touch toward the sky's hue at a low
-  // value. A leaf against the light is opaque and darker than what is
-  // behind it, never a pale ghost of the cloud: the field stays a solid
-  // dark silhouette under the sky and its rims carry it.
+  // value. Still opaque and darker than what is behind it, never a ghost.
   float dep = clamp(vDepth, 0.0, 1.0);
-  float air = lit * (0.03 + 0.07 * smoothstep(0.0, 1.0, dep));
+  float air = lit * (0.02 + 0.05 * smoothstep(0.0, 1.0, dep));
   vec3 tint = mix(vec3(0.78, 1.0, 0.5), vec3(0.94, 0.98, 1.0), smoothstep(0.2, 0.9, dep));
   c = mix(c, skyFar * tint * 0.3, air);
-  // The sun-facing edge: a thin warm yellow-green rim where the light
-  // grazes through the leaf's margin. Against the light it is always there
-  // (the sun is in front of you, up to the left), brighter toward the sun
-  // and with bright cloud behind, warmer than the transmission in the body;
-  // it is the light coming through to you, so the air dims it only a little.
-  const vec3 RIM = vec3(0.62, 0.6, 0.1);
-  // Only the margin itself: a couple of pixels in from the sunward edge
-  // (a little more on a wide blade), so a broad leaf near you stays dark
-  // through its body with a bright line along one side.
-  float edge = exp(-max(0.0, vHalf - abs(px)) / (1.2 + 0.1 * vHalf));
-  float rim = smoothstep(0.3, 0.85, vSunward) * edge;
-  float rimK = (0.35 + 0.6 * sn + 0.5 * behind) * mix(0.55, 1.0, s) * (1.0 - 0.2 * dep);
-  c += RIM * rim * rimK * (0.04 + 0.96 * lit);
+  // The sun-facing edge: a thin yellow-green rim where the light grazes
+  // through the leaf's margin, the only colour the field shows. Brighter
+  // toward the sun and with bright cloud behind; the air dims it a little.
+  // Only the margin itself, a pixel or two in from the sunward edge (a
+  // little more on a wide blade), so a broad leaf stays dark through its
+  // body with one bright line along a side; on a hair-thin tip the margin
+  // is the whole blade, so it is held back there.
+  // Out of focus the line spreads over the blade's disc of confusion, its
+  // light shared out over it, so a soft blade gets a soft dim rim, not a
+  // broad bright band over its whole blurred skirt.
+  float rw = 0.9 + 0.08 * vHalf;
+  float edge = exp(-max(0.0, vHalf - abs(px)) / (rw + vBlur)) * rw / (rw + 1.5 * vBlur);
+  float rim = smoothstep(0.2, 0.75, vSunward) * edge;
+  float rimK = (0.7 + 0.7 * sn + 0.6 * behind) * mix(0.6, 1.0, s) * (1.0 - 0.2 * dep) * mix(0.6, 1.0, sward);
+  rimK *= mix(0.5, 1.0, smoothstep(0.8, 2.5, vHalf));
+  c += vRim * rim * rimK * (0.03 + 0.97 * lit);
   // opaque at every distance: a blade's coverage is its own, near or far
   float cov = vA * dof;
   outColor = vec4(c * cov, cov);
