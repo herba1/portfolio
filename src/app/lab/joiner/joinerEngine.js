@@ -141,6 +141,24 @@ float skyWeight(vec2 uv, int r) {
   return smoothstep(0.3, 0.95, e);
 }
 
+// How far the open sky reaches from a structure, in plate pixels, read off
+// the same eroded matte out to r rings: each ring that is still clear of
+// structure adds its share (the ring's feathered weight), so the count runs
+// smoothly from 0 at a wall to r in open sky.
+float skyReach(vec2 uv, int r) {
+  vec2 t = 1.0 / vec2(textureSize(uMask, 0));
+  float e = texture(uMask, uv).r;
+  float n = 0.0;
+  for (int j = 1; j <= r; j++) {
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * 0.785398 + float(j) * 0.39;
+      e = min(e, texture(uMask, uv + vec2(cos(a), sin(a)) * t * float(j)).r);
+    }
+    n += smoothstep(0.3, 0.95, e);
+  }
+  return n;
+}
+
 void main() {
   vec2 s = vec2(vUv.x - 0.5, 0.5 - vUv.y) * 2.0 * uHalf;   // y down
   vec3 d = normalize(uC * uF + uR * s.x + uD * s.y);
@@ -167,6 +185,12 @@ void main() {
     vec3 moved = rad(texture(uCloud, uv2).rgb);
     vec3 still = rad(texture(uSky, uv).rgb);
     float cover = 1.0 - smoothstep(0.42, 0.6, (moved.b - moved.r) / (moved.b + 1e-4));
+    // The drifted deck knows nothing of the structures, so a cumulus moved
+    // up against a facade would end exactly on its outline as a white rim
+    // that traces the building. The cloud thins out over the last few plate
+    // pixels before any structure instead: there the open blue meets the
+    // wall, and the cloud edge lies a little off it, on its own shape.
+    cover *= smoothstep(1.0, 7.0, skyReach(uv, 7));
     vec3 sky = mix(still, moved, cover);
     // The structures' rims still hold the old sky: the anti-aliased edge, and
     // the band the eroded matte keeps back from a facade or a pole. Wherever
@@ -370,6 +394,9 @@ void main() {
   // is blurred over a disk about twelve plate pixels across before it is
   // used: a cloud's edge then thins out into the cobalt over the width a real
   // cumulus fringe has, instead of a paper cutout with a pale rim.
+  // Only taps on the sky matte count: a wall is no more cloud than it is
+  // blue, and read as cloud it would grade the strip of sky along every
+  // facade as a white rim that traces the building's outline.
   float aPix = clearKey(rawLin(vUv));
   float ak = aPix;
   float aw = 1.0;
@@ -378,8 +405,10 @@ void main() {
     float w = exp(-2.0 * float(j * j) / 9.0);
     for (int i = 0; i < 8; i++) {
       float a = float(i) * 0.785398 + float(j) * 0.26;
-      ak += w * clearKey(rawLin(vUv + r * vec2(cos(a), sin(a))));
-      aw += w;
+      vec2 p = vUv + r * vec2(cos(a), sin(a));
+      float wt = w * smoothstep(0.3, 0.9, texture(uRaw, p).a);
+      ak += wt * clearKey(rawLin(p));
+      aw += wt;
     }
   }
   ak /= aw;
