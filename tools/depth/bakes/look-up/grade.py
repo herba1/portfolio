@@ -207,9 +207,11 @@ def _composite(eq, P, w, elev, wsky, sky2, prof, geo=None):
     eq *= P['expo'] * np.array(P['restTint'], np.float32)
     rest = _buildings(eq, wsky, w, P, elev) if P.get('bGrade', 1) else eq
     del eq
+    # the towers take the soft shoulder; the sky has had its own (_sky2)
+    rest = _shoulder(rest, P)
     sky -= rest; sky *= wsky[..., None]; sky += rest
     del rest
-    return _shoulder(sky, P), wsky, alpha, prof
+    return sky, wsky, alpha, prof
 
 # The street's sky is far brighter than the new one, so a tower edge pixel that
 # is part street sky would glow as a pale rim against the cobalt. Along the
@@ -279,28 +281,35 @@ def _sky2(K, P, w, elev, prof, geo=None):
         lon = ((np.arange(K.shape[1]) - pw + 0.5) / w * 360).astype(np.float32)[None, :]
         geo = (elev, lon, lambda v: np.asarray(v, np.float32))
     lit = _sunlit(alpha, Yown, w, geo, P)
-    tLit = np.array(P['cloudLit'], np.float32); tSh = np.array(P['cloudShade'], np.float32)
-    tint = tSh + (tLit - tSh) * lit[..., None]
-    tint /= (tint @ LUMA)[..., None]
+    lit = _glow_lit(lit, alpha, Yown, w, P)
+    # (eased at litR degrees: the key and the fold tint now land unsqueezed by
+    # any shoulder, so lit's own fine flicker would mottle the terminator)
+    if P.get('litR', 0) > 0:
+        lit = cv2.GaussianBlur(lit, (0, 0), w / 360 * P['litR'])
+    np.clip(lit, 0, 1, out=lit)  # (powers of 1 - lit follow)
     K /= (Yc + 1e-5)[..., None]                          # the cloud's own chroma
-    K -= tint; K *= P['s2Keep']; K += tint               # toward the lit/shade tint
-    del tint
+    _cloud_chroma(K, lit, P)
     K /= np.maximum(K @ LUMA, 1e-5)[..., None]
     # a touch of form contrast around the cloud's mid level
     Yc *= np.clip(Yown / P['s2Mid'], 0.2, 5) ** P['s2Form'] * P['s2CloudGain']
     # skylight lift: the shaded bases are lit by the whole blue dome, so on
     # film they open up cool instead of sinking to grey
     Yc *= 1 + P.get('s2ShadeLift', 0) * (1 - smooth(P['s2ShLo'], P['s2ShHi'], Yown))
-    # the sun's key: sunward domes up, the folds and bases away from it down
-    Yc *= np.exp(P['sunKey'] * (lit - P['sunPivot']))
     # clarity inside the cloud only: the domes' own texture and edges, from
     # the capture's log luminance against a masked blur of it (sunClarR
     # degrees), soft-clipped so no edge rings
     Yc *= _clarity(Yown, alpha, w, P)
+    del Yown
+    # the cloud's own light into a shoulder that keeps its drawing; the sun's
+    # key goes on after it, so the shoulder never squeezes the sunward domes
+    # and the folds back together (a bright fold would sit in the highlights)
+    Yc = _dome_shoulder(Yc, alpha, w, P)
+    # the sun's key: sunward domes up, the folds and bases away from it down
+    Yc *= np.exp(P['sunKey'] * (lit - P['sunPivot']))
     # and the dome's skylight filling the shade, so the folds open up blue
     # instead of sinking to slate grey
     Yc += P['sunSky'] * (1 - lit) * alpha
-    del Yown, lit
+    del lit
     K *= Yc[..., None]
     del Yc
     # the open blue: a smooth cobalt ramp by elevation, lit by the capture's
@@ -310,8 +319,108 @@ def _sky2(K, P, w, elev, prof, geo=None):
     glow = np.clip(gap_Y / np.maximum(yref, 1e-4), 0.3, 4) ** P['s2Glow']
     del gap_Y
     glow *= P['skyGain'] * (1 - alpha)
-    K += skyc * glow[..., None]
+    skyc = skyc * glow[..., None]
+    del glow
+    K += _shoulder(skyc, P)
+    del skyc
+    _gamut_cap(K, P['domeCeil'], P['domeCapW'])
+    # a cloud's highlights land warm-neutral, never on the cyan side: where
+    # the blue under a bright rim (or a fold's last trace) would leave green
+    # above red, the highlight is drawn to the lit tint at its own luminance
+    # (taking green down alone would turn it violet)
+    Y = K @ LUMA
+    tLit = np.array(P['cloudLit'], np.float32); tLit /= float(tLit @ LUMA)
+    hg = smooth(P["hlLo"], P["hlHi"], Y) * smooth(0.1, 0.4, alpha)
+    hg *= smooth(0.0, 0.03, (K[..., 1] - K[..., 0]) / np.maximum(Y, 1e-4))
+    K += (Y[..., None] * tLit - K) * hg[..., None]
     return K, alpha, prof
+
+# The brightest masses are the sunlit ones: where the cloud's own light, at
+# glowR degrees, stands well above its usual level (glowLo..glowHi), the
+# relighting's gradient reading is overruled and the mass taken as lit. In
+# the capture's glare the dome term reads the glare's grain as domes and
+# flips lit from side to side every few pixels, which drew the brightest mass
+# as a camouflage of cream and fold blue (and, flattened by a shoulder, as the
+# mint patch at the zenith).
+def _glow_lit(lit, alpha, Yown, w, P):
+    if P.get('glowHi', 0) <= 0:
+        return lit
+    m = smooth(0.25, 0.7, alpha).astype(np.float32)
+    s_ = w / 360 * P['glowR']
+    lY = np.log(np.maximum(Yown, 1e-3)).astype(np.float32)
+    b = cv2.GaussianBlur(lY * m, (0, 0), s_) / (cv2.GaussianBlur(m, (0, 0), s_) + 1e-4)
+    g = smooth(float(np.log(P['glowLo'])), float(np.log(P['glowHi'])), b) * m
+    return (1 - (1 - lit) * (1 - g)).astype(np.float32)
+
+# The cloud's colour. The lit/shade split is one term, lit (see _sunlit), and
+# its complement s = 1 - lit is the cloud's shading. The sunward side takes the
+# warm-neutral key (cloudLit), easing to neutral as it turns away (litGamma
+# below 1 holds the warmth well round the dome); the folds
+# take the dome's skylight as a filter, a multiply locked at hue foldHue
+# (red cut fully, green cut by the share that puts the filter's hue there,
+# blue untouched; 215 degrees in linear light lands about 208 on the print,
+# the hue of the open sky around it), as deep as foldDepth at full shade and
+# eased in by foldGamma, so the sunward side stays clean cream. A filter never
+# adds green, so where the fold reaches into a cream dome the
+# light only cools toward blue and never turns mint.
+# K holds the cloud's own chroma (luma 1) and is worked in place.
+def _cloud_chroma(K, lit, P):
+    tLit = np.array(P['cloudLit'], np.float32); tLit /= float(tLit @ LUMA)
+    base = 1 + (tLit - 1) * (lit ** P['litGamma'])[..., None]
+    K -= base; K *= P['s2Keep']; K += base
+    del base
+    s = (1 - lit) ** P['foldGamma'] * P['foldDepth']
+    # hue h in (180, 240): blue full, red the floor, green between them
+    gshare = (240.0 - P['foldHue']) / 60.0
+    K[..., 0] *= 1 - s
+    K[..., 1] *= 1 - s * (1 - gshare)
+    return K
+
+# A shoulder for the cloud's light that keeps the domes drawn. The light is
+# the cloud's coverage (alpha) times its own brightness per coverage; that
+# brightness is split, in log, into a base (a masked blur at domeR degrees,
+# inside the cloud only, so the blue never darkens a rim) and the
+# mid-frequency detail riding on it, the shading of the domes. The base times
+# the coverage goes into the shoulder per pixel, from domeKnee rolling toward
+# domeTop, so thin and thick parts of a bright mass land close together as
+# before; the detail is put back on top, compressed past domeClip (log), so
+# the sunlit masses stay textured cream instead of a flat plateau of the
+# brightest value. domeKnee and domeTop are levels for the fully sunlit side: the key
+# (sunKey, applied after) lifts it by exp(sunKey (1 - sunPivot)) over the
+# shoulder's own scale.
+def _dome_shoulder(Yc, alpha, w, P):
+    kmax = float(np.exp(P['sunKey'] * (1 - P['sunPivot'])))
+    m = smooth(0.25, 0.7, alpha).astype(np.float32)
+    ae = np.clip(alpha, 0.3, 1).astype(np.float32)
+    lY = np.log(np.maximum(Yc / ae, 1e-4)).astype(np.float32)
+    s_ = w / 360 * P['domeR']
+    base = cv2.GaussianBlur(lY * m, (0, 0), s_) / (cv2.GaussianBlur(m, (0, 0), s_) + 1e-4)
+    # outside the cloud body the base is the pixel itself (no detail to keep)
+    base = lY + (base - lY) * m
+    det = lY - base
+    del lY
+    # (compressed past domeClip, log-like and with no ceiling: the glare of a
+    # silver lining is not carried whole, yet a big step never flattens to a
+    # plateau, so the drawing stays graded instead of two-tone)
+    c = P['domeClip']
+    det = np.arcsinh(det / c) * c
+    Yb = np.exp(base) * ae
+    del base
+    k, top = P['domeKnee'] / kmax, P['domeTop'] / kmax
+    Ys = np.where(Yb < k, Yb, k + (top - k) * (1 - np.exp(-(Yb - k) / (top - k)))).astype(np.float32)
+    return (Ys * np.exp(det)).astype(np.float32)
+
+# No channel past the encode range: a soft knee on the largest channel, the
+# pixel scaled as a whole so its hue holds (a clipped blue channel is what
+# turns a bright blue-cream mix mint). The knee is wide (width below ceil), so
+# a bright dome keeps its gradation into the top instead of piling up at it.
+# In place.
+def _gamut_cap(K, ceil, width):
+    c0 = ceil - width
+    M = K.max(-1)
+    Mn = np.where(M < c0, M, c0 + (ceil - c0) * (1 - np.exp(-(M - c0) / (ceil - c0))))
+    K *= (Mn / np.maximum(M, 1e-6))[..., None]
+    return K
 
 # The street's key light is a low warm sun from the right of the resting view
 # (sunAz, sunEl: the sunlit stone and the warm sills all sit on that side), but
@@ -547,10 +656,12 @@ def _tower_curve(graded, mblur, w, P):
 # saturated (the engine's film pass adds only a little blue depth on top), so
 # the frame deepens on a straight ramp to about #235fb0 at the zenith and
 # lightens toward the horizon.
-# cloudShade/s2Keep/s2ShadeLift/sunSky: the cloud bases take the dome's
-# skylight, opened up and cool; cloudLit and the engine's print shoulder warm
-# the sunward tops. sunKey (log luminance, about sunPivot) sets how far apart
-# the two sides sit; sunClar* is the clarity inside the cloud.
+# fold*/s2Keep/s2ShadeLift/sunSky: the cloud bases take the dome's skylight,
+# opened up and cool, as a skylight-blue filter (cloudShade only drives the
+# street's own sky); cloudLit and the engine's print shoulder warm the sunward
+# tops. sunKey (log luminance, about sunPivot) sets how far apart the two
+# sides sit, applied after the domes' own shoulder (dome*), so a fold never
+# rides up into the highlights; sunClar* is the clarity inside the cloud.
 P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          skyHex=['#0e5ec8', '#2c84d0', '#58a8e0', '#a6cbe9'], skyGain=0.8, gapTex=0.6,
          expo=0.36, cloudLit=[1.0, 0.92, 0.78], cloudShade=[0.32, 0.6, 1.0],
@@ -565,5 +676,8 @@ P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          s2CloudGain=1.0, s2Glow=0.5, eRad=2.0,
          # the clouds' key light (see _sunlit) and their clarity
          sunAz=120.0, sunEl=28.0, sunR1=2.0, sunW1=0.9, sunR2=5.0, sunW2=1.1, sunRb=0.6, sunWb=1.0,
-         sunRt=8.0, sunThick=1.2, sunBias=0.1, sunGain=2.0, sunKey=1.5, sunPivot=0.55,
-         sunClar=1.5, sunClarR=0.3, sunClarClip=0.3, sunSky=0.1)
+         sunRt=8.0, sunThick=1.2, sunBias=0.1, sunGain=2.0, sunKey=1.2, sunPivot=0.55,
+         sunClar=1.5, sunClarR=0.3, sunClarClip=0.3, sunSky=0.15,
+         # the cloud's colour and its shoulder (see _cloud_chroma, _dome_shoulder)
+         foldHue=215.0, foldDepth=0.8, foldGamma=1.5, litGamma=0.5, litR=0.5, glowR=1.0, glowLo=1.0, glowHi=3.0,
+         domeR=0.8, domeKnee=0.9, domeTop=1.35, domeClip=0.14, domeCeil=1.33, domeCapW=0.25, hlLo=0.7, hlHi=0.85)
