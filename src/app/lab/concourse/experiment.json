@@ -1,0 +1,26 @@
+{
+  "title": "Concourse",
+  "description": "Ryoji Iwata's photograph of the Shibuya scramble from above. Drag or scroll and the city's lights go out: the asphalt, the stripes and every shadow drop to black, and what is left is the people, each standing on their own slab of the real road, lit from beneath like a lightbox and lifted a little off the ground, a few of them glowing red. Swing round and the slabs are separate, the people standing up out of them. Hover a person and their panel brightens. Let go and the street comes back.",
+  "tags": ["generative", "WebGL", "Photo", "Segmentation"],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "herb's generative-art reference 4 (people cut out of an overhead crowd photo, each on their own glowing patch of floor, everything else black). One process pushed to the edge: real instance segmentation and a real floor plane. Every person was found (YOLOv10), cut with SAM 2.1 on their own crop, and stood on the road plane fitted to a MoGe-2 point map; each person owns one small slab centred on where their feet meet that plane, squared to the zebra stripes and kept apart from every other by a sliver of black, and the people are painted out of the road with LaMa so nothing ghosts as it dims.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.5], "to": [0.62, 0.44] },
+  "probe": [
+    { "idle": 3800 },
+    { "drag": [[0.4, 0.5], [0.64, 0.44]], "ms": 1800 },
+    { "idle": 400 },
+    { "drag": [[0.64, 0.44], [0.3, 0.56]], "ms": 2000 },
+    { "idle": 1800 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/aerial-photography-of-people-crossing-pedestrian-lane-dlBXwGlzfcs",
+      "file": "https://images.unsplash.com/photo-1522669830117-58a450cc6077?q=95&fm=jpg",
+      "author": "Ryoji Iwata (@ryoji__iwata)",
+      "licence": "Unsplash License",
+      "note": "4016x6016 original, Shibuya, Tokyo. People found with YOLOv10-m (onnx-community/yolov10m), cut with SAM 2.1 tiny, road plane and camera from MoGe-2 (tools/depth/normals.py), people removed with LaMa (tools/depth/fill.py); baked by tools/depth/bakes/concourse (detect.py, segment.py, bake.py)."
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+[
+  {
+    "round": 3,
+    "slug": "shatter",
+    "tag": "final",
+    "parent": "r2b",
+    "judged": 63,
+    "measured": 25.5,
+    "total": 88.5,
+    "pass": true,
+    "note": "Polish: burst variant made the default."
+  },
+  {
+    "round": 3,
+    "slug": "silk",
+    "tag": "final",
+    "parent": "r2b",
+    "judged": 61,
+    "measured": 20.7,
+    "total": 81.7,
+    "pass": true,
+    "note": "Polish: air variant default, shorter dead time before the next scarf drops in."
+  },
+  {
+    "round": 3,
+    "slug": "blinds",
+    "tag": "final",
+    "parent": "r2b",
+    "judged": 55,
+    "measured": 21.2,
+    "total": 76.2,
+    "pass": true,
+    "note": "Polish: the gap glow no longer blows out, so the next record reads clearly through the slats; only nearby slats bend (pacing 83 to 50ms p95)."
+  }
+]

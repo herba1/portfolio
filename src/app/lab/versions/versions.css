@@ -1,0 +1,332 @@
+.versions {
+  --versions-ground: #efede7;
+  --versions-paper: #fefdfa;
+  --versions-ink: var(--color-ink);
+  --versions-line: rgb(26 24 20 / 0.16);
+  /* The sheet's single hairline edge. */
+  --versions-edge: rgb(26 24 20 / 0.2);
+  /* Pencil: what a correction looks like before it is inked, at the
+     secondary ink's strength (never fainter), warmed to the paper. */
+  --versions-pencil: #6b665e;
+  --versions-cut: #c8553d;
+  /* Body sits at 460 on the ladder; the scale has no named rung for it. */
+  --font-weight-body: 460;
+  /* The serif emphasis rung, and its four compensations. */
+  --font-weight-serif: 430;
+  --versions-serif-size: 1.07em;
+  --versions-serif-track: 0.16px;
+  --versions-serif-opsz: "opsz" 10;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--versions-ground);
+  color: var(--versions-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.versions[data-embedded] {
+  min-height: 100%;
+}
+
+.versions-stage {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 600ms var(--ease-entrance);
+}
+
+.versions[data-ready] .versions-stage {
+  opacity: 1;
+}
+
+.versions[data-embedded] .versions-stage {
+  touch-action: pan-x;
+}
+
+.versions-stage[data-dragging] {
+  cursor: grabbing;
+}
+
+/* The scene, scaled as a whole to fit its box. `zoom` rather than a
+   scale transform, so type is laid out and rasterised at its final size
+   and stays crisp in a small tile. Cards are its direct
+   children so each takes the perspective without a shared 3D context:
+   paint order comes from z-index, set from depth. */
+.versions-space {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 640px;
+  height: 640px;
+  margin-left: -320px;
+  margin-top: -320px;
+  /* Origin and offset are set from the stack's constants in
+     versionsEngine.js. */
+  perspective: 1000px;
+  zoom: var(--fit, 1);
+}
+
+.versions-card {
+  position: absolute;
+  left: 50%;
+  /* Every save hangs from the same top edge and is only as tall as its own
+     text, so the front card never carries a band of empty paper. */
+  top: var(--versions-top, 336px);
+  box-sizing: border-box;
+  width: 440px;
+  margin-left: -220px;
+  padding: 16px 32px 28px;
+  /* A galley sheet, not an app card: square to within a hair, no cast
+     shadow. Depth comes from the perspective alone. */
+  border-radius: 2px;
+  /* Haze is fog on the sheet: with distance the paper closes over into the
+     ground, so the sheets separate by tone while every spine's type stays
+     at full ink. Only the sheet you are reading carries a ruled edge (--rim
+     is 1 at the front and 0 a save back). */
+  background: color-mix(in srgb, var(--versions-ground) calc(var(--fog, 0) * 100%), var(--versions-paper));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--versions-edge) calc(var(--rim, 1) * 100%), transparent);
+  transform-origin: 50% 0;
+  backface-visibility: hidden;
+}
+
+/* The head line is the spine: the only part of an older save that shows
+   above the one in front of it, so it carries one line, the title or what
+   that save changed, and a hairline closes it off from the text. When it
+   was saved is set in the margin, on this line's baseline. */
+.versions-head {
+  margin: 0 0 16px;
+  padding: 0 0 16px;
+  /* The rule is drawn inside the padding so the head stays on the grid,
+     as a one-pixel background strip: an inset shadow leaves faint seams at
+     the box's sides once the card is in perspective. */
+  --versions-head-rule: color-mix(in srgb, var(--versions-line) calc(var(--rim, 1) * 100%), transparent);
+  background: linear-gradient(var(--versions-head-rule), var(--versions-head-rule)) 0 100% / 100% 1px no-repeat;
+}
+
+/* One line tall, holding two: the title above, the change below. --front
+   rolls them through the window, so a card coming forward turns its spine
+   over to the title the way a counter turns a digit. Clipped, never faded. */
+/* The label takes its card's depth like everything else on the sheet: a
+   spine further back is set smaller because it is further away. The engine
+   only lifts it into the lip of paper that shows. */
+.versions-label {
+  height: 20px;
+  overflow: hidden;
+}
+
+.versions-label > * {
+  transform: translateY(calc((var(--front, 1) - 1) * 20px));
+}
+
+.versions-title {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--text-heading--font-weight);
+  text-wrap: balance;
+  width: max-content;
+  max-width: 100%;
+}
+
+/* The spine's proof line, on the same 20px line as the title it replaces,
+   set quiet: the grotesk at the meta rung, full ink, so the stack reads as
+   a ruled index of corrections behind the sheet and the front card leads.
+   The serif is kept for the front card, where it marks the words that save
+   actually wrote. */
+.versions-change {
+  margin: 0;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: max-content;
+  max-width: 100%;
+}
+
+.versions-edit {
+  color: var(--versions-ink);
+}
+
+/* Taken out: struck in the caret's red, the word itself left at full ink
+   so it can still be read. */
+.versions-struck {
+  text-decoration-line: line-through;
+  text-decoration-color: var(--versions-cut);
+  text-decoration-thickness: 0.08em;
+}
+
+.versions-arrow,
+.versions-sep {
+  color: var(--versions-ink);
+}
+
+.versions-body {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+  font-weight: var(--font-weight-body);
+  text-wrap: pretty;
+  hanging-punctuation: first;
+}
+
+/* What this save wrote, marked as a proof correction rather than a search
+   hit: the run is set in the serif, compensated on all four axes so it sits
+   at the size, colour and fit of the grotesk around it, and pinned to
+   line-height 1 so it never stretches the line. It is always laid out in
+   the serif, so nothing reflows as it inks. Only the front card has any
+   --f: as the card settles the ink runs in from the caret over the pencil,
+   one line after another, with a soft wet edge. */
+.versions-add {
+  --edge: 1.6em;
+  --at: calc(var(--f, 0) * (100% + var(--edge)));
+  font-family: var(--versions-serif), "Iowan Old Style", Georgia, serif;
+  font-style: italic;
+  font-size: var(--versions-serif-size);
+  font-weight: var(--font-weight-serif);
+  letter-spacing: var(--versions-serif-track);
+  font-variation-settings: var(--versions-serif-opsz);
+  font-feature-settings: normal;
+  line-height: 1;
+  text-decoration: none;
+  /* Room for the italic's overhang, which background-clip would cut off.
+     The negative margin gives most of it back, keeping a hair of italic
+     correction on the left where the slant leans into the space. */
+  margin: 0 -0.12em 0 -0.07em;
+  padding: 0 0.12em;
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--versions-ink) calc(var(--at) - var(--edge)),
+    var(--versions-pencil) var(--at)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* Slice, so the ink runs along the first line and then the next, as if
+     the run were one strip of type. */
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
+}
+
+/* Where words were taken out: a caret with no width, so the line never
+   reflows when it shows. */
+.versions-cut {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  line-height: 1;
+  vertical-align: -0.12em;
+}
+
+.versions-cut::before {
+  content: "";
+  position: absolute;
+  left: -0.2em;
+  top: 0;
+  width: 0.09em;
+  height: 1.05em;
+  border-radius: 1em;
+  background: var(--versions-cut);
+  opacity: var(--f, 0);
+  transform: scaleY(var(--f, 0));
+  transform-origin: 50% 100%;
+}
+
+/* A zero-size mark on a line's baseline, so the engine can read where the
+   baseline falls without guessing at the font's metrics. */
+.versions-base {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+/* The margin: the stack's own index, laid out in the scene's flat plane so
+   the dates never take the perspective. One hairline a gutter clear of the
+   front sheet, running the stack's height; a short tick on each spine's
+   baseline, the same length at every depth; the date set against the rule. Positions are set
+   from the stack's geometry in versionsEngine.js. */
+.versions-timeline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 3000;
+}
+
+.versions-rule {
+  position: absolute;
+  left: var(--versions-rule, 568px);
+  top: 0;
+  width: 1px;
+  background: var(--versions-edge);
+}
+
+.versions-tick {
+  position: absolute;
+  left: calc(var(--versions-rule, 568px) - var(--versions-gutter, 28px));
+  top: 0;
+  height: 20px;
+  margin: 0;
+  padding: 0 0 0 calc(var(--versions-gutter, 28px) + var(--versions-gap, 8px));
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A short tick off the rule, back toward the stack, through the middle of
+   the lower case on its spine's baseline. Every tick is the same length:
+   the stack and the margin are two columns joined by alignment, never by a
+   wire across the gutter. The current save's is inked; the rest are the
+   sheets' own hairline. */
+.versions-tick::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--versions-gutter, 28px) + 1px);
+  top: var(--versions-tick-at, 15px);
+  height: 1px;
+  width: var(--versions-reach, 8px);
+  background: color-mix(in srgb, var(--versions-ink) calc(var(--near, 0) * 100%), var(--versions-edge));
+  transform: translateX(-100%);
+}
+
+.versions-tick:focus-visible .versions-when {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.versions-when {
+  position: relative;
+  display: block;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--versions-ink);
+}

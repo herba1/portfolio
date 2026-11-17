@@ -67,3 +67,10 @@ public/audio/
 
 public/splats/4d/
 __pycache__/
+
+# experiment factory recordings
+/tools/factory/out/
+tools/depth/*.onnx
+tools/depth/**/*.onnx
+tools/depth/**/*.onnx_data
+*.sam.npz

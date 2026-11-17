@@ -1,0 +1,11 @@
+{
+  "title": "Rubber",
+  "description": "A song title moulded in soft orange rubber, lying on a warm white table. Press a letter and it squashes: the rubber under your finger gets thinner and, keeping its volume, spreads out sideways and shoulders its neighbours aside. Let go and it rings back into shape with a damped wobble. Drag to pull it and it stretches thin.",
+  "tags": ["WebGL", "Type", "Physics"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "From GT Maru (Grilli Type, https://www.itsnicethat.com/articles/grilli-type-gt-maru-graphic-design-200521, https://www.gt-maru.com): soft corners engineered so precisely that a cuddly face still reads as serious type. Here the softness is literal, a soft-body lattice per letter with area and volume preserved, shot like a Teenage Engineering rubber object.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.42, 0.5], "to": [0.42, 0.42] },
+  "sources": ["https://www.gt-maru.com", "https://www.itsnicethat.com/articles/grilli-type-gt-maru-graphic-design-200521"]
+}

@@ -1,0 +1,5 @@
+/* The writer's credit sits on the ladder's small-text rung, which the scale
+   has no named token for. */
+.kit-weingart {
+  --font-weight-small: 450;
+}

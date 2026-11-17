@@ -1,0 +1,269 @@
+{
+ "plate": [
+  1512,
+  2016
+ ],
+ "f": 786.232,
+ "c": [
+  756.0,
+  1008.0
+ ],
+ "up": [
+  -0.009762,
+  -0.137233,
+  0.990491
+ ],
+ "ex": [
+  -0.0018,
+  -0.990534,
+  -0.137257
+ ],
+ "ez": [
+  0.999951,
+  -0.003122,
+  0.009423
+ ],
+ "sun0": [
+  -0.344599,
+  -0.311941,
+  0.885407
+ ],
+ "patch": [
+  368,
+  640,
+  160,
+  184
+ ],
+ "faces": [
+  {
+   "name": "gold-glass",
+   "kind": "glass",
+   "normal": [
+    0.70165,
+    0.7048,
+    0.10457
+   ],
+   "cyl": false
+  },
+  {
+   "name": "gold-stone",
+   "kind": "stone",
+   "normal": [
+    0.99809,
+    0.05906,
+    0.01802
+   ],
+   "cyl": false
+  },
+  {
+   "name": "lattice",
+   "kind": "glass",
+   "normal": [
+    0.70459,
+    0.70193,
+    0.1042
+   ],
+   "cyl": false
+  },
+  {
+   "name": "canopy-stone",
+   "kind": "stone",
+   "normal": [
+    -0.73312,
+    0.67461,
+    0.08624
+   ],
+   "cyl": false
+  },
+  {
+   "name": "canopy-glass",
+   "kind": "glass",
+   "normal": [
+    0.70776,
+    0.69878,
+    0.10379
+   ],
+   "cyl": false
+  },
+  {
+   "name": "tower-a",
+   "kind": "punched",
+   "normal": [
+    -0.99995,
+    0.00501,
+    -0.00916
+   ],
+   "cyl": false
+  },
+  {
+   "name": "tower-b",
+   "kind": "punched",
+   "normal": [
+    -0.99995,
+    0.00126,
+    -0.00968
+   ],
+   "cyl": false
+  },
+  {
+   "name": "tower-c",
+   "kind": "punched",
+   "normal": [
+    -0.70858,
+    0.69987,
+    0.08998
+   ],
+   "cyl": false
+  },
+  {
+   "name": "tower-d",
+   "kind": "punched",
+   "normal": [
+    -0.69032,
+    0.71756,
+    0.09261
+   ],
+   "cyl": false
+  },
+  {
+   "name": "octagon-a",
+   "kind": "punched",
+   "normal": [
+    -0.67281,
+    -0.73189,
+    -0.10803
+   ],
+   "cyl": false
+  },
+  {
+   "name": "octagon-b",
+   "kind": "punched",
+   "normal": [
+    -0.99995,
+    -0.00212,
+    -0.01015
+   ],
+   "cyl": false
+  },
+  {
+   "name": "octagon-c",
+   "kind": "punched",
+   "normal": [
+    -0.98679,
+    -0.15885,
+    -0.03173
+   ],
+   "cyl": false
+  },
+  {
+   "name": "round",
+   "kind": "punched",
+   "normal": [
+    -0.76139,
+    -0.64109,
+    -0.09633
+   ],
+   "cyl": true
+  },
+  {
+   "name": "white-a",
+   "kind": "glass",
+   "normal": [
+    -0.0021,
+    -0.99053,
+    -0.13726
+   ],
+   "cyl": false
+  },
+  {
+   "name": "white-b",
+   "kind": "glass",
+   "normal": [
+    -0.00125,
+    -0.99054,
+    -0.13725
+   ],
+   "cyl": false
+  },
+  {
+   "name": "white-c",
+   "kind": "glass",
+   "normal": [
+    -0.99994,
+    -0.00338,
+    -0.01032
+   ],
+   "cyl": false
+  },
+  {
+   "name": "low-stone",
+   "kind": "stone",
+   "normal": [
+    -0.99992,
+    0.00885,
+    -0.00863
+   ],
+   "cyl": false
+  },
+  {
+   "name": "st-regis",
+   "kind": "glass",
+   "normal": [
+    -0.00085,
+    -0.99054,
+    -0.13725
+   ],
+   "cyl": false
+  },
+  {
+   "name": "dark-slats",
+   "kind": "glass",
+   "normal": [
+    0.00445,
+    -0.99053,
+    -0.1372
+   ],
+   "cyl": false
+  },
+  {
+   "name": "brown-side",
+   "kind": "glass",
+   "normal": [
+    0.03659,
+    -0.98992,
+    -0.13679
+   ],
+   "cyl": false
+  },
+  {
+   "name": "brown",
+   "kind": "punched",
+   "normal": [
+    0.00173,
+    -0.99054,
+    -0.13722
+   ],
+   "cyl": false
+  },
+  {
+   "name": "dark-side",
+   "kind": "glass",
+   "normal": [
+    0.99991,
+    0.00749,
+    0.01089
+   ],
+   "cyl": false
+  },
+  {
+   "name": "dark-front",
+   "kind": "glass",
+   "normal": [
+    0.00019,
+    -0.99054,
+    -0.13724
+   ],
+   "cyl": false
+  }
+ ]
+}

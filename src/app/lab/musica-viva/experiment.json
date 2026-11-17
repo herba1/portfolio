@@ -1,0 +1,11 @@
+{
+  "title": "Musica Viva",
+  "description": "A concert poster with no words, after Josef Müller-Brockmann's Musica Viva sheets for the Tonhalle Zürich: arc segments of concentric rings whose radii step through a just-intoned scale. Drag around the centre to tune it. Each ring turns at its own interval, 3/2, 4/3, 5/4, so the composition slides out of phase; let go and every ring springs to the nearest consonance, where all the arcs land back on the grid in a new poster, each sounding its interval softly as it settles.",
+  "tags": ["Canvas", "Graphic design", "Music", "Sound"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:30:00.000Z",
+  "intent": "Translate the Musica Viva / Tonhalle posters (https://socks-studio.com/2016/11/30/joseph-muller-brockmann-musica-viva-posters-for-the-zurich-tonhalle/): concentric arcs, flat colour on white, off-centre and cropped at the sheet edge, where the geometry is the music.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.62, 0.3], "to": [0.6, 0.75] },
+  "sources": ["https://socks-studio.com/2016/11/30/joseph-muller-brockmann-musica-viva-posters-for-the-zurich-tonhalle/"]
+}

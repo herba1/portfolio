@@ -1,0 +1,11 @@
+{
+  "title": "Radiating",
+  "description": "A short word in heavy Geist on warm white, its outline echoed outward in evenly spaced black lines until the whole box is one field of type, after Lance Wyman's Mexico 68 logotype. The lines are level sets of the word's signed distance field, so the echoes of neighbouring letters meet in clean creases. Every press drops a source that stays: a dot whose rings run finer the more presses already crowd the spot, unioned with the word ring for ring, so the picture builds up out of the presses as nested patches of bunched line meeting the word's echoes in chevron creases that never reach the letters.",
+  "tags": ["WebGL", "Type", "Op art"],
+  "status": "draft",
+  "createdAt": "2026-11-06T14:00:00.000Z",
+  "intent": "Wyman's radiating parallel lines (https://www.vam.ac.uk/articles/iconic-design-official-poster-for-the-mexico-1968-olympic-games) as a union of distance fields: the word is one source, the hand is another, and the lines are what lies at equal distance from both.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.2, 0.3], "to": [0.78, 0.72] },
+  "sources": ["https://www.vam.ac.uk/articles/iconic-design-official-poster-for-the-mexico-1968-olympic-games", "https://github.com/mapbox/tiny-sdf"]
+}

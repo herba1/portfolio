@@ -1,0 +1,11 @@
+{
+  "title": "Tabs Swipe",
+  "description": "A tab overview of eight live pages, each a real page laid out at phone width and shown small. Swipe a tab left and it stays under your finger, leaning a little with your speed; let go past the middle or flick it and it leaves with the speed you gave it, while the tabs behind it close the gap one after another. Let go early and it springs home. The small cross does the same leftward slide, so pressing it teaches the swipe. Drag up and down to scroll, with momentum and a rubber band at the ends. Catch a tab while it is leaving and it stops in your hand, and the grid opens back up for it.",
+  "tags": ["Gesture", "Spring", "Interface"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Safari's tab overview from WWDC 2018 'Designing Fluid Interfaces' (https://developer.apple.com/videos/play/wwdc2018/803/): the close button slides the tab away left to teach the swipe, gestures are interruptible, release velocity is carried into the springs, and rubber-banding shows the limits.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".ts-card", "from": [0.6, 0.4], "to": [0.1, 0.42] },
+  "sources": ["https://developer.apple.com/videos/play/wwdc2018/803/"]
+}

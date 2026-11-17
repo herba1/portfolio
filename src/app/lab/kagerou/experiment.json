@@ -1,0 +1,54 @@
+{
+  "title": "Kagerou",
+  "description": "An empty desert road at noon, seen from thirty centimetres off the tarmac, under a bright bank of summer cloud. Hold the pointer down and the sun works on the road: the air over it starts to shimmer, finest and fastest toward the horizon where the rays graze hundreds of metres of hot air, and the far road turns to water, an inferior mirage that is the poles, the veld and the road itself bent back up off a layer of thin, hot air. Let go and it cools off over a few seconds.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Film",
+    "Photography"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:30:00.000Z",
+  "intent": "Genre spec idea 9, kagerou (heat haze): Japanese summer heat shimmer on asphalt and Shinkai's low road shots. The gesture is heat; the shimmer is path-integrated refraction through a rising turbulent layer and the mirage is the exact inferior-mirage mirror below the critical depression. Reference: https://en.wikipedia.org/wiki/Mirage#Inferior_mirage",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.48,
+      0.72
+    ],
+    "to": [
+      0.52,
+      0.72
+    ]
+  },
+  "probe": [
+    {
+      "idle": 2600
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.72
+        ],
+        [
+          0.5,
+          0.72
+        ]
+      ],
+      "ms": 3600
+    },
+    {
+      "idle": 3200
+    }
+  ],
+  "sources": [
+    "HDRI: Nowhere Road, Poly Haven, photographed by Dario Barresi, CC0. https://polyhaven.com/a/nowhere_road (16k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/nowhere_road_16k.hdr). Rectilinear view down the road (yaw 104 deg from the panorama centre), the camera lowered from ~1.26 m to ~0.3 m: road plane resampled exactly, bushes, fence posts and poles lifted whole by the Depth Anything V2 distance of their foot (tools/depth/depth_hr.py) with occlusion (tools/depth/bakes/kagerou/render_nowhere.py, warp_nowhere2.py, encode_nowhere.py). The lens is ~30 deg across and tipped up 5 deg. Shipped as log2 radiance -6.5..-0.5 in 8 bits with TPDF dither (plate.webp); aux.png holds log2 distance, the road mask and the sky mask.",
+    "https://en.wikipedia.org/wiki/Mirage#Inferior_mirage",
+    "https://en.wikipedia.org/wiki/Heat_haze"
+  ]
+}

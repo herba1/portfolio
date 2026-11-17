@@ -1,0 +1,18 @@
+{
+  "title": "Split Fount",
+  "description": "One big wood type word on cream stock, inked the way poster shops do a rainbow roll: three inks laid side by side in one fountain, blended by the roller into a gradient across the type. Drag across the sheet to run the press. The last proof is shingled onto the run under the bed and the cylinder prints a fresh sheet under your hand, in the direction you dragged; the run stays on the pile beneath it, the older proofs running off the frame, each squared by hand a little off the one above along the way it was pulled, so the strip it shows always crosses the fount: a sheet pulled down the bed shows its head, one pulled across shows the edge it came in by, top to bottom, and you read the run sheet against sheet. Every pass the inks work further into each other on the roller: the borders wander, the blends widen and the hues slide from clean blue, red and yellow toward slate, brick and mustard. The cylinder inks rather than reveals, starved and salted just behind the nip and building to full a finger's width later, with a hair of slur at the letters' leading edges. The solids are flat and dense, squeezed dark at the letter edges, and salted only where the ink has a reason to run thin: behind the nip, along the fount's borders where the roller is still mixing, and in a patch where the roller ran short that turns up somewhere new on every proof; with the grain and nicks of the wood block and a faint bite of impression in the paper.",
+  "tags": ["WebGL", "Print", "Typography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:00:00.000Z",
+  "intent": "After split-fount (rainbow roll) letterpress inking, as printed on wood type by poster shops such as Hatch Show Print and the Hamilton Wood Type museum: the gradient is the press, not decoration, and it changes with every proof. https://en.wikipedia.org/wiki/Split-fount_inking",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.2], "to": [0.5, 0.8] },
+  "probe": [
+    { "idle": 1200 },
+    { "drag": [[0.5, 0.18], [0.5, 0.8]], "ms": 1400 },
+    { "idle": 1200 },
+    { "drag": [[0.2, 0.5], [0.8, 0.5]], "ms": 1100 },
+    { "idle": 1400 }
+  ],
+  "sources": ["https://en.wikipedia.org/wiki/Split-fount_inking", "https://woodtype.org", "https://hatchshowprint.com"]
+}

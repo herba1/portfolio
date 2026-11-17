@@ -1,0 +1,15 @@
+{
+  "title": "Lanyard",
+  "description": "A laminated backstage pass for the Beatles at the Hollywood Bowl, August 1964, hanging on a woven strap against a warm white wall. Grab it anywhere and throw it: the strap is a chain of rope segments that swings, goes slack and twists, the pass spins on its clip and unwinds, and the gloss on the laminate slides across the print as it turns, until it settles back where it started.",
+  "tags": ["WebGL", "Physics", "Music"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Vercel's Ship 3D event badge (https://vercel.com/blog/building-an-interactive-3d-event-badge-with-react-three-fiber): a badge on a lanyard you drag and fling. Rebuilt without a physics library: a verlet strap solved with XPBD, a rigid card on a ball joint with the strap's torsion pulling it back to face you.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.53, 0.62], "to": [0.3, 0.45] },
+  "sources": [
+    "https://vercel.com/blog/building-an-interactive-3d-event-badge-with-react-three-fiber",
+    "Müller et al., Detailed Rigid Body Simulation with Extended Position Based Dynamics (2020)",
+    "Cover: A Hard Day's Night, from the site's album catalogue"
+  ]
+}

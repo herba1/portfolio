@@ -1,6 +1,6 @@
 {
   "title": "Splat video",
-  "description": "A phone clip you can step into. The room is Gaussian splats, and the person is splats too: one oriented surfel per video pixel, generated on the GPU from the original video every frame at its own frame rate, so it is as sharp as the footage and leans like 3D. Drag to lean; sound, scrub and a video look.",
+  "description": "A phone clip you can step into: lying under a level-crossing signal and looking almost straight up past it into a summer cumulus, rebuilt as Gaussian splats and seen through a wide worm's-eye lens, the post converging on a deepening zenith. The signal and its catenary are one rigid silhouette well in front of the cloud, the cumulus tops boil and climb while it plays, and dragging leans you round the signal so the wires slide across the sky.",
   "tags": [
     "WebGL",
     "Player",
@@ -9,5 +9,14 @@
   ],
   "status": "draft",
   "createdAt": "2026-09-30T03:11:41.568Z",
-  "intent": "Gets as close to 4DV.ai as one webcam allows: a sharp, native-frame-rate subject with no crossfade over a splat room built once, with exposure that follows the video, on a real player interface (play, scrub, speed, sound, look, back to lens) on the light palette."
+  "intent": "Gets as close to 4DV.ai as one webcam allows: a sharp, native-frame-rate subject with no crossfade over a splat room built once, with exposure that follows the video. Full-bleed, so you lie under the sky rather than watch a clip of it: the player is one small pill over a soft scrim (play, scrub, speed, sound, look, back to lens) that steps aside while the clip plays untouched, and the signal's wires and truss run on past the photo's edges so nothing ends inside the frame at any lean.",
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
+      "file": "https://images.unsplash.com/photo-1620233950363-7c0947527682",
+      "author": "Kanata (@tanakanata)",
+      "licence": "Unsplash License",
+      "note": "Depth from Depth Anything V2 Small, sky matte and LaMa plate from tools/depth, baked to splat4d by tools/depth/bakes/splat-video/bake.py into public/lab/splat-video/fumikiri-sky; the signal and catenary are one textured card cut from the full-resolution sky matte by card.py."
+    }
+  ]
 }

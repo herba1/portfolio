@@ -1,0 +1,12 @@
+.kit-afternoon {
+  background: #f2f0eb;
+  outline: none;
+}
+
+.kit-afternoon .kit-canvas {
+  cursor: grab;
+}
+
+.kit-afternoon[data-dragging] .kit-canvas {
+  cursor: grabbing;
+}

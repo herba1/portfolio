@@ -1,0 +1,939 @@
+import { createStage, clamp } from "../_kit/stage";
+import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
+
+// Blue Hour. One real dusk street (Poly Haven's Modern Evening Street, an HDR
+// panorama) seen from the kerb lying on your back, straight up: a zenith
+// worm's-eye shaft of sky ringed by two towers, a crane, brick and curved
+// glass, every vertical running in to the one vanishing point overhead. Split offline into three layers of linear light: the ambient
+// city with the lamp switched off, the sky matte with its cloud texture, and
+// the one sodium lamp head on the bottom rim. Drag across and the
+// twenty minutes after sunset run: the skylight falls about three and a half
+// stops while the shaft deepens from pale peach-cyan to cobalt, darkest
+// overhead, the clouds lose the sun on their own, faster curve (peach-white
+// to a deep slate-blue under the sky), the camera opens up as a photographer
+// would, and the lamp trips
+// on its photocell and warms slowly from pink to amber. All of it is
+// developed through _kit/film with its dusk preset easing into night, so the
+// lamp blooms and halates the way it would on CineStill.
+
+const AMB_STOPS = 4.0; // skylight lost over the span
+const EXPO_STOPS = 1.7; // exposure the camera gives back
+const LO = -10;
+const HI = 3;
+const ELO = -9;
+const EHI = 14;
+
+// The view the plate was rendered with (see experiment.json), so every sky
+// pixel knows its elevation and bearing: a true zenith worm's-eye,
+// stereographic (k = 2), 125 deg across, the axis pitched the full 90 deg
+// and no frame slide, so the zenith is the print's centre and the vanishing
+// point of every vertical: towers, glass, brick and tree ring the frame and
+// all run in to it.
+const VIEW = { yaw: 116, pitch: -90, hfov: 125, k: 2, shift: 0 };
+// degrees, the bearing the sun went down on: the cloud panorama's own sun as
+// clouds.py turns and tilts it into the plate (it sits behind the right-hand
+// tower), so the sky's glow and the clouds' sunlit flanks agree
+const SUN_AZ = 214;
+
+// Lights, from the offline split (index = value in aux.b). kind: street
+// (sodium, on a photocell), led, warm (warm-white LED) or window (a room).
+// Looking straight up three sodium heads reach into the frame; only the one
+// over the brick, on the bottom rim, is lit (pack.py), the only warm note.
+const LIGHTS = [{ kind: "street", x: 482, y: 1584, chroma: [0.505, 0.351, 0.144] }];
+const MAX_LIGHTS = 32;
+const STREET_GAIN = 0.15; // the plate's lamp was metered for a darker sky, and it sits close
+const WARMUP = 0.16; // of the span (~3 min) for a sodium lamp to reach full
+
+// A fixed, believable schedule: photocells trip within a few minutes of each
+// other, street level next, rooms last and in no particular order.
+function schedule() {
+  let seed = 11;
+  const rnd = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
+  };
+  const street = LIGHTS.map((l, i) => ({ l, i })).filter((o) => o.l.kind === "street");
+  const ground = LIGHTS.map((l, i) => ({ l, i })).filter((o) => o.l.kind === "led" || o.l.kind === "warm");
+  const rooms = LIGHTS.map((l, i) => ({ l, i })).filter((o) => o.l.kind === "window");
+  const on = new Array(LIGHTS.length).fill(2);
+  street.forEach((o, j) => (on[o.i] = [0.08, 0.13, 0.18][j % 3]));
+  // lowest first: the kerb before the lobby, the lobby before the floors
+  ground.sort((a, b) => b.l.y - a.l.y);
+  ground.forEach((o, j) => (on[o.i] = 0.27 + (j / ground.length) * 0.18 + rnd() * 0.03));
+  rooms.sort(() => rnd() - 0.5);
+  rooms.forEach((o, j) => (on[o.i] = 0.44 + (j / rooms.length) * 0.44 + rnd() * 0.03));
+  return on;
+}
+
+const VS = `#version 300 es
+layout(location=0) in vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const DECODE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex; uniform vec2 uRange; uniform float uZeroIsNone;
+out vec4 o;
+void main(){
+  vec3 c = texelFetch(uTex, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec3 v = exp2(c * (uRange.y - uRange.x) + uRange.x);
+  if (uZeroIsNone > 0.5) {
+    // 0 = no emitter; 1..255 map onto the log range
+    vec3 cc = (c * 255.0 - 1.0) / 254.0;
+    v = exp2(cc * (uRange.y - uRange.x) + uRange.x) * step(0.5 / 255.0, c);
+  }
+  o = vec4(v, 1.0);
+}`;
+
+const SCENE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uAmb;     // linear ambient (lights off), mipmapped
+uniform sampler2D uEmit;    // linear emitters, mipmapped
+uniform sampler2D uAux;     // r sky matte, g cloud cover, b light index (0 = none)
+uniform sampler2D uCloud;   // cloud light: r log2 sun share, g log2 skylight share (mip 0 only)
+uniform vec2 uSize;         // target size in px
+uniform vec2 uTexSize;
+uniform mat3 uRot;          // camera to world
+uniform float uF;           // focal length in plate px
+uniform float uK;           // radial projection: 1 rectilinear, 2 stereographic
+uniform float uShift;       // frame below the optical axis, plate px
+uniform vec2 uSun;          // sun bearing on the horizon (x,z)
+uniform float uS;           // eased time 0..1
+uniform float uAmbK;        // skylight scale
+uniform float uExpo;        // camera exposure
+uniform vec3 uWB;           // skylight colour on the facades
+uniform vec3 uZen; uniform vec3 uMid; uniform vec3 uHorSun; uniform vec3 uHorAnti;
+uniform float uSkyLum;
+uniform float uSkySat;      // midtone saturation of the smooth sky
+uniform float uSunRef;      // the reference core's sun share in cloud.webp
+uniform float uCoreLift;    // its sun lift at sunset, in units of the local sky
+uniform float uSunK;        // the sun's share of the cloud's light left (1 at sunset)
+uniform float uCloudSkyK;   // skylight the cloud passes on, relative to open sky
+uniform float uKnee;        // stops of lift kept linear
+uniform float uShoulder;    // and the most any pixel may reach
+uniform float uCloudKeep;   // how much of the source's skylight structure the cloud keeps (0..1)
+uniform float uCloudCeil;   // the brightest a cloud may print, scene units before uExpo
+uniform float uDomeK;       // extra sun on the sunlit domes while the sun is up (0 by blue hour)
+uniform vec3 uCloudWhite;   // lit tops, luminance 1: peach-white to a faint warm grey
+uniform vec3 uCloudPeach;   // afterglow on the undersides, luminance 1
+uniform float uAfter;       // afterglow left, 1 at sunset, 0 by mid-span
+uniform float uFgGain;      // building layer: linear gain, riding the sky's own fall
+uniform float uReflK;       // the shaft's light the curtain-wall glass gives back
+uniform float uFgGamma;     // and its log contrast about the plate's mid
+uniform float uGlow;        // sun-side brightening
+uniform float uZenDeep;     // stops the zenith sits below the low sky
+uniform float uLod;         // mip level: sharp, only as soft as the print needs
+uniform vec3 uRampZen;      // the zenith ramp: deep cobalt overhead (linear, luminance 1)
+uniform vec3 uRampRim;      // and a paler, cyaner blue towards the roofs
+uniform vec2 uRampV;        // their levels, relative to the time's sky exposure
+uniform float uRampMax;     // zenith angle (rad) where the ramp reaches the rim colour
+uniform float uRampK;       // how far the ramp has taken over from the sunset gradient
+uniform float uB[${MAX_LIGHTS}];
+uniform vec3 uTint[${MAX_LIGHTS}];
+out vec4 o;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float FG_MID = 0.06;  // the plate's median facade luminance
+// cloud.webp (clouds.py): log2 sun share and log2 skylight share in 8 bits
+const float U_LO = -6.0; const float U_HI = 3.5;
+const float K_LO = -3.0; const float K_HI = 1.0;
+
+void main(){
+  vec2 p = gl_FragCoord.xy / uSize;
+  vec2 uv = vec2(p.x, 1.0 - p.y);
+  vec3 amb = textureLod(uAmb, uv, uLod).rgb;
+  vec3 em = textureLod(uEmit, uv, uLod).rgb;
+  vec4 ax = textureLod(uAux, uv, 0.0);
+  float a = ax.r;
+  float cov = ax.g;
+  int id = int(texelFetch(uAux, ivec2(uv * uTexSize), 0).b * 255.0 + 0.5);
+  if (id >= 16) id = 0;
+
+  // View direction of this plate pixel, for the sky gradient.
+  vec2 q = uv * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
+  float r = length(q) + 1e-6;
+  float th = uK * atan(r / (uK * uF));
+  vec3 dc = vec3(q / r * sin(th), cos(th));
+  vec3 d = uRot * dc;
+  float elev = asin(clamp(-d.y, -1.0, 1.0));
+  float e = clamp(elev / 1.5708, 0.0, 1.0);
+  vec2 hz = normalize(vec2(d.x, d.z) + 1e-5);
+  float facing = 0.5 + 0.5 * dot(hz, uSun);
+
+  // Twilight sky: deepest at the zenith, paler and warmer towards the sun's
+  // side of the horizon. Colours are linear, luminance 1.
+  float g = pow(1.0 - e, 1.6);
+  vec3 hor = mix(uHorAnti, uHorSun, smoothstep(0.2, 1.0, facing));
+  vec3 col = mix(uZen, uMid, smoothstep(0.0, 0.5, g));
+  col = mix(col, hor, smoothstep(0.3, 0.8, g));
+  // Blue-hour skylight is a clean, saturated blue all the way down, not a
+  // grey haze: push the gradient's chroma out (colours are luminance 1).
+  col = max(mix(vec3(1.0), col, uSkySat), 0.0);
+  float lum = uSkyLum * (1.0 + uGlow * g * g * facing * mix(1.0, 0.45, uRampK));
+  // Looking almost straight up the gradient is the picture: the zenith is
+  // the deepest, most saturated blue and the sky pales towards the roofs.
+  float ze = smoothstep(0.4, 1.0, e);
+  float lumOld = exp2(uZenDeep * (0.45 - ze));
+  // The zenith ramp. Its parameter is this ray's angle from the zenith on
+  // the view sphere (the zenith is the print's centre, but through the
+  // stereographic lens the print's radius is not linear in that angle),
+  // eased so the cobalt holds overhead and the paling gathers towards the
+  // roofs. Both ends are luminance-1 colours
+  // times a level, all riding the time's sky exposure (uSkyLum), so the
+  // shape and the hues hold while the light falls.
+  float zth = acos(clamp(-d.y, -1.0, 1.0));
+  float kr = pow(clamp(zth / uRampMax, 0.0, 1.0), 1.6);
+  vec3 rampC = mix(uRampZen, uRampRim, kr);
+  rampC /= dot(rampC, LUMA);
+  col = mix(col, rampC, uRampK);
+  // the open sky's level here; the sun's light on a cloud top does not
+  // depend on where the cloud sits, so the cloud's sun term keeps the
+  // unramped level (lumSun)
+  float lumSun = lum;
+  lum *= mix(lumOld, mix(uRampV.x, uRampV.y, kr), uRampK);
+  // Cloud: cover and light over the clear sky, one field of cumulus from a
+  // sky-only panorama through this same view (clouds.py), so the gaps between
+  // puffs are clean sky and the zenith deepens by the gradient above alone,
+  // with no patch, seam or pole pinch left in the layer to draw spokes.
+  // Alpha. aux.g is the cloud's blue/red log-ratio below the local clear sky,
+  // linear (clouds.py no longer thresholds it). Read mostly at mip 1 through
+  // a tight ramp, so a puff ends on a soft but definite edge, a texel or two
+  // wide, instead of smearing out into haze over a wide blurred feather.
+  float covW = textureLod(uAux, uv, 1.0).g;
+  float cw = smoothstep(0.1, 0.62, mix(cov, covW, 0.85));
+  // The buildings occlude the cloud, not the sky: alpha goes to zero a few
+  // texels inside the matte's edge (its eroded, blurred self), so no puff
+  // shows through balcony gaps or fringes a silhouette; the clear sky the
+  // matte already blends against the towers is what meets them.
+  float am = textureLod(uAux, uv, 1.5).r;
+  cw *= smoothstep(0.6, 1.0, min(a, am));
+  // Light: the source panorama's own radiance over its local clear sky,
+  // split offline into the skylight a pixel passes on (kS, about 1 on a thin
+  // wisp, 0.5 in a thick blue core) and the sun it scatters (0 in a lee
+  // pocket, about 2 on a flank, up to 7 on a dome). Full resolution, read at
+  // mip 0, so every billow, sunlit dome and skylit pocket is the real cloud's.
+  // The time only grades the two lights: the sun goes, the skylight stays.
+  vec3 cx = textureLod(uCloud, uv, 0.0).rgb;
+  float sunS = max(exp2(cx.r * (U_HI - U_LO) + U_LO) - exp2(U_LO), 0.0);
+  float skyS = exp2(cx.g * (K_HI - K_LO) + K_LO);
+  float sn = sunS / uSunRef;                      // 1 = the reference core
+  float sunny = clamp(0.5 * sn, 0.0, 1.0);        // 0 lee pocket, 1 dome
+  float topK = smoothstep(0.9, 2.2, sn);          // the sun-facing domes
+  float glowK = clamp(uAfter * (0.45 + 0.55 * facing), 0.0, 1.0);
+  // Skylight. A cumulus is lit through and through by the blue sky around
+  // it, so its colour here is the local sky's (ramp included: a puff
+  // overhead in the zenith cobalt, one by the roofs in the paler cyan),
+  // about half its chroma at sunset (a cloud is paler than the gap beside
+  // it) and most of it by blue hour (slate under cobalt); the pockets the
+  // sun does not reach keep the most. Its level is the source's own share,
+  // so the thick cores sit under the sky and the wisps just at it; that
+  // structure is all a cloud has left once the sun is gone (uCloudKeep).
+  vec3 skyTint = mix(vec3(1.0), col, mix(0.56, 0.8, uS) + 0.16 * uRampK * (1.0 - sunny));
+  // the ramp's cobalt is already the blue a shaded puff needs; only the
+  // sunset gradient's cyan wants pushing (more would turn it violet), and
+  // the pockets lean a little cyan, off the cobalt's red, so they read as
+  // skylight rather than lavender
+  skyTint *= mix(vec3(0.93, 0.99, 1.14), vec3(0.98, 1.0, 1.03), uRampK);
+  skyTint *= mix(vec3(1.0), vec3(0.93, 1.0, 1.02), 1.0 - sunny);
+  skyTint = max(skyTint, 0.0) / dot(max(skyTint, 0.0), LUMA);
+  // A puff thins into the sky, it does not end on a rim: towards the cover's
+  // edge its skylight floors at the local clear sky's own, colour, level and
+  // all (kS -> 1, tint -> col, the cloud's pass-on -> 1), so the source's
+  // dark cores only show where the cover is whole. The sun below adds on top,
+  // so no edge pixel prints under the gap beside it.
+  // The source's skylight share also dips through a puff's whole outer band
+  // (the key read the sunlit rim as the densest cloud), a band well inside
+  // the alpha's texel-or-two ramp, so once the sun left it printed as a
+  // dark ring round a paler middle. The level is therefore taken from the
+  // share's broad mean (mip 4.5, some twenty texels, the clear sky outside
+  // included, so it rises to the sky's own towards every edge) and the fine
+  // share only modulates it, at half its log contrast: billows kept, ring
+  // gone.
+  float skyB = exp2(textureLod(uCloud, uv, 4.5).g * (K_HI - K_LO) + K_LO);
+  float skyF = skyB * sqrt(skyS / skyB);
+  // and the floor lets go over that same broad scale (the cover's own mean),
+  // so a puff darkens into its core rather than at its outline
+  float ew = cw * cw * smoothstep(0.2, 0.8, textureLod(uAux, uv, 4.5).g);
+  float kS = mix(1.0, skyF, ew * uCloudKeep);
+  vec3 skyC = mix(col, skyTint, ew) * kS * mix(1.0, uCloudSkyK, ew);
+  // while the afterglow lasts the sunlit domes scatter its peach through too
+  skyC = mix(skyC, uCloudPeach * dot(skyC, LUMA), topK * 0.4 * glowK);
+  // Sun. The reference core lifts uCoreLift (in units of the local sky) at
+  // sunset and the time curve's solved share (uSunK) after; as the sun sinks
+  // its light leaves from the bottom of the cloud up, narrowing onto the
+  // brightest domes (a steeper power about the reference core, which keeps
+  // the solved level), so the last of it is a line on the very tops.
+  float sunT = pow(sn, 1.0 + 1.3 * uS);
+  // while the sun is up the domes that face it take extra (uDomeK), so they
+  // glow over the shaft instead of sitting level with it
+  float up = log2(1.0 + uCoreLift * sunT * uSunK * (1.0 + uDomeK * topK));
+  float room = uShoulder - uKnee;
+  up = up < uKnee ? up : uKnee + room * (1.0 - exp(-(up - uKnee) / room));
+  // what of the sun reaches the middle ranks arrives scattered, so it
+  // carries the sky's colour there; only the domes see it warm (a warm
+  // added to a blue of the same weight would print grey)
+  vec3 sunCol = mix(uCloudWhite, uCloudPeach, glowK * (0.95 - 0.3 * sunny) + 0.5 * uS);
+  sunCol /= dot(sunCol, LUMA);
+  vec3 sunC = mix(skyTint, sunCol, 0.25 + 0.75 * topK) * (exp2(up) - 1.0);
+  vec3 cl = skyC * lum + sunC * lumSun * uCloudSkyK;
+  // No cloud may print past the film's white: the brightest channel rolls
+  // into uCloudCeil (scene units, before the camera's exposure), so the
+  // tops stay modelled at sunset instead of a flat clipped plate.
+  float pk = max(cl.r, max(cl.g, cl.b)) * uAmbK;
+  float c0 = 0.62 * uCloudCeil;
+  float pk2 = pk < c0 ? pk : c0 + (uCloudCeil - c0) * (1.0 - exp(-(pk - c0) / (uCloudCeil - c0)));
+  cl *= pk2 / max(pk, 1e-6);
+  // and as it nears that white it goes warm-neutral, the way film shoulders
+  // a sunlit top, rather than holding a saturated peach plate
+  float roll = smoothstep(c0, uCloudCeil, pk);
+  vec3 wn = uCloudWhite / dot(uCloudWhite, LUMA);
+  cl = mix(cl, wn * dot(cl, LUMA), 0.3 * roll);
+  // premultiplied over: the cloud's radiance times its alpha, plus the sky
+  // it lets through
+  vec3 sky = col * lum * (1.0 - cw) + cl * cw;
+  // Dither after the ramp: interleaved gradient noise, about one 8-bit
+  // step of the print either way, so the long, slow ramp never bands.
+  float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  sky *= 1.0 + (ign - 0.5) * 0.022;
+
+  // The city is the frame, not the subject, but it is lit by the same sky:
+  // a harder log contrast about the plate's mid keeps towers, crane and
+  // brick darker than the shaft, while the gain (which falls with the sky's
+  // own level) keeps them carrying skylight rather than crushed to a mass;
+  // glass highlights roll off before they can compete with the cloud.
+  vec3 fa = amb * uWB;
+  float fy = dot(fa, LUMA) + 1e-6;
+  // Within a texel or two of the sky matte the plate's ambient is the split's
+  // padding, not facade: hold it at the old, lower gain there and give it no
+  // reflection, so the lift never brightens a matte edge into a contour.
+  float edge = smoothstep(0.02, 0.35, am);
+  float ny = FG_MID * pow(fy / FG_MID, uFgGamma) * uFgGain * (1.0 - 0.55 * edge);
+  ny = ny / (1.0 + ny / 0.06);
+  vec3 fg = fa * (ny / fy);
+  // Mirror glass: the bright, blue panes of the curved curtain wall and the
+  // towers are the sky seen in a mirror, so they take a share of the shaft's
+  // own radial gradient (here, at the rim: the paler cyan, riding the time's
+  // sky level), and glow cyan-cobalt round the opening as the sky does.
+  // Brick, the tree and the dark spandrels (low, or not blue) take none.
+  vec3 ap = amb + 1e-6;
+  float glass = smoothstep(-3.6, -1.6, log2(dot(ap, LUMA)))
+              * smoothstep(1.3, 2.3, ap.b / ap.r) * (1.0 - edge);
+  fg += col * lum * uReflK * glass;
+  fg *= uAmbK;
+  if (id > 0) {
+    int k = id - 1;
+    fg += em * uB[k] * uTint[k];
+  }
+  vec3 c = mix(fg, sky * uAmbK, a);
+  o = vec4(c * uExpo, 1.0);
+}`;
+
+const BLIT_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTex; uniform vec4 uRect;
+out vec4 o;
+void main(){
+  vec2 p = (gl_FragCoord.xy - uRect.xy) / uRect.zw;
+  o = vec4(texture(uTex, p).rgb, 1.0);
+}`;
+
+function compile(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [
+    [gl.VERTEX_SHADER, vs],
+    [gl.FRAGMENT_SHADER, fs],
+  ]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+    gl.deleteShader(s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u };
+}
+
+async function bitmap(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  return createImageBitmap(await res.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+}
+
+function upload(gl, img, filter) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+
+function target(gl, w, h, internal, type, format) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  return { tex, fbo, w, h };
+}
+
+function rotation(yaw, pitch, roll) {
+  const r = (roll * Math.PI) / 180;
+  const p = (pitch * Math.PI) / 180;
+  const t = (yaw * Math.PI) / 180;
+  const Rz = [
+    [Math.cos(r), -Math.sin(r), 0],
+    [Math.sin(r), Math.cos(r), 0],
+    [0, 0, 1],
+  ];
+  const Rx = [
+    [1, 0, 0],
+    [0, Math.cos(p), Math.sin(p)],
+    [0, -Math.sin(p), Math.cos(p)],
+  ];
+  const Ry = [
+    [Math.cos(t), 0, Math.sin(t)],
+    [0, 1, 0],
+    [-Math.sin(t), 0, Math.cos(t)],
+  ];
+  const mul = (A, B) => A.map((row, i) => B[0].map((_, j) => row.reduce((s, _, k) => s + A[i][k] * B[k][j], 0)));
+  const M = mul(mul(Ry, Rx), Rz);
+  // column-major for GLSL
+  return new Float32Array([M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
+}
+
+// sRGB hex -> linear rgb at luminance 1
+function lin(hex) {
+  const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const l = v.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+  return l.map((c) => c / y);
+}
+const mix3 = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
+const smooth = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+// The sky at sunset (pale peach at the horizon under a cyan zenith) and at
+// +20 minutes (cobalt overhead, a cleaner, lighter blue low down).
+const SKY0 = { zen: lin("#5b9ddc"), mid: lin("#8bbae6"), horSun: lin("#f0caa0"), horAnti: lin("#b7d0e6"), lum: 0.72, sat: 1.25, glow: 0.55, zenDeep: 0.6 };
+const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, sat: 0.95, glow: 1.4, zenDeep: 1.5 };
+// The zenith ramp (sRGB hue, saturation, value): deep, saturated cobalt
+// straight overhead, paling to a cyaner blue about 65 deg off the zenith,
+// where the roofs cut the shaft. Value is relative to the time's sky level.
+const RAMP = { zen: [216, 0.82, 0.5], rim: [199, 0.38, 1.6], max: 65 };
+// sRGB hsv -> linear rgb at luminance 1, and its value
+function hsvLin([h, sat]) {
+  const c = sat;
+  const hp = (h % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  const m = 1 - c;
+  const hex = "#" + [r, g, b].map((v) => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("");
+  return lin(hex);
+}
+const RAMP_ZEN = hsvLin(RAMP.zen);
+const RAMP_RIM = hsvLin(RAMP.rim);
+const CLOUD_WHITE0 = lin("#f4e9df"); // peach-white, the sun still on the tops
+const CLOUD_WHITE1 = lin("#cfb8ae"); // a faint warm grey: what sun is left on the tops
+const CLOUD_PEACH = lin("#ffb98f");
+// The cloud's light is the source's own (cloud.webp): SUN_REF is its median
+// sun share inside a cloud, the reference core the time curve is solved for.
+const SUN_REF = 1.9;
+// The cloud's own curve. As printed (after the camera opens up) the shaft
+// loses about 3.5 stops over the span; a lit cloud core, which loses the sun
+// as well as the sky, loses CLOUD_STOPS, so its lift over the sky closes and
+// it ends a little under it.
+const CLOUD_STOPS = 4.8;
+const CORE_LIFT = 1.1; // stops: the reference lit core the curve is solved for
+const CLOUD_SKY1 = 0.8; // skylight a cloud passes on at +20 min, vs open sky
+const CLOUD_CEIL = 0.8; // of the film's white: the brightest a cloud top may print
+// While the sun is up its domes glow: about 1-1.5 stops over the zenith,
+// rolling into a warm white just under the film's.
+const DOME_GAIN = 1.6; // extra sun on a dome, relative to the reference core's
+const DOME_ROOM = 0.6; // stops of shoulder it opens
+const DOME_CEIL = 1.0; // and the ceiling it may print up to
+const FG_GAIN = 0.85; // building layer at sunset, about a quarter stop under the plate
+const GLASS_REFL = 0.25; // the shaft's light the curtain-wall glass gives back
+
+function lerpParams(a, b, k) {
+  const out = {};
+  for (const key of Object.keys(b)) {
+    const va = a[key];
+    const vb = b[key];
+    if (Array.isArray(vb)) out[key] = mix3(va, vb, k);
+    else if (typeof vb === "number") out[key] = va + (vb - va) * k;
+    else out[key] = vb;
+  }
+  return out;
+}
+
+export async function createBlueHour(host, { embedded = false } = {}) {
+  const params = new URLSearchParams(window.location.search);
+  const fixed = params.has("t") ? clamp(parseFloat(params.get("t")) || 0, 0, 1) : null;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const still = fixed != null || params.has("still");
+
+  const [ambImg, emitImg, auxImg, cloudImg] = await Promise.all([
+    bitmap("/lab/blue-hour/ambient.webp"),
+    bitmap("/lab/blue-hour/lights.png"),
+    bitmap("/lab/blue-hour/aux.png"),
+    bitmap("/lab/blue-hour/cloud.webp"),
+  ]);
+
+  host.style.background = "#f2f0eb";
+  const stage = createStage(host, { webgl: true, dpr: 2, alpha: true, antialias: false });
+  const gl = stage.ctx;
+  if (!gl) throw new Error("no webgl2");
+  if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("no float targets");
+  gl.getExtension("OES_texture_float_linear");
+  const canvas = stage.canvas;
+  canvas.tabIndex = 0;
+  canvas.setAttribute("role", "slider");
+  canvas.setAttribute("aria-label", "Minutes after sunset");
+  canvas.setAttribute("aria-valuemin", "0");
+  canvas.setAttribute("aria-valuemax", "20");
+  canvas.style.outline = "none";
+
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  // Decode the log-encoded plates once into mipmapped half-float radiance.
+  const decode = compile(gl, VS, DECODE_FS);
+  const decodeTo = (img, range, zeroIsNone) => {
+    const src = upload(gl, img, gl.NEAREST);
+    const w = img.width;
+    const h = img.height;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texStorage2D(gl.TEXTURE_2D, Math.floor(Math.log2(Math.max(w, h))) + 1, gl.RGBA16F, w, h);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    gl.useProgram(decode.p);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform1i(decode.u.uTex, 0);
+    gl.uniform2f(decode.u.uRange, range[0], range[1]);
+    gl.uniform1f(decode.u.uZeroIsNone, zeroIsNone ? 1 : 0);
+    gl.viewport(0, 0, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(src);
+    return t;
+  };
+  const ambTex = decodeTo(ambImg, [LO, HI], false);
+  const emitTex = decodeTo(emitImg, [ELO, EHI], true);
+  const auxTex = upload(gl, auxImg, gl.LINEAR);
+  // mipmapped, so the cloud's feather, broad light and the matte's erosion
+  // are single taps (light ids are read with texelFetch at level 0)
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  // the cloud's light: full resolution, so every billow is read at the
+  // texel it was baked at (level 0); the mips only feed the skylight's
+  // broad floor
+  const cloudTex = upload(gl, cloudImg, gl.LINEAR);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.deleteProgram(decode.p);
+  const texW = auxImg.width;
+  const texH = auxImg.height;
+  ambImg.close?.();
+  emitImg.close?.();
+  auxImg.close?.();
+  cloudImg.close?.();
+
+  const scene = compile(gl, VS, SCENE_FS);
+  const blit = compile(gl, VS, BLIT_FS);
+  const film = createFilm(gl, { width: 2, height: 2 });
+
+  const rot = rotation(VIEW.yaw, VIEW.pitch, 0);
+  const fPlate = texW / 2 / (VIEW.k * Math.tan((VIEW.hfov * Math.PI) / 180 / 2 / VIEW.k));
+  const sunA = (SUN_AZ * Math.PI) / 180;
+  const sunDir = [Math.sin(sunA), Math.cos(sunA)];
+  const onAt = schedule();
+  const strikes = new Array(LIGHTS.length).fill(-1); // real time a strike began
+
+  // The print: 4:5, as large as the box allows with room around it.
+  const rect = { x: 0, y: 0, w: 1, h: 1 };
+  let sceneT = null;
+  let filmT = null;
+  const layout = (w, h, dpr) => {
+    const gutter = Math.max(16, w * 0.06);
+    let ph = Math.min(h * 0.84, 1100);
+    let pw = (ph * texW) / texH;
+    if (pw > w - gutter * 2) {
+      pw = w - gutter * 2;
+      ph = (pw * texH) / texW;
+    }
+    rect.w = Math.round(pw);
+    rect.h = Math.round(ph);
+    rect.x = Math.round((w - rect.w) / 2);
+    rect.y = Math.round((h - rect.h) / 2);
+    const dw = Math.round(rect.w * dpr);
+    const dh = Math.round(rect.h * dpr);
+    for (const t of [sceneT, filmT]) {
+      if (!t) continue;
+      gl.deleteTexture(t.tex);
+      gl.deleteFramebuffer(t.fbo);
+    }
+    sceneT = target(gl, dw, dh, gl.RGBA16F, gl.HALF_FLOAT, gl.RGBA);
+    filmT = target(gl, dw, dh, gl.RGBA8, gl.UNSIGNED_BYTE, gl.RGBA);
+    film.resize(dw, dh);
+  };
+
+  // Time: shown value, velocity, target. Starts at sunset and walks a little
+  // way in by itself so the first lamps catch, then hands over.
+  const st = { v: fixed ?? 0, vel: 0, target: fixed ?? 0 };
+  let reveal = fixed == null && !reduced ? { t: 0, dur: 2.6, to: 0.3 } : null;
+  if (fixed == null && reduced) st.v = st.target = 0.3;
+  let exposureLift = reveal ? 2.2 : 0; // opens overexposed, settles
+  let drag = null;
+  let dirty = true;
+  let grainT = 0;
+  let seed = 5;
+  let now = 0;
+
+  const inside = (p, slop = 24) => p.x > rect.x - slop && p.x < rect.x + rect.w + slop && p.y > rect.y - slop && p.y < rect.y + rect.h + slop;
+  const band = (v) => {
+    // rubber band past the ends
+    if (v > 1) return 1 + (1 - 1 / ((v - 1) * 2.4 + 1)) / 2.4 * 0.35;
+    if (v < 0) return -(1 - 1 / (-v * 2.4 + 1)) / 2.4 * 0.35;
+    return v;
+  };
+
+  stage.on("down", (p) => {
+    if (!inside(p)) return;
+    reveal = null;
+    exposureLift = Math.min(exposureLift, 0.0001);
+    drag = { x: p.x, from: clamp(st.target, 0, 1), raw: st.target };
+    canvas.style.cursor = "grabbing";
+  });
+  stage.on("move", (p) => {
+    if (drag) {
+      drag.raw = drag.from + (p.x - drag.x) / (rect.w * 1.1);
+      st.target = band(drag.raw);
+      dirty = true;
+    } else canvas.style.cursor = inside(p, 0) ? "grab" : "";
+  });
+  stage.on("up", (p) => {
+    if (!drag) return;
+    drag = null;
+    canvas.style.cursor = inside(p, 0) ? "grab" : "";
+    // carry the hand a little way (friction ~220 ms), then settle in range
+    const v = p.vx / (rect.w * 1.1);
+    st.target = clamp(clamp(st.target, 0, 1) + clamp(v, -3, 3) * 0.22, 0, 1);
+    dirty = true;
+  });
+  const onWheel = (e) => {
+    const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    e.preventDefault();
+    reveal = null;
+    exposureLift = Math.min(exposureLift, 0.0001);
+    st.target = clamp(st.target + dx * 0.0012, 0, 1);
+    dirty = true;
+  };
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  const onKey = (e) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    reveal = null;
+    exposureLift = Math.min(exposureLift, 0.0001);
+    st.target = clamp(Math.round(st.target * 20 + step) / 20, 0, 1); // a minute a press
+    dirty = true;
+  };
+  canvas.addEventListener("keydown", onKey);
+
+  stage.onResize((w, h, dpr) => {
+    layout(w, h, dpr);
+    dirty = true;
+  });
+
+  // Per-light brightness and tint at time t (plus a strike flicker in real
+  // time when a light has just crossed its switch-on).
+  const B = new Float32Array(MAX_LIGHTS);
+  const TINT = new Float32Array(MAX_LIGHTS * 3).fill(1);
+  let lastT = st.v;
+  const strikeCurve = (kind, dt) => {
+    if (dt < 0) return 1;
+    if (kind === "window") {
+      // a fluorescent tube: two or three stutters, then steady
+      const k = [
+        [0, 0.05, 0.8],
+        [0.05, 0.17, 0.05],
+        [0.17, 0.21, 0.6],
+        [0.21, 0.38, 0.1],
+        [0.38, 0.52, 0.85],
+      ];
+      for (const [a, b, v] of k) if (dt >= a && dt < b) return v;
+      return dt < 0.7 ? 0.85 + 0.15 * ((dt - 0.52) / 0.18) : 1;
+    }
+    // an LED driver: one blink, then on
+    if (dt < 0.04) return 0.9;
+    if (dt < 0.1) return 0.08;
+    if (dt < 0.22) return 0.7 + 0.3 * ((dt - 0.1) / 0.12);
+    return 1;
+  };
+  const lights = (t) => {
+    for (let i = 0; i < LIGHTS.length; i++) {
+      const L = LIGHTS[i];
+      const t0 = onAt[i];
+      let b = 0;
+      let tint = [1, 1, 1];
+      if (L.kind === "street") {
+        // High-pressure sodium: a dim pink strike, then the sodium takes
+        // over and it climbs to amber over a few minutes.
+        const p = clamp((t - t0) / WARMUP, 0, 1);
+        b = t > t0 ? (0.035 + 0.965 * p ** 1.7) * STREET_GAIN : 0;
+        b *= smooth(t0, t0 + 0.006, t);
+        tint = mix3([0.82, 0.6, 1.9], [1, 1, 1], smooth(0, 0.7, p));
+      } else {
+        b = smooth(t0, t0 + 0.004, t);
+        if (!still && strikes[i] >= 0) b *= strikeCurve(L.kind, now - strikes[i]);
+      }
+      B[i] = b;
+      TINT[i * 3] = tint[0];
+      TINT[i * 3 + 1] = tint[1];
+      TINT[i * 3 + 2] = tint[2];
+    }
+  };
+  const checkStrikes = (t) => {
+    if (still || reduced) return;
+    for (let i = 0; i < LIGHTS.length; i++) {
+      if (LIGHTS[i].kind === "street") continue;
+      if (lastT < onAt[i] && t >= onAt[i]) strikes[i] = now;
+      if (t < onAt[i]) strikes[i] = -1;
+    }
+    lastT = t;
+  };
+  const striking = () => strikes.some((s) => s >= 0 && now - s < 0.75);
+
+  const draw = () => {
+    const t = clamp(st.v, 0, 1);
+    const s = smooth(0, 1, t);
+    lights(t);
+    const sky = lerpParams(SKY0, SKY1, s);
+    const fp = lerpParams({ ...FILM_DEFAULTS, ...FILM_PRESETS.dusk }, { ...FILM_DEFAULTS, ...FILM_PRESETS.night }, smooth(0.05, 0.95, t));
+    const ambK = 2 ** (-AMB_STOPS * t);
+    const expo = 0.62 * 2 ** (EXPO_STOPS * t + exposureLift);
+    const wb = mix3([1.07, 1.0, 0.92], [0.82, 0.95, 1.22], s);
+    const skyLevel = sky.lum * 1.25 * ambK * expo;
+    // printed level of the skylight and of the cloud, both relative to sunset
+    const skyFall = (sky.lum / SKY0.lum) * ambK * 2 ** (EXPO_STOPS * t);
+    // solve the sun's share so the reference core prints on the cloud curve
+    const core0 = 2 ** CORE_LIFT;
+    const cloudSkyK = 1 + (CLOUD_SKY1 - 1) * t;
+    const coreT = (core0 * 2 ** (-CLOUD_STOPS * t)) / skyFall / cloudSkyK;
+    const sunK = clamp((coreT - 1) / (core0 - 1), 0, 1);
+
+    gl.bindVertexArray(vao);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
+    gl.viewport(0, 0, sceneT.w, sceneT.h);
+    gl.useProgram(scene.p);
+    const u = scene.u;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, ambTex);
+    gl.uniform1i(u.uAmb, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, emitTex);
+    gl.uniform1i(u.uEmit, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, auxTex);
+    gl.uniform1i(u.uAux, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, cloudTex);
+    gl.uniform1i(u.uCloud, 3);
+    gl.uniform2f(u.uSize, sceneT.w, sceneT.h);
+    gl.uniform2f(u.uTexSize, texW, texH);
+    gl.uniformMatrix3fv(u.uRot, false, rot);
+    gl.uniform1f(u.uF, fPlate);
+    gl.uniform1f(u.uK, VIEW.k);
+    gl.uniform1f(u.uShift, (VIEW.shift * texW) / 2);
+    gl.uniform2f(u.uSun, sunDir[0], sunDir[1]);
+    gl.uniform1f(u.uS, s);
+    gl.uniform1f(u.uAmbK, ambK);
+    gl.uniform1f(u.uExpo, expo);
+    gl.uniform3fv(u.uWB, wb);
+    gl.uniform3fv(u.uZen, sky.zen);
+    gl.uniform3fv(u.uMid, sky.mid);
+    gl.uniform3fv(u.uHorSun, sky.horSun);
+    gl.uniform3fv(u.uHorAnti, sky.horAnti);
+    gl.uniform1f(u.uSkyLum, sky.lum * 1.25);
+    gl.uniform1f(u.uSkySat, sky.sat);
+    gl.uniform1f(u.uSunRef, SUN_REF);
+    gl.uniform1f(u.uCoreLift, core0 - 1);
+    gl.uniform1f(u.uSunK, sunK);
+    gl.uniform1f(u.uCloudSkyK, cloudSkyK);
+    gl.uniform1f(u.uKnee, 1.0);
+    // the sunlit domes' extra lift, gone by blue hour; their headroom (the
+    // shoulder) opens with it
+    const domeK = DOME_GAIN * (1 - smooth(0.3, 0.55, t));
+    gl.uniform1f(u.uDomeK, domeK);
+    gl.uniform1f(u.uShoulder, 2.0 + DOME_ROOM * (domeK / DOME_GAIN));
+    // the skylight structure the cloud keeps: most of it while the sun still
+    // fills the pockets, all of it once the sun has gone
+    gl.uniform1f(u.uCloudKeep, 0.8 + 0.2 * s);
+    // the film lands fp.whitePoint (after its own exposure) on paper white;
+    // cloud tops roll off under CLOUD_CEIL of that, bloom included
+    const ceil = CLOUD_CEIL + (DOME_CEIL - CLOUD_CEIL) * (1 - smooth(0.3, 0.55, t));
+    gl.uniform1f(u.uCloudCeil, (ceil * fp.whitePoint) / (2 ** fp.exposure * expo));
+    gl.uniform3fv(u.uCloudWhite, mix3(CLOUD_WHITE0, CLOUD_WHITE1, smooth(0.0, 0.7, t)));
+    gl.uniform3fv(u.uCloudPeach, CLOUD_PEACH);
+    gl.uniform1f(u.uAfter, 1 - smooth(0, 0.65, t));
+    // the buildings are lit by the same sky, so they fall with its level
+    // (with uAmbK and the camera, the shaft's ~3.5 stops) from FG_GAIN
+    gl.uniform1f(u.uFgGain, FG_GAIN * (sky.lum / SKY0.lum));
+    gl.uniform1f(u.uReflK, GLASS_REFL);
+    gl.uniform1f(u.uFgGamma, 1.7);
+    gl.uniform1f(u.uGlow, sky.glow);
+    gl.uniform1f(u.uZenDeep, sky.zenDeep);
+    gl.uniform3fv(u.uRampZen, RAMP_ZEN);
+    gl.uniform3fv(u.uRampRim, RAMP_RIM);
+    gl.uniform2f(u.uRampV, RAMP.zen[2], RAMP.rim[2]);
+    gl.uniform1f(u.uRampMax, (RAMP.max * Math.PI) / 180);
+    gl.uniform1f(u.uRampK, smooth(0, 0.15, t));
+    gl.uniform1f(u.uLod, Math.max(0, Math.log2(texH / sceneT.h) - 0.7));
+    gl.uniform1fv(u.uB, B);
+    gl.uniform3fv(u.uTint, TINT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    film.render(
+      sceneT.tex,
+      {
+        ...fp,
+        input: "linear",
+        grainSeed: seed,
+        grain: fp.grain * 0.55,
+        vignette: fp.vignette * 0.7,
+        softness: 0.2,
+        // only what stands above the sky (cloud tops, the lamp) diffuses, so
+        // the shaft does not veil the towers grey
+        bloomThreshold: skyLevel * 2.2,
+        bloom: fp.bloom * 0.8,
+        toe: fp.toe * 0.4,
+        warmth: fp.warmth * 0.35,
+        halation: fp.halation * 0.38,
+        // the lamp is the one warm accent: cloud tops glow, but stay under
+        // the threshold where a red halo would fringe them
+        halationThreshold: Math.max(fp.halationThreshold, skyLevel * 9),
+      },
+      filmT.fbo,
+    );
+
+    const dpr = stage.dpr;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const x = Math.round(rect.x * dpr);
+    const y = canvas.height - Math.round(rect.y * dpr) - filmT.h;
+    gl.viewport(x, y, filmT.w, filmT.h);
+    gl.useProgram(blit.p);
+    gl.bindVertexArray(vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
+    gl.uniform1i(blit.u.uTex, 0);
+    gl.uniform4f(blit.u.uRect, x, y, filmT.w, filmT.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const min = Math.round(t * 20);
+    canvas.setAttribute("aria-valuenow", String(min));
+    canvas.setAttribute("aria-valuetext", `${min} minutes after sunset`);
+  };
+
+  const easeOutExpo = (x) => (x >= 1 ? 1 : 1 - 2 ** (-10 * x));
+
+  stage.onFrame((dt, time) => {
+    now = time;
+    if (reveal) {
+      reveal.t += dt;
+      const k = easeOutExpo(Math.min(1, reveal.t / reveal.dur));
+      st.target = reveal.to * k;
+      exposureLift = 2.2 * (1 - easeOutExpo(Math.min(1, reveal.t / 2.0)));
+      if (reveal.t >= reveal.dur) {
+        reveal = null;
+        exposureLift = 0;
+      }
+      dirty = true;
+    }
+    // The shown time follows its target on a spring (damping 0.86): firm
+    // under the hand, a soft settle after a throw.
+    const w = drag ? 22 : 10;
+    const z = 0.86;
+    const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      const a = -2 * z * w * st.vel - w * w * (st.v - st.target);
+      st.vel += a * h;
+      st.v += st.vel * h;
+    }
+    if (Math.abs(st.v - st.target) < 1e-5 && Math.abs(st.vel) < 1e-4) {
+      if (st.v !== st.target) dirty = true;
+      st.v = st.target;
+      st.vel = 0;
+    } else dirty = true;
+    checkStrikes(clamp(st.v, 0, 1));
+    if (striking()) dirty = true;
+    if (!still && !reduced) {
+      grainT += dt;
+      if (grainT >= 1 / 24) {
+        grainT %= 1 / 24;
+        seed = (seed + 1.618) % 997;
+        dirty = true;
+      }
+    }
+    if (dirty && sceneT) {
+      dirty = false;
+      draw();
+    }
+  });
+  void embedded;
+
+  return {
+    destroy() {
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("keydown", onKey);
+      for (const t of [ambTex, emitTex, auxTex, cloudTex]) gl.deleteTexture(t);
+      for (const t of [sceneT, filmT]) {
+        if (!t) continue;
+        gl.deleteTexture(t.tex);
+        gl.deleteFramebuffer(t.fbo);
+      }
+      film.destroy();
+      gl.deleteProgram(scene.p);
+      gl.deleteProgram(blit.p);
+      gl.deleteBuffer(quad);
+      gl.deleteVertexArray(vao);
+      stage.destroy();
+    },
+  };
+}

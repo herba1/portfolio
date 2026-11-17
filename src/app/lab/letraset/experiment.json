@@ -1,0 +1,14 @@
+{
+  "title": "Letraset",
+  "description": "A sheet of dry transfer lettering lying over warm paper, a lyric half rubbed down. Rub a letter with the pointer and it lets go of the carrier: grey and silvered on the sheet where it has lifted, black on the paper below, partial where the rub was light and cracked where the film flexed. Drag the sheet by its margin to line up the next letter; what you leave behind is a used sheet full of gaps.",
+  "tags": ["Canvas", "Type", "Material"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "From the Letraset dry transfer reference (https://eyemagazine.com/feature/article/rub-down-revolution): rub-down lettering whose cracks, partial transfers and uneven spacing became the look.",
+  "tile": { "shape": "wide" },
+  "sources": [
+    "https://eyemagazine.com/feature/article/rub-down-revolution",
+    "https://action-transfers.com/html/a_articles/what7.shtml",
+    "https://en.wikipedia.org/wiki/Letraset"
+  ]
+}

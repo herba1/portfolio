@@ -1,0 +1,135 @@
+.it {
+  /* Two colours and nothing between them: the ink is the highlight, the
+     ground is the inverted label. No track, no third tone. */
+  --it-ground: #f2f0eb;
+  --it-ink: #0d0d0c;
+
+  /* Display scale, fitted: the row runs the full width of the canvas, the
+     first and last letters touching the frame. --it-fit is the row's width
+     in em, measured once the face has loaded (Piece.jsx); 12 is close
+     enough for the first paint. */
+  --it-fit: 12;
+  --it-size: calc(100cqw / var(--it-fit));
+  /* The sleeve's one margin: the baseline hangs this far above the bottom
+     edge. A multiple of 4px at every canvas size. */
+  --it-base: max(16px, round(nearest, 3cqw, 4px));
+  /* Row bottom to baseline, in px, measured from a probe on the baseline
+     (Piece.jsx). The hang subtracts it so the baseline, not the line box,
+     lands on --it-base. */
+  --it-drop: 0px;
+  /* Side bearings of the first and last glyph, in em, measured from the
+     face; the outer tabs pull out by these so ink, not advance, meets the
+     frame. */
+  --it-lsb: 0;
+  --it-rsb: 0;
+
+  position: relative;
+  display: grid;
+  align-items: end;
+  justify-items: start;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  background: var(--it-ground);
+  color: var(--it-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.it-bar {
+  position: relative;
+  margin-bottom: calc(var(--it-base) - var(--it-drop));
+  touch-action: none;
+  cursor: default;
+}
+
+.it-bar[data-dragging] {
+  cursor: grabbing;
+}
+
+.it-row {
+  display: flex;
+  position: relative;
+  font-size: var(--it-size);
+  /* The display step's leading, snapped to the 4px grid. */
+  line-height: round(nearest, calc(1em * var(--text-display--line-height)), 4px);
+  /* Fluid type has no fixed step to borrow tracking from, so the row
+     carries the law itself: -0.043 x (size - 12px), in em so it scales. */
+  letter-spacing: calc(-0.043 * (1em - 12px));
+  font-weight: var(--text-display--font-weight);
+  /* One word-space between words, split across the two tabs that meet:
+     the highlight's edge is always inside a word, never over air. */
+  --it-pad-x: 0.12em;
+  --it-pad-y: round(nearest, 0.04em, 4px);
+}
+
+/* The highlight is a colour field, not a pill: the whole canvas in ink,
+   clipped left and right to the active tab's edges and open top and bottom,
+   so it rises out of the type and runs off the top of the poster as a
+   square-edged column. The outer tabs' outer edges sit on the frame, so on
+   Albums or Demos the field bleeds. The row inside it hangs from the same
+   grid and margin as the live row, so the inverted words land on the live
+   ones exactly. */
+.it-ink {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-items: end;
+  justify-items: start;
+  background: var(--it-ink);
+  color: var(--it-ground);
+  pointer-events: none;
+  will-change: clip-path;
+  clip-path: inset(0 100% 0 0);
+}
+
+.it-ink > .it-row {
+  margin-bottom: calc(var(--it-base) - var(--it-drop));
+}
+
+/* A zero-size box on the baseline, so the hang can be measured. */
+.it-probe {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+.it-tab {
+  display: block;
+  margin: 0;
+  padding: var(--it-pad-y) var(--it-pad-x);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  white-space: nowrap;
+  cursor: inherit;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Flush: no outer padding on the end tabs, and each pulls out by its
+   glyph's side bearing. The last tab also gives back the tracking Chrome
+   hangs after its final letter, so its ink, not its advance, meets the
+   right edge. */
+.it-tab:first-child {
+  padding-left: 0;
+  margin-left: calc(-1em * var(--it-lsb));
+}
+
+.it-tab:last-child {
+  padding-right: 0;
+  margin-right: calc(-1em * var(--it-rsb) + 0.043 * (1em - 12px));
+}
+
+.it-bar .it-tab:focus-visible {
+  box-shadow: 0 0 0 2px var(--it-ground), 0 0 0 4px var(--it-ink);
+}

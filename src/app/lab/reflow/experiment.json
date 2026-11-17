@@ -1,0 +1,18 @@
+{
+  "title": "Reflow",
+  "description": "One enormous black S, the initial of Scarborough Fair, stands in a block of the ballad set small and justified, three columns filling the sheet between equal margins, and runs off its foot. The letter is Geist itself, read from the font's real outline, and the text runs around its curves with an even gutter, filling the bays of the S; each counter belongs to the one column that holds most of it, so a bowl reads as one run, never two fragments across a gutter. Drag the letter and every line is cut again and re-broken at frame rate: Knuth–Plass total fit, Liang's hyphenation patterns, hanging punctuation, and short runaround lines set flush left and ragged rather than stretched; each bay and counter is set whole as one block that opens and closes on a full line, its scraps left white, and a free region shallower than three lines stays white.",
+  "tags": ["Typography", "Layout", "Canvas"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After the Stedelijk Museum identity by Mevis & Van Deursen (2012): one huge letter as the composition, the type wrapping around it. https://stedelijk.nl/en/news/new-visual-identity-by-mevis-en-van-deursen",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.5], "to": [0.38, 0.58] },
+  "probe": [
+    { "idle": 1200 },
+    { "drag": [[0.6, 0.5], [0.4, 0.6]], "ms": 2200 },
+    { "idle": 900 },
+    { "drag": [[0.4, 0.6], [0.7, 0.35]], "ms": 1800 },
+    { "idle": 1400 }
+  ],
+  "sources": ["https://stedelijk.nl/en/news/new-visual-identity-by-mevis-en-van-deursen", "https://en.wikipedia.org/wiki/Knuth%E2%80%93Plass_line-breaking_algorithm", "https://en.wikipedia.org/wiki/Scarborough_Fair_(ballad)"]
+}

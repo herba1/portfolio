@@ -1,0 +1,11 @@
+.kit-poke {
+  background: #f2f0eb;
+}
+
+.kit-poke[data-grab="open"] {
+  cursor: grab;
+}
+
+.kit-poke[data-grab="held"] {
+  cursor: grabbing;
+}

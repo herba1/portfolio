@@ -1,0 +1,11 @@
+{
+  "title": "Optical",
+  "description": "A short paragraph about reading, set in a serif with a true optical-size axis. Pinch, ctrl-scroll or drag up and down to zoom it from caption size to display size around your finger, and the letters redraw themselves as they grow: at the smallest sizes the face is wide, sturdy and open, spaced loose; as it grows the contrast sharpens, the counters close up and the spacing tightens, so every size on the way is set as a typefounder would set it.",
+  "tags": ["Type", "Variable fonts", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T15:00:00.000Z",
+  "intent": "From Underware's Zeitung Flex automatic optical size (https://underware.nl/fonts/zeitung/features/Flex/): the design follows the point size continuously. Here opsz tracks the rendered pixel size and tracking follows the house law, -0.043 x (size - 12) px, so the craft of sizing is shown as one continuous zoom.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-optical", "from": [0.5, 0.55], "to": [0.5, 0.4] },
+  "sources": ["https://underware.nl/fonts/zeitung/features/Flex/", "https://fonts.google.com/specimen/Newsreader"]
+}

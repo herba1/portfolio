@@ -192,6 +192,7 @@ function RgbdField({ clip, engineRef, isMobile }) {
     const pivot = pivotRef.current;
     const engine = engineRef.current;
     if (!runtime || !pivot || !engine) return;
+    engine.drawn = true;
     const delta = Math.min(rawDelta, RENDER.maxDelta);
     runtime.sync(engine, performance.now());
     aimCamera(state.camera, engine, clip.meta, delta, pivot);

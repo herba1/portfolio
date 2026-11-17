@@ -57,8 +57,32 @@ const followScratch = {
   scale: new THREE.Vector3(1, 1, 1),
 };
 
-export function aimCamera(camera, engine, meta, delta, pivot, base = null) {
-  const fov = viewFov(meta);
+const remapScratch = {
+  yaw: new THREE.Quaternion(),
+  pitch: new THREE.Quaternion(),
+  turn: new THREE.Quaternion(),
+  offset: new THREE.Vector3(),
+  across: new THREE.Vector3(1, 0, 0),
+};
+
+// The worm's-eye rest: the camera sits where the phone was, pitched further
+// up (and rolled) by the remap. The lean rides on top of it as one rigid turn
+// about the post's base: yaw round the remapped zenith, pitch round the
+// horizontal, so the base holds its place in the frame while the cloud and
+// wires swing behind the post. In a view this wide every degree of turn shows,
+// so the lean is scaled down to keep the source's edges outside the frame.
+function aimRemapped(camera, view, remap, pivot) {
+  const s = remapScratch;
+  s.yaw.setFromAxisAngle(remap.zenith, view.yaw * remap.lean);
+  s.pitch.setFromAxisAngle(s.across, -view.pitch * remap.lean);
+  s.turn.multiplyQuaternions(s.yaw, s.pitch);
+  s.offset.copy(pivot).multiplyScalar(-view.dolly).applyQuaternion(s.turn);
+  camera.position.copy(pivot).add(s.offset);
+  camera.quaternion.multiplyQuaternions(s.turn, remap.rest);
+}
+
+export function aimCamera(camera, engine, meta, delta, pivot, base = null, remap = null) {
+  const fov = remap ? remap.vfovDeg : viewFov(meta);
   if (camera.fov !== fov || camera.near !== RENDER.near || camera.far !== RENDER.far) {
     camera.fov = fov;
     camera.near = RENDER.near;
@@ -68,6 +92,11 @@ export function aimCamera(camera, engine, meta, delta, pivot, base = null) {
 
   const { yaw, pitch, dolly } = stepOrbit(engine, delta, performance.now());
   engine.view = { yaw, pitch, dolly };
+  if (remap) {
+    aimRemapped(camera, engine.view, remap, pivot);
+    camera.updateMatrixWorld();
+    return;
+  }
   const distance = meta.camera.pivotDepth * dolly;
   camera.position.set(
     pivot.x + Math.sin(yaw) * Math.cos(pitch) * distance,

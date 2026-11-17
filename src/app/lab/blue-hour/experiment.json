@@ -1,0 +1,29 @@
+{
+  "title": "Blue Hour",
+  "description": "The twenty minutes after sunset, lying on your back on the kerb of a city street and looking straight up: a shaft of sky ringed by two towers, a crane, brick and curved glass, every vertical running in to the one vanishing point overhead. Drag across and the evening runs: the skylight falls three and a half stops while the shaft deepens from pale peach-cyan to cobalt, darkest straight overhead, the clouds lose the sun faster than the sky loses its light and sink from peach-white to a deep slate-blue with a faint warm top, and the one sodium lamp on the bottom rim trips on its photocell and warms slowly from a dim pink strike to amber. The lamp is a real emitter cut from the HDR panorama, so its bloom and halation through the film come from its own radiance.",
+  "tags": ["WebGL", "Film", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:00:00.000Z",
+  "intent": "Genre spec idea 10, Blue Hour (factory/reality/genre-spec.md section 4), after Todd Hido's dusk houses and CineStill 800T: glow that behaves like optics, as the one night-adjacent piece. Reference: https://www.toddhido.com/ and https://cinestillfilm.com/products/800tungsten-high-speed-color-film-135-36exp . ?t=0..1 holds the time (0 = sunset, 1 = twenty minutes on); ?still=1 skips the reveal.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.5], "to": [0.62, 0.5] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.4, 0.5], [0.62, 0.5]], "ms": 1800 },
+    { "idle": 1400 },
+    { "drag": [[0.62, 0.5], [0.45, 0.5]], "ms": 1200 },
+    { "idle": 1200 }
+  ],
+  "photo": {
+    "name": "Grzegorz Wronkowski, Modern Evening Street (Poly Haven HDRI, CC0)",
+    "url": "https://polyhaven.com/a/modern_evening_street"
+  },
+  "sources": [
+    "HDRI: Modern Evening Street, Poly Haven, by Grzegorz Wronkowski, CC0. https://polyhaven.com/a/modern_evening_street (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/modern_evening_street_8k.hdr). True zenith worm's-eye view: stereographic, 125 deg across, the axis pitched the full 90 deg up at yaw 116 with no frame slide, so the zenith is the print's centre and the single vanishing point of every vertical, and the towers, brick, curved glass and tree ring the frame; rendered 2x supersampled and shipped at 1440x1800. Offline split: the sky matte (a seed grown from the zenith by smoothness, brightness and chroma, since Depth Anything V2 reads the pale towers as sky looking straight up, then a two-colour luminance and chroma projection at the edges) and the lights cut out as radiance above their surround, the lamps' diffraction stars painted out of both layers; only the sodium head over the brick on the bottom rim ships as an emitter, the other two heads and the lit rooms stay dark; ambient (lights off) as log2 radiance -10..+3 in 8 bits, emitters as log2 -9..+14. The plate's own clouds were a few scraps under an equirect pole pinch, so the whole cloud layer comes from a second, sky-only HDRI through the same view, its deck slid 25 deg so a clear patch sits on the zenith with the puffs ringed round it and its sun behind the right-hand tower (tools/depth/bakes/blue-hour/clouds.py), split by colour rather than luminance: cover is how far a pixel's blue/red ratio has fallen from the local clear sky's (aux.png), and the cloud's light ships apart at full resolution (cloud.webp): its real radiance over the local clear sky, split by least squares into the skylight it passes on and the sun it scatters, both log2 in 8 bits and read at mip 0, so every puff keeps the source's own sunlit domes and skylit blue pockets while the shader grades the sun away and the skylight down over the span. One source, no patch and no seam, so the gaps are clean sky and the zenith deepens by the radial gradient alone.",
+    "HDRI (cloud): Kloofendal 48d Partly Cloudy (Pure Sky), Poly Haven, by Greg Zaal with sky edits by Jarod Guest, CC0. https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr), seen through the plate's view turned 210 deg and tilted 25 deg: about a third of the shaft under fair-weather cumulus, a clear patch overhead, its sun behind the right-hand tower.",
+    "https://en.wikipedia.org/wiki/Blue_hour",
+    "https://en.wikipedia.org/wiki/Sodium-vapor_lamp",
+    "https://www.toddhido.com/",
+    "https://rassokhin-video.pages.dev/articles/what-is-halation-effect-dehancer-guide"
+  ]
+}

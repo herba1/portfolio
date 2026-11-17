@@ -1,0 +1,11 @@
+{
+  "title": "Corner Throw",
+  "description": "A small square record sleeve resting in the corner of a warm press sheet, inside its own crop marks, behaving like a picture-in-picture window. Throw it and it does not go where your finger let go: it projects the throw forward with the same deceleration a scroll view uses, picks the corner nearest to where that momentum would have carried it, and travels there on a spring that starts at your release velocity. While you hold it, a 1px ink line runs from the cover to where its momentum would carry it, ending in a crosshair, and crop marks register the corner it will land in, changing their mind as your hand does. Let go and the line stays pinned between where your hand let go and where the throw lands, then fades as the cover settles over a typeset tracklist. Catch it in flight and it stops in your fingers.",
+  "tags": ["Gesture", "Spring", "Music"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Apple PiP corner projection, WWDC 2018 'Designing Fluid Interfaces' (https://developer.apple.com/videos/play/wwdc2018/803/): the target is chosen from where the throw would land, not where the finger lifted, and the spring keeps the release velocity.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".ct-tile", "from": [0.15, 0.8], "to": [0.4, 0.55] },
+  "sources": ["https://developer.apple.com/videos/play/wwdc2018/803/"]
+}

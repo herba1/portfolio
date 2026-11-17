@@ -1,0 +1,281 @@
+.ct-root {
+  --ct-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ct-paper: #f2f0eb;
+  /* Secondary ink, warmed to the paper: a grey-brown, not slate. 5:1 on the sheet. */
+  --color-ink-secondary: #6f655a;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--ct-paper);
+  touch-action: none;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ct-tile,
+.ct-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--ct-size, 144px);
+  height: var(--ct-size, 144px);
+}
+
+.ct-root:not([data-ready]) .ct-tile,
+.ct-root:not([data-ready]) .ct-ghost {
+  visibility: hidden;
+}
+
+/* The landing corner: printer's crop marks at the cover's exact trim, so the
+   chosen corner reads as registration on the sheet, not as a slot. */
+.ct-ghost {
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    transform 180ms var(--ct-ease),
+    opacity 200ms var(--ct-ease);
+}
+
+.ct-ghost[data-show] {
+  opacity: 1;
+}
+
+.ct-crop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--color-ink-secondary);
+  stroke-width: 1px;
+}
+
+/* The projection: where the hand is (or let go) to where the momentum lands. */
+.ct-trace {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--color-ink);
+  stroke-width: 1px;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.ct-root[data-tracing] .ct-trace {
+  opacity: 1;
+  transition: none;
+}
+
+/* The rule runs under the type. While it is drawn, every glyph carries a 2px
+   paper halo, so the line breaks around letters instead of striking them out. */
+.ct-root[data-tracing] .ct-page {
+  text-shadow:
+    2px 0 var(--ct-paper),
+    -2px 0 var(--ct-paper),
+    0 2px var(--ct-paper),
+    0 -2px var(--ct-paper),
+    1.5px 1.5px var(--ct-paper),
+    -1.5px 1.5px var(--ct-paper),
+    1.5px -1.5px var(--ct-paper),
+    -1.5px -1.5px var(--ct-paper);
+}
+
+.ct-hand circle {
+  fill: var(--ct-paper);
+}
+
+.ct-knock {
+  stroke: var(--ct-paper);
+  stroke-width: 3px;
+}
+
+/* While held, the hand is the tile: no release mark yet. */
+.ct-root[data-dragging] .ct-hand {
+  display: none;
+}
+
+.ct-tile {
+  cursor: grab;
+  will-change: transform;
+  outline: none;
+  touch-action: none;
+}
+
+.ct-root[data-dragging] .ct-tile {
+  cursor: grabbing;
+}
+
+/* A hard square sleeve. No shadow: depth while lifted is a 1px ink keyline. */
+.ct-lift {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: scale 280ms var(--ct-ease);
+}
+
+.ct-lift::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  box-shadow: inset 0 0 0 1px var(--color-ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ct-ease);
+}
+
+.ct-root[data-dragging] .ct-lift,
+.ct-root[data-flying] .ct-lift {
+  scale: 1.035;
+}
+
+.ct-root[data-dragging] .ct-lift::after,
+.ct-root[data-flying] .ct-lift::after {
+  opacity: 1;
+}
+
+.ct-tile:focus-visible .ct-lift {
+  outline: 1px solid var(--color-ink);
+  outline-offset: 4px;
+}
+
+.ct-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* The sheet: a 12-column grid (column width set from the box in JS, always even).
+   The tracklist sets in columns 3–10; columns 1–2 and 11–12 are the sleeve's wells. */
+.ct-page {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(12, var(--ct-col, 72px));
+  column-gap: var(--ct-gutter, 24px);
+  justify-content: center;
+  align-content: center;
+  color: var(--color-ink);
+}
+
+.ct-head,
+.ct-sides {
+  grid-column: 3 / 11;
+  min-width: 0;
+}
+
+/* A zero-size probe whose bottom sits on the title's baseline. */
+.ct-base {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
+}
+
+.ct-artist,
+.ct-meta,
+.ct-n,
+.ct-len,
+.ct-notes {
+  color: var(--color-ink-secondary);
+}
+
+.ct-title {
+  margin-top: 4px;
+  text-wrap: balance;
+}
+
+.ct-meta {
+  margin-top: 8px;
+}
+
+.ct-sides {
+  display: grid;
+  /* Two halves of eight columns: four columns and three gutters each. */
+  grid-template-columns: 1fr 1fr;
+  column-gap: var(--ct-gutter, 24px);
+  margin-top: 48px;
+  align-items: start;
+}
+
+.ct-side-name {
+  padding-bottom: 8px;
+  text-wrap: balance;
+  box-shadow: inset 0 -1px 0 var(--color-ink);
+}
+
+.ct-tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ct-track {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  min-height: 32px;
+  column-gap: 8px;
+  box-shadow: inset 0 -1px 0 rgb(40 30 15 / 0.12);
+}
+
+.ct-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ct-track[data-now] .ct-name {
+  font-weight: var(--font-weight-strong);
+}
+
+.ct-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-ink);
+}
+
+.ct-notes {
+  margin-top: 24px;
+  max-width: 320px;
+}
+
+@container (max-width: 760px) {
+  .ct-sides {
+    grid-template-columns: 1fr;
+  }
+
+  .ct-side + .ct-side,
+  .ct-notes {
+    display: none;
+  }
+}
+
+/* Short boxes (an index tile): keep the title and the top of side one. */
+@container (max-height: 560px) {
+  .ct-meta,
+  .ct-notes {
+    display: none;
+  }
+
+  .ct-sides {
+    margin-top: 24px;
+  }
+
+  .ct-track:nth-child(n + 4) {
+    display: none;
+  }
+}

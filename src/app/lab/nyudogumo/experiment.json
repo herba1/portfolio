@@ -1,0 +1,26 @@
+{
+  "title": "Nyudogumo",
+  "description": "A railway crossing in silhouette against a cumulonimbus on a summer afternoon, made into a time-lapse from the one photograph. Drag up and the afternoon goes on: the tower boils upward and outward from its own texture, the turrets that already stood tallest rising furthest, every lobe swelling and the flanks rolling out and down, while the base thickens to a skylight blue-grey and the sunlit tops stay warm and white. The light on the signal goes warmer and longer with the hour. Let go and the afternoon eases back to the moment the shutter opened. Every pixel of cloud is the photograph's own, carried along the flow.",
+  "tags": ["WebGL", "Film", "Photography", "Simulation"],
+  "status": "draft",
+  "createdAt": "2026-11-07T15:00:00.000Z",
+  "intent": "Nyudogumo (the towering summer cumulonimbus): convection as a time-lapse from one still, after herb's reference 3 (a pole and wires against towering cumulus) and the genre spec's idea 4, Natsu (factory/reality/genre-spec.md section 4). Reference: https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4 . The cloud is advected backward along a baked convective flow (an updraft per column scaled by how tall the column already stands, an outward spread, lobe inflation from the gradient of the cloud's band-passed luminance, and the curl of a side-signed luminance stream function, after Bridson, Hourihan and Nordenstam, 'Curl-noise for procedural fluid flow', SIGGRAPH 2007, https://www.cs.ubc.ca/~rbridson/docs/bridson-siggraph2007-curlnoise.pdf), composited as its excess over a fitted sky, then developed through the shared summer film kit. ?t=0..1 holds the hour (0 = the photograph), ?still=1 skips the reveal.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.8], "to": [0.6, 0.25] },
+  "probe": [
+    { "idle": 4600 },
+    { "drag": [[0.6, 0.82], [0.6, 0.22]], "ms": 2600 },
+    { "idle": 2400 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
+      "file": "https://images.unsplash.com/photo-1620233950363-7c0947527682",
+      "author": "Kanata (@tanakanata), Unsplash",
+      "licence": "Unsplash License",
+      "note": "5184x3456 original, worked at 2400x1600. Bake: tools/depth/bakes/nyudogumo (matte.py, sky.py, flow.py, export.py; preview.py renders the shader's backtrace offline). Sky matte by tools/depth/segment.py sky (Depth Anything V2 depth as the hint), corrected with a thin-line key and black-silhouette unmixing against a pull-push background, guided-filter refined; the sky and cloud behind the silhouettes inpainted with LaMa (tools/depth/fill.py; Carve/LaMa-ONNX, Apache-2.0); sky fitted as a quadratic in linear light; cloud keyed by saturation and luminance against that sky."
+    },
+    "https://en.wikipedia.org/wiki/Cumulonimbus_cloud",
+    "https://www.cs.ubc.ca/~rbridson/docs/bridson-siggraph2007-curlnoise.pdf"
+  ]
+}

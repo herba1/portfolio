@@ -1,0 +1,77 @@
+{
+  "title": "Motion Brush",
+  "description": "A still photograph of a cumulus tower over Osaka, cut by a fan of power lines, that moves only where you paint it. Brush across the sky and the stroke's direction and speed become a motion field: that bank of cloud starts to drift along your stroke, behind wires that stay perfectly still, in a loop that never resets, while the rest of the frame stays a photograph. Brush along a wire and it sways instead. A long press lets it all settle back.",
+  "tags": [
+    "WebGL",
+    "Film",
+    "Photography",
+    "Motion"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "After Holynski, Curless, Seitz and Szeliski, Animating Pictures with Eulerian Motion Fields (CVPR 2021, https://eulerian.cs.washington.edu/), and the motion brush in video models. One static velocity field per photo, integrated backward and forward from the source frame and blended symmetrically (variance-preserving, and occlusion-aware: a branch that crosses from cloud into sky or stalls loses its weight, and open sky and the silhouette band are held still), so the loop starts and ends on the photograph. Strokes spread by geodesic distance through a colour-weighted grid with buildings as walls, then a guided filter. ?strokes=demo|none, ?t=seconds holds the clock, ?trace=0..1 holds the brush trace, ?wire=0..25 sets a wire swaying.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.42,
+      0.62
+    ],
+    "to": [
+      0.58,
+      0.55
+    ]
+  },
+  "probe": [
+    {
+      "idle": 4000
+    },
+    {
+      "drag": [
+        [
+          0.42,
+          0.35
+        ],
+        [
+          0.58,
+          0.3
+        ]
+      ],
+      "ms": 900
+    },
+    {
+      "idle": 3000
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.5,
+          0.5
+        ]
+      ],
+      "ms": 900
+    },
+    {
+      "idle": 2000
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-large-cloud-looms-in-the-sky-over-a-city-CUG_6ScVHuI",
+      "file": "https://images.unsplash.com/photo-1720083132913-e569ad61c90f",
+      "author": "Buddy AN (@stbuddyp), Unsplash",
+      "licence": "Unsplash License",
+      "note": "Hirano, Osaka, iPhone 13 Pro Max, 3017x4023, worked at 1536x2048. Wires found by a Radon search on the black top-hat of luma, fitted and tracked as centrelines, matted against a sky painted in across each strip; buildings from Depth Anything V2 (tools/depth/depth_hr.py) snapped to the photo with a guided filter."
+    },
+    "https://eulerian.cs.washington.edu/",
+    "https://hal.inria.fr/inria-00537472/document",
+    "https://eheitzresearch.wordpress.com/722-2/"
+  ]
+}

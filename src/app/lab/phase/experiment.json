@@ -1,0 +1,11 @@
+{
+  "title": "Phase",
+  "description": "One spoken phrase set twice in Geist on warm white, both copies looping sideways at very slightly different speeds, the first in blue and the second in red printed over it. The page is the history of the process, set like a phase score: the live pair runs along the bottom line, and once per loop it is printed off and every earlier row climbs one line, so the drift reads as a diagonal running up the sheet. Rows in unison print as one solid dark line; rows out of step break into a blue voice, a red echo a word behind, and a third ink wherever they overlap. Drag sideways to push the live loop ahead or hold it back; let go and it settles into its own drift, and the rows above keep the record. A pair of identical clicks, one per loop, phases along with it.",
+  "tags": ["Type", "Motion", "Sound"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Steve Reich's It's Gonna Rain (1965): two identical tape loops of one phrase run at slightly different speeds and drift out of phase, so a single process makes something rich and changing out of one fragment. https://www.npr.org/sections/deceptivecadence/2015/01/27/381575433/fifty-years-of-steve-reichs-its-gonna-rain",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.5], "to": [0.55, 0.5] },
+  "sources": ["https://www.npr.org/sections/deceptivecadence/2015/01/27/381575433/fifty-years-of-steve-reichs-its-gonna-rain"]
+}

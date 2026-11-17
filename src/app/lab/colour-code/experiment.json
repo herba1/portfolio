@@ -1,0 +1,13 @@
+{
+  "title": "Colour Code",
+  "description": "A lyric set as a row of flat printed squares, one colour per letter, beside a decoder wheel: a flush colour ring under a solid black die-cut cover. Type and the line re-encodes, the new squares sliding into place. Hover a square and the ring turns under the cover, clicking through each letter until the one you are pointing at sits framed at twelve o'clock and large in the window.",
+  "tags": ["Canvas", "Type", "Print", "Sound"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Peter Saville's colour alphabet for New Order (Power, Corruption & Lies, Blue Monday, 1983): a private cipher that turns type into pure colour, decoded with a wheel printed on the sleeve. Own palette and own wheel. https://atlasrecords.co.uk/blogs/all-about-vinyl/blue-monday-secret-codes-in-records",
+  "tile": { "shape": "wide" },
+  "sources": [
+    "https://atlasrecords.co.uk/blogs/all-about-vinyl/blue-monday-secret-codes-in-records",
+    "https://en.wikipedia.org/wiki/Power,_Corruption_%26_Lies"
+  ]
+}

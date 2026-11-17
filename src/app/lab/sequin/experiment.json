@@ -1,0 +1,11 @@
+{
+  "title": "Sequin",
+  "description": "A swatch of flip sequins lying on a table in a dark room lit by a few hot softboxes. Brush across it and every sequin you pass turns over in the direction of your stroke, from its matte side to its mirror side, and together the mirrors spell out Abbey Road. Each disc is a real cupped sequin that tips through the light as it turns, so a stroke leaves a wake of glints before the picture settles. Brush back the other way to wipe it; tap to send a ripple through the fabric.",
+  "tags": ["WebGL", "Light", "Music"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "From Benji Taylor's Family QR easter egg (https://benji.org/family-values), where swiping a QR code flips its dots like sequins on fabric. Here the sequins are the whole object, and the hidden side is a record sleeve.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.34, 0.4], "to": [0.66, 0.44] },
+  "sources": ["https://benji.org/family-values"]
+}

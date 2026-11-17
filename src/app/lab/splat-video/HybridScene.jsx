@@ -180,6 +180,7 @@ function HybridField({ clip, engineRef, isMobile }) {
     const group = groupRef.current;
     const engine = engineRef.current;
     if (!runtime || !scratch || !group || !engine) return;
+    engine.drawn = true;
     const delta = Math.min(rawDelta, RENDER.maxDelta);
     runtime.clock.sync(engine, performance.now());
     placeSubject(runtime.subject, clip.meta, runtime.clock.frameTime(engine.time));
@@ -192,6 +193,10 @@ function HybridField({ clip, engineRef, isMobile }) {
     runtime.show(engine.look, scratch.viewport, Math.pow(leanAmount(engine), SURFEL.loosen.ease));
     const { uniforms } = runtime.splats.material;
     uniforms.uViewport.value.copy(scratch.viewport);
+    if (scratch.remap) {
+      uniforms.uStereo.value = scratch.remap.stereo;
+      uniforms.uStereoShift.value = scratch.remap.stereoShift;
+    }
     uniforms.uLowPass.value = lowPassFor(backdrop, scratch.viewport.y);
     runtime.splats.tick(0, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, backdrop);

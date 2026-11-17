@@ -1,0 +1,35 @@
+{
+  "title": "Catenary",
+  "description": "A railway mast in Ine, Kyoto, seen from underneath against one towering summer cumulus. The overhead wires are real strings: each was found in the photograph, fitted as a catenary from its insulator, painted out of the sky and redrawn live with its own width, shade and softening with distance, so at rest the frame is the photograph. Drag across a wire and it catches on your hand, slips off, and rings as a damped string: two pulses run out to the insulators, come back inverted, and settle into the low modes, while the wires on the same mast pick up a faint tremor. A slow breeze keeps them breathing.",
+  "tags": ["WebGL", "Physics", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:30:00.000Z",
+  "intent": "Herb's taste for worm's-eye utility poles and wires against cumulus in soft film colour (genre spec, factory/reality/genre-spec.md: one sharp silhouette, the natsu sky), turned into one physical gesture: the wires in a real photograph are strings you can pluck. Wave equation with Kelvin-Voigt damping and compliant supports; reference: https://en.wikipedia.org/wiki/Catenary and https://en.wikipedia.org/wiki/String_vibration",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.54, 0.3], "to": [0.6, 0.52] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.6, 0.25], [0.66, 0.45]], "ms": 600 },
+    { "idle": 2400 },
+    { "drag": [[0.7, 0.15], [0.74, 0.35]], "ms": 500 },
+    { "idle": 2000 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/utility-poles-and-overhead-wires-against-a-cloudy-blue-sky-6DHLBwmRkOw",
+      "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "6000x4000, Ine, Kyoto Prefecture, Sony a7 IV. Six wires fitted as catenaries and painted out (clean plate 3600x2400 webp); the two in-line strain insulators cut out as sprites that ride their wires; per-wire width, blur, opacity and cross-cable shade measured against the clean plate, blur and opacity regressed on a Depth Anything V2 depth map of the photo. Shown with the camera turned a further 56 degrees up about its own centre, an extreme worm's-eye some 86 degrees above the horizon: a pure-rotation homography H = K R K^-1 (K from a 24 mm lens on the full-frame sensor, no EXIF in the source), applied to the plate, the redrawn wires and the insulator sprites alike, and cropped wider than the photograph's own field, so the mast, the far pole and the gantry's verticals converge on one vanishing point about an eighth of a frame height above the frame, straight over the cloud, and the steel splays out toward the bottom corners. Turned that far the frame looks past the photograph's top and sides; that sky is the plate's own fitted cobalt carried on, eased so it holds, drawn by elevation toward one deep zenith cobalt, with the plate's edge residual faded in and its grain laid on per plate pixel (tools/depth/bakes/catenary/zenith.py). The feeder's catenary runs on into it, and the photograph's four far wires on the right are carried on past its edge as straight lines with their own edge profile. The frame never shows past the photograph's bottom, nor past the cage on its left."
+    },
+    {
+      "url": "https://commons.wikimedia.org/wiki/File:500px_photo_(44011304).jpeg",
+      "author": "Yasuo Ogiuchi",
+      "licence": "CC BY 3.0",
+      "note": "The sky: the photograph's dozen scattered puffs are replaced by one cumulus congestus from this frame: only the crisp cauliflower crown of its tower, right of its pole (as plated for the film-test piece, its wires inpainted), not mirrored, so it is lit from the left like the steel. Its own sky is unmixed out of its edges and it is laid over the sky through a matte that follows its light: crisp on the sunlit crown and turrets, and on the shaded sides and the whole lower tower a transition some 20-30 px wide that the cloud's own billows break into translucent, sky-tinted fringe and wisps, never a blur, the flank's thin hooked tail trimmed and its left side built as a stack of cauliflower lobes stepping out as the tower widens down; its body is re-lit as a volume from its own light (sunlit billows warm, the shaded side and the lower body skylight blue), graded at the scale of the whole tower from the sunlit crown down to a pale skylight-blue body, never as deep as the cobalt beside it, with a shaded base under each lobe, and above a cut near 1/40 of the frame's width its texture is the crown's own detail band quilted in at the published resolution, never magnified, crisp on the sunlit turrets and carried on, softer, down through the skylit body. The whole crown stands clear against open cobalt in the gap between the mast top and the feeder, its flank stepping down to the right, and only its lower body passes behind the truss and the far pole, over a smooth fit of the Ine photograph's own clear sky (tools/depth/bakes/catenary/sky.py)."
+    },
+    "https://creativecommons.org/licenses/by/3.0/",
+    "https://en.wikipedia.org/wiki/Catenary",
+    "https://en.wikipedia.org/wiki/String_vibration"
+  ]
+}

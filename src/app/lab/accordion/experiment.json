@@ -1,0 +1,20 @@
+{
+  "title": "Accordion",
+  "description": "A small accordion-fold book lying shut on a warm white table. Pull its edge and it rises onto its spine and lets go of its panels one crease at a time, standing up as a long zig-zag strip that carries one continuous street, printed along the top and, upside down, along the bottom for the other side. Each crease is a hinge with a little stiffness, so panels settle rather than snap, and each face catches the light at its own angle. Push it back and it folds shut.",
+  "tags": ["WebGL", "Paper", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T15:00:00.000Z",
+  "intent": "After Ed Ruscha, Every Building on the Sunset Strip (1966), https://www.moma.org/collection/works/146931: a deadpan continuous street survey that is also a great object.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.55], "to": [0.9, 0.55] },
+  "probe": [
+    { "idle": 1500 },
+    { "drag": [[0.5, 0.55], [0.75, 0.55]], "ms": 1800 },
+    { "idle": 1200 },
+    { "drag": [[0.75, 0.55], [0.95, 0.55]], "ms": 1400 },
+    { "idle": 1600 },
+    { "drag": [[0.9, 0.55], [0.45, 0.55]], "ms": 1600 },
+    { "idle": 1600 }
+  ],
+  "sources": ["https://www.moma.org/collection/works/146931"]
+}
