@@ -205,9 +205,11 @@ void main() {
       vec3 T = normalize(vec3(stitchT, 0.0));
       T = normalize(T - n * dot(T, n));
       float th = dot(T, H);
-      float sheen = pow(sqrt(max(1.0 - th * th, 0.0)), mix(30.0, 110.0, mat.g)) * mix(0.14, 0.62, mat.g) * stitchSheen;
-      float wrap = max((dot(n, Lv) + 0.25) / 1.25, 0.0);
-      col = (base * sky * tiltAmb + (base * wrap * 1.5 + mix(base, vec3(1.0), 0.45) * sheen) * lit * lampCol) * stitchAo;
+      // Thread, not foil: a soft, wide sheen along the stitch, tinted by the
+      // thread's own colour. A tight, bright, near-white lobe read as metal.
+      float sheen = pow(sqrt(max(1.0 - th * th, 0.0)), mix(6.0, 18.0, mat.g)) * mix(0.05, 0.18, mat.g) * stitchSheen;
+      float wrap = max((dot(n, Lv) + 0.35) / 1.35, 0.0);
+      col = (base * sky * tiltAmb * 1.05 + (base * wrap * 1.45 + mix(base, vec3(1.0), 0.12) * sheen) * lit * lampCol) * stitchAo;
     } else if (mat.r > 0.5) {
       vec3 f0 = max(base, vec3(0.26));
       float e = mix(40.0, 900.0, mat.g);

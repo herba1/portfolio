@@ -6,8 +6,12 @@ const DWELL_MS = 4000;
 const SPEED = 3.2;
 const SWAP_OMEGA = 9;
 const SWAP_DELAY = 0.16;
-const KICK_OMEGA = 4.5;
-const KICK_ZETA = 0.32;
+// The burst is a damped swing. Lightly damped (0.32) it flew out, came back,
+// swung through to the far side and hung there before settling: a visible
+// stall mid-reform. Damped harder it throws out and flows straight home with
+// one small overshoot, so the motion never seems to stop.
+const KICK_OMEGA = 5;
+const KICK_ZETA = 0.52;
 const KICK_RISE = 9;
 const PUSH = 0.3;
 const SETTLE = 3.4;
