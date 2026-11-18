@@ -4,6 +4,13 @@ import { piece } from "./_piece.mjs";
 export default piece({
   url: "/scorch", ready: "[data-ready]",
   hide: ['[class*="ring"]', '[class*="controls"]'],
+  css: ".scorch-plate:focus-visible { outline: none !important; box-shadow: none !important; }",
+  // Film photographs instead of the stock prints (assets/photos).
+  swap: [
+    { url: "**/scorch/meadow.webp*", file: "tools/showreel/assets/photos/mt-hood.jpg" },
+    { url: "**/scorch/valley.webp*", file: "tools/showreel/assets/photos/picnic.jpg" },
+    { url: "**/scorch/beams.webp*", file: "tools/showreel/assets/photos/yellow-car.jpg" },
+  ],
   globals: { __scorch: { burnRate: 2.2, heatSpread: 1.4 } },
   beats: [
     { key: "ArrowRight", pause: 900 },
