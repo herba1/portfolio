@@ -100,7 +100,9 @@ export default function ScorchStage({ sheets, embedded = false, reducedMotion = 
       return undefined;
     }
     engineRef.current = engine;
-    engine.setParams(SCORCH_DEFAULTS);
+    // Dev only: a recording can set window.__scorch to retune the burn.
+    const tune = process.env.NODE_ENV !== "production" ? window.__scorch : null;
+    engine.setParams(tune ? { ...SCORCH_DEFAULTS, ...tune } : SCORCH_DEFAULTS);
     engine.resize(plate.clientWidth, plate.clientHeight);
     const ghost = createScorchGhost({ engine, host: plate, keyTarget: embedded ? plate : window, reducedMotion: reducedRef.current });
     ghostRef.current = ghost;

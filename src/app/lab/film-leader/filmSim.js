@@ -530,7 +530,11 @@ export default class FilmSim {
       const nx = wy * tz - wz * ty;
       const ny = wz * tx - wx * tz;
       const nz = wx * ty - wy * tx;
-      const kappa = curlAt(i * SEG, u);
+      // Held film lies flat under the fingers: the leader's tight curl relaxes
+      // around the grip, or the hand and the curl fight and the tip flips
+      // from one side to the other as it is pulled.
+      let kappa = curlAt(i * SEG, u);
+      if (grabbed >= 0) kappa += (1 / 160 - kappa) * (1 - smooth(18, 64, Math.abs(i - grabbed) * SEG));
       const sag = (kappa * chord * chord) / 8;
       const mx = (P[a] + P[c]) * 0.5 + nx * sag;
       const my = (P[a + 1] + P[c + 1]) * 0.5 + ny * sag;

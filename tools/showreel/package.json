@@ -1,0 +1,12 @@
+{
+  "name": "showreel",
+  "private": true,
+  "type": "module",
+  "description": "Scripted, cinematic recordings of lab pieces for X and other social feeds",
+  "scripts": {
+    "rec": "node record.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0"
+  }
+}

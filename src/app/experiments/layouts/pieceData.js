@@ -35,6 +35,12 @@ function variedTracks(tracks) {
 // Server-side props for pieces that need them, keyed by route.
 export async function pieceData() {
   const { tracks: allTracks } = await cachedTracks().catch(() => ({ tracks: [] }));
+  return pieceDataFrom(allTracks);
+}
+
+// The same props from a track list already in hand (the dev recording
+// stage reads it from the live site when this machine has no Spotify keys).
+export function pieceDataFrom(allTracks) {
   const tracks = variedTracks(allTracks);
   // Flyout's machinery collects songs on the index — the same top tracks.
   const covers = tracks.slice(0, 12);
