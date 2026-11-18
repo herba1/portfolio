@@ -92,6 +92,28 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   if (process.env.SHOWREEL_CAM) fs.writeFileSync(outFile.replace(/\.mp4$/, ".cam.json"), JSON.stringify(await page.evaluate(() => window.camPath)));
   await done;
   await browser.close();
+  // Sound: lay each captured track at its place on the clip's clock, mix, and
+  // mux it under the picture (the video stream is copied, not re-encoded).
+  if (cap.audio?.length) {
+    const silent = outFile.replace(/\.mp4$/, ".silent.mp4");
+    fs.renameSync(outFile, silent);
+    const dur = (total / fps).toFixed(3);
+    const ins = cap.audio.flatMap((a) => ["-i", path.join(dir, a.file)]);
+    const chains = cap.audio.map((a, i) => {
+      const off = (a.at - start) / 1000;
+      return off >= 0
+        ? `[${i + 1}:a]adelay=${Math.round(off * 1000)}:all=1,apad[a${i}]`
+        : `[${i + 1}:a]atrim=start=${(-off).toFixed(4)},asetpts=PTS-STARTPTS,apad[a${i}]`;
+    });
+    const mix = cap.audio.length > 1 ? `${cap.audio.map((_, i) => `[a${i}]`).join("")}amix=inputs=${cap.audio.length}:normalize=0[m]` : `[a0]anull[m]`;
+    await new Promise((res, rej) => {
+      const p = spawn("ffmpeg", ["-y", "-v", "error", "-i", silent, ...ins, "-filter_complex", `${chains.join(";")};${mix};[m]atrim=0:${dur},loudnorm=I=-16:TP=-1.5,aresample=48000[out]`,
+        "-map", "0:v", "-map", "[out]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", dur, "-movflags", "+faststart", outFile], { stdio: "inherit" });
+      p.on("close", (c) => (c === 0 ? res() : rej(new Error(`audio mux exited ${c}`))));
+    });
+    fs.unlinkSync(silent);
+    log(`  muxed ${cap.audio.length} audio track${cap.audio.length === 1 ? "" : "s"}`);
+  }
   log(`  wrote ${outFile} (${(total / fps).toFixed(1)}s, ${W}x${H} @ ${fps}fps)`);
   return outFile;
 }

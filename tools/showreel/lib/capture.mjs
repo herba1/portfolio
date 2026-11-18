@@ -41,15 +41,22 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   // Just the piece on its page. `chrome: true` in a reel keeps them.
   if (!reel.chrome) await context.addInitScript(() => { try { sessionStorage.setItem("herb:chrome-hidden", "1"); } catch {} });
   if (reel.storage) await context.addInitScript((s) => { for (const [k, v] of Object.entries(s)) try { localStorage.setItem(k, v); } catch {} }, reel.storage);
+  // reel.globals: values set on window before the page's scripts run (dev tuning knobs).
+  if (reel.globals) await context.addInitScript((g) => Object.assign(window, g), reel.globals);
   // Hide dev-only chrome (the Next.js dev badge) plus anything the reel names.
   await context.addInitScript((css) => {
     const add = () => { const s = document.createElement("style"); s.textContent = css; document.documentElement.appendChild(s); };
     if (document.documentElement) add(); else document.addEventListener("DOMContentLoaded", add);
   }, `nextjs-portal { display: none !important; } ${reel.css ?? ""}`);
+  // reel.audio: record the page's Web Audio in step with the frozen clock
+  // (see audioTap.js). HTML <audio>/<video> elements are not captured.
+  if (reel.audio) await context.addInitScript({ path: new URL("./audioTap.js", import.meta.url).pathname });
   // Recordings should not count as visits.
   await context.route(/posthog|vercel-insights|\/_vercel\/(insights|speed-insights)/, (r) => r.abort());
   // reel.mock: [{ url, json }] answers a request locally, for pieces that need
   // a live API the recording machine can't reach (song search, say).
+  // reel.swap: serve a local file in place of a page asset, e.g. other photos for a clip.
+  for (const sw of reel.swap ?? []) await context.route(sw.url, (r) => r.fulfill({ path: new URL(`../../../${sw.file}`, import.meta.url).pathname }));
   for (const m of reel.mock ?? []) await context.route(m.url, (r) => r.fulfill({ json: typeof m.json === "function" ? m.json(r.request().url()) : m.json }));
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
@@ -100,6 +107,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
         }
       }, dt).catch(() => {});
       vt += dt;
+      if (reel.audio) await page.evaluate((v) => window.__audioAdvance?.(v), vt).catch(() => {});
       if (recording) {
         const { data } = await cdp.send("Page.captureScreenshot", shot);
         save(vt, data);
@@ -149,7 +157,9 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     return { x: box.x + box.width * within[0], y: box.y + box.height * within[1] };
   };
 
-  const show = () => { if (!cur.shown) { cur.shown = true; mark("cursor", { visible: true, x: cur.x, y: cur.y }); } };
+  // cursor.never: a piece whose own tool is the pointer (an eraser, a
+  // brush): the mouse still moves, but no arrow is ever drawn.
+  const show = () => { if (reel.cursor?.never) return; if (!cur.shown) { cur.shown = true; mark("cursor", { visible: true, x: cur.x, y: cur.y }); } };
 
   // An eased path on a gentle arc, like a wrist pivoting: it always bows
   // upward (or outward on a vertical move), never zig-zags. Samples follow the
@@ -203,7 +213,13 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       await glide(await resolve(from), b.approach ?? 800, b.arc);
       await clock.wait(b.settle ?? 100);
       await press();
-      for (const to of rest) await glide(await resolve(to), b.duration ?? 900, b.dragArc ?? 0.06);
+      // `duration` is the whole stroke: shared across its segments by length,
+      // so a many-point scrub is one quick gesture, not one slow move per point.
+      const pts = [];
+      for (const to of rest) pts.push(await resolve(to));
+      const lens = pts.map((p, i) => Math.hypot(p.x - (i ? pts[i - 1].x : cur.x), p.y - (i ? pts[i - 1].y : cur.y)));
+      const total = lens.reduce((a, l) => a + l, 0) || 1;
+      for (const [i, p] of pts.entries()) await glide(p, Math.max(40, (b.duration ?? 900) * (lens[i] / total)), b.dragArc ?? 0.06);
       await clock.wait(b.release ?? 60);
       await release();
     },
@@ -214,7 +230,20 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
         if (i < (b.times ?? 1) - 1) await clock.wait(b.gap ?? 450);
       }
     },
-    type: async (text, b) => { mark("type", { text }); await page.keyboard.type(text, { delay: b.delay ?? 70 }); },
+    // Typed on the capture clock (a real-time delay would pass in zero page
+    // time and land the whole word at once), with a human, uneven rhythm:
+    // quicker inside a word, a beat longer after a space.
+    type: async (text, b) => {
+      mark("type", { text });
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (const ch of text) {
+        await page.keyboard.press(ch === " " ? "Space" : ch === "\n" ? "Enter" : ch);
+        const base = b.delay ?? 150;
+        await clock.wait(base * (0.65 + rnd() * 0.7) * (ch === " " ? 1.6 : 1));
+      }
+    },
+    focus: async (sel) => page.focus(sel),
     scroll: async (dy, b) => {
       if (b.at) await glide(await resolve(b.at), b.approach ?? 700);
       const steps = Math.max(1, Math.round((b.duration ?? 900) / 16));
@@ -274,7 +303,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       const x = Math.min(...rs.map((r) => r.left)), y = Math.min(...rs.map((r) => r.top));
       return { x, y, width: Math.max(...rs.map((r) => r.right)) - x, height: Math.min(innerHeight, Math.max(...rs.map((r) => r.bottom))) - y };
     });
-    stage = { ...box, pad: reel.stage.pad ?? 0.12 };
+    stage = { ...box, pad: reel.stage.pad ?? 0.12, cover: !!reel.stage.cover };
     mark("stage", stage);
   }
 
@@ -344,8 +373,25 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   while (pending) await clock.wait(20);
 
   const title = reel.title ?? (await page.title()).split("|")[0].trim();
+  // Each audio context's samples, as a wav, placed at the capture time it began.
+  const audio = [];
+  if (reel.audio) {
+    const tracks = await page.evaluate((v) => window.__audioFinish?.(v), at()).catch((e) => { log(`  audio: ${e.message}`); return []; });
+    for (const [i, tr] of (tracks ?? []).entries()) {
+      const pcm = Buffer.from(tr.b64, "base64");
+      const head = Buffer.alloc(44);
+      head.write("RIFF", 0); head.writeUInt32LE(36 + pcm.length, 4); head.write("WAVE", 8);
+      head.write("fmt ", 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(2, 22);
+      head.writeUInt32LE(tr.rate, 24); head.writeUInt32LE(tr.rate * 4, 28); head.writeUInt16LE(4, 32); head.writeUInt16LE(16, 34);
+      head.write("data", 36); head.writeUInt32LE(pcm.length, 40);
+      const file = `audio-${i}.wav`;
+      fs.writeFileSync(path.join(dir, file), Buffer.concat([head, pcm]));
+      audio.push({ file, at: tr.at });
+    }
+    log(`  audio: ${audio.length} track${audio.length === 1 ? "" : "s"}`);
+  }
   await browser.close();
-  const meta = { reel: reel.name, format, url, title, viewport: vp, dpr: format.dpr, frames, timeline };
+  const meta = { reel: reel.name, format, url, title, viewport: vp, dpr: format.dpr, frames, timeline, audio };
   fs.writeFileSync(path.join(dir, "capture.json"), JSON.stringify(meta));
   log(`  ${frames.length} frames over ${(at() / 1000).toFixed(1)}s (${lockstep ? "lockstep" : "realtime"}, ${(frames.length / (at() / 1000)).toFixed(0)} fps captured)`);
   return meta;

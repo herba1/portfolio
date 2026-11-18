@@ -60,7 +60,8 @@ window.setup = async (spec) => {
   const st = spec.timeline.find((e) => e.type === "stage");
   base = { z: 1, x: vw / 2, y: vh / 2 };
   if (st) {
-    const z = Math.min(vw / (st.width * (1 + 2 * st.pad)), vh / (st.height * (1 + 2 * st.pad)));
+    // cover: fill the frame with the stage (cropping its long side) instead of fitting it whole
+    const z = (st.cover ? Math.max : Math.min)(vw / (st.width * (1 + 2 * st.pad)), vh / (st.height * (1 + 2 * st.pad)));
     base = { z: clamp(z, 1, spec.maxBase ?? 2.2), x: st.x + st.width / 2, y: st.y + st.height / 2 };
   }
 
