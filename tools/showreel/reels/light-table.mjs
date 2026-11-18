@@ -1,9 +1,9 @@
 import { piece } from "./_piece.mjs";
-// A light table spread with film. Slide a transparency over another and they double-expose.
+// A light table: lay one transparency over another for a double exposure, then put the loupe on the film.
 export default piece({
   url: "/lab/light-table", ready: "canvas",
   beats: [
-    { drag: [[0.65, 0.82], [0.5, 0.62], [0.42, 0.42]], duration: 1800, approach: 800, pause: 1400 },
-    { drag: [[0.42, 0.42], [0.55, 0.6]], duration: 1200, approach: 300, pause: 1200 },
+    { drag: [[0.5, 0.86], [0.45, 0.62]], duration: 900, approach: 600, pause: 1200 },
+    { drag: [[0.29, 0.84], [0.32, 0.46], [0.5, 0.45]], duration: 1500, approach: 500, pause: 1500 },
   ],
 });

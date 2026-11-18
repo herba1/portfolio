@@ -1,11 +1,12 @@
 import { piece } from "./_piece.mjs";
-// A deck of recently played covers. Fan through it.
+// Your recent covers on a stack: flick through, then click to fan them out, and back.
 export default piece({
   url: "/deck", ready: "[data-ready]",
-  hide: [".btn"],
   beats: [
-    { drag: [[0.65, 0.55], [0.35, 0.55]], duration: 700, approach: 800, pause: 1300 },
-    { drag: [[0.65, 0.55], [0.35, 0.55]], duration: 700, approach: 500, pause: 1300 },
-    { drag: [[0.35, 0.55], [0.7, 0.55]], duration: 700, approach: 500, pause: 1400 },
+    { drag: [[0.6, 0.5], [0.3, 0.5]], duration: 380, approach: 600, pause: 900 },
+    { drag: [[0.6, 0.5], [0.3, 0.5]], duration: 380, approach: 400, pause: 1100 },
+    { click: [0.5, 0.5], duration: 500, settle: 120, pause: 2400 },
+    { drag: [[0.7, 0.5], [0.3, 0.5]], duration: 450, approach: 400, pause: 1400 },
+    { click: [0.5, 0.5], duration: 400, settle: 120, pause: 2000 },
   ],
 });

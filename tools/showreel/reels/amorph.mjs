@@ -1,10 +1,10 @@
 import { piece } from "./_piece.mjs";
-// A cover printed in dots. Click and the print bursts into the next cover.
+// Six covers in dots of ink; click and the print bursts into the next cover.
 export default piece({
-  url: "/lab/amorph", ready: "canvas",
-  hide: [".amorph__inks"],
+  url: "/lab/amorph", ready: '.amorph[data-phase="ready"]',
   beats: [
-    { click: [0.5, 0.48], duration: 800, settle: 200, pause: 3200 },
-    { click: [0.44, 0.42], duration: 700, settle: 200, pause: 3200 },
+    { click: [0.5, 0.48], duration: 650, settle: 120, pause: 2600 },
+    { click: [0.42, 0.4], duration: 600, settle: 120, pause: 1200 },
+    { click: [0.6, 0.58], duration: 500, settle: 80, pause: 2600 },
   ],
 });

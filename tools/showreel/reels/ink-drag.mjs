@@ -1,9 +1,10 @@
 import { piece } from "./_piece.mjs";
-// A cover printed in wet ink. Drag through it and the ink smears along your path.
+// A record printed in wet ink: smear it, then watch the cover's ink flow into its title.
 export default piece({
   url: "/lab/ink-drag", ready: "[data-ready]",
-  hide: [".ink-drag__records", ".ink-drag__inks", ".ink-drag__fresh"],
+  hide: [".ink-drag__records", ".ink-drag__inks", ".ink-drag__fresh", "button"],
   beats: [
-    { drag: [[0.3, 0.32], [0.5, 0.45], [0.72, 0.4], [0.6, 0.6]], duration: 2200, approach: 800, pause: 1600 },
+    { drag: [[0.3, 0.3], [0.5, 0.45], [0.72, 0.38], [0.62, 0.6]], duration: 900, approach: 600, pause: 400 },
+    { move: [0.84, 0.88], duration: 600, pause: 7000 },   // out of the way for the morph into the words
   ],
 });

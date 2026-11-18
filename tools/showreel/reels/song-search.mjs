@@ -1,13 +1,12 @@
 import { piece } from "./_piece.mjs";
-import { itunesMock } from "./_tracks.mjs";
-// Search a song: its cover and colours load in.
+// A search dock over Apple's catalogue: open it, type, and pick a song.
 export default piece({
   url: "/song-search", ready: "input",
-  mock: [itunesMock],
+  embed: false,
   hide: [".ss-toggle"],
   beats: [
-    { click: "input", duration: 900, pause: 300 },
-    { type: "come", delay: 110, pause: 900 },
-    { click: ".bd-dock__row >> nth=0", duration: 700, pause: 3200 },
+    { click: "input", duration: 700, pause: 500 },
+    { type: "come together", delay: 160, pause: 1100 },
+    { click: ".bd-dock__row >> nth=0", duration: 600, pause: 3200 },
   ],
 });

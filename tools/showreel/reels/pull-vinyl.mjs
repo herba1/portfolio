@@ -1,6 +1,7 @@
 import { piece } from "./_piece.mjs";
 // Pull-to-refresh: drag the card down, the record rolls out of its sleeve; let go and it spins.
 export default piece({
+  embed: false,   // approved as recorded on its own page
   url: "/lab/pull-vinyl", ready: ".pull-vinyl-screen",
   beats: [
     { press: [0.5, 0.36], duration: 800, settle: 150 },

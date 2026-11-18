@@ -15,7 +15,10 @@ export const WORDLESS = [
 
 // hand: false for pieces that play on their own: no pointer at all, since a
 // hand that never touches anything only suggests it should have.
-export function piece({ hide = [], css = "", beats, home = HOME, hand = true, ...rest }) {
+// embed (default): record the piece the way its experiments-page tile
+// mounts it, filling the frame, through the dev-only /reel stage. Pass
+// embed: false to record the piece's own full page instead.
+export function piece({ hide = [], css = "", beats, home = HOME, hand = true, embed = true, url, ...rest }) {
   const hidden = hide.length ? `${hide.join(", ")} { visibility: hidden !important; }` : "";
   return {
     formats: ["feed"],
@@ -24,8 +27,9 @@ export function piece({ hide = [], css = "", beats, home = HOME, hand = true, ..
     loop: { fade: 1000 },
     tempo: 0.8,
     travel: 0.8,
-    cursor: hand ? { from: home, visible: true } : { visible: false },
+    cursor: hand ? { from: home, visible: true } : { visible: false, never: true },
     ...rest,
+    url: embed ? `/reel?p=${encodeURIComponent(url)}` : url,
     css: [WORDLESS, hidden, css].join("\n"),
     beats: hand ? [...beats, { move: home, duration: 700, pause: 300 }] : beats,
   };
